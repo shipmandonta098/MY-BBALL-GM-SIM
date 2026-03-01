@@ -38,10 +38,26 @@ const PlayerModal: React.FC<PlayerModalProps> = ({
   onUpdatePlayer
 }) => {
   const [isEditing, setIsEditing] = React.useState(false);
-  const [editedPlayer, setEditedPlayer] = React.useState<Player>(player);
+
+  const defaultAttributes = {
+    shooting: 50, defense: 50, rebounding: 50, playmaking: 50, athleticism: 50,
+    shootingInside: 50, shootingMid: 50, shooting3pt: 50, freeThrow: 70,
+    speed: 60, strength: 55, jumping: 55, stamina: 75,
+    perimeterDef: 50, interiorDef: 50, steals: 50, blocks: 50,
+    defensiveIQ: 50, ballHandling: 50, passing: 50, offensiveIQ: 50,
+    postScoring: 50, offReb: 50, defReb: 50
+  };
+
+  const normalizePlayer = (p: Player): Player => ({
+    ...p,
+    attributes: p.attributes ?? defaultAttributes,
+    personalityTraits: p.personalityTraits ?? [],
+  });
+
+  const [editedPlayer, setEditedPlayer] = React.useState<Player>(normalizePlayer(player));
 
   useEffect(() => {
-    setEditedPlayer(player);
+    setEditedPlayer(normalizePlayer(player));
   }, [player]);
 
   useEffect(() => {
