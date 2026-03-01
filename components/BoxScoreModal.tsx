@@ -1,0 +1,190 @@
+
+import React, { useState } from 'react';
+import { GameResult, Team, GamePlayerLine } from '../types';
+import TeamBadge from './TeamBadge';
+
+interface BoxScoreModalProps {
+  result: GameResult;
+  homeTeam: Team;
+  awayTeam: Team;
+  onClose: () => void;
+}
+
+const BoxScoreModal: React.FC<BoxScoreModalProps> = ({ result, homeTeam, awayTeam, onClose }) => {
+  const [activeTab, setActiveTab] = useState<'stats' | 'pbp'>('stats');
+  const isHomeWinner = result.homeScore > result.awayScore;
+
+  const StatTable = ({ team, stats }: { team: Team, stats: GamePlayerLine[] }) => (
+    <div className="space-y-4">
+      <div className="flex items-center gap-4">
+        <TeamBadge team={team} size="md" />
+        <h3 className="text-xl font-display font-bold uppercase text-white">{team.city} {team.name}</h3>
+      </div>
+      <div className="overflow-x-auto rounded-2xl border border-slate-800">
+        <table className="w-full text-left text-xs">
+          <thead className="bg-slate-950/50 border-b border-slate-800 text-[10px] font-black uppercase text-slate-500">
+            <tr>
+              <th className="px-4 py-4">Player</th>
+              <th className="px-2 py-4 text-center">MIN</th>
+              <th className="px-2 py-4 text-center">PTS</th>
+              <th className="px-2 py-4 text-center">REB</th>
+              <th className="px-2 py-4 text-center">AST</th>
+              <th className="px-2 py-4 text-center">STL</th>
+              <th className="px-2 py-4 text-center">BLK</th>
+              <th className="px-2 py-4 text-center">FG</th>
+              <th className="px-2 py-4 text-center">3P</th>
+              <th className="px-2 py-4 text-center">FT</th>
+              <th className="px-2 py-4 text-center">+/-</th>
+              <th className="px-2 py-4 text-center">TO</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-slate-800/40">
+            {stats.sort((a,b) => b.pts - a.pts).map(line => (
+              <tr key={line.playerId} className="hover:bg-slate-800/30 transition-colors">
+                <td className="px-4 py-4 font-bold text-slate-200 uppercase tracking-tight">{line.name}</td>
+                <td className="px-2 py-4 text-center font-mono">{line.min}</td>
+                <td className="px-2 py-4 text-center font-display font-bold text-sm text-amber-500">{line.pts}</td>
+                <td className="px-2 py-4 text-center font-mono">{line.reb}</td>
+                <td className="px-2 py-4 text-center font-mono">{line.ast}</td>
+                <td className="px-2 py-4 text-center font-mono text-slate-500">{line.stl}</td>
+                <td className="px-2 py-4 text-center font-mono text-slate-500">{line.blk}</td>
+                <td className="px-2 py-4 text-center font-mono text-[10px]">
+                  {line.fgm}-{line.fga}
+                </td>
+                <td className="px-2 py-4 text-center font-mono text-[10px] text-slate-400">
+                  {line.threepm}-{line.threepa}
+                </td>
+                <td className="px-2 py-4 text-center font-mono text-[10px] text-slate-400">
+                  {line.ftm}-{line.fta}
+                </td>
+                <td className={`px-2 py-4 text-center font-mono font-bold ${line.plusMinus > 0 ? 'text-emerald-500' : line.plusMinus < 0 ? 'text-rose-500' : 'text-slate-500'}`}>
+                  {line.plusMinus > 0 ? `+${line.plusMinus}` : line.plusMinus}
+                </td>
+                <td className="px-2 py-4 text-center font-mono text-rose-500/50">{line.tov}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+
+  return (
+    <div className="fixed inset-0 z-[3000] bg-slate-950/90 backdrop-blur-xl flex items-center justify-center p-4 md:p-10 animate-in fade-in duration-300" onClick={onClose}>
+      <div className="bg-slate-900 border border-slate-800 rounded-[3rem] w-full max-w-6xl h-full max-h-[92vh] flex flex-col shadow-2xl overflow-hidden" onClick={e => e.stopPropagation()}>
+        
+        {/* Header HUD */}
+        <div className="p-8 md:p-12 border-b border-slate-800 bg-slate-900/50 relative overflow-hidden shrink-0">
+          <div className="absolute top-0 right-0 w-96 h-96 bg-amber-500/5 blur-[100px] rounded-full -mr-48 -mt-48"></div>
+          
+          <div className="relative z-10 flex flex-col md:flex-row items-center justify-between gap-8">
+            <div className="flex items-center gap-12">
+               <div className="text-center">
+                  <TeamBadge team={homeTeam} size="xl" className="mb-4 mx-auto" />
+                  <p className={`text-6xl font-display font-black leading-none ${isHomeWinner ? 'text-white' : 'text-slate-600'}`}>{result.homeScore}</p>
+                  <p className="text-[10px] font-black uppercase text-slate-500 tracking-[0.4em] mt-2">Home</p>
+               </div>
+               <div className="flex flex-col items-center">
+                  <span className="px-6 py-2 bg-slate-800 text-slate-400 text-xs font-black uppercase rounded-full border border-slate-700 mb-2">Final</span>
+                  <p className="text-xs font-bold text-amber-500 uppercase tracking-widest">Regular Season</p>
+               </div>
+               <div className="text-center">
+                  <TeamBadge team={awayTeam} size="xl" className="mb-4 mx-auto" />
+                  <p className={`text-6xl font-display font-black leading-none ${!isHomeWinner ? 'text-white' : 'text-slate-600'}`}>{result.awayScore}</p>
+                  <p className="text-[10px] font-black uppercase text-slate-500 tracking-[0.4em] mt-2">Away</p>
+               </div>
+            </div>
+
+            {/* Quarterly Table */}
+            <div className="bg-slate-950/60 rounded-2xl p-6 border border-slate-800 min-w-[300px]">
+               <table className="w-full text-center">
+                  <thead className="text-[8px] font-black text-slate-600 uppercase tracking-widest">
+                     <tr>
+                        <th className="pb-2 text-left">TEAM</th>
+                        <th className="pb-2">1Q</th>
+                        <th className="pb-2">2Q</th>
+                        <th className="pb-2">3Q</th>
+                        <th className="pb-2">4Q</th>
+                        <th className="pb-2 text-white">TOT</th>
+                     </tr>
+                  </thead>
+                  <tbody className="text-xs font-mono font-bold">
+                     <tr className="border-b border-slate-800/50">
+                        <td className="py-2 text-left text-slate-400 uppercase font-display">{homeTeam.name}</td>
+                        {result.quarterScores.home.map((s, i) => <td key={i} className="py-2 text-slate-300">{s}</td>)}
+                        <td className="py-2 text-white">{result.homeScore}</td>
+                     </tr>
+                     <tr>
+                        <td className="py-2 text-left text-slate-400 uppercase font-display">{awayTeam.name}</td>
+                        {result.quarterScores.away.map((s, i) => <td key={i} className="py-2 text-slate-300">{s}</td>)}
+                        <td className="py-2 text-white">{result.awayScore}</td>
+                     </tr>
+                  </tbody>
+               </table>
+            </div>
+          </div>
+          
+          <button onClick={onClose} className="absolute top-8 right-8 p-3 bg-slate-800 hover:bg-slate-700 rounded-full transition-colors z-20">
+            <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12" /></svg>
+          </button>
+        </div>
+
+        {/* Tabs */}
+        <div className="flex border-b border-slate-800 shrink-0">
+           <button 
+             onClick={() => setActiveTab('stats')}
+             className={`px-10 py-5 text-[10px] font-black uppercase tracking-[0.3em] transition-all relative ${activeTab === 'stats' ? 'text-amber-500' : 'text-slate-500 hover:text-slate-300'}`}
+           >
+              Box Score Stats
+              {activeTab === 'stats' && <div className="absolute bottom-0 left-0 right-0 h-1 bg-amber-500"></div>}
+           </button>
+           <button 
+             onClick={() => setActiveTab('pbp')}
+             className={`px-10 py-5 text-[10px] font-black uppercase tracking-[0.3em] transition-all relative ${activeTab === 'pbp' ? 'text-amber-500' : 'text-slate-500 hover:text-slate-300'}`}
+           >
+              Play-By-Play Log
+              {activeTab === 'pbp' && <div className="absolute bottom-0 left-0 right-0 h-1 bg-amber-500"></div>}
+           </button>
+        </div>
+
+        {/* Content */}
+        <div className="flex-1 overflow-y-auto p-8 md:p-12 space-y-12 scrollbar-thin scrollbar-thumb-slate-800">
+          {activeTab === 'stats' ? (
+             <div className="space-y-16">
+                {result.aiRecap && (
+                  <div className="bg-amber-500/10 border border-amber-500/20 p-8 rounded-3xl relative overflow-hidden">
+                    <div className="absolute top-0 right-0 p-4 opacity-5 pointer-events-none">
+                       <svg className="w-32 h-32" fill="currentColor" viewBox="0 0 24 24"><path d="M12 2L4.5 20.29l.71.71L12 18l6.79 3 .71-.71z"/></svg>
+                    </div>
+                    <h4 className="text-[10px] font-black uppercase tracking-[0.4em] text-amber-500 mb-2">Gemini Tactical Recap</h4>
+                    <p className="text-xl italic font-medium leading-relaxed text-slate-200">"{result.aiRecap}"</p>
+                  </div>
+                )}
+
+                <div className="grid grid-cols-1 gap-16 pb-20">
+                  <StatTable team={homeTeam} stats={result.homePlayerStats} />
+                  <StatTable team={awayTeam} stats={result.awayPlayerStats} />
+                </div>
+             </div>
+          ) : (
+             <div className="max-w-3xl mx-auto space-y-4 pb-20">
+                {result.playByPlay?.map((event, i) => (
+                   <div key={i} className="flex gap-8 p-6 bg-slate-950/40 border border-slate-800 rounded-2xl hover:border-amber-500/20 transition-all">
+                      <span className="text-xs font-mono text-slate-600 w-20 shrink-0 font-bold">Q{event.quarter} {event.time}</span>
+                      <p className={`text-sm font-medium leading-relaxed ${event.type === 'score' ? 'text-white font-bold' : 'text-slate-400'}`}>
+                         {event.text}
+                      </p>
+                   </div>
+                ))}
+                {(!result.playByPlay || result.playByPlay.length === 0) && (
+                   <div className="py-20 text-center text-slate-600 italic">No detailed play-by-play log available for this archived game.</div>
+                )}
+             </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+};
+
+export default BoxScoreModal;
