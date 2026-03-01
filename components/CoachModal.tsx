@@ -1,6 +1,6 @@
 
-import React, { useEffect } from 'react';
-import { Coach, CoachBadge } from '../types';
+import React, { useEffect, useState } from 'react';
+import { Coach, CoachBadge, CoachScheme, Gender } from '../types';
 
 interface CoachModalProps {
   coach: Coach;
@@ -9,6 +9,8 @@ interface CoachModalProps {
   scoutingReport: { coachId: string; report: string } | null;
   isUserTeam: boolean;
   onFire?: (coachId: string) => void;
+  godMode?: boolean;
+  onUpdateCoach?: (coach: Coach) => void;
 }
 
 const badgeDescriptions: Record<CoachBadge, string> = {
@@ -21,21 +23,41 @@ const badgeDescriptions: Record<CoachBadge, string> = {
   'Recruiting Ace': 'Increases the likelihood of free agents signing for less money.'
 };
 
-const CoachModal: React.FC<CoachModalProps> = ({ 
-  coach, 
-  onClose, 
-  onScout, 
-  scoutingReport, 
-  isUserTeam, 
-  onFire 
+const SCHEMES: CoachScheme[] = ['Balanced', 'Pace and Space', 'Grit and Grind', 'Triangle', 'Small Ball', 'Showtime'];
+const BADGES: CoachBadge[] = Object.keys(badgeDescriptions) as CoachBadge[];
+const GENDERS: Gender[] = ['Male', 'Female', 'Non-binary'];
+
+const CoachModal: React.FC<CoachModalProps> = ({
+  coach,
+  onClose,
+  onScout,
+  scoutingReport,
+  isUserTeam,
+  onFire,
+  godMode = false,
+  onUpdateCoach
 }) => {
+  const [isEditing, setIsEditing] = useState(false);
+  const [editedCoach, setEditedCoach] = useState<Coach>(coach);
+
+  // Sync state if coach prop changes
+  useEffect(() => {
+    setEditedCoach(coach);
+  }, [coach]);
 
   useEffect(() => {
-    const handleEsc = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
+    const handleEsc = (e: KeyboardEvent) => { if (e.key === 'Escape' && !isEditing) onClose(); };
     window.addEventListener('keydown', handleEsc);
     document.body.style.overflow = 'hidden';
     return () => { window.removeEventListener('keydown', handleEsc); document.body.style.overflow = 'unset'; };
-  }, [onClose]);
+  }, [onClose, isEditing]);
+
+  const handleSave = () => {
+    if (onUpdateCoach) {
+      onUpdateCoach(editedCoach);
+    }
+    setIsEditing(false);
+  };
 
   const getAttrColor = (val: number) => {
     if (val >= 85) return 'bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.4)]';
@@ -59,14 +81,179 @@ const CoachModal: React.FC<CoachModalProps> = ({
   );
 
   const overallRating = Math.round((coach.ratingOffense + coach.ratingDefense + coach.ratingDevelopment + coach.ratingMotivation + coach.ratingClutch + coach.ratingRecruiting) / 6);
+  const editedOverall = Math.round((editedCoach.ratingOffense + editedCoach.ratingDefense + editedCoach.ratingDevelopment + editedCoach.ratingMotivation + editedCoach.ratingClutch + editedCoach.ratingRecruiting) / 6);
+
+  const toggleBadge = (badge: CoachBadge) => {
+    if (editedCoach.badges.includes(badge)) {
+      setEditedCoach({ ...editedCoach, badges: editedCoach.badges.filter(b => b !== badge) });
+    } else {
+      setEditedCoach({ ...editedCoach, badges: [...editedCoach.badges, badge] });
+    }
+  };
+
+  if (isEditing) {
+    return (
+      <div className="fixed inset-0 z-[1000] bg-slate-950/90 backdrop-blur-xl flex items-center justify-center p-4 lg:p-10 animate-in fade-in duration-300" onClick={onClose}>
+        <div className="bg-slate-900 border border-slate-800 rounded-[3rem] w-full max-w-7xl h-full max-h-[92vh] overflow-hidden flex flex-col shadow-[0_0_80px_rgba(0,0,0,0.6)] relative" onClick={e => e.stopPropagation()}>
+          <header className="p-8 border-b border-slate-800 flex justify-between items-center shrink-0">
+            <div>
+              <h2 className="text-3xl font-display font-bold uppercase tracking-tight text-white">Edit <span className="text-amber-500">Coach</span></h2>
+              <p className="text-xs text-slate-500 mt-1 uppercase tracking-widest">God Mode: Full Data Access</p>
+            </div>
+            <div className="flex gap-4">
+              <button onClick={() => setIsEditing(false)} className="px-6 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 text-[10px] font-black uppercase rounded-xl transition-all">Cancel</button>
+              <button onClick={handleSave} className="px-8 py-2 bg-amber-500 hover:bg-amber-400 text-slate-950 text-[10px] font-black uppercase rounded-xl transition-all shadow-lg shadow-amber-500/20">Save Changes</button>
+            </div>
+          </header>
+
+          <div className="flex-1 overflow-y-auto p-8 lg:p-12 space-y-12 scrollbar-thin scrollbar-thumb-slate-800">
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-12">
+              <div className="space-y-8">
+                <h3 className="text-[10px] font-black text-amber-500 uppercase tracking-[0.5em]">Basic Information</h3>
+                
+                <div className="space-y-4">
+                  <div className="space-y-2">
+                    <label className="text-[10px] font-black uppercase text-slate-500 tracking-widest">Full Name</label>
+                    <input type="text" value={editedCoach.name} onChange={e => setEditedCoach({...editedCoach, name: e.target.value})} className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-3 text-white font-display text-xl focus:outline-none focus:border-amber-500/50" />
+                  </div>
+                  
+                  <div className="grid grid-cols-2 gap-4">
+                    <div className="space-y-2">
+                      <label className="text-[10px] font-black uppercase text-slate-500 tracking-widest">Age</label>
+                      <input type="number" min="30" max="80" value={editedCoach.age} onChange={e => setEditedCoach({...editedCoach, age: parseInt(e.target.value) || 30})} className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-3 text-white focus:outline-none focus:border-amber-500/50 text-center" />
+                    </div>
+                    <div className="space-y-2">
+                      <label className="text-[10px] font-black uppercase text-slate-500 tracking-widest">Gender</label>
+                      <select value={editedCoach.gender} onChange={e => setEditedCoach({...editedCoach, gender: e.target.value as Gender})} className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-3 text-white focus:outline-none focus:border-amber-500/50 text-center pr-8">
+                        {GENDERS.map(g => <option key={g} value={g}>{g}</option>)}
+                      </select>
+                    </div>
+                  </div>
+
+                  <div className="space-y-2">
+                    <label className="text-[10px] font-black uppercase text-slate-500 tracking-widest">Philosophy / Scheme</label>
+                    <select value={editedCoach.scheme} onChange={e => setEditedCoach({...editedCoach, scheme: e.target.value as CoachScheme})} className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-4 text-white font-display uppercase tracking-wider focus:outline-none focus:border-amber-500/50">
+                      {SCHEMES.map(s => <option key={s} value={s}>{s}</option>)}
+                    </select>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-4">
+                    <div className="space-y-2">
+                      <label className="text-[10px] font-black uppercase text-slate-500 tracking-widest">Hometown</label>
+                      <input type="text" value={editedCoach.hometown} onChange={e => setEditedCoach({...editedCoach, hometown: e.target.value})} className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-3 text-white focus:outline-none focus:border-amber-500/50" />
+                    </div>
+                    <div className="space-y-2">
+                      <label className="text-[10px] font-black uppercase text-slate-500 tracking-widest">College</label>
+                      <input type="text" value={editedCoach.college} onChange={e => setEditedCoach({...editedCoach, college: e.target.value})} className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-3 text-white focus:outline-none focus:border-amber-500/50" />
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-4">
+                    <div className="space-y-2">
+                      <label className="text-[10px] font-black uppercase text-slate-500 tracking-widest">Experience (Years)</label>
+                      <input type="number" min="0" value={editedCoach.experience} onChange={e => setEditedCoach({...editedCoach, experience: parseInt(e.target.value) || 0})} className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-3 text-white focus:outline-none focus:border-amber-500/50" />
+                    </div>
+                    <div className="space-y-2">
+                      <label className="text-[10px] font-black uppercase text-slate-500 tracking-widest">Salary ($)</label>
+                      <input type="number" min="100000" value={editedCoach.salary} onChange={e => setEditedCoach({...editedCoach, salary: parseInt(e.target.value) || 100000})} className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-3 text-white focus:outline-none focus:border-amber-500/50" />
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <div className="space-y-8">
+                <div className="flex justify-between items-end">
+                  <h3 className="text-[10px] font-black text-amber-500 uppercase tracking-[0.5em]">Attributes</h3>
+                  <div className="text-right">
+                    <div className="text-[10px] text-slate-500 uppercase tracking-widest mb-1">Calculated OVR</div>
+                    <div className="text-4xl font-display font-black text-white">{editedOverall}</div>
+                  </div>
+                </div>
+
+                <div className="bg-slate-950/50 p-6 rounded-2xl border border-slate-800 space-y-6">
+                  {(['ratingOffense', 'ratingDefense', 'ratingDevelopment', 'ratingMotivation', 'ratingClutch', 'ratingRecruiting'] as const).map(attr => (
+                    <div key={attr} className="space-y-3">
+                      <div className="flex justify-between text-xs font-bold uppercase tracking-wider">
+                        <span className="text-slate-400">{attr.replace('rating', '')}</span>
+                        <span className="text-amber-500">{editedCoach[attr]}</span>
+                      </div>
+                      <input 
+                        type="range" min="0" max="100" 
+                        value={editedCoach[attr]} 
+                        onChange={e => setEditedCoach({...editedCoach, [attr]: parseInt(e.target.value)})}
+                        className="w-full accent-amber-500 h-2 bg-slate-900 rounded-full appearance-none cursor-pointer"
+                      />
+                    </div>
+                  ))}
+                  <div className="space-y-3 pt-4 border-t border-slate-800">
+                      <div className="flex justify-between text-xs font-bold uppercase tracking-wider">
+                        <span className="text-slate-400">Potential</span>
+                        <span className="text-emerald-500">{editedCoach.potential || editedOverall}</span>
+                      </div>
+                      <input 
+                        type="range" min="0" max="100" 
+                        value={editedCoach.potential || editedOverall} 
+                        onChange={e => setEditedCoach({...editedCoach, potential: parseInt(e.target.value)})}
+                        className="w-full accent-emerald-500 h-2 bg-slate-900 rounded-full appearance-none cursor-pointer"
+                      />
+                  </div>
+                </div>
+              </div>
+
+              <div className="space-y-8">
+                <h3 className="text-[10px] font-black text-amber-500 uppercase tracking-[0.5em]">Badges</h3>
+                <div className="bg-slate-950/50 border border-slate-800 rounded-2xl p-4 flex flex-wrap gap-2 h-fit max-h-[400px] overflow-y-auto scrollbar-thin scrollbar-thumb-slate-800">
+                  {BADGES.map((badge: CoachBadge) => (
+                    <button
+                      key={badge}
+                      onClick={() => toggleBadge(badge)}
+                      className={`px-4 py-3 rounded-xl border text-left flex-1 min-w-[200px] transition-all
+                        ${editedCoach.badges.includes(badge)
+                          ? 'bg-amber-500/20 border-amber-500 text-amber-500 shadow-[0_0_10px_rgba(245,158,11,0.2)]'
+                          : 'bg-slate-900 border-slate-800 text-slate-400 hover:border-slate-700'
+                        }`}
+                    >
+                      <div className="text-xs font-black uppercase tracking-wider mb-1">{badge}</div>
+                      <div className="text-[10px] opacity-70 leading-tight">{badgeDescriptions[badge]}</div>
+                    </button>
+                  ))}
+                </div>
+                
+                <div className="space-y-2">
+                  <label className="text-[10px] font-black uppercase text-slate-500 tracking-widest">Coaching History (Bio)</label>
+                  <textarea 
+                    value={editedCoach.history} 
+                    onChange={e => setEditedCoach({...editedCoach, history: e.target.value})} 
+                    className="w-full h-32 bg-slate-950 border border-slate-800 rounded-xl px-4 py-3 text-white text-sm focus:outline-none focus:border-amber-500/50 scrollbar-thin scrollbar-thumb-slate-800" 
+                    placeholder="Short bio..."
+                  ></textarea>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="fixed inset-0 z-[1000] bg-slate-950/90 backdrop-blur-xl flex items-center justify-center p-4 md:p-10 animate-in fade-in duration-300" onClick={onClose}>
       <div className="bg-slate-900 border border-slate-800 rounded-[3rem] w-full max-w-6xl h-full max-h-[92vh] overflow-hidden flex flex-col shadow-2xl relative" onClick={e => e.stopPropagation()}>
         
-        <button onClick={onClose} className="absolute top-8 right-8 z-[1100] p-4 bg-slate-800 hover:bg-slate-700 rounded-full text-slate-300 shadow-xl border border-slate-700 transition-all">
-          <svg className="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12" /></svg>
-        </button>
+        <div className="absolute top-8 right-8 z-[1100] flex gap-3">
+          {godMode && (
+            <button
+              onClick={() => setIsEditing(true)}
+              className="p-4 bg-amber-500 hover:bg-amber-400 rounded-full text-slate-950 transition-all shadow-xl border border-amber-600"
+              title="God Mode: Edit Coach"
+            >
+              <svg className="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" /></svg>
+            </button>
+          )}
+          <button onClick={onClose} className="p-4 bg-slate-800 hover:bg-slate-700 rounded-full text-slate-300 shadow-xl border border-slate-700 transition-all">
+            <svg className="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12" /></svg>
+          </button>
+        </div>
 
         <div className="relative h-64 md:h-80 bg-slate-800 shrink-0">
           <div className="absolute inset-0 bg-gradient-to-t from-slate-900 via-slate-900/40 to-transparent"></div>

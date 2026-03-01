@@ -690,6 +690,37 @@ const App: React.FC = () => {
     }
   };
 
+  const handleUpdateCoach = (updatedCoach: Coach) => {
+    if (!league) return;
+
+    const updateInTeams = league.teams.map(t => {
+      const staff = t.staff;
+      const isHere = Object.values(staff).some((c: any) => c?.id === updatedCoach.id);
+      if (!isHere) return t;
+      
+      const newStaff = { ...staff };
+      if (newStaff.headCoach?.id === updatedCoach.id) newStaff.headCoach = updatedCoach;
+      if (newStaff.assistantOffense?.id === updatedCoach.id) newStaff.assistantOffense = updatedCoach;
+      if (newStaff.assistantDefense?.id === updatedCoach.id) newStaff.assistantDefense = updatedCoach;
+      if (newStaff.assistantDev?.id === updatedCoach.id) newStaff.assistantDev = updatedCoach;
+      if (newStaff.trainer?.id === updatedCoach.id) newStaff.trainer = updatedCoach;
+      
+      return { ...t, staff: newStaff };
+    });
+
+    const updateInCoachPool = league.coachPool.map(c => c.id === updatedCoach.id ? updatedCoach : c);
+
+    setLeague({
+      ...league,
+      teams: updateInTeams,
+      coachPool: updateInCoachPool
+    });
+    
+    if (selectedCoach && selectedCoach.id === updatedCoach.id) {
+      setSelectedCoach(updatedCoach);
+    }
+  };
+
   const handleViewPlayer = (player: Player | Prospect) => setSelectedPlayer(player as Player);
   
   const handleWatchLive = (gameId: string) => {
