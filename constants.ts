@@ -391,6 +391,16 @@ export const generateCoachPool = (count: number, genderRatio: number = 10): Coac
   });
 };
 
+const DAYS_IN_MONTH = [31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
+const randomBirthdate = (age: number): string => {
+  const currentYear = new Date().getFullYear();
+  const birthYear = currentYear - age - (Math.random() < 0.5 ? 1 : 0);
+  const month = Math.floor(Math.random() * 12) + 1;
+  const maxDay = month === 2 && birthYear % 4 === 0 ? 29 : DAYS_IN_MONTH[month - 1];
+  const day = Math.floor(Math.random() * maxDay) + 1;
+  return `${birthYear}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+};
+
 export const generatePlayer = (id: string, ageRange: [number, number] = [19, 38], genderRatio: number = 0): Player => {
   const gender = getRandomGender(genderRatio);
   
@@ -476,7 +486,7 @@ export const generatePlayer = (id: string, ageRange: [number, number] = [19, 38]
     height: "6'7\"", weight: 220, status: 'Bench',
     personalityTraits: getRandomTraits(),
     hometown: region.hometowns[Math.floor(Math.random() * region.hometowns.length)], 
-    birthdate: "1995-01-01", 
+    birthdate: randomBirthdate(age), 
     college: region.id === 'usa' ? COLLEGES[Math.floor(Math.random() * COLLEGES.length)] : region.name,
     draftInfo: { team: "Titans", round: 1, pick: 1, year: 2015 }
   };
@@ -574,7 +584,7 @@ export const generateProspects = (year: number, count: number = 100, genderRatio
       height: "6'8\"", weight: 210,
       personalityTraits: getRandomTraits(),
       hometown: region.hometowns[Math.floor(Math.random() * region.hometowns.length)], 
-      birthdate: `${year - 19}-01-01`, 
+      birthdate: randomBirthdate(19 + Math.floor(Math.random() * 3)), 
       college: region.id === 'usa' ? "N/A" : region.name,
       draftInfo: { team: "N/A", round: 0, pick: 0, year },
       careerStats: [],

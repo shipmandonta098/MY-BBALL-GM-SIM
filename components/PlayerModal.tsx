@@ -510,8 +510,15 @@ const PlayerModal: React.FC<PlayerModalProps> = ({
                    <span className="text-white text-base font-medium">{player.hometown}</span>
                 </div>
                 <div className="flex items-center gap-4">
-                   <span className="text-[10px] text-slate-500 font-black uppercase tracking-[0.2em] w-24">Birthdate</span>
-                   <span className="text-white text-base font-medium">{player.birthdate}</span>
+                   <span className="text-[10px] text-slate-500 font-black uppercase tracking-[0.2em] w-24">Born</span>
+                   <span className="text-white text-base font-medium">
+                     {(() => {
+                       if (!player.birthdate) return 'Unknown';
+                       const [y, m, d] = player.birthdate.split('-').map(Number);
+                       const months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+                       return `${months[m - 1]} ${d}, ${y} (Age: ${player.age})`;
+                     })()}
+                   </span>
                 </div>
                 <div className="flex items-center gap-4">
                    <span className="text-[10px] text-slate-500 font-black uppercase tracking-[0.2em] w-24">Draft</span>
