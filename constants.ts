@@ -1,4 +1,4 @@
-import { Team, Position, Player, Conference, Division, MarketSize, PersonalityTrait, ScheduleGame, Prospect, DraftPick, Coach, CoachScheme, CoachBadge, OwnerGoal, Gender, CoachRole, TeamRotation } from './types';
+import { Team, Position, Player, Conference, Division, MarketSize, PersonalityTrait, PlayerTendencies, ScheduleGame, Prospect, DraftPick, Coach, CoachScheme, CoachBadge, OwnerGoal, Gender, CoachRole, TeamRotation } from './types';
 
 export const POSITIONS: Position[] = ['PG', 'SG', 'SF', 'PF', 'C'];
 export const SCHEMES: CoachScheme[] = ['Balanced', 'Pace and Space', 'Grit and Grind', 'Triangle', 'Small Ball', 'Showtime'];
@@ -6,12 +6,56 @@ export const COACH_ROLES: CoachRole[] = ['Head Coach', 'Assistant Offense', 'Ass
 
 export const PERSONALITY_TRAITS: PersonalityTrait[] = [
   'Leader', 'Diva/Star', 'Loyal', 'Professional', 'Gym Rat', 
-  'Lazy', 'Clutch', 'Tough/Alpha', 'Friendly/Team First', 'Money Hungry'
+  'Lazy', 'Clutch', 'Tough/Alpha', 'Friendly/Team First', 'Money Hungry',
+  'Hot Head', 'Workhorse', 'Streaky'
 ];
 
 export const getRandomTraits = (): PersonalityTrait[] => {
   const count = Math.floor(Math.random() * 3) + 1; // 1 to 3
   return [...PERSONALITY_TRAITS].sort(() => 0.5 - Math.random()).slice(0, count);
+};
+
+export const generateTendencies = (pos: Position, traits: PersonalityTrait[]): PlayerTendencies => {
+  type Base = { pullUpThree: number; postUp: number; driveToBasket: number; midRangeJumper: number; kickOutPasser: number; isoHeavy: number; transitionHunter: number; gambles: number; helpDefender: number; physicality: number; faceUpGuard: number };
+  const baseMap: Record<Position, Base> = {
+    PG: { pullUpThree: 65, postUp: 20, driveToBasket: 70, midRangeJumper: 45, kickOutPasser: 75, isoHeavy: 35, transitionHunter: 70, gambles: 50, helpDefender: 65, physicality: 40, faceUpGuard: 60 },
+    SG: { pullUpThree: 70, postUp: 35, driveToBasket: 60, midRangeJumper: 55, kickOutPasser: 50, isoHeavy: 55, transitionHunter: 55, gambles: 55, helpDefender: 55, physicality: 50, faceUpGuard: 65 },
+    SF: { pullUpThree: 55, postUp: 50, driveToBasket: 55, midRangeJumper: 60, kickOutPasser: 55, isoHeavy: 50, transitionHunter: 45, gambles: 50, helpDefender: 60, physicality: 60, faceUpGuard: 55 },
+    PF: { pullUpThree: 35, postUp: 70, driveToBasket: 45, midRangeJumper: 55, kickOutPasser: 40, isoHeavy: 45, transitionHunter: 35, gambles: 45, helpDefender: 70, physicality: 75, faceUpGuard: 45 },
+    C:  { pullUpThree: 15, postUp: 85, driveToBasket: 35, midRangeJumper: 40, kickOutPasser: 30, isoHeavy: 40, transitionHunter: 25, gambles: 40, helpDefender: 80, physicality: 85, faceUpGuard: 30 },
+  };
+  const b = baseMap[pos];
+  const rand = (base: number) => Math.min(100, Math.max(0, base + Math.floor(Math.random() * 21) - 10));
+
+  let off: PlayerTendencies['offensiveTendencies'] = {
+    pullUpThree:      rand(b.pullUpThree),
+    postUp:           rand(b.postUp),
+    driveToBasket:    rand(b.driveToBasket),
+    midRangeJumper:   rand(b.midRangeJumper),
+    kickOutPasser:    rand(b.kickOutPasser),
+    isoHeavy:         rand(b.isoHeavy),
+    transitionHunter: rand(b.transitionHunter),
+  };
+  let def: PlayerTendencies['defensiveTendencies'] = {
+    gambles:      rand(b.gambles),
+    helpDefender: rand(b.helpDefender),
+    physicality:  rand(b.physicality),
+    faceUpGuard:  rand(b.faceUpGuard),
+  };
+
+  // Personality trait modifiers
+  if (traits.includes('Lazy'))                 { off.isoHeavy        = Math.min(100, off.isoHeavy        + 15); def.gambles      = Math.max(0,   def.gambles      - 10); }
+  if (traits.includes('Workhorse'))            { off.driveToBasket   = Math.min(100, off.driveToBasket   + 10); def.helpDefender = Math.min(100, def.helpDefender  + 10); }
+  if (traits.includes('Leader'))               { off.kickOutPasser   = Math.min(100, off.kickOutPasser   + 15); off.isoHeavy     = Math.max(0,   off.isoHeavy     - 10); }
+  if (traits.includes('Friendly/Team First'))  { off.kickOutPasser   = Math.min(100, off.kickOutPasser   + 12); def.helpDefender = Math.min(100, def.helpDefender  + 12); }
+  if (traits.includes('Diva/Star'))            { off.isoHeavy        = Math.min(100, off.isoHeavy        + 20); off.kickOutPasser = Math.max(0,  off.kickOutPasser - 15); }
+  if (traits.includes('Tough/Alpha'))          { def.physicality     = Math.min(100, def.physicality     + 15); def.gambles      = Math.min(100, def.gambles      + 10); }
+  if (traits.includes('Hot Head'))             { def.gambles         = Math.min(100, def.gambles         + 15); off.isoHeavy     = Math.min(100, off.isoHeavy     + 10); }
+  if (traits.includes('Professional'))         { off.midRangeJumper  = Math.min(100, off.midRangeJumper  + 10); def.helpDefender = Math.min(100, def.helpDefender + 10); }
+  if (traits.includes('Gym Rat'))              { off.driveToBasket   = Math.min(100, off.driveToBasket   + 10); def.helpDefender = Math.min(100, def.helpDefender + 10); }
+  if (traits.includes('Streaky'))              { off.pullUpThree     = Math.min(100, off.pullUpThree     + 12); off.midRangeJumper = Math.min(100, off.midRangeJumper + 8); }
+
+  return { offensiveTendencies: off, defensiveTendencies: def };
 };
 
 export const COACH_BADGES: CoachBadge[] = [
@@ -606,6 +650,7 @@ export const generatePlayer = (id: string, ageRange: [number, number] = [19, 38]
     defReb: getRandomAttr(rating),
   };
   const pAttrs = applyPhysical(rawAttrs, pos, physGender, phys.heightIn, phys.weight);
+  const playerTraits = getRandomTraits();
   
   return {
     id,
@@ -636,7 +681,8 @@ export const generatePlayer = (id: string, ageRange: [number, number] = [19, 38]
     morale: 75 + Math.floor(Math.random() * 20),
     jerseyNumber: Math.floor(Math.random() * 99),
     height: phys.heightStr, weight: phys.weight, archetype: phys.archetype, status: 'Bench',
-    personalityTraits: getRandomTraits(),
+    personalityTraits: playerTraits,
+    tendencies: generateTendencies(pos, playerTraits),
     hometown: playerHometown,
     country: countryFromHometown(playerHometown),
     birthdate: randomBirthdate(age), 
@@ -724,6 +770,7 @@ export const generateProspects = (year: number, count: number = 100, genderRatio
       defReb: getRandomAttr(rating),
     };
     const pAttrs = applyPhysical(rawAttrs, pos, physGender, phys.heightIn, phys.weight);
+    const prospectTraits = getRandomTraits();
 
     return {
       id,
@@ -740,7 +787,8 @@ export const generateProspects = (year: number, count: number = 100, genderRatio
       attributes: pAttrs as Player['attributes'],
       jerseyNumber: Math.floor(Math.random() * 99),
       height: phys.heightStr, weight: phys.weight, archetype: phys.archetype,
-      personalityTraits: getRandomTraits(),
+      personalityTraits: prospectTraits,
+      tendencies: generateTendencies(pos, prospectTraits),
       hometown: prospectHometown,
       country: countryFromHometown(prospectHometown),
       birthdate: randomBirthdate(19 + Math.floor(Math.random() * 3)), 

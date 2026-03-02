@@ -71,6 +71,9 @@ const LiveGameModal: React.FC<LiveGameModalProps> = ({
   const lastSubCheckHome    = useRef(0);   // gameSecondsRef at last home periodic check
   const lastSubCheckAway    = useRef(0);   // gameSecondsRef at last away periodic check
   const quarterBreakPending = useRef(false);
+  // Tendencies system refs
+  const coachFrustrationRef = useRef<{ home: number; away: number }>({ home: 0, away: 0 });
+  const streakRef = useRef<Record<string, { consecutive: number; lastMade: boolean }>>({}); 
 
   // Persistence
   useEffect(() => {
@@ -342,7 +345,9 @@ const LiveGameModal: React.FC<LiveGameModalProps> = ({
       const player = (eligibleTeamIsHome ? offPlayers : defPlayers)[0];
       if (!player?.id) return false;
       let threshold = 0.025; // 2.5% base
+      if (player.personalityTraits?.includes('Professional')) return false; // Professional never gets a tech
       if (player.personalityTraits?.includes('Diva/Star') || player.personalityTraits?.includes('Tough/Alpha')) threshold *= 1.4 * rivalryMod;
+      if (player.personalityTraits?.includes('Hot Head')) threshold *= 1.8 * rivalryMod;
       if (player.personalityTraits?.includes('Leader')) threshold *= 0.7;
       if (techRoll > threshold) return false;
 
@@ -367,6 +372,43 @@ const LiveGameModal: React.FC<LiveGameModalProps> = ({
       // Original possession resumes — possessionAfter stays as possessionBefore
       return true;
     };
+
+    // ── Personality & Tendency Effects ────────────────────────────────────
+    const frustSide = (isHomePossession ? 'home' : 'away') as 'home' | 'away';
+    const shooterTraits = shooter.personalityTraits ?? [];
+    const shooterTend   = shooter.tendencies;
+    // Streaky: ±shot bonus for 2+ consecutive makes/misses
+    const streakData  = streakRef.current[shooter.id] ?? { consecutive: 0, lastMade: false };
+    const streakBonus = shooterTraits.includes('Streaky')
+      ? ( streakData.lastMade  && streakData.consecutive >= 2 ?  10
+        : !streakData.lastMade && streakData.consecutive >= 2 ?  -8 : 0)
+      : 0;
+    // Conflict: iso-heavy vs Offensive Architect
+    if (badge.offArch && (shooterTend?.offensiveTendencies.isoHeavy ?? 50) > 60) {
+      const isoProb = shooterTraits.includes('Lazy') ? 0.50 : shooterTraits.includes('Professional') ? 0.10 : 0.30;
+      if (Math.random() < isoProb) coachFrustrationRef.current[frustSide] = Math.min(100, coachFrustrationRef.current[frustSide] + 3);
+    }
+    // Conflict: post-up vs Pace Master
+    if (badge.paceMaster && (shooterTend?.offensiveTendencies.postUp ?? 50) > 65 && !shooterTraits.includes('Leader')) {
+      if (Math.random() < 0.25) coachFrustrationRef.current[frustSide] = Math.min(100, coachFrustrationRef.current[frustSide] + 2);
+    }
+    // Conflict: gambles vs Defensive Guru → defensive breakdown event
+    if (badge.defGuru && (shooterTend?.defensiveTendencies.gambles ?? 50) > 60) {
+      const gambleProb = shooterTraits.includes('Hot Head') ? 0.40 : 0.25;
+      if (Math.random() < gambleProb) {
+        coachFrustrationRef.current[frustSide] = Math.min(100, coachFrustrationRef.current[frustSide] + 4);
+        batchEvents.push(makeEvent(`${abbrev(shooter.name)} gambles on defense — breakdown!`, 'turnover', defTeam.id, possessionBefore, possessionBefore));
+      }
+    }
+    // Frustration milestones: 50+ → timeout event; 75+ → force substitution
+    const curFrust = coachFrustrationRef.current[frustSide];
+    if (curFrust >= 75 && curFrust < 80) {
+      runSubstitutions(isHomePossession ? homeTeam : awayTeam, isHomePossession, batchEvents, newTime, 'FATIGUE');
+      coachFrustrationRef.current[frustSide] = Math.max(0, curFrust - 20);
+    } else if (curFrust >= 50 && curFrust < 55) {
+      batchEvents.push(makeEvent(`TIMEOUT — scheme breakdown! Coach frustration: ${curFrust}`, 'info', offTeam.id, possessionBefore, possessionBefore));
+      coachFrustrationRef.current[frustSide] = Math.max(0, curFrust - 15);
+    }
 
     const roll = Math.random() * 100;
 
@@ -474,7 +516,8 @@ const LiveGameModal: React.FC<LiveGameModalProps> = ({
         + (isThree ? offArch3Boost : 0)           // Offensive Architect: +8 on 3s
         - defGuruFgPen                            // Defensive Guru: −8% all FG
         - (isThree ? defGuru3Pen  : 0)            // Defensive Guru: −5% additional on 3s
-        - defClutchPen;                           // Clutch Specialist (def): −5% crunch time
+        - defClutchPen                            // Clutch Specialist (def): −5% crunch time
+        + streakBonus;                            // Streaky: hot streak +10, cold streak −8
       // Defensive Guru: defensive rating is amplified (blocks/closeouts better)
       const defRating = ((defender.attributes?.perimeterDef ?? 50)
         + (badge.defGuru ? 8 : 0)                // Defensive Guru: +8 def IQ
@@ -505,6 +548,9 @@ const LiveGameModal: React.FC<LiveGameModalProps> = ({
         updatePlayerStat(isHomePossession, shooter.id, 'fgm', 1);
         if (isThree) updatePlayerStat(isHomePossession, shooter.id, 'threepm', 1);
         updatePlusMinus(isHomePossession, pts);
+        // Streaky: update streak tracker on made shot
+        { const s = streakRef.current[shooter.id] ?? { consecutive: 0, lastMade: false };
+          streakRef.current[shooter.id] = { consecutive: s.lastMade ? s.consecutive + 1 : 1, lastMade: true }; }
         possessionAfter = defTeam.id; // made basket → possession switches
         tryTech(isHomePossession);
       } else { // Miss
@@ -522,6 +568,9 @@ const LiveGameModal: React.FC<LiveGameModalProps> = ({
           eventText = `${abbrev(shooter.name)} ${shotType}: Missed.`;
         }
         eventType = 'miss';
+        // Streaky: update streak tracker on missed shot
+        { const s = streakRef.current[shooter.id] ?? { consecutive: 0, lastMade: true };
+          streakRef.current[shooter.id] = { consecutive: !s.lastMade ? s.consecutive + 1 : 1, lastMade: false }; }
 
         // Rebound
         const isOffRebChance = Math.random() > 0.72;
@@ -629,7 +678,14 @@ const LiveGameModal: React.FC<LiveGameModalProps> = ({
       if (!ft[p.id]) return;
       if (ft[p.id].isOnFloor) {
         ft[p.id].minutesPlayed      += mins;
-        ft[p.id].fatigueLevel        = Math.min(100, ft[p.id].fatigueLevel + mins);
+        // Trait-based fatigue build rate
+        const traitList  = p.personalityTraits ?? [];
+        const buildRate  = traitList.includes('Lazy')         ? 1.25
+                         : traitList.includes('Workhorse')    ? 0.80
+                         : traitList.includes('Professional') ? 0.85
+                         : traitList.includes('Gym Rat')      ? 0.90
+                         : 1.0;
+        ft[p.id].fatigueLevel        = Math.min(100, ft[p.id].fatigueLevel + mins * buildRate);
         ft[p.id].consecutiveMinutes += mins;
       } else {
         // Bench recovery: half the build rate

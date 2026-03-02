@@ -23,7 +23,10 @@ const traitIcons: Record<PersonalityTrait, string> = {
   'Clutch': '🎯',
   'Tough/Alpha': '🛡️',
   'Friendly/Team First': '👋',
-  'Money Hungry': '💰'
+  'Money Hungry': '💰',
+  'Hot Head': '🔥',
+  'Workhorse': '🐴',
+  'Streaky': '📈'
 };
 
 const Roster: React.FC<RosterProps> = ({ leagueTeams, userTeamId, initialTeamId, onScout, onScoutCoach, scoutingReport, onUpdateTeamRoster, onManageTeam }) => {

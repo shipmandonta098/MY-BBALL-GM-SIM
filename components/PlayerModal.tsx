@@ -24,7 +24,10 @@ const traitIcons: Record<PersonalityTrait, string> = {
   'Clutch': '🎯',
   'Tough/Alpha': '🛡️',
   'Friendly/Team First': '👋',
-  'Money Hungry': '💰'
+  'Money Hungry': '💰',
+  'Hot Head': '🔥',
+  'Workhorse': '🐴',
+  'Streaky': '📈'
 };
 
 const PlayerModal: React.FC<PlayerModalProps> = ({ 
@@ -159,7 +162,8 @@ const PlayerModal: React.FC<PlayerModalProps> = ({
 
   const personalityTraitsList: PersonalityTrait[] = [
     'Leader', 'Diva/Star', 'Loyal', 'Professional', 'Gym Rat', 
-    'Lazy', 'Clutch', 'Tough/Alpha', 'Friendly/Team First', 'Money Hungry'
+    'Lazy', 'Clutch', 'Tough/Alpha', 'Friendly/Team First', 'Money Hungry',
+    'Hot Head', 'Workhorse', 'Streaky'
   ];
   const positions: Position[] = ['PG', 'SG', 'SF', 'PF', 'C'];
   const archetypes = ['Hybrid Star', '3&D', 'Pure Scorer', 'Playmaker', 'Lockdown Defender', 'Rim Protector', 'Stretch Big', 'Glass Cleaner', 'Floor General', 'Slasher'];

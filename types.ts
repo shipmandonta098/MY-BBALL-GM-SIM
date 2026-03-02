@@ -7,7 +7,25 @@ export type PlayerStatus = 'Starter' | 'Rotation' | 'Bench' | 'Injured';
 export type InjuryType = 'Ankle Sprain' | 'Hamstring Strain' | 'Knee Sprain' | 'Patellofemoral Pain' | 'Lumbar Strain' | 'Finger/Hand Injury' | 'Concussion' | 'ACL Tear' | 'Achilles Rupture' | 'Illness';
 export type Gender = 'Male' | 'Female' | 'Non-binary';
 
-export type PersonalityTrait = 'Leader' | 'Diva/Star' | 'Loyal' | 'Professional' | 'Gym Rat' | 'Lazy' | 'Clutch' | 'Tough/Alpha' | 'Friendly/Team First' | 'Money Hungry';
+export type PersonalityTrait = 'Leader' | 'Diva/Star' | 'Loyal' | 'Professional' | 'Gym Rat' | 'Lazy' | 'Clutch' | 'Tough/Alpha' | 'Friendly/Team First' | 'Money Hungry' | 'Hot Head' | 'Workhorse' | 'Streaky';
+
+export interface PlayerTendencies {
+  offensiveTendencies: {
+    pullUpThree: number;       // 0-100
+    postUp: number;
+    driveToBasket: number;
+    midRangeJumper: number;
+    kickOutPasser: number;
+    isoHeavy: number;
+    transitionHunter: number;
+  };
+  defensiveTendencies: {
+    gambles: number;
+    helpDefender: number;
+    physicality: number;
+    faceUpGuard: number;
+  };
+}
 export type CoachBadge = 'Developmental Genius' | 'Pace Master' | 'Star Handler' | 'Defensive Guru' | 'Offensive Architect' | 'Clutch Specialist' | 'Recruiting Ace';
 
 export type CoachScheme = 'Balanced' | 'Pace and Space' | 'Grit and Grind' | 'Triangle' | 'Small Ball' | 'Showtime';
@@ -267,6 +285,7 @@ export interface Player {
     threepm: number;
   };
   archetype?: string;
+  tendencies?: PlayerTendencies;
   morale: number;
   jerseyNumber: number;
   height: string;
