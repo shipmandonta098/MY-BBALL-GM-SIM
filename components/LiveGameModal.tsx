@@ -119,11 +119,15 @@ const LiveGameModal: React.FC<LiveGameModalProps> = ({
     const homeWinsTip = Math.random() < (homeJump / (homeJump + awayJump));
     const tipWinner = homeWinsTip ? homeC : awayC;
     const tipWinnerTeam = homeWinsTip ? homeTeam : awayTeam;
+    const hcName = homeC?.name ?? homeTeam.name;
+    const acName = awayC?.name ?? awayTeam.name;
+    const twName = tipWinner?.name ?? tipWinnerTeam.name;
+    const abbrevLocal = (name: string) => { const p = name.trim().split(/\s+/); return p.length < 2 ? name : `${p[0].charAt(0)}. ${p.slice(1).join(' ')}`; };
     setEvents([
       {
         time: '12:00',
         quarter: 1,
-        text: `Jump ball between ${homeC?.name ?? homeTeam.name} and ${awayC?.name ?? awayTeam.name}. ${tipWinner?.name ?? tipWinnerTeam.name} wins the tip for ${tipWinnerTeam.city} ${tipWinnerTeam.name}!`,
+        text: `Jump ball: ${abbrevLocal(hcName)} vs. ${abbrevLocal(acName)}. ${abbrevLocal(twName)} wins the tip (${tipWinnerTeam.city} ${tipWinnerTeam.name}).`,
         type: 'info',
         teamId: tipWinnerTeam.id
       }
@@ -142,12 +146,22 @@ const LiveGameModal: React.FC<LiveGameModalProps> = ({
     return `${m}:${s < 10 ? '0' : ''}${s}`;
   };
 
+  const abbrev = (name: string) => {
+    const parts = name.trim().split(/\s+/);
+    if (parts.length < 2) return name;
+    return `${parts[0].charAt(0)}. ${parts.slice(1).join(' ')}`;
+  };
+
+  const getStat = (isHome: boolean, pid: string, stat: keyof GamePlayerLine): number => {
+    const map = isHome ? homeStats : awayStats;
+    return (map[pid] as any)?.[stat] ?? 0;
+  };
+
   const generatePlay = () => {
     const isHomePossession = Math.random() > 0.5;
     const offTeam = isHomePossession ? homeTeam : awayTeam;
     const defTeam = isHomePossession ? awayTeam : homeTeam;
     
-    // Pick 5 starters for logic (simulating active lineups)
     const offPlayers = offTeam.roster.slice(0, 5);
     const defPlayers = defTeam.roster.slice(0, 5);
     const shooter = offPlayers[Math.floor(Math.random() * offPlayers.length)];
@@ -158,104 +172,139 @@ const LiveGameModal: React.FC<LiveGameModalProps> = ({
     
     let eventText = "";
     let eventType: GameEvent['type'] = 'info';
-    let ptsGain = 0;
+    const rivalryMod = ['Hot', 'Red Hot'].includes(rivalryLevel) ? 1.5 : 1.0;
+
+    const tov_types = ['Lost Ball Turnover', 'Bad Pass Turnover', 'Step Out of Bounds Turnover', 'Offensive Foul Turnover'];
+    const foul_types = ['Shooting Foul', 'Personal Take Foul', 'Loose Ball Foul', 'Illegal Screen'];
+    const shot2_types_make = ['Driving Layup', 'Floating Jump Shot', 'Turnaround Mid-range Jumper', 'Pull-up Jump Shot', 'Running Layup', 'Putback Layup'];
+    const shot2_types_miss = ['Driving Layup', 'Floating Jump Shot', 'Turnaround Jumper', 'Pull-up Mid-range', 'Running Floater', 'Hook Shot'];
+    const shot3_types_make = ['3pt Jump Shot', 'Corner 3-pointer', 'Step Back 3-pointer', 'Pull-up 3pt Shot', 'Catch-and-Shoot 3'];
+    const shot3_types_miss = ['3pt Jump Shot', 'Step Back 3-pointer', 'Pull-up 3pt Shot', 'Turnaround 3-pointer', 'Catch-and-Shoot 3'];
+    const pick = <T,>(arr: T[]) => arr[Math.floor(Math.random() * arr.length)];
 
     const roll = Math.random() * 100;
-    const rivalryMod = ['Hot', 'Red Hot'].includes(rivalryLevel) ? 1.5 : 1.0;
-    
-    // Logic tied to attributes/traits
+
     if (roll < 2) { // Technical Foul
       const p = shooter;
       let techChance = 1.0;
       if (p.personalityTraits.includes('Diva/Star') || p.personalityTraits.includes('Tough/Alpha')) techChance *= 1.2;
       if (p.personalityTraits.includes('Leader')) techChance *= 0.9;
-      
       if (Math.random() < techChance * rivalryMod) {
-        eventText = `${p.name} tech'd for taunt! 1 FT for ${defTeam.name}.`;
+        const newTechs = getStat(isHomePossession, p.id, 'techs') + 1;
+        eventText = `${abbrev(p.name)} Technical Foul. (${newTechs} tech${newTechs !== 1 ? 's' : ''})`;
         eventType = 'foul';
         updatePlayerStat(isHomePossession, p.id, 'techs', 1);
         setIsChippy(true);
         if (isHomePossession) setAwayScore(s => s + 1); else setHomeScore(s => s + 1);
       } else {
-        eventText = `${p.name} called for a loose ball foul.`;
+        const newPf = getStat(isHomePossession, p.id, 'pf') + 1;
+        eventText = `${abbrev(p.name)} Loose Ball Foul. (${newPf} foul${newPf !== 1 ? 's' : ''})`;
+        eventType = 'foul';
         updatePlayerStat(isHomePossession, p.id, 'pf', 1);
       }
     } else if (roll < 3) { // Flagrant Foul
       const p = defender;
       const isF2 = Math.random() < 0.1 || (rivalryLevel === 'Red Hot' && Math.random() < 0.3);
-      eventText = isF2 ? `FLAGRANT 2! ${p.name} ejected for excessive contact!` : `Flagrant 1 on ${p.name}. Unnecessary contact.`;
+      eventText = isF2
+        ? `${abbrev(p.name)} Flagrant 2 Foul — EJECTED.`
+        : `${abbrev(p.name)} Flagrant 1 Foul.`;
       eventType = 'foul';
       updatePlayerStat(!isHomePossession, p.id, 'flagrants', isF2 ? 2 : 1);
       if (isF2) updatePlayerStat(!isHomePossession, p.id, 'ejected', 1 as any);
       setIsChippy(true);
       if (isHomePossession) setHomeScore(s => s + 2); else setAwayScore(s => s + 2);
-    } else if (roll < 10) { // Turnover
-      eventText = `${shooter.name} loses the handle! Turnover ${offTeam.name}.`;
+    } else if (roll < 5) { // Steal
+      const stealer = defPlayers[Math.floor(Math.random() * defPlayers.length)];
+      const newStl = getStat(!isHomePossession, stealer.id, 'stl') + 1;
+      const newTov = getStat(isHomePossession, shooter.id, 'tov') + 1;
+      eventText = `${abbrev(stealer.name)} Steal (${newStl} steal${newStl !== 1 ? 's' : ''}). ${abbrev(shooter.name)} ${pick(tov_types)} (${newTov} TO)`;
+      eventType = 'turnover';
+      updatePlayerStat(!isHomePossession, stealer.id, 'stl', 1);
+      updatePlayerStat(isHomePossession, shooter.id, 'tov', 1);
+    } else if (roll < 10) { // Turnover (no steal)
+      const tovType = pick(tov_types);
+      const newTov = getStat(isHomePossession, shooter.id, 'tov') + 1;
+      eventText = `${abbrev(shooter.name)} ${tovType} (${newTov} turnover${newTov !== 1 ? 's' : ''})`;
       eventType = 'turnover';
       updatePlayerStat(isHomePossession, shooter.id, 'tov', 1);
-    } else if (roll < 20) { // Foul
-      eventText = `${defender.name} reaches in on ${shooter.name}. Personal foul!`;
+    } else if (roll < 16) { // Personal Foul
+      const foulType = pick(foul_types);
+      const newPf = getStat(!isHomePossession, defender.id, 'pf') + 1;
+      eventText = `${abbrev(defender.name)} ${foulType} (${newPf} foul${newPf !== 1 ? 's' : ''})`;
       eventType = 'foul';
       updatePlayerStat(!isHomePossession, defender.id, 'pf', 1);
-    } else { // Shot attempt
-      const isThree = Math.random() < 0.38; // Modern NBA 3pt frequency
-      const successChance = isThree ? shooter.attributes.shooting3pt : shooter.attributes.shooting;
-      
-      // Defensive impact: Use team defense and individual defender
-      const defRating = (defender.attributes.perimeterDef + defTeam.roster.reduce((acc, p) => acc + p.attributes.defensiveIQ, 0) / defTeam.roster.length) / 2;
-      const contestedModifier = (defRating / 3);
-      
-      // Base threshold for a "make" is higher to lower FG%
-      // NBA average FG% is ~47%, 3PT% is ~36%
+    } else if (roll < 19) { // Assist + make (no shot attempt tracking separately)
+      const assister = offPlayers.filter(p => p.id !== shooter.id)[Math.floor(Math.random() * 4)] ?? shooter;
+      const pts = Math.random() > 0.35 ? 2 : 3;
+      const shotType = pts === 3 ? pick(shot3_types_make) : pick(shot2_types_make);
+      const newPts = getStat(isHomePossession, shooter.id, 'pts') + pts;
+      const newAst = getStat(isHomePossession, assister.id, 'ast') + 1;
+      eventText = `${abbrev(shooter.name)} ${shotType}: Made (${newPts} pts). ${abbrev(assister.name)} ${newAst} assist${newAst !== 1 ? 's' : ''}`;
+      eventType = 'score';
+      if (isHomePossession) {
+        setHomeScore(s => s + pts);
+        setHomeQScore(prev => { const n = [...prev]; n[quarter - 1] += pts; return n; });
+      } else {
+        setAwayScore(s => s + pts);
+        setAwayQScore(prev => { const n = [...prev]; n[quarter - 1] += pts; return n; });
+      }
+      updatePlayerStat(isHomePossession, shooter.id, 'pts', pts);
+      updatePlayerStat(isHomePossession, shooter.id, 'fgm', 1);
+      updatePlayerStat(isHomePossession, shooter.id, 'fga', 1);
+      if (pts === 3) { updatePlayerStat(isHomePossession, shooter.id, 'threepm', 1); updatePlayerStat(isHomePossession, shooter.id, 'threepa', 1); }
+      updatePlayerStat(isHomePossession, assister.id, 'ast', 1);
+    } else { // Normal shot attempt
+      const isThree = Math.random() < 0.38;
+      const successChance = isThree ? (shooter.attributes?.shooting3pt ?? 50) : (shooter.attributes?.shooting ?? 50);
+      const defRating = ((defender.attributes?.perimeterDef ?? 50) + defTeam.roster.reduce((acc, p) => acc + (p.attributes?.defensiveIQ ?? 50), 0) / defTeam.roster.length) / 2;
+      const contestedModifier = defRating / 3;
       const baseThreshold = isThree ? 62 : 55;
       const finalChance = (successChance - contestedModifier) + (Math.random() * 30 - 15);
-      
+
       updatePlayerStat(isHomePossession, shooter.id, 'fga', 1);
       if (isThree) updatePlayerStat(isHomePossession, shooter.id, 'threepa', 1);
 
       if (finalChance > baseThreshold) { // Make
-        const isDunk = shooter.attributes.jumping > 85 && !isThree && Math.random() > 0.7;
         const pts = isThree ? 3 : 2;
-        eventText = isDunk 
-          ? `BOOM! ${shooter.name} detonates on ${defender.name} with a thunderous slam!` 
-          : `${shooter.name} pulls up from ${isThree ? 'deep' : 'midrange'}... BUCKET!`;
-        
+        const isDunk = (shooter.attributes?.jumping ?? 0) > 85 && !isThree && Math.random() > 0.7;
+        const shotType = isDunk ? 'Slam Dunk' : isThree ? pick(shot3_types_make) : pick(shot2_types_make);
+        const newPts = getStat(isHomePossession, shooter.id, 'pts') + pts;
+        eventText = `${abbrev(shooter.name)} ${shotType}: Made. (${newPts} points)`;
+        eventType = 'score';
+
         if (isHomePossession) {
           setHomeScore(s => s + pts);
-          setHomeQScore(prev => {
-            const next = [...prev];
-            next[quarter - 1] += pts;
-            return next;
-          });
+          setHomeQScore(prev => { const n = [...prev]; n[quarter - 1] += pts; return n; });
         } else {
           setAwayScore(s => s + pts);
-          setAwayQScore(prev => {
-            const next = [...prev];
-            next[quarter - 1] += pts;
-            return next;
-          });
+          setAwayQScore(prev => { const n = [...prev]; n[quarter - 1] += pts; return n; });
         }
-        
-        eventType = 'score';
-        ptsGain = pts;
         updatePlayerStat(isHomePossession, shooter.id, 'pts', pts);
         updatePlayerStat(isHomePossession, shooter.id, 'fgm', 1);
         if (isThree) updatePlayerStat(isHomePossession, shooter.id, 'threepm', 1);
       } else { // Miss
-        const isBlock = defender.attributes.blocks > 80 && Math.random() > 0.8;
+        const isBlock = (defender.attributes?.blocks ?? 0) > 80 && Math.random() > 0.8;
         if (isBlock) {
-          eventText = `NOT TODAY! ${defender.name} sends ${shooter.name}'s shot into the stands!`;
+          const newBlk = getStat(!isHomePossession, defender.id, 'blk') + 1;
+          const shotType = isThree ? pick(shot3_types_miss) : pick(shot2_types_miss);
+          eventText = `${abbrev(shooter.name)} ${shotType}: Missed. ${abbrev(defender.name)} Blocked Shot (${newBlk} block${newBlk !== 1 ? 's' : ''})`;
           updatePlayerStat(!isHomePossession, defender.id, 'blk', 1);
         } else {
-          eventText = `${shooter.name} looks for the shot, but it rims out.`;
+          const shotType = isThree ? pick(shot3_types_miss) : pick(shot2_types_miss);
+          eventText = `${abbrev(shooter.name)} ${shotType}: Missed.`;
         }
         eventType = 'miss';
-        
+
         // Rebound
-        const rebber = Math.random() > 0.7 ? offPlayers[Math.floor(Math.random()*5)] : defPlayers[Math.floor(Math.random()*5)];
-        const isOffReb = offPlayers.some(p => p.id === rebber.id);
-        updatePlayerStat(isOffReb ? isHomePossession : !isHomePossession, rebber.id, 'reb', 1);
-        eventText += ` Rebound by ${rebber.name}.`;
+        const isOffRebChance = Math.random() > 0.72;
+        const rebPool = isOffRebChance ? offPlayers : defPlayers;
+        const rebber = rebPool[Math.floor(Math.random() * rebPool.length)];
+        const isOffReb = isOffRebChance;
+        const rebIsHome = isOffReb ? isHomePossession : !isHomePossession;
+        const newReb = getStat(rebIsHome, rebber.id, 'reb') + 1;
+        const rebType = isOffReb ? 'Offensive Rebound' : 'Defensive Rebound';
+        eventText += ` ${abbrev(rebber.name)} ${rebType} (${newReb} reb${newReb !== 1 ? 's' : ''})`;
+        updatePlayerStat(rebIsHome, rebber.id, 'reb', 1);
       }
     }
 
@@ -267,7 +316,7 @@ const LiveGameModal: React.FC<LiveGameModalProps> = ({
       teamId: isHomePossession ? homeTeam.id : awayTeam.id
     };
 
-    setEvents(prev => [...prev, newEvent].slice(-80)); // Keep log sane
+    setEvents(prev => [...prev, newEvent].slice(-80));
     setTimeLeft(newTime);
   };
 
