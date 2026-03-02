@@ -1,5 +1,6 @@
 import React, { useEffect } from 'react';
 import { Player, PlayerStatus, PersonalityTrait, Position } from '../types';
+import { getFlag } from '../constants';
 
 interface PlayerModalProps {
   player: Player;
@@ -507,7 +508,7 @@ const PlayerModal: React.FC<PlayerModalProps> = ({
                 </div>
                 <div className="flex items-center gap-4">
                    <span className="text-[10px] text-slate-500 font-black uppercase tracking-[0.2em] w-24">Hometown</span>
-                   <span className="text-white text-base font-medium">{player.hometown}</span>
+                   <span className="text-white text-base font-medium">{player.hometown} {getFlag(player.country)}</span>
                 </div>
                 <div className="flex items-center gap-4">
                    <span className="text-[10px] text-slate-500 font-black uppercase tracking-[0.2em] w-24">Born</span>

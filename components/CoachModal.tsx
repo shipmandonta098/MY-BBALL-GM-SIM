@@ -1,6 +1,7 @@
 
 import React, { useEffect, useState } from 'react';
 import { Coach, CoachBadge, CoachScheme, Gender } from '../types';
+import { getFlag } from '../constants';
 
 interface CoachModalProps {
   coach: Coach;
@@ -295,7 +296,7 @@ const CoachModal: React.FC<CoachModalProps> = ({
                 </div>
                 <div className="flex items-center gap-4">
                    <span className="text-[10px] text-slate-500 font-black uppercase tracking-[0.2em] w-24">Hometown</span>
-                   <span className="text-white text-lg font-medium">{coach.hometown}</span>
+                   <span className="text-white text-lg font-medium">{coach.hometown} {getFlag(coach.country)}</span>
                 </div>
              </div>
              <div className="space-y-4">

@@ -361,6 +361,7 @@ export const generateCoach = (id: string, tier: 'A' | 'B' | 'C' | 'D' = 'C', gen
     gender,
     role: COACH_ROLES[Math.floor(Math.random() * COACH_ROLES.length)],
     hometown: cities[Math.floor(Math.random() * cities.length)],
+    country: 'United States',
     college: COLLEGES[Math.floor(Math.random() * COLLEGES.length)],
     experience,
     history: `Served as ${tier === 'A' ? 'lead architect' : 'assistant'} for several championship runs. Known for ${tier === 'A' ? 'elite playcalling' : 'locker room stability'}.`,
@@ -401,6 +402,56 @@ const randomBirthdate = (age: number): string => {
   return `${birthYear}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
 };
 
+const countryFromHometown = (hometown: string): string => {
+  const parts = hometown.split(', ');
+  const last = parts[parts.length - 1].trim();
+  return /^[A-Z]{2}$/.test(last) ? 'United States' : last;
+};
+
+export const COUNTRY_FLAGS: Record<string, string> = {
+  'United States': '\u{1F1FA}\u{1F1F8}',
+  'Canada': '\u{1F1E8}\u{1F1E6}',
+  'Serbia': '\u{1F1F7}\u{1F1F8}',
+  'Slovenia': '\u{1F1F8}\u{1F1EE}',
+  'Croatia': '\u{1F1ED}\u{1F1F7}',
+  'Montenegro': '\u{1F1F2}\u{1F1EA}',
+  'Bosnia': '\u{1F1E7}\u{1F1E6}',
+  'France': '\u{1F1EB}\u{1F1F7}',
+  'Spain': '\u{1F1EA}\u{1F1F8}',
+  'Germany': '\u{1F1E9}\u{1F1EA}',
+  'Italy': '\u{1F1EE}\u{1F1F9}',
+  'Lithuania': '\u{1F1F1}\u{1F1F9}',
+  'Latvia': '\u{1F1F1}\u{1F1FB}',
+  'Estonia': '\u{1F1EA}\u{1F1EA}',
+  'Denmark': '\u{1F1E9}\u{1F1F0}',
+  'Sweden': '\u{1F1F8}\u{1F1EA}',
+  'Finland': '\u{1F1EB}\u{1F1EE}',
+  'Australia': '\u{1F1E6}\u{1F1FA}',
+  'New Zealand': '\u{1F1F3}\u{1F1FF}',
+  'Nigeria': '\u{1F1F3}\u{1F1EC}',
+  'Senegal': '\u{1F1F8}\u{1F1F3}',
+  'Cameroon': '\u{1F1E8}\u{1F1F2}',
+  'South Africa': '\u{1F1FF}\u{1F1E6}',
+  'Ghana': '\u{1F1EC}\u{1F1ED}',
+  'Japan': '\u{1F1EF}\u{1F1F5}',
+  'China': '\u{1F1E8}\u{1F1F3}',
+  'Philippines': '\u{1F1F5}\u{1F1ED}',
+  'South Korea': '\u{1F1F0}\u{1F1F7}',
+  'Brazil': '\u{1F1E7}\u{1F1F7}',
+  'Argentina': '\u{1F1E6}\u{1F1F7}',
+  'Mexico': '\u{1F1F2}\u{1F1FD}',
+  'Uruguay': '\u{1F1FA}\u{1F1FE}',
+  'Colombia': '\u{1F1E8}\u{1F1F4}',
+  'Venezuela': '\u{1F1FB}\u{1F1EA}',
+  'Greece': '\u{1F1EC}\u{1F1F7}',
+  'Turkey': '\u{1F1F9}\u{1F1F7}',
+};
+
+export const getFlag = (country?: string): string => {
+  if (!country) return '';
+  return COUNTRY_FLAGS[country] ?? '';
+};
+
 export const generatePlayer = (id: string, ageRange: [number, number] = [19, 38], genderRatio: number = 0): Player => {
   const gender = getRandomGender(genderRatio);
   
@@ -429,6 +480,7 @@ export const generatePlayer = (id: string, ageRange: [number, number] = [19, 38]
   const f = region.flavor;
   const getRandomAttr = (base: number, flavor: number = 0) => 
     Math.min(99, Math.max(25, Math.floor(base + flavor + (Math.random() * 20 - 10))));
+  const playerHometown = region.hometowns[Math.floor(Math.random() * region.hometowns.length)];
   
   return {
     id,
@@ -485,7 +537,8 @@ export const generatePlayer = (id: string, ageRange: [number, number] = [19, 38]
     jerseyNumber: Math.floor(Math.random() * 99),
     height: "6'7\"", weight: 220, status: 'Bench',
     personalityTraits: getRandomTraits(),
-    hometown: region.hometowns[Math.floor(Math.random() * region.hometowns.length)], 
+    hometown: playerHometown,
+    country: countryFromHometown(playerHometown),
     birthdate: randomBirthdate(age), 
     college: region.id === 'usa' ? COLLEGES[Math.floor(Math.random() * COLLEGES.length)] : region.name,
     draftInfo: { team: "Titans", round: 1, pick: 1, year: 2015 }
@@ -541,6 +594,7 @@ export const generateProspects = (year: number, count: number = 100, genderRatio
     const f = region.flavor;
     const getRandomAttr = (base: number, flavor: number = 0) => 
       Math.min(99, Math.max(25, Math.floor(base + flavor + (Math.random() * 25 - 12))));
+    const prospectHometown = region.hometowns[Math.floor(Math.random() * region.hometowns.length)];
 
     return {
       id,
@@ -583,7 +637,8 @@ export const generateProspects = (year: number, count: number = 100, genderRatio
       jerseyNumber: Math.floor(Math.random() * 99),
       height: "6'8\"", weight: 210,
       personalityTraits: getRandomTraits(),
-      hometown: region.hometowns[Math.floor(Math.random() * region.hometowns.length)], 
+      hometown: prospectHometown,
+      country: countryFromHometown(prospectHometown),
       birthdate: randomBirthdate(19 + Math.floor(Math.random() * 3)), 
       college: region.id === 'usa' ? "N/A" : region.name,
       draftInfo: { team: "N/A", round: 0, pick: 0, year },

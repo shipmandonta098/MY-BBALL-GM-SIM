@@ -135,6 +135,7 @@ export interface Coach {
   gender: Gender;
   role?: CoachRole;
   hometown: string;
+  country?: string;
   college: string;
   experience: number;
   history: string;
@@ -273,6 +274,7 @@ export interface Player {
   status: PlayerStatus;
   personalityTraits: PersonalityTrait[];
   hometown: string;
+  country?: string;
   birthdate: string;
   college: string;
   draftInfo: {

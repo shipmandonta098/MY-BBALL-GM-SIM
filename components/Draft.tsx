@@ -1,5 +1,6 @@
 import React, { useState, useMemo, useEffect } from 'react';
 import { LeagueState, Team, Prospect, DraftPick, Player } from '../types';
+import { getFlag } from '../constants';
 
 interface DraftProps {
   league: LeagueState;
@@ -273,7 +274,7 @@ const Draft: React.FC<DraftProps> = ({ league, updateLeague, onScout, scoutingRe
                       <td className="px-6 py-5">
                          <span className="text-amber-500 font-black">{p.position}</span>
                       </td>
-                      <td className="px-6 py-5 text-slate-400 italic">{p.school}</td>
+                      <td className="px-6 py-5 text-slate-400 italic">{p.school} {getFlag(p.country)}</td>
                       <td className="px-6 py-5 text-center">
                          <div className="flex justify-center gap-1">
                             {Array.from({ length: 5 }).map((_, i) => (
@@ -340,7 +341,7 @@ const Draft: React.FC<DraftProps> = ({ league, updateLeague, onScout, scoutingRe
                           <span className="font-display font-bold text-amber-500">#{p.mockRank}</span>
                           <span className="text-sm font-bold text-slate-200">{p.name}</span>
                        </div>
-                       <span className="text-[10px] text-slate-600 font-black uppercase">{p.school}</span>
+                       <span className="text-[10px] text-slate-600 font-black uppercase">{p.school} {getFlag(p.country)}</span>
                     </div>
                   ))}
                </div>
