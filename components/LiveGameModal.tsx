@@ -21,6 +21,7 @@ interface GameEvent {
   quarter: number;
   text: string;
   type: 'score' | 'miss' | 'turnover' | 'foul' | 'highlight' | 'info';
+  teamId?: string; // which team acted
 }
 
 const LiveGameModal: React.FC<LiveGameModalProps> = ({ 
@@ -104,6 +105,29 @@ const LiveGameModal: React.FC<LiveGameModalProps> = ({
     };
     setHomeStats(init(homeTeam));
     setAwayStats(init(awayTeam));
+
+    // Jump ball — find centers (or highest jumping player)
+    const getCenter = (team: Team) => {
+      const centers = team.roster.filter(p => p.position === 'C' || p.position === 'PF');
+      const pool = centers.length > 0 ? centers : team.roster.slice(0, 5);
+      return pool.reduce((best, p) => (p.attributes?.jumping ?? 0) > (best.attributes?.jumping ?? 0) ? p : best, pool[0]);
+    };
+    const homeC = getCenter(homeTeam);
+    const awayC = getCenter(awayTeam);
+    const homeJump = homeC?.attributes?.jumping ?? 60;
+    const awayJump = awayC?.attributes?.jumping ?? 60;
+    const homeWinsTip = Math.random() < (homeJump / (homeJump + awayJump));
+    const tipWinner = homeWinsTip ? homeC : awayC;
+    const tipWinnerTeam = homeWinsTip ? homeTeam : awayTeam;
+    setEvents([
+      {
+        time: '12:00',
+        quarter: 1,
+        text: `Jump ball between ${homeC?.name ?? homeTeam.name} and ${awayC?.name ?? awayTeam.name}. ${tipWinner?.name ?? tipWinnerTeam.name} wins the tip for ${tipWinnerTeam.city} ${tipWinnerTeam.name}!`,
+        type: 'info',
+        teamId: tipWinnerTeam.id
+      }
+    ]);
   }, [homeTeam, awayTeam]);
 
   useEffect(() => {
@@ -239,10 +263,11 @@ const LiveGameModal: React.FC<LiveGameModalProps> = ({
       time: formatTime(newTime),
       quarter,
       text: eventText,
-      type: eventType
+      type: eventType,
+      teamId: isHomePossession ? homeTeam.id : awayTeam.id
     };
 
-    setEvents(prev => [...prev, newEvent].slice(-50)); // Keep log sane
+    setEvents(prev => [...prev, newEvent].slice(-80)); // Keep log sane
     setTimeLeft(newTime);
   };
 
@@ -482,29 +507,75 @@ const LiveGameModal: React.FC<LiveGameModalProps> = ({
             <span className="text-[10px] font-bold text-slate-600 uppercase">Day {game.day} • Season {season}</span>
           </div>
           
-          <div ref={logRef} className="flex-1 overflow-y-auto p-8 space-y-6 scroll-smooth scrollbar-thin scrollbar-thumb-slate-800">
+          <div ref={logRef} className="flex-1 overflow-y-auto p-6 space-y-4 scroll-smooth scrollbar-thin scrollbar-thumb-slate-800">
             {events.map((e, i) => {
               const isLatest = i >= events.length - 3;
               const isScore = e.type === 'score';
               const isTurnover = e.type === 'turnover';
-              
-              return (
-                <div 
-                  key={i} 
-                  className={`flex gap-8 group animate-in slide-in-from-bottom-2 duration-500 ${isScore ? 'bg-amber-500/5 -mx-8 px-8 py-4 border-y border-amber-500/10' : ''}`}
-                >
-                  <div className="w-16 shrink-0 flex flex-col items-center pt-1">
-                    <span className="text-[10px] font-mono text-slate-600 group-hover:text-slate-400 transition-colors">{e.time}</span>
-                    <span className="text-[8px] font-black text-slate-800 uppercase">Q{e.quarter}</span>
+              const isInfo = e.type === 'info';
+              const actingTeam = e.teamId ? (e.teamId === homeTeam.id ? homeTeam : awayTeam) : null;
+
+              if (isInfo && !e.teamId) {
+                // Section dividers (quarter start, etc.) — no logo, centered
+                return (
+                  <div key={i} className="flex items-center gap-3 py-1">
+                    <div className="h-px flex-1 bg-slate-800/60"></div>
+                    <span className="text-[9px] font-black text-slate-600 uppercase tracking-[0.25em] whitespace-nowrap">{e.text}</span>
+                    <div className="h-px flex-1 bg-slate-800/60"></div>
                   </div>
-                  <div className="flex-1">
-                    <p className={`leading-relaxed transition-all duration-500 ${
-                      isLatest ? 'text-lg font-bold' : 'text-sm font-medium'
+                );
+              }
+
+              return (
+                <div
+                  key={i}
+                  className={`flex items-start gap-3 group animate-in slide-in-from-bottom-2 duration-300 rounded-2xl px-3 py-2 transition-all ${
+                    isScore
+                      ? 'bg-amber-500/5 border border-amber-500/10 shadow-sm'
+                      : isLatest
+                      ? 'bg-slate-900/50'
+                      : 'hover:bg-slate-900/30'
+                  }`}
+                >
+                  {/* Team Logo */}
+                  <div className="shrink-0 w-7 h-7 mt-0.5">
+                    {actingTeam ? (
+                      <div
+                        className="w-7 h-7 rounded-lg flex items-center justify-center border"
+                        style={{
+                          backgroundColor: actingTeam.primaryColor + '20',
+                          borderColor: actingTeam.primaryColor + '40'
+                        }}
+                      >
+                        <TeamBadge team={actingTeam} size="xs" />
+                      </div>
+                    ) : (
+                      <div className="w-7 h-7 rounded-lg bg-slate-800/50 border border-slate-700/50 flex items-center justify-center">
+                        <span className="text-[8px] text-slate-600 font-black">🏀</span>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Time */}
+                  <div className="shrink-0 flex flex-col items-end w-12 pt-0.5">
+                    <span className="text-[10px] font-mono text-slate-600 group-hover:text-slate-400 transition-colors leading-tight">{e.time}</span>
+                    <span className="text-[8px] font-black text-slate-800 uppercase leading-tight">Q{e.quarter}</span>
+                  </div>
+
+                  {/* Play Text */}
+                  <div className="flex-1 min-w-0">
+                    <p className={`leading-snug transition-all duration-300 ${
+                      isLatest ? 'text-base font-bold' : 'text-sm font-medium'
                     } ${
-                      isScore ? 'text-white' : 
-                      isTurnover ? 'text-orange-400' : 
-                      e.type === 'foul' ? 'text-rose-400' :
-                      'text-slate-400'
+                      isScore
+                        ? 'text-white'
+                        : isTurnover
+                        ? 'text-orange-400'
+                        : e.type === 'foul'
+                        ? 'text-rose-400'
+                        : isInfo
+                        ? 'text-amber-400'
+                        : 'text-slate-400'
                     }`}>
                       {e.text}
                     </p>
