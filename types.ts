@@ -4,6 +4,7 @@ export type Conference = 'Eastern' | 'Western';
 export type Division = 'Atlantic' | 'Central' | 'Southeast' | 'Northwest' | 'Pacific' | 'Southwest';
 export type MarketSize = 'Small' | 'Medium' | 'Large';
 export type PlayerStatus = 'Starter' | 'Rotation' | 'Bench' | 'Injured';
+export type InjuryType = 'Ankle Sprain' | 'Hamstring Strain' | 'Knee Sprain' | 'Patellofemoral Pain' | 'Lumbar Strain' | 'Finger/Hand Injury' | 'Concussion' | 'ACL Tear' | 'Achilles Rupture' | 'Illness';
 export type Gender = 'Male' | 'Female' | 'Non-binary';
 
 export type PersonalityTrait = 'Leader' | 'Diva/Star' | 'Loyal' | 'Professional' | 'Gym Rat' | 'Lazy' | 'Clutch' | 'Tough/Alpha' | 'Friendly/Team First' | 'Money Hungry';
@@ -290,6 +291,8 @@ export interface Player {
   onTradeBlock?: boolean;
   isSuspended?: boolean;
   suspensionGames?: number;
+  injuryType?: InjuryType;
+  injuryDaysLeft?: number;
 }
 
 export interface Prospect extends Omit<Player, 'stats' | 'status' | 'morale' | 'salary' | 'contractYears'> {
@@ -435,6 +438,7 @@ export interface GameResult {
   isComeback?: boolean;
   isChippy?: boolean;
   season: number;
+  gameInjuries?: Array<{playerId: string; playerName: string; injuryType: InjuryType; daysOut: number; teamId: string}>;
 }
 
 export interface LeagueSettings {

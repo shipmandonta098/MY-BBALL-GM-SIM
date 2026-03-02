@@ -1,6 +1,6 @@
 
 import React, { useState, useEffect, useCallback } from 'react';
-import { LeagueState, Player, Team, GameResult, PlayerStatus, ScheduleGame, BulkSimSummary, Prospect, Coach, TradeProposal, Position, NewsItem, NewsCategory, LeagueSettings, SeasonAwards, PlayoffBracket, PlayoffSeries, Transaction, TransactionType, PowerRankingSnapshot, PowerRankingEntry, GMProfile, GMMilestone, RivalryStats } from './types';
+import { LeagueState, Player, Team, GameResult, PlayerStatus, ScheduleGame, BulkSimSummary, Prospect, Coach, TradeProposal, Position, NewsItem, NewsCategory, LeagueSettings, SeasonAwards, PlayoffBracket, PlayoffSeries, Transaction, TransactionType, PowerRankingSnapshot, PowerRankingEntry, GMProfile, GMMilestone, RivalryStats, InjuryType } from './types';
 import { generateLeagueTeams, generateSeasonSchedule, generateProspects, generateFreeAgentPool, generateCoachPool, EXPANSION_TEAM_POOL, generateCoach } from './constants';
 import { simulateGame } from './utils/simEngine';
 import { generateGameRecap, generateScoutingReport, generateSeasonNarrative, generateCoachScoutingReport, generateNewsHeadline } from './services/geminiService';
@@ -263,13 +263,39 @@ const App: React.FC = () => {
         newState = { ...newState, teams: updatedTeams, coachPool: updatedPool };
       }
     }
-    if (Math.random() > 0.85) {
-      const allPlayers = newState.teams.flatMap(t => t.roster);
-      const injuredPlayer = allPlayers[Math.floor(Math.random() * allPlayers.length)];
-      const team = newState.teams.find(t => t.roster.some(p => p.id === injuredPlayer.id))!;
-      const injuries = ["Sprained Ankle", "Knee Strain", "Lower Back Soreness", "Hamstring Pull"];
-      const injury = injuries[Math.floor(Math.random() * injuries.length)];
-      newState.transactions = recordTransaction(newState, 'injury', [team.id], `${injuredPlayer.name} is out with a ${injury}.`, [injuredPlayer.id]);
+    // Injury recovery — decrement days, auto-return when healed
+    newState = {
+      ...newState,
+      teams: newState.teams.map(t => ({
+        ...t,
+        roster: t.roster.map(p => {
+          if (p.status !== 'Injured') return p;
+          const daysLeft = (p.injuryDaysLeft ?? 1) - 1;
+          if (daysLeft <= 0) {
+            return { ...p, status: 'Rotation' as PlayerStatus, injuryType: undefined, injuryDaysLeft: 0 };
+          }
+          return { ...p, injuryDaysLeft: daysLeft };
+        })
+      }))
+    };
+    // Rare practice/travel illness
+    if (Math.random() > 0.97) {
+      const active = newState.teams.flatMap(t => t.roster).filter(p => p.status !== 'Injured');
+      if (active.length > 0) {
+        const unlucky = active[Math.floor(Math.random() * active.length)];
+        const team = newState.teams.find(t => t.roster.some(p => p.id === unlucky.id))!;
+        const days = 1 + Math.floor(Math.random() * 5);
+        newState = {
+          ...newState,
+          teams: newState.teams.map(t => t.id !== team.id ? t : {
+            ...t,
+            roster: t.roster.map(p => p.id !== unlucky.id ? p : {
+              ...p, status: 'Injured' as PlayerStatus, injuryType: 'Illness' as InjuryType, injuryDaysLeft: days
+            })
+          })
+        };
+        newState = await addNewsItem(newState, 'injury', { player: unlucky, team, detail: `${unlucky.name} is dealing with an illness — day-to-day, expected back in ${days} day${days !== 1 ? 's' : ''}.` }, false);
+      }
     }
     if (newState.currentDay % 15 === 0) {
       const newCoach = generateCoach(`gen-coach-${Date.now()}`, 'C', newState.settings.coachGenderRatio);
@@ -467,6 +493,28 @@ const App: React.FC = () => {
       const team = newState.teams.find(t => t.id === (result.homePlayerStats.some(h => h.playerId === pLine.playerId) ? result.homeTeamId : result.awayTeamId))!;
       const player = team.roster.find(p => p.id === pLine.playerId)!;
       newState = await addNewsItem(newState, 'injury', { player, team, detail: `${player.name} tossed — rivalry boils over!` }, true);
+    }
+
+    // Apply in-game injuries
+    if (result.gameInjuries && result.gameInjuries.length > 0) {
+      for (const inj of result.gameInjuries) {
+        newState = {
+          ...newState,
+          teams: newState.teams.map(t => t.id !== inj.teamId ? t : {
+            ...t,
+            roster: t.roster.map(p => p.id !== inj.playerId ? p : {
+              ...p, status: 'Injured' as PlayerStatus, injuryType: inj.injuryType as InjuryType, injuryDaysLeft: inj.daysOut
+            })
+          })
+        };
+        const injTeam = newState.teams.find(t => t.id === inj.teamId)!;
+        const injPlayer = injTeam.roster.find(p => p.id === inj.playerId)!;
+        const wks = inj.daysOut >= 14 ? ` (${Math.round(inj.daysOut / 7)} wks)` : '';
+        newState = await addNewsItem(newState, 'injury', {
+          player: injPlayer, team: injTeam,
+          detail: `${injPlayer.name} suffered a ${inj.injuryType} and is expected to miss ${inj.daysOut} day${inj.daysOut !== 1 ? 's' : ''}${wks}.`
+        }, inj.daysOut >= 14);
+      }
     }
 
     return newState;

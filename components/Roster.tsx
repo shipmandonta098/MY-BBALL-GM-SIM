@@ -32,6 +32,7 @@ const Roster: React.FC<RosterProps> = ({ leagueTeams, userTeamId, initialTeamId,
   const [posFilter, setPosFilter] = useState<string>('ALL');
   const [minOvr, setMinOvr] = useState(60);
   const [sortConfig, setSortConfig] = useState<{ key: string, direction: 'asc' | 'desc' }>({ key: 'rating', direction: 'desc' });
+  const [injuredOnly, setInjuredOnly] = useState(false);
 
   useEffect(() => {
     if (initialTeamId) {
@@ -76,7 +77,8 @@ const Roster: React.FC<RosterProps> = ({ leagueTeams, userTeamId, initialTeamId,
         const matchesSearch = p.name.toLowerCase().includes(searchTerm.toLowerCase());
         const matchesPos = posFilter === 'ALL' || p.position === posFilter;
         const matchesOvr = p.rating >= minOvr;
-        return matchesSearch && matchesPos && matchesOvr;
+        const matchesInjured = !injuredOnly || p.status === 'Injured';
+        return matchesSearch && matchesPos && matchesOvr && matchesInjured;
       })
       .sort((a, b) => {
         let aVal: any = (a as any)[sortConfig.key];
@@ -208,6 +210,24 @@ const Roster: React.FC<RosterProps> = ({ leagueTeams, userTeamId, initialTeamId,
         </div>
       </div>
 
+      {/* Injury Filter */}
+      <div className="flex items-center gap-3">
+        <button
+          onClick={() => setInjuredOnly(!injuredOnly)}
+          className={`flex items-center gap-2 px-4 py-2.5 rounded-xl border text-[10px] font-black uppercase tracking-widest transition-all ${
+            injuredOnly ? 'bg-rose-500/20 border-rose-500 text-rose-400 shadow-lg shadow-rose-900/20' : 'bg-slate-900 border-slate-800 text-slate-500 hover:border-slate-600'
+          }`}
+        >
+          <span>🤕</span> {injuredOnly ? 'Showing Injured Only' : 'Show Injured Only'}
+        </button>
+        {injuredOnly && filteredRoster.length > 0 && (
+          <span className="text-[10px] text-rose-400 font-bold uppercase tracking-widest">{filteredRoster.length} on injured list</span>
+        )}
+        {injuredOnly && filteredRoster.length === 0 && (
+          <span className="text-[10px] text-slate-500 font-bold uppercase tracking-widest">No current injuries on this roster</span>
+        )}
+      </div>
+
       {/* Roster Table */}
       <div className="bg-slate-900 border border-slate-800 rounded-3xl overflow-hidden shadow-2xl">
         <div className="overflow-x-auto">
@@ -226,7 +246,7 @@ const Roster: React.FC<RosterProps> = ({ leagueTeams, userTeamId, initialTeamId,
               {filteredRoster.map((player) => (
                 <tr 
                   key={player.id} 
-                  className={`group hover:bg-slate-800/40 transition-all cursor-pointer ${player.status === 'Injured' ? 'opacity-50' : ''}`}
+                  className={`group hover:bg-slate-800/40 transition-all cursor-pointer ${player.status === 'Injured' ? 'bg-rose-950/20 border-l-2 border-rose-500/30' : ''}`}
                   onClick={() => onScout(player)}
                 >
                   <td className="px-8 py-6">
@@ -241,9 +261,15 @@ const Roster: React.FC<RosterProps> = ({ leagueTeams, userTeamId, initialTeamId,
                           </span>
                         </div>
                         <div className="flex items-center gap-2 mt-0.5">
-                          <span className={`text-[10px] font-black uppercase tracking-widest px-1.5 py-0.5 rounded ${player.status === 'Starter' ? 'bg-emerald-500/10 text-emerald-500' : 'bg-slate-800 text-slate-500'}`}>
-                            {player.status}
-                          </span>
+                          {player.status === 'Injured' ? (
+                            <span className="text-[10px] font-black uppercase tracking-widest px-1.5 py-0.5 rounded bg-rose-500/10 text-rose-400 border border-rose-500/20 whitespace-nowrap">
+                              🤕 {player.injuryType ?? 'Injured'}{player.injuryDaysLeft ? ` · ${player.injuryDaysLeft}d` : ''}
+                            </span>
+                          ) : (
+                            <span className={`text-[10px] font-black uppercase tracking-widest px-1.5 py-0.5 rounded ${player.status === 'Starter' ? 'bg-emerald-500/10 text-emerald-500' : 'bg-slate-800 text-slate-500'}`}>
+                              {player.status}
+                            </span>
+                          )}
                           <div className="flex gap-1">
                             {player.personalityTraits.map(trait => (
                               <span key={trait} title={trait} className="text-xs">{traitIcons[trait]}</span>

@@ -134,8 +134,12 @@ const Dashboard: React.FC<DashboardProps> = ({ league, news, onSimulate, onScout
   const lowMorale = userTeam.roster.filter(p => p.morale < 50).length;
   if (lowMorale > 0) alerts.push({ text: "Low morale warning", type: 'warning' });
   
-  const injured = userTeam.roster.filter(p => p.status === 'Injured').length;
-  if (injured > 0) alerts.push({ text: `${injured} players injured`, type: 'danger' });
+  const injuredPlayers = userTeam.roster.filter(p => p.status === 'Injured');
+  injuredPlayers.forEach(p => {
+    const days = p.injuryDaysLeft ?? 0;
+    const label = p.injuryType ?? 'Injury';
+    alerts.push({ text: `${p.name} — ${label}${days > 0 ? ` · ${days}d` : ''}`, type: 'danger' });
+  });
 
   const formatMoney = (amount: number) => `$${(amount / 1000000).toFixed(1)}M`;
 

@@ -1,9 +1,36 @@
-import { Team, GameResult, Player, GamePlayerLine, CoachScheme, PlayByPlayEvent } from '../types';
+import { Team, GameResult, Player, GamePlayerLine, CoachScheme, PlayByPlayEvent, InjuryType } from '../types';
 
 // Realistic NBA Constants
 const BASE_PACE = 100;
 const BASE_PPP = 1.12; // ~112 points per 100 possessions
 const SCORE_VARIANCE = 0.04; // Tighten distribution
+
+type InjuryEntry = { type: InjuryType; minDays: number; maxDays: number; weight: number; msgs: string[] };
+const INJURY_TABLE: InjuryEntry[] = [
+  { type: 'Ankle Sprain',        minDays: 7,   maxDays: 14,  weight: 30, msgs: ['{n} rolls ankle on landing — grimacing badly', '{n} steps on an opponent\'s foot and limps to the bench'] },
+  { type: 'Hamstring Strain',    minDays: 10,  maxDays: 21,  weight: 20, msgs: ['{n} pulls up clutching the hamstring — trainers rush in', '{n} grabs the back of the leg after a sprint and will not return'] },
+  { type: 'Knee Sprain',         minDays: 14,  maxDays: 28,  weight: 12, msgs: ['{n} clutches the knee after going down hard — trainers checking', '{n} is helped off the floor — knee issue, headed to the locker room'] },
+  { type: 'Patellofemoral Pain', minDays: 21,  maxDays: 42,  weight: 6,  msgs: ['{n} cannot continue — knee issue forces an early exit'] },
+  { type: 'Lumbar Strain',       minDays: 7,   maxDays: 21,  weight: 8,  msgs: ['{n} clutches lower back after taking an elbow — in visible pain'] },
+  { type: 'Finger/Hand Injury',  minDays: 14,  maxDays: 35,  weight: 8,  msgs: ['{n} jams a finger on a steal attempt — heading to the bench', '{n} going to the locker room with a hand issue'] },
+  { type: 'Concussion',          minDays: 5,   maxDays: 14,  weight: 4,  msgs: ['{n} takes a hard elbow to the head — trainers conducting concussion protocol'] },
+  { type: 'ACL Tear',            minDays: 270, maxDays: 365, weight: 1,  msgs: ['{n} lands awkwardly and goes down immediately — team in shock', '{n} drops to the floor — the arena goes completely silent'] },
+  { type: 'Achilles Rupture',    minDays: 270, maxDays: 365, weight: 1,  msgs: ['{n} pulls up in disbelief, clutching the Achilles — a devastating blow'] },
+  { type: 'Illness',             minDays: 1,   maxDays: 7,   weight: 10, msgs: ['{n} heads to the locker room feeling ill — will not return tonight'] },
+];
+const rollInjury = (name: string): { type: InjuryType; daysOut: number; msg: string } => {
+  const total = INJURY_TABLE.reduce((s, e) => s + e.weight, 0);
+  let r = Math.random() * total;
+  for (const e of INJURY_TABLE) {
+    r -= e.weight;
+    if (r <= 0) {
+      const daysOut = e.minDays + Math.floor(Math.random() * (e.maxDays - e.minDays + 1));
+      return { type: e.type, daysOut, msg: e.msgs[Math.floor(Math.random() * e.msgs.length)].replace(/{n}/g, name) };
+    }
+  }
+  const fb = INJURY_TABLE[0];
+  return { type: fb.type, daysOut: fb.minDays, msg: fb.msgs[0].replace(/{n}/g, name) };
+};
 
 const calculateTeamRatings = (team: Team) => {
   let roster = team.roster.slice(0, 10); // Focus on rotation for ratings
@@ -163,6 +190,30 @@ export const simulateGame = (home: Team, away: Team, date: number, season: numbe
   rollForChippy(homePlayerStats, true);
   rollForChippy(awayPlayerStats, false);
 
+  // Injury Rolls
+  const gameInjuries: Array<{playerId: string; playerName: string; injuryType: InjuryType; daysOut: number; teamId: string}> = [];
+  const rollForInjuries = (stats: GamePlayerLine[], isHome: boolean) => {
+    const tm = isHome ? home : away;
+    const isB2B = isHome ? homeB2B : awayB2B;
+    const trainerRating = tm.staff.trainer?.ratingDevelopment ?? 0;
+    stats.forEach(p => {
+      if (p.min < 5) return;
+      const player = tm.roster.find(pl => pl.id === p.playerId);
+      if (!player || player.status === 'Injured') return;
+      let chance = 0.004;
+      if (p.min > 35) chance *= 1.5;
+      if (isB2B) chance *= 1.3;
+      chance *= (1 - (trainerRating / 100) * 0.3);
+      if (Math.random() < chance) {
+        const { type, daysOut, msg } = rollInjury(player.name);
+        pbp.push({ time: `${Math.floor(Math.random() * 12)}:${String(Math.floor(Math.random() * 60)).padStart(2, '0')}`, text: msg, type: 'foul', quarter: Math.floor(Math.random() * 4) + 1 });
+        gameInjuries.push({ playerId: player.id, playerName: player.name, injuryType: type, daysOut, teamId: tm.id });
+      }
+    });
+  };
+  rollForInjuries(homePlayerStats, true);
+  rollForInjuries(awayPlayerStats, false);
+
   // Overtime
   let isOvertime = false;
   if (Math.abs(totalHome - totalAway) < 1) {
@@ -218,6 +269,7 @@ export const simulateGame = (home: Team, away: Team, date: number, season: numbe
     isOvertime,
     isBuzzerBeater,
     isComeback,
-    isChippy
+    isChippy,
+    gameInjuries
   };
 };
