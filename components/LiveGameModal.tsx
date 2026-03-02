@@ -53,6 +53,8 @@ const LiveGameModal: React.FC<LiveGameModalProps> = ({
   const logRef = useRef<HTMLDivElement>(null);
   // Tracks which team currently has possession — updated each play
   const possessionRef = useRef<string>('');
+  // Tracks last live play type to gate technical foul eligibility
+  const lastPlayTypeRef = useRef<string>('');
 
   // Persistence
   useEffect(() => {
@@ -174,8 +176,9 @@ const LiveGameModal: React.FC<LiveGameModalProps> = ({
     const offTeam = isHomePossession ? homeTeam : awayTeam;
     const defTeam = isHomePossession ? awayTeam : homeTeam;
     
-    const offPlayers = offTeam.roster.slice(0, 5);
-    const defPlayers = defTeam.roster.slice(0, 5);
+    const offPlayers = offTeam.roster.slice(0, 5).filter(p => p?.id);
+    const defPlayers = defTeam.roster.slice(0, 5).filter(p => p?.id);
+    if (!offPlayers.length || !defPlayers.length) return;
     const shooter = offPlayers[Math.floor(Math.random() * offPlayers.length)];
     const defender = defPlayers[Math.floor(Math.random() * defPlayers.length)];
 
@@ -185,36 +188,111 @@ const LiveGameModal: React.FC<LiveGameModalProps> = ({
     let eventText = "";
     let eventType: GameEvent['type'] = 'info';
     const rivalryMod = ['Hot', 'Red Hot'].includes(rivalryLevel) ? 1.5 : 1.0;
+    // Accumulate multiple events (e.g. foul + free throws) to push as one batch
+    const batchEvents: GameEvent[] = [];
+    const makeEvent = (text: string, type: GameEvent['type'], teamId: string | undefined,
+      pBefore: string, pAfter: string): GameEvent => ({
+      time: formatTime(newTime), quarter, text, type, teamId, possessionBefore: pBefore, possessionAfter: pAfter
+    });
 
     const tov_types = ['Lost Ball Turnover', 'Bad Pass Turnover', 'Step Out of Bounds Turnover', 'Offensive Foul Turnover'];
-    const foul_types = ['Shooting Foul', 'Personal Take Foul', 'Loose Ball Foul', 'Illegal Screen'];
+    const non_shooting_fouls = ['Personal Take Foul', 'Loose Ball Foul', 'Illegal Screen'];
     const shot2_types_make = ['Driving Layup', 'Floating Jump Shot', 'Turnaround Mid-range Jumper', 'Pull-up Jump Shot', 'Running Layup', 'Putback Layup'];
     const shot2_types_miss = ['Driving Layup', 'Floating Jump Shot', 'Turnaround Jumper', 'Pull-up Mid-range', 'Running Floater', 'Hook Shot'];
     const shot3_types_make = ['3pt Jump Shot', 'Corner 3-pointer', 'Step Back 3-pointer', 'Pull-up 3pt Shot', 'Catch-and-Shoot 3'];
     const shot3_types_miss = ['3pt Jump Shot', 'Step Back 3-pointer', 'Pull-up 3pt Shot', 'Turnaround 3-pointer', 'Catch-and-Shoot 3'];
     const pick = <T,>(arr: T[]) => arr[Math.floor(Math.random() * arr.length)];
 
+    // ── Helpers ──────────────────────────────────────────────────────────────
+    const makeFTSequence = (
+      fouledPlayer: typeof shooter,
+      fouledTeamIsHome: boolean,
+      numFTs: number,
+      foulEventText: string,
+      pBefore: string
+    ) => {
+      const fouledTeam = fouledTeamIsHome ? homeTeam : awayTeam;
+      const oppTeam   = fouledTeamIsHome ? awayTeam : homeTeam;
+      // Foul event itself
+      batchEvents.push(makeEvent(foulEventText, 'foul', oppTeam.id, pBefore, pBefore));
+      updatePlayerStat(!fouledTeamIsHome, defender.id, 'pf', 1);
+      // Generate each free throw
+      let lastFTMade = false;
+      for (let i = 1; i <= numFTs; i++) {
+        const ftSkill = fouledPlayer.attributes?.freeThrow ?? 70;
+        lastFTMade = Math.random() * 100 < ftSkill;
+        const newFtm = getStat(fouledTeamIsHome, fouledPlayer.id, 'ftm') + (lastFTMade ? 1 : 0);
+        const newFta = getStat(fouledTeamIsHome, fouledPlayer.id, 'fta') + i;
+        const ftText = `${abbrev(fouledPlayer.name)} Free Throw ${i} of ${numFTs}: ${lastFTMade ? 'Made' : 'Missed'}. (${newFtm}/${newFta} FT)`;
+        // Possession stays with fouled team throughout FT sequence
+        batchEvents.push(makeEvent(ftText, lastFTMade ? 'score' : 'miss', fouledTeam.id, pBefore, pBefore));
+        if (lastFTMade) {
+          updatePlayerStat(fouledTeamIsHome, fouledPlayer.id, 'ftm', 1);
+          updatePlayerStat(fouledTeamIsHome, fouledPlayer.id, 'pts', 1);
+          if (fouledTeamIsHome) {
+            setHomeScore(s => s + 1);
+            setHomeQScore(prev => { const n = [...prev]; n[quarter - 1] += 1; return n; });
+          } else {
+            setAwayScore(s => s + 1);
+            setAwayQScore(prev => { const n = [...prev]; n[quarter - 1] += 1; return n; });
+          }
+        }
+        updatePlayerStat(fouledTeamIsHome, fouledPlayer.id, 'fta', 1);
+      }
+      // After last FT: if made → possession to opponent; if missed → live rebound (off team keeps ~28%)
+      if (lastFTMade) {
+        possessionAfter = oppTeam.id;
+      } else {
+        const offRebChance = Math.random() > 0.72;
+        possessionAfter = offRebChance ? fouledTeam.id : oppTeam.id;
+        const rebberPool = offRebChance ? fouledTeam.roster.slice(0, 5) : oppTeam.roster.slice(0, 5);
+        const rebber = rebberPool[Math.floor(Math.random() * rebberPool.length)];
+        const rebIsHome = offRebChance ? fouledTeamIsHome : !fouledTeamIsHome;
+        updatePlayerStat(rebIsHome, rebber.id, 'reb', 1);
+        batchEvents[batchEvents.length - 1].text += ` ${abbrev(rebber.name)} ${offRebChance ? 'Offensive' : 'Defensive'} Rebound.`;
+      }
+      // Fix possessionAfter on the last event
+      batchEvents[batchEvents.length - 1].possessionAfter = possessionAfter;
+    };
+
+    // ── Tech foul helper (only call in eligible moments) ─────────────────────
+    const tryTech = (eligibleTeamIsHome: boolean): boolean => {
+      const techEligible = ['score', 'miss'].includes(lastPlayTypeRef.current);
+      if (!techEligible) return false;
+      const techRoll = Math.random();
+      const player = (eligibleTeamIsHome ? offPlayers : defPlayers)[0];
+      if (!player?.id) return false;
+      let threshold = 0.025; // 2.5% base
+      if (player.personalityTraits?.includes('Diva/Star') || player.personalityTraits?.includes('Tough/Alpha')) threshold *= 1.4 * rivalryMod;
+      if (player.personalityTraits?.includes('Leader')) threshold *= 0.7;
+      if (techRoll > threshold) return false;
+
+      const newTechs = getStat(eligibleTeamIsHome, player.id, 'techs') + 1;
+      const techText = `${abbrev(player.name)} Technical Foul. (${newTechs} tech${newTechs !== 1 ? 's' : ''})`;
+      // Tech: opponent shoots 1 FT, then original possession resumes
+      batchEvents.push(makeEvent(techText, 'foul', eligibleTeamIsHome ? offTeam.id : defTeam.id, possessionBefore, possessionBefore));
+      updatePlayerStat(eligibleTeamIsHome, player.id, 'techs', 1);
+      setIsChippy(true);
+      // Opponent gets 1 FT
+      const oppIsHome = !eligibleTeamIsHome;
+      const oppPlayers = (oppIsHome ? homeTeam : awayTeam).roster.slice(0, 5).filter(p => p?.id);
+      const ftShooter = oppPlayers[Math.floor(Math.random() * oppPlayers.length)];
+      const ftMade = Math.random() < 0.75; // tech FTs ~75% make rate
+      const ftText = `${abbrev(ftShooter.name)} Technical Free Throw: ${ftMade ? 'Made' : 'Missed'}.`;
+      batchEvents.push(makeEvent(ftText, ftMade ? 'score' : 'miss', oppIsHome ? homeTeam.id : awayTeam.id, possessionBefore, possessionBefore));
+      if (ftMade) {
+        updatePlayerStat(oppIsHome, ftShooter.id, 'ftm', 1);
+        updatePlayerStat(oppIsHome, ftShooter.id, 'pts', 1);
+        if (oppIsHome) { setHomeScore(s => s + 1); } else { setAwayScore(s => s + 1); }
+      }
+      updatePlayerStat(oppIsHome, ftShooter.id, 'fta', 1);
+      // Original possession resumes — possessionAfter stays as possessionBefore
+      return true;
+    };
+
     const roll = Math.random() * 100;
 
-    if (roll < 2) { // Technical Foul
-      const p = shooter;
-      let techChance = 1.0;
-      if (p.personalityTraits.includes('Diva/Star') || p.personalityTraits.includes('Tough/Alpha')) techChance *= 1.2;
-      if (p.personalityTraits.includes('Leader')) techChance *= 0.9;
-      if (Math.random() < techChance * rivalryMod) {
-        const newTechs = getStat(isHomePossession, p.id, 'techs') + 1;
-        eventText = `${abbrev(p.name)} Technical Foul. (${newTechs} tech${newTechs !== 1 ? 's' : ''})`;
-        eventType = 'foul';
-        updatePlayerStat(isHomePossession, p.id, 'techs', 1);
-        setIsChippy(true);
-        if (isHomePossession) setAwayScore(s => s + 1); else setHomeScore(s => s + 1);
-      } else {
-        const newPf = getStat(isHomePossession, p.id, 'pf') + 1;
-        eventText = `${abbrev(p.name)} Loose Ball Foul. (${newPf} foul${newPf !== 1 ? 's' : ''})`;
-        eventType = 'foul';
-        updatePlayerStat(isHomePossession, p.id, 'pf', 1);
-      }
-    } else if (roll < 3) { // Flagrant Foul
+    if (roll < 1) { // Flagrant Foul
       const p = defender;
       const isF2 = Math.random() < 0.1 || (rivalryLevel === 'Red Hot' && Math.random() < 0.3);
       eventText = isF2
@@ -224,7 +302,9 @@ const LiveGameModal: React.FC<LiveGameModalProps> = ({
       updatePlayerStat(!isHomePossession, p.id, 'flagrants', isF2 ? 2 : 1);
       if (isF2) updatePlayerStat(!isHomePossession, p.id, 'ejected', 1 as any);
       setIsChippy(true);
-      if (isHomePossession) setHomeScore(s => s + 2); else setAwayScore(s => s + 2);
+      // Flagrant → 2 FTs for the fouled team + possession
+      makeFTSequence(shooter, isHomePossession, 2, eventText, possessionBefore);
+      eventText = ''; // already pushed via batch
     } else if (roll < 5) { // Steal
       const stealer = defPlayers[Math.floor(Math.random() * defPlayers.length)];
       const newStl = getStat(!isHomePossession, stealer.id, 'stl') + 1;
@@ -241,13 +321,45 @@ const LiveGameModal: React.FC<LiveGameModalProps> = ({
       eventType = 'turnover';
       updatePlayerStat(isHomePossession, shooter.id, 'tov', 1);
       possessionAfter = defTeam.id; // turnover → possession switches
-    } else if (roll < 16) { // Personal Foul
-      const foulType = pick(foul_types);
+    } else if (roll < 15) { // Non-shooting Personal Foul (Loose Ball, Illegal Screen, Take Foul)
+      const foulType = pick(non_shooting_fouls);
       const newPf = getStat(!isHomePossession, defender.id, 'pf') + 1;
       eventText = `${abbrev(defender.name)} ${foulType} (${newPf} foul${newPf !== 1 ? 's' : ''})`;
       eventType = 'foul';
       updatePlayerStat(!isHomePossession, defender.id, 'pf', 1);
-    } else if (roll < 19) { // Assist + make (no shot attempt tracking separately)
+      // possession stays — fouled team inbounds
+    } else if (roll < 20) { // Shooting Foul — mandatory FT sequence
+      const isThreePtFoul = Math.random() < 0.20;
+      const numFTs = isThreePtFoul ? 3 : 2;
+      const foulText = `${abbrev(defender.name)} Shooting Foul on ${abbrev(shooter.name)} (${isThreePtFoul ? '3-pt' : '2-pt'} attempt). ${numFTs} free throws.`;
+      updatePlayerStat(!isHomePossession, defender.id, 'pf', 1);
+      makeFTSequence(shooter, isHomePossession, numFTs, foulText, possessionBefore);
+      eventText = ''; // pushed via batch
+    } else if (roll < 8) { // And-One shooting foul (shot was made)
+      const isThree = Math.random() < 0.1;
+      const pts = isThree ? 3 : 2;
+      const shotType = isThree ? pick(shot3_types_make) : pick(shot2_types_make);
+      const newPts = getStat(isHomePossession, shooter.id, 'pts') + pts;
+      const makeText = `${abbrev(shooter.name)} ${shotType}: Made AND FOUL! (${newPts} pts)`;
+      if (isHomePossession) {
+        setHomeScore(s => s + pts);
+        setHomeQScore(prev => { const n = [...prev]; n[quarter - 1] += pts; return n; });
+      } else {
+        setAwayScore(s => s + pts);
+        setAwayQScore(prev => { const n = [...prev]; n[quarter - 1] += pts; return n; });
+      }
+      updatePlayerStat(isHomePossession, shooter.id, 'pts', pts);
+      updatePlayerStat(isHomePossession, shooter.id, 'fgm', 1);
+      updatePlayerStat(isHomePossession, shooter.id, 'fga', 1);
+      if (isThree) { updatePlayerStat(isHomePossession, shooter.id, 'threepm', 1); updatePlayerStat(isHomePossession, shooter.id, 'threepa', 1); }
+      // And-one → 1 FT, then possession switches after
+      batchEvents.push(makeEvent(makeText, 'score', offTeam.id, possessionBefore, possessionBefore));
+      makeFTSequence(shooter, isHomePossession, 1, `${abbrev(defender.name)} Shooting Foul (And-One). 1 free throw.`, possessionBefore);
+      // After and-one FT sequence, possession goes to defense regardless
+      possessionAfter = defTeam.id;
+      batchEvents[batchEvents.length - 1].possessionAfter = possessionAfter;
+      eventText = '';
+    } else if (roll < 27) { // Assist + make
       const assister = offPlayers.filter(p => p.id !== shooter.id)[Math.floor(Math.random() * 4)] ?? shooter;
       const pts = Math.random() > 0.35 ? 2 : 3;
       const shotType = pts === 3 ? pick(shot3_types_make) : pick(shot2_types_make);
@@ -268,6 +380,8 @@ const LiveGameModal: React.FC<LiveGameModalProps> = ({
       if (pts === 3) { updatePlayerStat(isHomePossession, shooter.id, 'threepm', 1); updatePlayerStat(isHomePossession, shooter.id, 'threepa', 1); }
       updatePlayerStat(isHomePossession, assister.id, 'ast', 1);
       possessionAfter = defTeam.id; // made basket → possession switches
+      // After a made basket is an eligible moment for a tech taunt
+      tryTech(isHomePossession);
     } else { // Normal shot attempt
       const isThree = Math.random() < 0.38;
       const successChance = isThree ? (shooter.attributes?.shooting3pt ?? 50) : (shooter.attributes?.shooting ?? 50);
@@ -298,6 +412,7 @@ const LiveGameModal: React.FC<LiveGameModalProps> = ({
         updatePlayerStat(isHomePossession, shooter.id, 'fgm', 1);
         if (isThree) updatePlayerStat(isHomePossession, shooter.id, 'threepm', 1);
         possessionAfter = defTeam.id; // made basket → possession switches
+        tryTech(isHomePossession);
       } else { // Miss
         const isBlock = (defender.attributes?.blocks ?? 0) > 80 && Math.random() > 0.8;
         if (isBlock) {
@@ -327,6 +442,17 @@ const LiveGameModal: React.FC<LiveGameModalProps> = ({
     }
 
     possessionRef.current = possessionAfter;
+    lastPlayTypeRef.current = eventType;
+
+    // If batch was populated (foul + FTs), push all and skip the single-event path
+    if (batchEvents.length > 0) {
+      possessionRef.current = batchEvents[batchEvents.length - 1].possessionAfter ?? possessionAfter;
+      lastPlayTypeRef.current = batchEvents[batchEvents.length - 1].type;
+      setEvents(prev => [...prev, ...batchEvents].slice(-80));
+      setTimeLeft(newTime);
+      return;
+    }
+
     const newEvent: GameEvent = {
       time: formatTime(newTime),
       quarter,
