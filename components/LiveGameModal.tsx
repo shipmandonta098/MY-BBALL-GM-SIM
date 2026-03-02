@@ -227,6 +227,34 @@ const LiveGameModal: React.FC<LiveGameModalProps> = ({
     const shooter = offPlayers[Math.floor(Math.random() * offPlayers.length)];
     const defender = defPlayers[Math.floor(Math.random() * defPlayers.length)];
 
+    // ── Coach Badge Effects (computed fresh each possession) ──────────────
+    const _offBadges = (isHomePossession ? homeTeam : awayTeam).staff?.headCoach?.badges ?? [];
+    const _defBadges = (isHomePossession ? awayTeam : homeTeam).staff?.headCoach?.badges ?? [];
+    const isClutchTime = quarter >= 4 && timeLeft <= 120 && Math.abs(homeScore - awayScore) <= 5;
+    const badge = {
+      offArch:     _offBadges.includes('Offensive Architect'),
+      devGenius:   _offBadges.includes('Developmental Genius'),
+      paceMaster:  _offBadges.includes('Pace Master'),
+      starHandler: _offBadges.includes('Star Handler'),
+      offClutch:   isClutchTime && _offBadges.includes('Clutch Specialist'),
+      defGuru:     _defBadges.includes('Defensive Guru'),
+      defClutch:   isClutchTime && _defBadges.includes('Clutch Specialist'),
+    };
+    // Developmental Genius: young (≤23) on-floor players get +5 to all attributes
+    const devBoost      = (p: Player) => badge.devGenius && p.age <= 23 ? 5 : 0;
+    // Clutch Specialist (off): all player ratings +6 in crunch time (≤2:00, score diff ≤5)
+    const clutchBoost   = badge.offClutch ? 6 : 0;
+    // Defensive Guru: opp FG −8%, opp 3PT additional −5%
+    const defGuruFgPen  = badge.defGuru   ? 8 : 0;
+    const defGuru3Pen   = badge.defGuru   ? 5 : 0;
+    // Clutch Specialist (def): opp FG −5% in crunch time
+    const defClutchPen  = badge.defClutch ? 5 : 0;
+    // Offensive Architect: 3PT accuracy +8%, 3PT attempt rate 38% → 43%
+    const offArch3Boost = badge.offArch   ? 8 : 0;
+    const threePtRate   = 0.38 + (badge.offArch ? 0.05 : 0);
+    // Pace Master: transition/fast-break bucket fires more often (+4 to roll threshold)
+    const paceBoost     = badge.paceMaster ? 4 : 0;
+
     const timePassed = Math.floor(Math.random() * 15) + 5;
     const newTime = Math.max(0, timeLeft - timePassed);
 
@@ -355,7 +383,7 @@ const LiveGameModal: React.FC<LiveGameModalProps> = ({
       // Flagrant → 2 FTs for the fouled team + possession
       makeFTSequence(shooter, isHomePossession, 2, eventText, possessionBefore);
       eventText = ''; // already pushed via batch
-    } else if (roll < 5) { // Steal
+    } else if (roll < (5 + (badge.defGuru ? 0.55 : 0))) { // Steal — Defensive Guru widens steal window
       const stealer = defPlayers[Math.floor(Math.random() * defPlayers.length)];
       const newStl = getStat(!isHomePossession, stealer.id, 'stl') + 1;
       const newTov = getStat(isHomePossession, shooter.id, 'tov') + 1;
@@ -410,7 +438,7 @@ const LiveGameModal: React.FC<LiveGameModalProps> = ({
       possessionAfter = defTeam.id;
       batchEvents[batchEvents.length - 1].possessionAfter = possessionAfter;
       eventText = '';
-    } else if (roll < 27) { // Assist + make
+    } else if (roll < (27 + paceBoost)) { // Assist + make (Pace Master: more transition buckets)
       const assister = offPlayers.filter(p => p.id !== shooter.id)[Math.floor(Math.random() * 4)] ?? shooter;
       const pts = Math.random() > 0.35 ? 2 : 3;
       const shotType = pts === 3 ? pick(shot3_types_make) : pick(shot2_types_make);
@@ -435,9 +463,22 @@ const LiveGameModal: React.FC<LiveGameModalProps> = ({
       // After a made basket is an eligible moment for a tech taunt
       tryTech(isHomePossession);
     } else { // Normal shot attempt
-      const isThree = Math.random() < 0.38;
-      const successChance = isThree ? (shooter.attributes?.shooting3pt ?? 50) : (shooter.attributes?.shooting ?? 50);
-      const defRating = ((defender.attributes?.perimeterDef ?? 50) + defTeam.roster.reduce((acc, p) => acc + (p.attributes?.defensiveIQ ?? 50), 0) / defTeam.roster.length) / 2;
+      const isThree = Math.random() < threePtRate; // Offensive Architect: 38% → 43%
+      // Base attribute + all badge modifiers layered on
+      const baseAttr = isThree
+        ? (shooter.attributes?.shooting3pt ?? 50)
+        : (shooter.attributes?.shooting    ?? 50);
+      const successChance = baseAttr
+        + devBoost(shooter)                       // Dev Genius: ≤23 yr old +5
+        + clutchBoost                             // Clutch Specialist (off): +6 crunch time
+        + (isThree ? offArch3Boost : 0)           // Offensive Architect: +8 on 3s
+        - defGuruFgPen                            // Defensive Guru: −8% all FG
+        - (isThree ? defGuru3Pen  : 0)            // Defensive Guru: −5% additional on 3s
+        - defClutchPen;                           // Clutch Specialist (def): −5% crunch time
+      // Defensive Guru: defensive rating is amplified (blocks/closeouts better)
+      const defRating = ((defender.attributes?.perimeterDef ?? 50)
+        + (badge.defGuru ? 8 : 0)                // Defensive Guru: +8 def IQ
+        + defTeam.roster.reduce((acc, p) => acc + (p.attributes?.defensiveIQ ?? 50), 0) / defTeam.roster.length) / 2;
       const contestedModifier = defRating / 3;
       const baseThreshold = isThree ? 62 : 55;
       const finalChance = (successChance - contestedModifier) + (Math.random() * 30 - 15);
@@ -467,7 +508,10 @@ const LiveGameModal: React.FC<LiveGameModalProps> = ({
         possessionAfter = defTeam.id; // made basket → possession switches
         tryTech(isHomePossession);
       } else { // Miss
-        const isBlock = (defender.attributes?.blocks ?? 0) > 80 && Math.random() > 0.8;
+        // Defensive Guru: block probability +10% (threshold 80→75, random check 0.80→0.70)
+        const blockAttrThresh = badge.defGuru ? 75 : 80;
+        const blockRandThresh = badge.defGuru ? 0.70 : 0.80;
+        const isBlock = (defender.attributes?.blocks ?? 0) > blockAttrThresh && Math.random() > blockRandThresh;
         if (isBlock) {
           const newBlk = getStat(!isHomePossession, defender.id, 'blk') + 1;
           const shotType = isThree ? pick(shot3_types_miss) : pick(shot2_types_miss);
@@ -602,10 +646,11 @@ const LiveGameModal: React.FC<LiveGameModalProps> = ({
     currentTime: number,
     triggerReason: SubReason
   ) => {
-    const coach      = team.staff?.headCoach;
-    const motivation = coach?.ratingMotivation ?? 70;
-    const clutch     = coach?.ratingClutch     ?? 70;
-    const isDevGenius = coach?.badges?.includes('Developmental Genius') ?? false;
+    const coach         = team.staff?.headCoach;
+    const motivation    = coach?.ratingMotivation ?? 70;
+    const clutch        = coach?.ratingClutch     ?? 70;
+    const isDevGenius   = coach?.badges?.includes('Developmental Genius') ?? false;
+    const hasStarHandler = coach?.badges?.includes('Star Handler') ?? false;
 
     const currentLineup = [...(isHome ? lineupRef.current.home : lineupRef.current.away)];
     const ft      = fatigueRef.current;
@@ -652,11 +697,14 @@ const LiveGameModal: React.FC<LiveGameModalProps> = ({
         shouldSub = true; reason = 'FATIGUE';
       }
       // ── Cold-streak hook ─
+      // Star Handler: Diva/Star personality players are protected from cold-streak pulls
       else if (fga >= 4 && fgm === 0 && motivation < 75) {
-        shouldSub = true; reason = 'COLD_STREAK';
+        const isDiva = team.roster.find(p => p.id === player.id)?.personalityTraits?.includes('Diva/Star') ?? false;
+        if (!(hasStarHandler && isDiva)) { shouldSub = true; reason = 'COLD_STREAK'; }
       }
       else if (fga >= 3 && fgm === 0 && motivation >= 80 && Math.random() < 0.35) {
-        shouldSub = true; reason = 'COLD_STREAK';
+        const isDiva = team.roster.find(p => p.id === player.id)?.personalityTraits?.includes('Diva/Star') ?? false;
+        if (!(hasStarHandler && isDiva)) { shouldSub = true; reason = 'COLD_STREAK'; }
       }
       // ── Down-10 tactical ─
       else if (isDown10 && clutch >= 80 && triggerReason === 'TACTICAL' && Math.random() < 0.45) {
