@@ -21,7 +21,9 @@ interface GameEvent {
   quarter: number;
   text: string;
   type: 'score' | 'miss' | 'turnover' | 'foul' | 'highlight' | 'info';
-  teamId?: string; // which team acted
+  teamId?: string;           // which team performed the action
+  possessionBefore?: string; // teamId that had possession entering the play
+  possessionAfter?: string;  // teamId that has possession leaving the play
 }
 
 const LiveGameModal: React.FC<LiveGameModalProps> = ({ 
@@ -49,6 +51,8 @@ const LiveGameModal: React.FC<LiveGameModalProps> = ({
   const [isChippy, setIsChippy] = useState(false);
   const [activeTab, setActiveTab] = useState<'home' | 'away' | 'combined'>('combined');
   const logRef = useRef<HTMLDivElement>(null);
+  // Tracks which team currently has possession — updated each play
+  const possessionRef = useRef<string>('');
 
   // Persistence
   useEffect(() => {
@@ -123,13 +127,16 @@ const LiveGameModal: React.FC<LiveGameModalProps> = ({
     const acName = awayC?.name ?? awayTeam.name;
     const twName = tipWinner?.name ?? tipWinnerTeam.name;
     const abbrevLocal = (name: string) => { const p = name.trim().split(/\s+/); return p.length < 2 ? name : `${p[0].charAt(0)}. ${p.slice(1).join(' ')}`; };
+    possessionRef.current = tipWinnerTeam.id;
     setEvents([
       {
         time: '12:00',
         quarter: 1,
         text: `Jump ball: ${abbrevLocal(hcName)} vs. ${abbrevLocal(acName)}. ${abbrevLocal(twName)} wins the tip (${tipWinnerTeam.city} ${tipWinnerTeam.name}).`,
         type: 'info',
-        teamId: tipWinnerTeam.id
+        teamId: tipWinnerTeam.id,
+        possessionBefore: tipWinnerTeam.id,
+        possessionAfter: tipWinnerTeam.id,
       }
     ]);
   }, [homeTeam, awayTeam]);
@@ -158,7 +165,12 @@ const LiveGameModal: React.FC<LiveGameModalProps> = ({
   };
 
   const generatePlay = () => {
-    const isHomePossession = Math.random() > 0.5;
+    // Use tracked possession; fall back to random only before jump ball resolves
+    const possessionTeamId = possessionRef.current || (Math.random() > 0.5 ? homeTeam.id : awayTeam.id);
+    const isHomePossession = possessionTeamId === homeTeam.id;
+    const possessionBefore = possessionTeamId;
+    // Default: possession stays — overridden below for turnovers, makes, def rebounds
+    let possessionAfter = possessionBefore;
     const offTeam = isHomePossession ? homeTeam : awayTeam;
     const defTeam = isHomePossession ? awayTeam : homeTeam;
     
@@ -221,12 +233,14 @@ const LiveGameModal: React.FC<LiveGameModalProps> = ({
       eventType = 'turnover';
       updatePlayerStat(!isHomePossession, stealer.id, 'stl', 1);
       updatePlayerStat(isHomePossession, shooter.id, 'tov', 1);
+      possessionAfter = defTeam.id; // steal → possession to stealing team
     } else if (roll < 10) { // Turnover (no steal)
       const tovType = pick(tov_types);
       const newTov = getStat(isHomePossession, shooter.id, 'tov') + 1;
       eventText = `${abbrev(shooter.name)} ${tovType} (${newTov} turnover${newTov !== 1 ? 's' : ''})`;
       eventType = 'turnover';
       updatePlayerStat(isHomePossession, shooter.id, 'tov', 1);
+      possessionAfter = defTeam.id; // turnover → possession switches
     } else if (roll < 16) { // Personal Foul
       const foulType = pick(foul_types);
       const newPf = getStat(!isHomePossession, defender.id, 'pf') + 1;
@@ -253,6 +267,7 @@ const LiveGameModal: React.FC<LiveGameModalProps> = ({
       updatePlayerStat(isHomePossession, shooter.id, 'fga', 1);
       if (pts === 3) { updatePlayerStat(isHomePossession, shooter.id, 'threepm', 1); updatePlayerStat(isHomePossession, shooter.id, 'threepa', 1); }
       updatePlayerStat(isHomePossession, assister.id, 'ast', 1);
+      possessionAfter = defTeam.id; // made basket → possession switches
     } else { // Normal shot attempt
       const isThree = Math.random() < 0.38;
       const successChance = isThree ? (shooter.attributes?.shooting3pt ?? 50) : (shooter.attributes?.shooting ?? 50);
@@ -282,6 +297,7 @@ const LiveGameModal: React.FC<LiveGameModalProps> = ({
         updatePlayerStat(isHomePossession, shooter.id, 'pts', pts);
         updatePlayerStat(isHomePossession, shooter.id, 'fgm', 1);
         if (isThree) updatePlayerStat(isHomePossession, shooter.id, 'threepm', 1);
+        possessionAfter = defTeam.id; // made basket → possession switches
       } else { // Miss
         const isBlock = (defender.attributes?.blocks ?? 0) > 80 && Math.random() > 0.8;
         if (isBlock) {
@@ -305,15 +321,20 @@ const LiveGameModal: React.FC<LiveGameModalProps> = ({
         const rebType = isOffReb ? 'Offensive Rebound' : 'Defensive Rebound';
         eventText += ` ${abbrev(rebber.name)} ${rebType} (${newReb} reb${newReb !== 1 ? 's' : ''})`;
         updatePlayerStat(rebIsHome, rebber.id, 'reb', 1);
+        // OFF reb → possession stays; DEF reb → possession switches
+        if (!isOffReb) possessionAfter = defTeam.id;
       }
     }
 
+    possessionRef.current = possessionAfter;
     const newEvent: GameEvent = {
       time: formatTime(newTime),
       quarter,
       text: eventText,
       type: eventType,
-      teamId: isHomePossession ? homeTeam.id : awayTeam.id
+      teamId: isHomePossession ? homeTeam.id : awayTeam.id,
+      possessionBefore,
+      possessionAfter,
     };
 
     setEvents(prev => [...prev, newEvent].slice(-80));
