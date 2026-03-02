@@ -89,6 +89,8 @@ const LiveGameModal: React.FC<LiveGameModalProps> = ({
           name: p.name, 
           pts: 0, 
           reb: 0, 
+          offReb: 0,
+          defReb: 0,
           ast: 0, 
           stl: 0, 
           blk: 0, 
@@ -229,6 +231,7 @@ const LiveGameModal: React.FC<LiveGameModalProps> = ({
         if (lastFTMade) {
           updatePlayerStat(fouledTeamIsHome, fouledPlayer.id, 'ftm', 1);
           updatePlayerStat(fouledTeamIsHome, fouledPlayer.id, 'pts', 1);
+          updatePlusMinus(fouledTeamIsHome, 1);
           if (fouledTeamIsHome) {
             setHomeScore(s => s + 1);
             setHomeQScore(prev => { const n = [...prev]; n[quarter - 1] += 1; return n; });
@@ -249,6 +252,7 @@ const LiveGameModal: React.FC<LiveGameModalProps> = ({
         const rebber = rebberPool[Math.floor(Math.random() * rebberPool.length)];
         const rebIsHome = offRebChance ? fouledTeamIsHome : !fouledTeamIsHome;
         updatePlayerStat(rebIsHome, rebber.id, 'reb', 1);
+        updatePlayerStat(rebIsHome, rebber.id, offRebChance ? 'offReb' : 'defReb', 1);
         batchEvents[batchEvents.length - 1].text += ` ${abbrev(rebber.name)} ${offRebChance ? 'Offensive' : 'Defensive'} Rebound.`;
       }
       // Fix possessionAfter on the last event
@@ -282,8 +286,7 @@ const LiveGameModal: React.FC<LiveGameModalProps> = ({
       batchEvents.push(makeEvent(ftText, ftMade ? 'score' : 'miss', oppIsHome ? homeTeam.id : awayTeam.id, possessionBefore, possessionBefore));
       if (ftMade) {
         updatePlayerStat(oppIsHome, ftShooter.id, 'ftm', 1);
-        updatePlayerStat(oppIsHome, ftShooter.id, 'pts', 1);
-        if (oppIsHome) { setHomeScore(s => s + 1); } else { setAwayScore(s => s + 1); }
+        updatePlayerStat(oppIsHome, ftShooter.id, 'pts', 1);      updatePlusMinus(oppIsHome, 1);        if (oppIsHome) { setHomeScore(s => s + 1); } else { setAwayScore(s => s + 1); }
       }
       updatePlayerStat(oppIsHome, ftShooter.id, 'fta', 1);
       // Original possession resumes — possessionAfter stays as possessionBefore
@@ -335,7 +338,7 @@ const LiveGameModal: React.FC<LiveGameModalProps> = ({
       updatePlayerStat(!isHomePossession, defender.id, 'pf', 1);
       makeFTSequence(shooter, isHomePossession, numFTs, foulText, possessionBefore);
       eventText = ''; // pushed via batch
-    } else if (roll < 8) { // And-One shooting foul (shot was made)
+    } else if (roll < 23) { // And-One shooting foul (shot was made)
       const isThree = Math.random() < 0.1;
       const pts = isThree ? 3 : 2;
       const shotType = isThree ? pick(shot3_types_make) : pick(shot2_types_make);
@@ -352,6 +355,7 @@ const LiveGameModal: React.FC<LiveGameModalProps> = ({
       updatePlayerStat(isHomePossession, shooter.id, 'fgm', 1);
       updatePlayerStat(isHomePossession, shooter.id, 'fga', 1);
       if (isThree) { updatePlayerStat(isHomePossession, shooter.id, 'threepm', 1); updatePlayerStat(isHomePossession, shooter.id, 'threepa', 1); }
+      updatePlusMinus(isHomePossession, pts);
       // And-one → 1 FT, then possession switches after
       batchEvents.push(makeEvent(makeText, 'score', offTeam.id, possessionBefore, possessionBefore));
       makeFTSequence(shooter, isHomePossession, 1, `${abbrev(defender.name)} Shooting Foul (And-One). 1 free throw.`, possessionBefore);
@@ -379,6 +383,7 @@ const LiveGameModal: React.FC<LiveGameModalProps> = ({
       updatePlayerStat(isHomePossession, shooter.id, 'fga', 1);
       if (pts === 3) { updatePlayerStat(isHomePossession, shooter.id, 'threepm', 1); updatePlayerStat(isHomePossession, shooter.id, 'threepa', 1); }
       updatePlayerStat(isHomePossession, assister.id, 'ast', 1);
+      updatePlusMinus(isHomePossession, pts);
       possessionAfter = defTeam.id; // made basket → possession switches
       // After a made basket is an eligible moment for a tech taunt
       tryTech(isHomePossession);
@@ -411,6 +416,7 @@ const LiveGameModal: React.FC<LiveGameModalProps> = ({
         updatePlayerStat(isHomePossession, shooter.id, 'pts', pts);
         updatePlayerStat(isHomePossession, shooter.id, 'fgm', 1);
         if (isThree) updatePlayerStat(isHomePossession, shooter.id, 'threepm', 1);
+        updatePlusMinus(isHomePossession, pts);
         possessionAfter = defTeam.id; // made basket → possession switches
         tryTech(isHomePossession);
       } else { // Miss
@@ -436,6 +442,7 @@ const LiveGameModal: React.FC<LiveGameModalProps> = ({
         const rebType = isOffReb ? 'Offensive Rebound' : 'Defensive Rebound';
         eventText += ` ${abbrev(rebber.name)} ${rebType} (${newReb} reb${newReb !== 1 ? 's' : ''})`;
         updatePlayerStat(rebIsHome, rebber.id, 'reb', 1);
+        updatePlayerStat(rebIsHome, rebber.id, isOffReb ? 'offReb' : 'defReb', 1);
         // OFF reb → possession stays; DEF reb → possession switches
         if (!isOffReb) possessionAfter = defTeam.id;
       }
@@ -473,6 +480,16 @@ const LiveGameModal: React.FC<LiveGameModalProps> = ({
       ...prev,
       [pid]: { ...prev[pid], [stat]: ((prev[pid] as any)[stat] || 0) + val }
     }));
+  };
+
+  // Update plus/minus for all 5 on-court players when a basket is scored
+  const updatePlusMinus = (scoringTeamIsHome: boolean, pts: number) => {
+    homeTeam.roster.slice(0, 5).forEach(p =>
+      updatePlayerStat(true, p.id, 'plusMinus', scoringTeamIsHome ? pts : -pts)
+    );
+    awayTeam.roster.slice(0, 5).forEach(p =>
+      updatePlayerStat(false, p.id, 'plusMinus', scoringTeamIsHome ? -pts : pts)
+    );
   };
 
   const simRest = () => {
@@ -631,6 +648,172 @@ const LiveGameModal: React.FC<LiveGameModalProps> = ({
       isChippy: isChippy
     };
     onComplete(res);
+  };
+
+  // ── Box Score Renderer ────────────────────────────────────────────────────
+  const renderTeamBoxScore = (
+    team: Team,
+    stats: Record<string, Partial<GamePlayerLine>>,
+    show: boolean,
+    isHalf: boolean
+  ) => {
+    if (!show) return null;
+    const isHome = team.id === homeTeam.id;
+    const currentScore = isHome ? homeScore : awayScore;
+    const allStats = Object.values(stats) as Partial<GamePlayerLine>[];
+
+    const players = team.roster.map((p, idx) => ({
+      id: p.id,
+      name: p.name,
+      stat: stats[p.id] ?? {},
+      isStarter: idx < 5,
+    }));
+    const starters = players.filter(p => p.isStarter);
+    const bench = players.filter(p => !p.isStarter);
+
+    // Top scorer across starters+bench
+    const topId = [...players].sort((a, b) => (b.stat.pts ?? 0) - (a.stat.pts ?? 0))[0]?.id;
+
+    const tot = {
+      pts: allStats.reduce((s, p) => s + (p.pts ?? 0), 0),
+      reb: allStats.reduce((s, p) => s + (p.reb ?? 0), 0),
+      ast: allStats.reduce((s, p) => s + (p.ast ?? 0), 0),
+      stl: allStats.reduce((s, p) => s + (p.stl ?? 0), 0),
+      blk: allStats.reduce((s, p) => s + (p.blk ?? 0), 0),
+      tov: allStats.reduce((s, p) => s + (p.tov ?? 0), 0),
+      pf:  allStats.reduce((s, p) => s + (p.pf  ?? 0), 0),
+      fgm: allStats.reduce((s, p) => s + (p.fgm ?? 0), 0),
+      fga: allStats.reduce((s, p) => s + (p.fga ?? 0), 0),
+      tpm: allStats.reduce((s, p) => s + (p.threepm ?? 0), 0),
+      tpa: allStats.reduce((s, p) => s + (p.threepa ?? 0), 0),
+      ftm: allStats.reduce((s, p) => s + (p.ftm ?? 0), 0),
+      fta: allStats.reduce((s, p) => s + (p.fta ?? 0), 0),
+    };
+    const teamFgPct = tot.fga > 0 ? Math.round(tot.fgm / tot.fga * 100) : 0;
+
+    const renderPlayerRow = (pl: typeof players[0]) => {
+      const s = pl.stat;
+      const hasStat = (s.pts ?? 0) + (s.reb ?? 0) + (s.ast ?? 0) + (s.stl ?? 0) +
+                      (s.blk ?? 0) + (s.tov ?? 0) + (s.fga ?? 0) > 0;
+      const isDNP = !pl.isStarter && !hasStat;
+      const fgPct = (s.fga ?? 0) > 0 ? Math.round(((s.fgm ?? 0) / (s.fga ?? 0)) * 100) : null;
+      const pm = s.plusMinus ?? 0;
+      const isTop = pl.id === topId && hasStat;
+
+      return (
+        <tr
+          key={pl.id}
+          className={`border-b border-slate-800/40 text-[9px] transition-colors ${
+            isTop
+              ? 'bg-amber-500/8 border-b-amber-500/20'
+              : 'hover:bg-slate-800/30'
+          }`}
+        >
+          <td className="sticky left-0 bg-inherit py-1.5 pl-2 pr-2 min-w-[82px] max-w-[82px]">
+            <div className={`truncate text-[9px] font-bold leading-tight ${isTop ? 'text-amber-300' : isDNP ? 'text-slate-600' : 'text-slate-200'}`}>
+              {abbrev(pl.name)}
+            </div>
+            {isDNP && <div className="text-[7px] text-slate-700 uppercase font-black tracking-wider">DNP-CD</div>}
+            {isTop && !isDNP && <div className="text-[7px] text-amber-600 uppercase font-black tracking-wider">★ Top</div>}
+          </td>
+          {isDNP ? (
+            <td colSpan={13} className="py-1.5 text-[8px] text-slate-700 uppercase font-black pl-1">Coach's Decision</td>
+          ) : (
+            <>
+              <td className="py-1.5 px-1 text-center font-black text-amber-400">{s.pts ?? 0}</td>
+              <td className="py-1.5 px-1 text-center text-slate-300">{s.reb ?? 0}</td>
+              <td className="py-1.5 px-1 text-center text-slate-300">{s.ast ?? 0}</td>
+              <td className="py-1.5 px-1 text-center text-slate-400">{s.stl ?? 0}</td>
+              <td className="py-1.5 px-1 text-center text-slate-400">{s.blk ?? 0}</td>
+              <td className="py-1.5 px-1 text-center text-orange-400">{s.tov ?? 0}</td>
+              <td className="py-1.5 px-1 text-center text-rose-400">{s.pf ?? 0}</td>
+              <td className="py-1.5 px-1 text-center font-mono text-slate-300">{s.fgm ?? 0}-{s.fga ?? 0}</td>
+              <td className="py-1.5 px-1 text-center font-mono text-slate-300">{s.threepm ?? 0}-{s.threepa ?? 0}</td>
+              <td className="py-1.5 px-1 text-center font-mono text-slate-300">{s.ftm ?? 0}-{s.fta ?? 0}</td>
+              <td className={`py-1.5 px-1 text-center ${fgPct !== null && fgPct >= 50 ? 'text-emerald-400' : fgPct !== null && fgPct < 35 ? 'text-rose-400' : 'text-slate-400'}`}>
+                {fgPct !== null ? `${fgPct}%` : <span className="text-slate-700">-</span>}
+              </td>
+              <td className={`py-1.5 pl-1 pr-2 text-center ${pm > 0 ? 'text-emerald-400 font-bold' : pm < 0 ? 'text-rose-400' : 'text-slate-700'}`}>
+                {pm > 0 ? `+${pm}` : pm !== 0 ? pm : <span className="text-slate-700">-</span>}
+              </td>
+            </>
+          )}
+        </tr>
+      );
+    };
+
+    return (
+      <div
+        key={team.id}
+        className={`${isHalf ? 'flex-1 min-h-0' : 'flex-1'} flex flex-col overflow-hidden border-b border-slate-800 last:border-b-0`}
+      >
+        {/* Team header */}
+        <div className="shrink-0 flex items-center justify-between px-3 py-2 border-b border-slate-800"
+          style={{ background: team.primaryColor + '14' }}>
+          <div className="flex items-center gap-2">
+            <TeamBadge team={team} size="xs" />
+            <span className="text-[10px] font-black uppercase text-white tracking-wider">
+              {team.city} {team.name}
+            </span>
+          </div>
+          <span className="text-2xl font-display font-black tabular-nums" style={{ color: team.primaryColor }}>
+            {currentScore}
+          </span>
+        </div>
+
+        {/* Scrollable table */}
+        <div className="flex-1 overflow-y-auto overflow-x-auto scrollbar-thin scrollbar-thumb-slate-700 scrollbar-track-transparent">
+          <table className="w-full text-slate-300 border-collapse" style={{ minWidth: 520 }}>
+            <thead className="sticky top-0 z-10 bg-slate-900">
+              <tr className="text-[8px] font-black uppercase text-slate-600 border-b-2 border-slate-800">
+                <th className="sticky left-0 bg-slate-900 py-1.5 pl-2 pr-2 text-left min-w-[82px]">Player</th>
+                <th className="py-1.5 px-1 w-7 text-center">PTS</th>
+                <th className="py-1.5 px-1 w-7 text-center">REB</th>
+                <th className="py-1.5 px-1 w-7 text-center">AST</th>
+                <th className="py-1.5 px-1 w-7 text-center">STL</th>
+                <th className="py-1.5 px-1 w-7 text-center">BLK</th>
+                <th className="py-1.5 px-1 w-6 text-center">TO</th>
+                <th className="py-1.5 px-1 w-6 text-center">PF</th>
+                <th className="py-1.5 px-1 w-14 text-center">FG</th>
+                <th className="py-1.5 px-1 w-14 text-center">3P</th>
+                <th className="py-1.5 px-1 w-14 text-center">FT</th>
+                <th className="py-1.5 px-1 w-9 text-center">FG%</th>
+                <th className="py-1.5 pl-1 pr-2 w-9 text-center">+/-</th>
+              </tr>
+            </thead>
+            <tbody>
+              {starters.map(renderPlayerRow)}
+
+              {bench.length > 0 && (
+                <tr className="border-y border-slate-800 bg-slate-900/70">
+                  <td colSpan={13} className="py-0.5 pl-2 text-[7px] font-black uppercase text-slate-700 tracking-widest">BENCH</td>
+                </tr>
+              )}
+              {bench.map(renderPlayerRow)}
+
+              {/* Team totals */}
+              <tr className="border-t-2 border-slate-700 bg-slate-900/80 text-[9px] font-black text-white sticky bottom-0">
+                <td className="sticky left-0 bg-slate-900 py-2 pl-2 pr-2 text-[8px] uppercase tracking-wider text-slate-500">TEAM</td>
+                <td className="py-2 px-1 text-center text-amber-400">{tot.pts}</td>
+                <td className="py-2 px-1 text-center">{tot.reb}</td>
+                <td className="py-2 px-1 text-center">{tot.ast}</td>
+                <td className="py-2 px-1 text-center">{tot.stl}</td>
+                <td className="py-2 px-1 text-center">{tot.blk}</td>
+                <td className="py-2 px-1 text-center text-orange-400">{tot.tov}</td>
+                <td className="py-2 px-1 text-center text-rose-400">{tot.pf}</td>
+                <td className="py-2 px-1 text-center font-mono">{tot.fgm}-{tot.fga}</td>
+                <td className="py-2 px-1 text-center font-mono">{tot.tpm}-{tot.tpa}</td>
+                <td className="py-2 px-1 text-center font-mono">{tot.ftm}-{tot.fta}</td>
+                <td className={`py-2 px-1 text-center ${teamFgPct >= 50 ? 'text-emerald-400' : teamFgPct < 35 && tot.fga > 0 ? 'text-rose-400' : 'text-slate-400'}`}>
+                  {tot.fga > 0 ? `${teamFgPct}%` : <span className="text-slate-700">-</span>}
+                </td>
+                <td className="py-2 pl-1 pr-2 text-center text-slate-700">-</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    );
   };
 
   return (
@@ -799,93 +982,28 @@ const LiveGameModal: React.FC<LiveGameModalProps> = ({
         </div>
 
         {/* Live Box Score Sidebar (Right 35%) */}
-        <div className="flex-[0.35] flex flex-col bg-slate-900/50 overflow-hidden">
-          <div className="p-4 border-b border-slate-800 flex gap-2">
+        <div className="flex-[0.35] flex flex-col bg-slate-900 overflow-hidden border-l border-slate-800">
+          {/* Tab bar */}
+          <div className="shrink-0 p-2.5 border-b border-slate-800 flex gap-1.5">
             {(['combined', 'home', 'away'] as const).map(tab => (
               <button
                 key={tab}
                 onClick={() => setActiveTab(tab)}
-                className={`flex-1 py-2 text-[10px] font-black uppercase tracking-widest rounded-lg transition-all ${
-                  activeTab === tab ? 'bg-slate-800 text-white shadow-lg' : 'text-slate-500 hover:text-slate-300'
+                className={`flex-1 py-2 text-[9px] font-black uppercase tracking-widest rounded-lg transition-all ${
+                  activeTab === tab
+                    ? 'bg-amber-500 text-slate-950 shadow-lg'
+                    : 'text-slate-500 hover:text-slate-300 hover:bg-slate-800/50'
                 }`}
               >
-                {tab === 'combined' ? 'Box' : tab === 'home' ? homeTeam.city.substring(0, 3) : awayTeam.city.substring(0, 3)}
+                {tab === 'combined' ? 'Box Score' : tab === 'home' ? homeTeam.city.substring(0, 10) : awayTeam.city.substring(0, 10)}
               </button>
             ))}
           </div>
 
-          <div className="flex-1 overflow-y-auto p-6 space-y-8 scrollbar-thin scrollbar-thumb-slate-800">
-            {/* Team Totals */}
-            <div className="grid grid-cols-4 gap-2">
-              {[
-                { label: 'PTS', val: activeTab === 'away' ? awayScore : activeTab === 'home' ? homeScore : homeScore + awayScore },
-                { label: 'REB', val: activeTab === 'away' ? (Object.values(awayStats) as Partial<GamePlayerLine>[]).reduce((a,b)=>a+(b.reb||0),0) : activeTab === 'home' ? (Object.values(homeStats) as Partial<GamePlayerLine>[]).reduce((a,b)=>a+(b.reb||0),0) : (Object.values(homeStats) as Partial<GamePlayerLine>[]).reduce((a,b)=>a+(b.reb||0),0) + (Object.values(awayStats) as Partial<GamePlayerLine>[]).reduce((a,b)=>a+(b.reb||0),0) },
-                { label: 'AST', val: activeTab === 'away' ? (Object.values(awayStats) as Partial<GamePlayerLine>[]).reduce((a,b)=>a+(b.ast||0),0) : activeTab === 'home' ? (Object.values(homeStats) as Partial<GamePlayerLine>[]).reduce((a,b)=>a+(b.ast||0),0) : (Object.values(homeStats) as Partial<GamePlayerLine>[]).reduce((a,b)=>a+(b.ast||0),0) + (Object.values(awayStats) as Partial<GamePlayerLine>[]).reduce((a,b)=>a+(b.ast||0),0) },
-                { label: 'FG%', val: '44%' }
-              ].map(stat => (
-                <div key={stat.label} className="bg-slate-950/50 p-3 rounded-xl border border-slate-800 text-center">
-                  <p className="text-[8px] font-black text-slate-600 uppercase mb-1">{stat.label}</p>
-                  <p className="text-lg font-display font-bold text-white">{stat.val}</p>
-                </div>
-              ))}
-            </div>
-
-            {/* Player Lines */}
-            <div className="space-y-6">
-              {(activeTab === 'combined' || activeTab === 'home') && (
-                <div className="space-y-3">
-                  <div className="flex items-center gap-2 border-b border-slate-800 pb-2">
-                    <TeamBadge team={homeTeam} size="xs" />
-                    <h4 className="text-[10px] font-black uppercase tracking-widest text-slate-500">{homeTeam.name}</h4>
-                  </div>
-                  <div className="space-y-1">
-                    {(Object.values(homeStats) as Partial<GamePlayerLine>[]).sort((a,b) => (b.pts||0) - (a.pts||0)).map((p, idx) => (
-                      <div key={p.playerId} className={`flex justify-between items-center py-2 px-3 rounded-lg hover:bg-slate-800/30 transition-colors ${idx < 5 ? 'font-bold text-white' : 'text-slate-400'}`}>
-                        <div className="flex flex-col">
-                          <span className="text-xs truncate max-w-[120px]">{p.name}</span>
-                          <span className="text-[8px] text-slate-600 uppercase font-black">{idx < 5 ? 'Starter' : 'Bench'}</span>
-                        </div>
-                        <div className="flex items-center gap-4 font-mono text-[10px]">
-                          <span className="w-6 text-center text-amber-500">{p.pts}</span>
-                          <span className="w-6 text-center">{p.reb}</span>
-                          <span className="w-6 text-center">{p.ast}</span>
-                          <span className={`w-8 text-right ${p.plusMinus! > 0 ? 'text-emerald-500' : p.plusMinus! < 0 ? 'text-rose-500' : ''}`}>
-                            {p.plusMinus! > 0 ? `+${p.plusMinus}` : p.plusMinus}
-                          </span>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
-
-              {(activeTab === 'combined' || activeTab === 'away') && (
-                <div className="space-y-3">
-                  <div className="flex items-center gap-2 border-b border-slate-800 pb-2">
-                    <TeamBadge team={awayTeam} size="xs" />
-                    <h4 className="text-[10px] font-black uppercase tracking-widest text-slate-500">{awayTeam.name}</h4>
-                  </div>
-                  <div className="space-y-1">
-                    {(Object.values(awayStats) as Partial<GamePlayerLine>[]).sort((a,b) => (b.pts||0) - (a.pts||0)).map((p, idx) => (
-                      <div key={p.playerId} className={`flex justify-between items-center py-2 px-3 rounded-lg hover:bg-slate-800/30 transition-colors ${idx < 5 ? 'font-bold text-white' : 'text-slate-400'}`}>
-                        <div className="flex flex-col">
-                          <span className="text-xs truncate max-w-[120px]">{p.name}</span>
-                          <span className="text-[8px] text-slate-600 uppercase font-black">{idx < 5 ? 'Starter' : 'Bench'}</span>
-                        </div>
-                        <div className="flex items-center gap-4 font-mono text-[10px]">
-                          <span className="w-6 text-center text-amber-500">{p.pts}</span>
-                          <span className="w-6 text-center">{p.reb}</span>
-                          <span className="w-6 text-center">{p.ast}</span>
-                          <span className={`w-8 text-right ${p.plusMinus! > 0 ? 'text-emerald-500' : p.plusMinus! < 0 ? 'text-rose-500' : ''}`}>
-                            {p.plusMinus! > 0 ? `+${p.plusMinus}` : p.plusMinus}
-                          </span>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
-            </div>
+          {/* Box score tables — each team in its own independent scroll zone */}
+          <div className="flex-1 flex flex-col overflow-hidden">
+            {renderTeamBoxScore(homeTeam, homeStats, activeTab !== 'away', activeTab === 'combined')}
+            {renderTeamBoxScore(awayTeam, awayStats, activeTab !== 'home', activeTab === 'combined')}
           </div>
         </div>
       </div>
