@@ -452,6 +452,102 @@ export const getFlag = (country?: string): string => {
   return COUNTRY_FLAGS[country] ?? '';
 };
 
+// ── Physical Generation System ──────────────────────────────────────
+type PhysRange = { minH: number; maxH: number; avgH: number; minW: number; maxW: number; avgW: number };
+const HEIGHT_WEIGHT: Record<string, Record<'Male'|'Female', PhysRange>> = {
+  PG: {
+    Male:   { minH: 72, maxH: 76, avgH: 74, minW: 175, maxW: 195, avgW: 185 },
+    Female: { minH: 65, maxH: 69, avgH: 67, minW: 140, maxW: 160, avgW: 150 },
+  },
+  SG: {
+    Male:   { minH: 75, maxH: 79, avgH: 77, minW: 185, maxW: 210, avgW: 198 },
+    Female: { minH: 67, maxH: 71, avgH: 69, minW: 148, maxW: 168, avgW: 158 },
+  },
+  SF: {
+    Male:   { minH: 78, maxH: 81, avgH: 80, minW: 205, maxW: 230, avgW: 218 },
+    Female: { minH: 70, maxH: 73, avgH: 72, minW: 160, maxW: 180, avgW: 170 },
+  },
+  PF: {
+    Male:   { minH: 80, maxH: 83, avgH: 82, minW: 220, maxW: 245, avgW: 233 },
+    Female: { minH: 72, maxH: 75, avgH: 74, minW: 175, maxW: 200, avgW: 188 },
+  },
+  C: {
+    Male:   { minH: 82, maxH: 86, avgH: 84, minW: 240, maxW: 270, avgW: 255 },
+    Female: { minH: 74, maxH: 77, avgH: 76, minW: 190, maxW: 220, avgW: 205 },
+  },
+};
+
+const inchesToStr = (inches: number): string => {
+  const ft  = Math.floor(inches / 12);
+  const ins = inches % 12;
+  return `${ft}'${ins}"`;
+};
+
+const genPhysical = (pos: string, gender: 'Male'|'Female'): {
+  heightIn: number; heightStr: string; weight: number; archetype?: string;
+} => {
+  const r = HEIGHT_WEIGHT[pos]?.[gender] ?? HEIGHT_WEIGHT['SF'][gender];
+  const heightIn = r.minH + Math.floor(Math.random() * (r.maxH - r.minH + 1));
+  const weight   = r.minW + Math.floor(Math.random() * (r.maxW - r.minW + 1));
+  const isTallHeavy  = heightIn >= r.avgH + 2 && weight >= r.avgW + 20;
+  const isShortLight = heightIn <= r.avgH - 2 && weight <= r.avgW - 20;
+  return {
+    heightIn,
+    heightStr: inchesToStr(heightIn),
+    weight,
+    archetype: isTallHeavy ? 'Power' : isShortLight ? 'Speedster' : undefined,
+  };
+};
+
+type AttrMap = Record<string, number>;
+const _clamp = (v: number) => Math.min(99, Math.max(25, Math.round(v)));
+const _mod   = (base: number, delta: number, cap: number) =>
+  _clamp(base + Math.max(-cap, Math.min(cap, delta)));
+
+const applyPhysical = (attrs: AttrMap, pos: string, gender: 'Male'|'Female', heightIn: number, weight: number): AttrMap => {
+  const r   = HEIGHT_WEIGHT[pos]?.[gender] ?? HEIGHT_WEIGHT['SF'][gender];
+  const hD  = heightIn - r.avgH;
+  const wD  = weight   - r.avgW;
+  const cap = (Math.abs(hD) >= 2 && Math.abs(wD) >= 20) ? 8 : 99;
+  const a   = { ...attrs };
+  // Height modifiers
+  if (hD >= 2) {           // Taller than avg
+    a.interiorDef  = _mod(a.interiorDef,  +4, cap);
+    a.blocks       = _mod(a.blocks,        +5, cap);
+    a.offReb       = _mod(a.offReb,        +3, cap);
+    a.defReb       = _mod(a.defReb,        +3, cap);
+    a.perimeterDef = _mod(a.perimeterDef,  -3, cap);
+    a.speed        = _mod(a.speed,         -3, cap);
+    a.shooting3pt  = _mod(a.shooting3pt,   -4, cap);
+  } else if (hD <= -2) {   // Shorter than avg
+    a.speed        = _mod(a.speed,         +4, cap);
+    a.perimeterDef = _mod(a.perimeterDef,  +3, cap);
+    a.ballHandling = _mod(a.ballHandling,  +3, cap);
+    a.shooting3pt  = _mod(a.shooting3pt,   +3, cap);
+    a.interiorDef  = _mod(a.interiorDef,   -4, cap);
+    a.blocks       = _mod(a.blocks,        -5, cap);
+    a.offReb       = _mod(a.offReb,        -3, cap);
+    a.defReb       = _mod(a.defReb,        -3, cap);
+  }
+  // Weight modifiers
+  if (wD >= 20) {          // Heavier than avg
+    a.strength     = _mod(a.strength,      +5, cap);
+    a.interiorDef  = _mod(a.interiorDef,   +3, cap);
+    a.postScoring  = _mod(a.postScoring,   +4, cap);
+    a.speed        = _mod(a.speed,         -4, cap);
+    a.stamina      = _mod(a.stamina,       -3, cap);
+    a.jumping      = _mod(a.jumping,       -3, cap);
+  } else if (wD <= -20) {  // Lighter than avg
+    a.speed        = _mod(a.speed,         +3, cap);
+    a.stamina      = _mod(a.stamina,       +3, cap);
+    a.jumping      = _mod(a.jumping,       +3, cap);
+    a.strength     = _mod(a.strength,      -4, cap);
+    a.interiorDef  = _mod(a.interiorDef,   -3, cap);
+    a.postScoring  = _mod(a.postScoring,   -3, cap);
+  }
+  return a;
+};
+
 export const generatePlayer = (id: string, ageRange: [number, number] = [19, 38], genderRatio: number = 0): Player => {
   const gender = getRandomGender(genderRatio);
   
@@ -481,6 +577,35 @@ export const generatePlayer = (id: string, ageRange: [number, number] = [19, 38]
   const getRandomAttr = (base: number, flavor: number = 0) => 
     Math.min(99, Math.max(25, Math.floor(base + flavor + (Math.random() * 20 - 10))));
   const playerHometown = region.hometowns[Math.floor(Math.random() * region.hometowns.length)];
+  const physGender = gender === 'Female' ? 'Female' : 'Male';
+  const phys = genPhysical(pos, physGender);
+  const rawAttrs: AttrMap = {
+    shooting: rating + f.shooting, 
+    defense: rating, 
+    rebounding: rating, 
+    playmaking: rating + f.passing, 
+    athleticism: rating + f.athleticism,
+    shootingInside: getRandomAttr(rating), 
+    shootingMid: getRandomAttr(rating, f.shooting), 
+    shooting3pt: getRandomAttr(rating, f.shooting), 
+    freeThrow: getRandomAttr(rating, f.shooting),
+    speed: getRandomAttr(rating, f.athleticism), 
+    strength: getRandomAttr(rating, f.athleticism), 
+    jumping: getRandomAttr(rating, f.athleticism), 
+    stamina: getRandomAttr(rating),
+    perimeterDef: getRandomAttr(rating), 
+    interiorDef: getRandomAttr(rating), 
+    steals: getRandomAttr(rating), 
+    blocks: getRandomAttr(rating), 
+    defensiveIQ: getRandomAttr(rating, f.iq),
+    ballHandling: getRandomAttr(rating, f.passing), 
+    passing: getRandomAttr(rating, f.passing), 
+    offensiveIQ: getRandomAttr(rating, f.iq), 
+    postScoring: getRandomAttr(rating), 
+    offReb: getRandomAttr(rating), 
+    defReb: getRandomAttr(rating),
+  };
+  const pAttrs = applyPhysical(rawAttrs, pos, physGender, phys.heightIn, phys.weight);
   
   return {
     id,
@@ -490,32 +615,7 @@ export const generatePlayer = (id: string, ageRange: [number, number] = [19, 38]
     position: pos,
     rating,
     potential,
-    attributes: {
-      shooting: rating + f.shooting, 
-      defense: rating, 
-      rebounding: rating, 
-      playmaking: rating + f.passing, 
-      athleticism: rating + f.athleticism,
-      shootingInside: getRandomAttr(rating), 
-      shootingMid: getRandomAttr(rating, f.shooting), 
-      shooting3pt: getRandomAttr(rating, f.shooting), 
-      freeThrow: getRandomAttr(rating, f.shooting),
-      speed: getRandomAttr(rating, f.athleticism), 
-      strength: getRandomAttr(rating, f.athleticism), 
-      jumping: getRandomAttr(rating, f.athleticism), 
-      stamina: getRandomAttr(rating),
-      perimeterDef: getRandomAttr(rating), 
-      interiorDef: getRandomAttr(rating), 
-      steals: getRandomAttr(rating), 
-      blocks: getRandomAttr(rating), 
-      defensiveIQ: getRandomAttr(rating, f.iq),
-      ballHandling: getRandomAttr(rating, f.passing), 
-      passing: getRandomAttr(rating, f.passing), 
-      offensiveIQ: getRandomAttr(rating, f.iq), 
-      postScoring: getRandomAttr(rating), 
-      offReb: getRandomAttr(rating), 
-      defReb: getRandomAttr(rating),
-    },
+    attributes: pAttrs as Player['attributes'],
     salary: Math.floor((rating / 100) * 45000000),
     contractYears: Math.floor(Math.random() * 5) + 1,
     stats: { 
@@ -535,7 +635,7 @@ export const generatePlayer = (id: string, ageRange: [number, number] = [19, 38]
     },
     morale: 75 + Math.floor(Math.random() * 20),
     jerseyNumber: Math.floor(Math.random() * 99),
-    height: "6'7\"", weight: 220, status: 'Bench',
+    height: phys.heightStr, weight: phys.weight, archetype: phys.archetype, status: 'Bench',
     personalityTraits: getRandomTraits(),
     hometown: playerHometown,
     country: countryFromHometown(playerHometown),
@@ -595,6 +695,35 @@ export const generateProspects = (year: number, count: number = 100, genderRatio
     const getRandomAttr = (base: number, flavor: number = 0) => 
       Math.min(99, Math.max(25, Math.floor(base + flavor + (Math.random() * 25 - 12))));
     const prospectHometown = region.hometowns[Math.floor(Math.random() * region.hometowns.length)];
+    const physGender = gender === 'Female' ? 'Female' : 'Male';
+    const phys = genPhysical(pos, physGender);
+    const rawAttrs: AttrMap = {
+      shooting: rating + f.shooting, 
+      defense: rating, 
+      rebounding: rating, 
+      playmaking: rating + f.passing, 
+      athleticism: rating + f.athleticism,
+      shootingInside: getRandomAttr(rating), 
+      shootingMid: getRandomAttr(rating, f.shooting), 
+      shooting3pt: getRandomAttr(rating, f.shooting), 
+      freeThrow: getRandomAttr(rating, f.shooting),
+      speed: getRandomAttr(rating, f.athleticism), 
+      strength: getRandomAttr(rating, f.athleticism), 
+      jumping: getRandomAttr(rating, f.athleticism), 
+      stamina: getRandomAttr(rating),
+      perimeterDef: getRandomAttr(rating), 
+      interiorDef: getRandomAttr(rating), 
+      steals: getRandomAttr(rating), 
+      blocks: getRandomAttr(rating), 
+      defensiveIQ: getRandomAttr(rating, f.iq),
+      ballHandling: getRandomAttr(rating, f.passing), 
+      passing: getRandomAttr(rating, f.passing), 
+      offensiveIQ: getRandomAttr(rating, f.iq), 
+      postScoring: getRandomAttr(rating), 
+      offReb: getRandomAttr(rating), 
+      defReb: getRandomAttr(rating),
+    };
+    const pAttrs = applyPhysical(rawAttrs, pos, physGender, phys.heightIn, phys.weight);
 
     return {
       id,
@@ -608,34 +737,9 @@ export const generateProspects = (year: number, count: number = 100, genderRatio
       school: region.origins[Math.floor(Math.random() * region.origins.length)],
       revealed: false,
       mockRank: i + 1,
-      attributes: {
-        shooting: rating + f.shooting, 
-        defense: rating, 
-        rebounding: rating, 
-        playmaking: rating + f.passing, 
-        athleticism: rating + f.athleticism,
-        shootingInside: getRandomAttr(rating), 
-        shootingMid: getRandomAttr(rating, f.shooting), 
-        shooting3pt: getRandomAttr(rating, f.shooting), 
-        freeThrow: getRandomAttr(rating, f.shooting),
-        speed: getRandomAttr(rating, f.athleticism), 
-        strength: getRandomAttr(rating, f.athleticism), 
-        jumping: getRandomAttr(rating, f.athleticism), 
-        stamina: getRandomAttr(rating),
-        perimeterDef: getRandomAttr(rating), 
-        interiorDef: getRandomAttr(rating), 
-        steals: getRandomAttr(rating), 
-        blocks: getRandomAttr(rating), 
-        defensiveIQ: getRandomAttr(rating, f.iq),
-        ballHandling: getRandomAttr(rating, f.passing), 
-        passing: getRandomAttr(rating, f.passing), 
-        offensiveIQ: getRandomAttr(rating, f.iq), 
-        postScoring: getRandomAttr(rating), 
-        offReb: getRandomAttr(rating), 
-        defReb: getRandomAttr(rating),
-      },
+      attributes: pAttrs as Player['attributes'],
       jerseyNumber: Math.floor(Math.random() * 99),
-      height: "6'8\"", weight: 210,
+      height: phys.heightStr, weight: phys.weight, archetype: phys.archetype,
       personalityTraits: getRandomTraits(),
       hometown: prospectHometown,
       country: countryFromHometown(prospectHometown),

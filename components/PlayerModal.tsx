@@ -522,6 +522,26 @@ const PlayerModal: React.FC<PlayerModalProps> = ({
                    </span>
                 </div>
                 <div className="flex items-center gap-4">
+                   <span className="text-[10px] text-slate-500 font-black uppercase tracking-[0.2em] w-24">Height</span>
+                   <span className="text-white text-base font-medium">{player.height}</span>
+                </div>
+                <div className="flex items-center gap-4">
+                   <span className="text-[10px] text-slate-500 font-black uppercase tracking-[0.2em] w-24">Weight</span>
+                   <span className="text-white text-base font-medium">{player.weight} lbs</span>
+                </div>
+                {(player as any).archetype && (
+                  <div className="flex items-center gap-4">
+                    <span className="text-[10px] text-slate-500 font-black uppercase tracking-[0.2em] w-24">Archetype</span>
+                    <span className={`text-xs font-black uppercase tracking-widest px-3 py-1 rounded-full ${
+                      (player as any).archetype === 'Power'
+                        ? 'bg-rose-500/20 text-rose-400 border border-rose-500/30'
+                        : 'bg-sky-500/20 text-sky-400 border border-sky-500/30'
+                    }`}>
+                      {(player as any).archetype === 'Power' ? '💪 Power' : '⚡ Speedster'}
+                    </span>
+                  </div>
+                )}
+                <div className="flex items-center gap-4">
                    <span className="text-[10px] text-slate-500 font-black uppercase tracking-[0.2em] w-24">Draft</span>
                    <span className="text-white text-base font-medium">
                       {player.draftInfo.year} • R{player.draftInfo.round} P{player.draftInfo.pick} ({player.draftInfo.team})
