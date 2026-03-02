@@ -26,6 +26,15 @@ interface GameEvent {
   possessionAfter?: string;  // teamId that has possession leaving the play
 }
 
+interface PlayerFatigueData {
+  minutesPlayed:      number; // cumulative game-minutes on floor
+  fatigueLevel:       number; // 0–100
+  isOnFloor:          boolean;
+  consecutiveMinutes: number; // current uninterrupted stint
+}
+
+type SubReason = 'FATIGUE' | 'FOUL_TROUBLE' | 'COLD_STREAK' | 'TACTICAL' | 'QUARTER_BREAK';
+
 const LiveGameModal: React.FC<LiveGameModalProps> = ({ 
   game, 
   homeTeam, 
@@ -55,6 +64,13 @@ const LiveGameModal: React.FC<LiveGameModalProps> = ({
   const possessionRef = useRef<string>('');
   // Tracks last live play type to gate technical foul eligibility
   const lastPlayTypeRef = useRef<string>('');
+  // Substitution / fatigue system refs
+  const lineupRef           = useRef<{ home: string[]; away: string[] }>({ home: [], away: [] });
+  const fatigueRef          = useRef<Record<string, PlayerFatigueData>>({});
+  const gameSecondsRef      = useRef(0);   // elapsed game-seconds this quarter
+  const lastSubCheckHome    = useRef(0);   // gameSecondsRef at last home periodic check
+  const lastSubCheckAway    = useRef(0);   // gameSecondsRef at last away periodic check
+  const quarterBreakPending = useRef(false);
 
   // Persistence
   useEffect(() => {
@@ -114,6 +130,23 @@ const LiveGameModal: React.FC<LiveGameModalProps> = ({
     setHomeStats(init(homeTeam));
     setAwayStats(init(awayTeam));
 
+    // Lineup and fatigue initialisation
+    lineupRef.current = {
+      home: homeTeam.roster.slice(0, 5).map(p => p.id),
+      away: awayTeam.roster.slice(0, 5).map(p => p.id),
+    };
+    const ft: Record<string, PlayerFatigueData> = {};
+    homeTeam.roster.forEach((p, i) => {
+      ft[p.id] = { minutesPlayed: 0, fatigueLevel: 0, isOnFloor: i < 5, consecutiveMinutes: 0 };
+    });
+    awayTeam.roster.forEach((p, i) => {
+      ft[p.id] = { minutesPlayed: 0, fatigueLevel: 0, isOnFloor: i < 5, consecutiveMinutes: 0 };
+    });
+    fatigueRef.current      = ft;
+    gameSecondsRef.current  = 0;
+    lastSubCheckHome.current = 0;
+    lastSubCheckAway.current = 0;
+
     // Jump ball — find centers (or highest jumping player)
     const getCenter = (team: Team) => {
       const centers = team.roster.filter(p => p.position === 'C' || p.position === 'PF');
@@ -168,6 +201,9 @@ const LiveGameModal: React.FC<LiveGameModalProps> = ({
     return (map[pid] as any)?.[stat] ?? 0;
   };
 
+  const posGroup = (pos: string): 'Guard' | 'Wing' | 'Big' =>
+    (pos === 'PG' || pos === 'SG') ? 'Guard' : pos === 'C' ? 'Big' : 'Wing';
+
   const generatePlay = () => {
     // Use tracked possession; fall back to random only before jump ball resolves
     const possessionTeamId = possessionRef.current || (Math.random() > 0.5 ? homeTeam.id : awayTeam.id);
@@ -178,15 +214,26 @@ const LiveGameModal: React.FC<LiveGameModalProps> = ({
     const offTeam = isHomePossession ? homeTeam : awayTeam;
     const defTeam = isHomePossession ? awayTeam : homeTeam;
     
-    const offPlayers = offTeam.roster.slice(0, 5).filter(p => p?.id);
-    const defPlayers = defTeam.roster.slice(0, 5).filter(p => p?.id);
+    // Use live lineup (updated by substitutions) rather than static roster order
+    const liveHomeIds = lineupRef.current.home.length === 5 ? lineupRef.current.home : homeTeam.roster.slice(0, 5).map(p => p.id);
+    const liveAwayIds = lineupRef.current.away.length === 5 ? lineupRef.current.away : awayTeam.roster.slice(0, 5).map(p => p.id);
+    const offPlayers = (isHomePossession ? liveHomeIds : liveAwayIds)
+      .map(id => offTeam.roster.find(p => p.id === id))
+      .filter(Boolean) as Player[];
+    const defPlayers = (isHomePossession ? liveAwayIds : liveHomeIds)
+      .map(id => defTeam.roster.find(p => p.id === id))
+      .filter(Boolean) as Player[];
     if (!offPlayers.length || !defPlayers.length) return;
     const shooter = offPlayers[Math.floor(Math.random() * offPlayers.length)];
     const defender = defPlayers[Math.floor(Math.random() * defPlayers.length)];
 
     const timePassed = Math.floor(Math.random() * 15) + 5;
     const newTime = Math.max(0, timeLeft - timePassed);
-    
+
+    // Advance fatigue clock
+    gameSecondsRef.current += timePassed;
+    updateFatigue(timePassed);
+
     let eventText = "";
     let eventType: GameEvent['type'] = 'info';
     const rivalryMod = ['Hot', 'Red Hot'].includes(rivalryLevel) ? 1.5 : 1.0;
@@ -451,6 +498,42 @@ const LiveGameModal: React.FC<LiveGameModalProps> = ({
     possessionRef.current = possessionAfter;
     lastPlayTypeRef.current = eventType;
 
+    // ── Periodic substitution check (after every dead-ball / natural stop) ──
+    {
+      const coach        = homeTeam.staff?.headCoach;
+      const isPaceMaster = coach?.badges?.includes('Pace Master') ?? false;
+      const homeInterval = isPaceMaster ? 150 : 240; // 2.5 vs 4 min in game-seconds
+      const awayCoach    = awayTeam.staff?.headCoach;
+      const awayPace     = awayCoach?.badges?.includes('Pace Master') ?? false;
+      const awayInterval = awayPace ? 150 : 240;
+
+      const subEvts: GameEvent[] = [];
+      if (gameSecondsRef.current - lastSubCheckHome.current >= homeInterval) {
+        lastSubCheckHome.current = gameSecondsRef.current;
+        runSubstitutions(homeTeam, true,  subEvts, newTime, 'FATIGUE');
+      }
+      if (gameSecondsRef.current - lastSubCheckAway.current >= awayInterval) {
+        lastSubCheckAway.current = gameSecondsRef.current;
+        runSubstitutions(awayTeam, false, subEvts, newTime, 'FATIGUE');
+      }
+
+      // Always check for mandatory foul-trouble/cold-streak subs every dead ball
+      if (eventType === 'foul' || eventType === 'turnover') {
+        runSubstitutions(homeTeam, true,  subEvts, newTime, 'TACTICAL');
+        runSubstitutions(awayTeam, false, subEvts, newTime, 'TACTICAL');
+      }
+
+      if (subEvts.length > 0) {
+        // Append sub events after whatever just happened
+        const allEvts = [...(batchEvents.length > 0 ? batchEvents : [{ time: formatTime(newTime), quarter, text: eventText, type: eventType, teamId: isHomePossession ? homeTeam.id : awayTeam.id, possessionBefore, possessionAfter }]), ...subEvts];
+        possessionRef.current = allEvts[allEvts.length - 1].possessionAfter ?? possessionAfter;
+        lastPlayTypeRef.current = allEvts[allEvts.length - 1].type;
+        setEvents(prev => [...prev, ...allEvts].slice(-80));
+        setTimeLeft(newTime);
+        return;
+      }
+    }
+
     // If batch was populated (foul + FTs), push all and skip the single-event path
     if (batchEvents.length > 0) {
       possessionRef.current = batchEvents[batchEvents.length - 1].possessionAfter ?? possessionAfter;
@@ -484,12 +567,178 @@ const LiveGameModal: React.FC<LiveGameModalProps> = ({
 
   // Update plus/minus for all 5 on-court players when a basket is scored
   const updatePlusMinus = (scoringTeamIsHome: boolean, pts: number) => {
-    homeTeam.roster.slice(0, 5).forEach(p =>
-      updatePlayerStat(true, p.id, 'plusMinus', scoringTeamIsHome ? pts : -pts)
-    );
-    awayTeam.roster.slice(0, 5).forEach(p =>
-      updatePlayerStat(false, p.id, 'plusMinus', scoringTeamIsHome ? -pts : pts)
-    );
+    const hIds = lineupRef.current.home.length > 0
+      ? lineupRef.current.home
+      : homeTeam.roster.slice(0, 5).map(p => p.id);
+    const aIds = lineupRef.current.away.length > 0
+      ? lineupRef.current.away
+      : awayTeam.roster.slice(0, 5).map(p => p.id);
+    hIds.forEach(pid => updatePlayerStat(true,  pid, 'plusMinus', scoringTeamIsHome ? pts  : -pts));
+    aIds.forEach(pid => updatePlayerStat(false, pid, 'plusMinus', scoringTeamIsHome ? -pts : pts));
+  };
+
+  // ── Fatigue updater (call once per play with seconds elapsed) ────────────
+  const updateFatigue = (timePassed: number) => {
+    const mins = timePassed / 60;
+    const ft   = fatigueRef.current;
+    [...homeTeam.roster, ...awayTeam.roster].forEach(p => {
+      if (!ft[p.id]) return;
+      if (ft[p.id].isOnFloor) {
+        ft[p.id].minutesPlayed      += mins;
+        ft[p.id].fatigueLevel        = Math.min(100, ft[p.id].fatigueLevel + mins);
+        ft[p.id].consecutiveMinutes += mins;
+      } else {
+        // Bench recovery: half the build rate
+        ft[p.id].fatigueLevel = Math.max(0, ft[p.id].fatigueLevel - mins * 0.5);
+      }
+    });
+  };
+
+  // ── Substitution engine ──────────────────────────────────────────────────
+  const runSubstitutions = (
+    team: Team,
+    isHome: boolean,
+    batchEvts: GameEvent[],
+    currentTime: number,
+    triggerReason: SubReason
+  ) => {
+    const coach      = team.staff?.headCoach;
+    const motivation = coach?.ratingMotivation ?? 70;
+    const clutch     = coach?.ratingClutch     ?? 70;
+    const isDevGenius = coach?.badges?.includes('Developmental Genius') ?? false;
+
+    const currentLineup = [...(isHome ? lineupRef.current.home : lineupRef.current.away)];
+    const ft      = fatigueRef.current;
+    const stats   = isHome ? homeStats : awayStats;
+    const scoreDiff = homeScore - awayScore;
+    const isDown10  = isHome ? scoreDiff <= -10 : scoreDiff >= 10;
+
+    const onFloor  = currentLineup
+      .map(id => team.roster.find(p => p.id === id))
+      .filter(Boolean) as Player[];
+    const offBench = team.roster.filter(p => !currentLineup.includes(p.id));
+
+    type SubOp = { out: Player; in: Player; reason: SubReason };
+    const ops: SubOp[]         = [];
+    const usedFromBench        = new Set<string>();
+
+    for (const player of onFloor) {
+      if (ops.length >= 2) break; // max 2 subs at once
+
+      const fd  = ft[player.id] ?? { minutesPlayed: 0, fatigueLevel: 0, isOnFloor: true, consecutiveMinutes: 0 };
+      const pf  = (stats[player.id]?.pf  ?? 0) as number;
+      const fga = (stats[player.id]?.fga ?? 0) as number;
+      const fgm = (stats[player.id]?.fgm ?? 0) as number;
+
+      let shouldSub            = false;
+      let reason: SubReason    = triggerReason;
+
+      // ── Mandatory: foul-out ─
+      if (pf >= 5) {
+        shouldSub = true; reason = 'FOUL_TROUBLE';
+      }
+      // ── 3 fouls in 1st half → sit ─
+      else if (pf >= 3 && quarter <= 2) {
+        shouldSub = true; reason = 'FOUL_TROUBLE';
+      }
+      // ── Fatigue priority ─
+      else if (fd.fatigueLevel > 85) {
+        shouldSub = true; reason = 'FATIGUE';
+      }
+      else if (fd.fatigueLevel > 70 && Math.random() < 0.45) {
+        shouldSub = true; reason = 'FATIGUE';
+      }
+      else if (fd.consecutiveMinutes >= 10) {
+        shouldSub = true; reason = 'FATIGUE';
+      }
+      // ── Cold-streak hook ─
+      else if (fga >= 4 && fgm === 0 && motivation < 75) {
+        shouldSub = true; reason = 'COLD_STREAK';
+      }
+      else if (fga >= 3 && fgm === 0 && motivation >= 80 && Math.random() < 0.35) {
+        shouldSub = true; reason = 'COLD_STREAK';
+      }
+      // ── Down-10 tactical ─
+      else if (isDown10 && clutch >= 80 && triggerReason === 'TACTICAL' && Math.random() < 0.45) {
+        shouldSub = true; reason = 'TACTICAL';
+      }
+      // ── Quarter-break rotation ─
+      else if (triggerReason === 'QUARTER_BREAK' && fd.consecutiveMinutes >= 5 && Math.random() < 0.60) {
+        shouldSub = true; reason = 'QUARTER_BREAK';
+      }
+      else if (isDevGenius && triggerReason === 'QUARTER_BREAK' && Math.random() < 0.30) {
+        shouldSub = true; reason = 'TACTICAL';
+      }
+      // ── Periodic fatigue check ─
+      else if (triggerReason === 'FATIGUE' && fd.fatigueLevel > 55 && Math.random() < 0.22) {
+        shouldSub = true; reason = 'FATIGUE';
+      }
+
+      if (!shouldSub) continue;
+
+      // Find eligible bench player — same position group, not fouled out
+      const group = posGroup(player.position);
+      const candidates = offBench.filter(b =>
+        !usedFromBench.has(b.id) &&
+        posGroup(b.position) === group &&
+        ((stats[b.id]?.pf ?? 0) as number) < 5
+      );
+
+      let incoming: Player | undefined;
+      if (isDevGenius) {
+        // Prefer youngest available
+        incoming = [...candidates].sort((a, b) => a.age - b.age)[0];
+      }
+      if (!incoming) {
+        // Default: prefer least fatigued bench player
+        incoming = [...candidates].sort(
+          (a, b) => (ft[a.id]?.fatigueLevel ?? 0) - (ft[b.id]?.fatigueLevel ?? 0)
+        )[0];
+      }
+      if (!incoming) continue; // no valid sub for this position group
+
+      ops.push({ out: player, in: incoming, reason });
+      usedFromBench.add(incoming.id);
+    }
+
+    if (ops.length === 0) return;
+
+    // Apply lineup changes and update fatigue flags
+    let newLineup = [...currentLineup];
+    for (const op of ops) {
+      newLineup = newLineup.map(id => (id === op.out.id ? op.in.id : id));
+      if (ft[op.out.id]) {
+        ft[op.out.id].isOnFloor         = false;
+        ft[op.out.id].consecutiveMinutes = 0;
+      }
+      if (!ft[op.in.id]) {
+        ft[op.in.id] = { minutesPlayed: 0, fatigueLevel: 0, isOnFloor: false, consecutiveMinutes: 0 };
+      }
+      ft[op.in.id].isOnFloor = true;
+    }
+    if (isHome) lineupRef.current = { ...lineupRef.current, home: newLineup };
+    else        lineupRef.current = { ...lineupRef.current, away: newLineup };
+
+    // Generate PBP substitution events
+    for (const op of ops) {
+      const fatLabel = Math.round(ft[op.out.id]?.fatigueLevel ?? 0);
+      const pfLabel  = (stats[op.out.id]?.pf ?? 0) as number;
+      let detail = '';
+      if      (op.reason === 'FOUL_TROUBLE')  detail = `${pfLabel} PF`;
+      else if (op.reason === 'FATIGUE')        detail = `fatigue ${fatLabel}%`;
+      else if (op.reason === 'COLD_STREAK')    detail = `${(stats[op.out.id]?.fgm ?? 0)}-${(stats[op.out.id]?.fga ?? 0)} FG`;
+      else if (op.reason === 'TACTICAL')       detail = `tactical`;
+      else if (op.reason === 'QUARTER_BREAK')  detail = `rotation`;
+      batchEvts.push({
+        time: formatTime(currentTime),
+        quarter,
+        text: `${abbrev(op.in.name)} checks in for ${abbrev(op.out.name)} (${detail})`,
+        type: 'info',
+        teamId: team.id,
+        possessionBefore: possessionRef.current,
+        possessionAfter:  possessionRef.current,
+      });
+    }
   };
 
   const simRest = () => {
@@ -584,14 +833,35 @@ const LiveGameModal: React.FC<LiveGameModalProps> = ({
         generatePlay();
       }, 1000 / speed);
     } else if (timeLeft === 0 && quarter < 4) {
+      // Quarter break — fire rotational subs for both teams
+      const qBreakEvts: GameEvent[] = [];
+      runSubstitutions(homeTeam, true,  qBreakEvts, 0, 'QUARTER_BREAK');
+      runSubstitutions(awayTeam, false, qBreakEvts, 0, 'QUARTER_BREAK');
+      gameSecondsRef.current  = 0;
+      lastSubCheckHome.current = 0;
+      lastSubCheckAway.current = 0;
       setQuarter(q => q + 1);
       setTimeLeft(720);
-      setEvents(prev => [...prev, { time: "12:00", quarter: quarter+1, text: `--- Start of Quarter ${quarter+1} ---`, type: 'info' }]);
+      setEvents(prev => [
+        ...prev,
+        { time: '12:00', quarter: quarter + 1, text: `--- Start of Quarter ${quarter + 1} ---`, type: 'info' as const },
+        ...qBreakEvts
+      ]);
     } else if (timeLeft === 0 && quarter >= 4) {
       if (homeScore === awayScore) {
+        const otBreakEvts: GameEvent[] = [];
+        runSubstitutions(homeTeam, true,  otBreakEvts, 0, 'QUARTER_BREAK');
+        runSubstitutions(awayTeam, false, otBreakEvts, 0, 'QUARTER_BREAK');
+        gameSecondsRef.current  = 0;
+        lastSubCheckHome.current = 0;
+        lastSubCheckAway.current = 0;
         setQuarter(q => q + 1);
         setTimeLeft(300); // 5 mins for OT
-        setEvents(prev => [...prev, { time: "5:00", quarter: quarter + 1, text: `--- Start of Overtime ${quarter - 3} ---`, type: 'info' }]);
+        setEvents(prev => [
+          ...prev,
+          { time: '5:00', quarter: quarter + 1, text: `--- Start of Overtime ${quarter - 3} ---`, type: 'info' as const },
+          ...otBreakEvts
+        ]);
       } else {
         // Game Over
         setIsPlaying(false);
@@ -667,6 +937,8 @@ const LiveGameModal: React.FC<LiveGameModalProps> = ({
       name: p.name,
       stat: stats[p.id] ?? {},
       isStarter: idx < 5,
+      isOnFloor: (isHome ? lineupRef.current.home : lineupRef.current.away).includes(p.id),
+      fatigueLevel: fatigueRef.current[p.id]?.fatigueLevel ?? 0,
     }));
     const starters = players.filter(p => p.isStarter);
     const bench = players.filter(p => !p.isStarter);
@@ -695,10 +967,12 @@ const LiveGameModal: React.FC<LiveGameModalProps> = ({
       const s = pl.stat;
       const hasStat = (s.pts ?? 0) + (s.reb ?? 0) + (s.ast ?? 0) + (s.stl ?? 0) +
                       (s.blk ?? 0) + (s.tov ?? 0) + (s.fga ?? 0) > 0;
-      const isDNP = !pl.isStarter && !hasStat;
+      const isDNP = !pl.isStarter && !hasStat && !pl.isOnFloor;
       const fgPct = (s.fga ?? 0) > 0 ? Math.round(((s.fgm ?? 0) / (s.fga ?? 0)) * 100) : null;
       const pm = s.plusMinus ?? 0;
       const isTop = pl.id === topId && hasStat;
+      const fatigue = pl.fatigueLevel;
+      const fatColor = fatigue > 85 ? 'bg-rose-500' : fatigue > 70 ? 'bg-orange-400' : fatigue > 50 ? 'bg-yellow-400' : 'bg-emerald-500';
 
       return (
         <tr
@@ -713,8 +987,20 @@ const LiveGameModal: React.FC<LiveGameModalProps> = ({
             <div className={`truncate text-[9px] font-bold leading-tight ${isTop ? 'text-amber-300' : isDNP ? 'text-slate-600' : 'text-slate-200'}`}>
               {abbrev(pl.name)}
             </div>
-            {isDNP && <div className="text-[7px] text-slate-700 uppercase font-black tracking-wider">DNP-CD</div>}
-            {isTop && !isDNP && <div className="text-[7px] text-amber-600 uppercase font-black tracking-wider">★ Top</div>}
+            <div className="flex items-center gap-1 mt-0.5">
+              {/* On-floor pill */}
+              <span className={`text-[6px] font-black uppercase px-1 py-0.5 rounded ${pl.isOnFloor ? 'bg-emerald-500/20 text-emerald-400' : 'bg-slate-800 text-slate-600'}`}>
+                {pl.isOnFloor ? 'ON' : 'OFF'}
+              </span>
+              {isDNP && <span className="text-[6px] font-black text-slate-700 uppercase">DNP</span>}
+              {isTop && !isDNP && <span className="text-[6px] font-black text-amber-600 uppercase">★Top</span>}
+              {/* Fatigue bar */}
+              {pl.isOnFloor && (
+                <div className="flex-1 h-0.5 rounded-full bg-slate-800 overflow-hidden max-w-[24px]">
+                  <div className={`h-full rounded-full ${fatColor}`} style={{ width: `${fatigue}%` }} />
+                </div>
+              )}
+            </div>
           </td>
           {isDNP ? (
             <td colSpan={13} className="py-1.5 text-[8px] text-slate-700 uppercase font-black pl-1">Coach's Decision</td>
