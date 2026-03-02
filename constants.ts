@@ -21,14 +21,82 @@ export const COACH_BADGES: CoachBadge[] = [
 
 const COLLEGES = ["Duke", "Kentucky", "Kansas", "UNC", "Gonzaga", "UCLA", "Villanova", "Arizona", "Michigan State", "UConn", "Purdue", "Houston", "Baylor", "Virginia", "Texas"];
 
+// ─── US Male first names: 120+ unique, no current NBA stars ──────────────────
+const US_MALE_FIRST = [
+  "Jaden","Malik","Marcus","Xavier","Elijah","Isaiah","Kendall","Brennan","Derrick","Terrence",
+  "Avery","Tavon","Nolan","Colby","Jamar","Reginald","Deshawn","Trent","Devon","Quincy",
+  "Marlon","Kendrick","Rasheed","Caleb","Tyrell","Leroy","Darnell","Cordell","Marques","Rondell",
+  "Cortez","Wendell","Lamar","Cedric","Jarrell","Montrell","Kavon","Trevin","Deon","Ashton",
+  "Bryson","Collin","Kameron","Jamaal","Devonte","Daylen","Jaxon","Braxton","Kylen","Corbin",
+  "Demarco","Tevon","Terrell","Quinton","Damonte","Cory","Bryce","Jakobe","Malachi","Aiden",
+  "Declan","Hunter","Gavin","Mason","Ethan","Logan","Tyler","Chase","Cole","Connor",
+  "Blake","Owen","Liam","Noah","Grant","Reid","Knox","Preston","Sutton","Porter",
+  "Lawson","Briggs","Holden","Grady","Beckett","Bennett","Wade","Pierce","Emmett","Ryder",
+  "Colton","Flynn","Rhett","Tanner","Easton","Paxton","Heath","Dalton","Travis","Darion",
+  "Rayvon","Keondre","Jabari","Torrence","Dontae","Tyrone","Dequan","Rashad","Marshawn","Kenton",
+  "Aldric","Dominique","Darian","Elton","Hakim","Jarvis","Kelvin","Nathaniel","Orlando","Peyton",
+  "Rowan","Samir","Tobias","Vance","Waverly","Xander","Zachariah","Corvin","Ledger","Theron"
+];
+
+// ─── US Male last names: 220+ diverse American surnames ───────────────────────
+const US_MALE_LAST = [
+  "Washington","Hayes","Thompson","Williams","Jackson","Robinson","Davis","Johnson","Anderson","Harris",
+  "White","Martin","Brown","Taylor","Lee","Clark","Lewis","Walker","Hall","Young",
+  "Allen","Wright","King","Scott","Green","Baker","Adams","Nelson","Carter","Morrison",
+  "Chambers","Brooks","Edwards","Coleman","Jenkins","Perry","Powell","Long","Patterson","West",
+  "Foster","Simmons","Warren","Dixon","Griffin","Harper","Reed","Fleming","Garrett","Bradley",
+  "Newman","Blake","Ross","Holmes","Stone","Burns","Kennedy","Rice","Watkins","Mack",
+  "Webb","Flynn","Shaw","Hughes","Owens","Fields","Frost","Crawford","Barnes","Nichols",
+  "Franklin","Barker","Stanton","Benson","Thornton","Caldwell","Maxwell","Ramsey","Moss","Sims",
+  "Norris","Swain","Payne","Vickers","Monroe","Cross","Sterling","Harmon","Mercer","Blackwell",
+  "Davenport","Ellison","Frazier","Goodwin","Hayden","Inman","Jefferson","Kelley","Meadows","Newton",
+  "Ortiz","Ramsey","Sawyer","Underwood","Valle","Winfield","York","Zimmerman","Prescott","Calloway",
+  "Donaldson","Epps","Fordham","Granger","Hinds","Ivory","Jacobsen","Lattimore","Maddox","Ogden",
+  "Pruitt","Quinones","Renfro","Salter","Tomlinson","Upshaw","Vanderpool","Whitlock","Yates","Burgess",
+  "Calhoun","Dunmore","Fairchild","Gilliam","Holt","Jamison","Kinard","Massey","Oliver","Pittman",
+  "Raines","Stafford","Thames","Valentine","Waller","Archer","Boone","Crenshaw","Dunbar","Flagg",
+  "Gaines","Holton","Jansen","Kirby","Moorehead","Nettles","Pennington","Thornburg","Ulrich","Weston",
+  "Yancy","Zavala","Blount","Cisco","Darnell","Easley","Fuqua","Glover","Hadley","Ingersoll",
+  "Jasper","Kincaid","Latimer","Munro","Nance","Oldham","Prater","Rendell","Spires","Tidwell",
+  "Unger","Varner","Whitmore","Yarborough","Becton","Colquitt","Elmore","Fortson","Gadsby","Harden",
+  "Isom","Joplin","Langford","Minter","Odom","Phelps","Quarles","Sherwood","Trawick","Villanueva",
+  "Wooten","Albright","Brackett","Cantrell","Dewey","Edmond","Furlong","Greathouse","Hubbard","Ivery"
+];
+
+// ─── Female names: 110+ unique, no current WNBA stars ─────────────────────────
 const NAMES_MALE = {
-  first: ["James", "Kevin", "Stephen", "Luka", "Joel", "Giannis", "Anthony", "Kawhi", "Kyrie", "Damian", "Jayson", "Devin", "Ja", "Zion", "Nikola", "Victor", "Chet", "Shai", "Tyrese", "Paolo", "Donovan", "Jalen", "Bam", "De'Aaron", "Cade"],
-  last: ["James", "Durant", "Curry", "Doncic", "Embiid", "Antetokounmpo", "Davis", "Leonard", "Irving", "Lillard", "Tatum", "Booker", "Morant", "Williamson", "Jokic", "Wembanyama", "Holmgren", "Gilgeous", "Haliburton", "Banchero", "Mitchell", "Brunson", "Adebayo", "Fox", "Cunningham"]
+  first: US_MALE_FIRST,
+  last: US_MALE_LAST
 };
 
 const NAMES_FEMALE = {
-  first: ["Maya", "Breanna", "Candace", "Diana", "A'ja", "Kelsey", "Jewell", "Elena", "Sabrina", "Brittney", "Jonquel", "Nneka", "Skylar", "Courtney", "Arike", "Caitlin", "Angel", "Aliyah", "Cameron", "Kamilla", "Juju", "Paige", "Rickea"],
-  last: ["Moore", "Stewart", "Parker", "Taurasi", "Wilson", "Plum", "Loyd", "Delle Donne", "Ionescu", "Griner", "Jones", "Ogwumike", "Diggins-Smith", "Vandersloot", "Ogunbowale", "Clark", "Reese", "Boston", "Brink", "Cardoso", "Watkins", "Bueckers", "Jackson"]
+  first: [
+    "Aaliyah","Amara","Destiny","Imani","Jasmine","Kiara","Layla","Monique","Nadia","Simone",
+    "Tiana","Unique","Vanessa","Ximena","Yara","Zara","Brianna","Camille","Deja","Essence",
+    "Fatima","Gabrielle","Harmony","Isis","Jade","Kezia","Lyric","Mia","Naomi","Olivia",
+    "Portia","Reign","Sarai","Trinity","Ursula","Valencia","Whitney","Xena","Yasmin","Zola",
+    "Amber","Bianca","Chloe","Danielle","Ebony","Faith","Giselle","Hailey","Imara","Jada",
+    "Krystal","Latasha","Melanie","Nicole","Octavia","Peyton","Quiana","Renee","Shanice","Tara",
+    "Uma","Vivian","Willow","Xiomara","Yvette","Zelda","Adriana","Bella","Celeste","Diana",
+    "Elena","Farida","Gianna","Hana","Ingrid","Jolene","Kaia","Lena","Mara","Nora",
+    "Odessa","Paloma","Quinn","Raven","Selena","Tamara","Unika","Vera","Wren","Xochitl",
+    "Yolanda","Zuri","Ainsley","Brielle","Cassidy","Delilah","Eden","Fiona","Grace","Harper",
+    "Iris","Jordyn","Kendra","Lorena","Madison","Noelle","Opal","Priya","Remi","Sage",
+    "Thalia","Unity","Valentina","Waverly","Ximena","Yael","Zoe"
+  ],
+  last: [
+    "Washington","Hayes","Thompson","Williams","Jackson","Robinson","Davis","Johnson","Anderson","Harris",
+    "White","Martin","Brown","Taylor","Lee","Clark","Lewis","Walker","Hall","Young",
+    "Allen","Wright","King","Scott","Green","Baker","Adams","Nelson","Carter","Morrison",
+    "Chambers","Brooks","Edwards","Coleman","Jenkins","Perry","Powell","Long","Patterson","West",
+    "Foster","Simmons","Warren","Dixon","Griffin","Harper","Reed","Fleming","Garrett","Bradley",
+    "Newman","Blake","Ross","Holmes","Stone","Burns","Kennedy","Rice","Mack","Webb",
+    "Flynn","Shaw","Hughes","Owens","Fields","Frost","Crawford","Barnes","Nichols","Franklin",
+    "Stanton","Benson","Thornton","Caldwell","Maxwell","Ramsey","Moss","Sterling","Harmon","Mercer",
+    "Blackwell","Davenport","Ellison","Frazier","Goodwin","Hayden","Jefferson","Kelley","Meadows","Newton",
+    "Ortiz","Sawyer","Underwood","Valle","Winfield","York","Prescott","Calloway","Granger","Hinds",
+    "Lattimore","Maddox","Ogden","Pruitt","Renfro","Salter","Tomlinson","Vanderpool","Whitlock","Yates"
+  ]
 };
 
 const REGIONS = [
@@ -37,8 +105,8 @@ const REGIONS = [
     name: 'United States',
     weight: 78,
     origins: ["Duke", "Kentucky", "Kansas", "UNC", "Gonzaga", "UCLA", "Villanova", "Arizona", "Michigan State", "UConn", "Purdue", "Houston", "Baylor", "Virginia", "Texas"],
-    firstNamesMale: ["James", "Kevin", "Stephen", "Luka", "Joel", "Giannis", "Anthony", "Kawhi", "Kyrie", "Damian", "Jayson", "Devin", "Ja", "Zion", "Nikola", "Victor", "Chet", "Shai", "Tyrese", "Paolo", "Donovan", "Jalen", "Bam", "De'Aaron", "Cade"],
-    lastNamesMale: ["James", "Durant", "Curry", "Doncic", "Embiid", "Antetokounmpo", "Davis", "Leonard", "Irving", "Lillard", "Tatum", "Booker", "Morant", "Williamson", "Jokic", "Wembanyama", "Holmgren", "Gilgeous", "Haliburton", "Banchero", "Mitchell", "Brunson", "Adebayo", "Fox", "Cunningham"],
+    firstNamesMale: US_MALE_FIRST,
+    lastNamesMale: US_MALE_LAST,
     hometowns: ["New York, NY", "Los Angeles, CA", "Chicago, IL", "Houston, TX", "Philadelphia, PA", "Phoenix, AZ", "San Antonio, TX", "San Diego, CA", "Dallas, TX", "San Jose, CA"],
     flavor: { athleticism: 2, shooting: 0, passing: 0, iq: 0 }
   },
@@ -47,49 +115,125 @@ const REGIONS = [
     name: 'Balkans',
     weight: 5,
     origins: ["Partizan Belgrade", "Crvena Zvezda", "Mega MIS", "Cedevita Olimpija", "Buducnost VOLI"],
-    firstNamesMale: ["Nikola", "Luka", "Bogdan", "Vasilije", "Nemanja", "Milos", "Bojan", "Dario", "Ivica", "Jusuf", "Aleksej", "Filip", "Marko", "Stefan"],
-    lastNamesMale: ["Jokic", "Doncic", "Bogdanovic", "Micic", "Bjelica", "Teodosic", "Saric", "Zubac", "Nurkic", "Pokuševski", "Petrušev", "Guduric", "Jovic", "Marjanovic"],
-    hometowns: ["Belgrade, Serbia", "Ljubljana, Slovenia", "Zagreb, Croatia", "Podgorica, Montenegro"],
+    firstNamesMale: [
+      "Branko","Dragan","Goran","Miroslav","Predrag","Radovan","Slobodan","Vojislav","Zoran","Aleksandar",
+      "Borivoje","Cvetan","Dalibor","Dusan","Eugen","Gojko","Hristo","Ilija","Jovan","Kosta",
+      "Ljupcho","Mirko","Nedeljko","Ognjen","Petar","Rastko","Srdan","Tihomir","Uros","Vladan",
+      "Tomislav","Ratko","Miodrag","Nebojsa","Dragutin","Velimir","Cedomir","Blazo","Andrija","Sinisa"
+    ],
+    lastNamesMale: [
+      "Kovacevic","Petrovic","Stojanovic","Nikolic","Djordjevic","Milosevic","Popovic","Ivanovic","Lukic","Markovic",
+      "Stankovic","Paunovic","Lazarevic","Zdravkovic","Stevanovic","Todorovič","Vukovic","Radovic","Milovanovic","Rankovic",
+      "Cvetkovic","Filipovic","Gavrilovic","Hernandez","Jankovic","Knezevic","Miletic","Ninkovic","Obradovic","Pavlovic",
+      "Radulovic","Savic","Tosic","Ugrinovic","Vucic","Zivanovic","Blagojevic","Djokic","Eremic","Gavric"
+    ],
+    hometowns: ["Belgrade, Serbia", "Ljubljana, Slovenia", "Zagreb, Croatia", "Podgorica, Montenegro", "Novi Sad, Serbia"],
     flavor: { athleticism: -2, shooting: 2, passing: 3, iq: 3 }
   },
   {
     id: 'europe_west',
     name: 'Western Europe',
-    weight: 5,
+    weight: 3,
     origins: ["Real Madrid", "FC Barcelona", "ASVEL", "Monaco", "ALBA Berlin", "Bayern Munich", "Virtus Bologna", "Olimpia Milano"],
-    firstNamesMale: ["Victor", "Rudy", "Evan", "Nicolas", "Killian", "Zaccharie", "Alexandre", "Moussa", "Theo", "Guerschon", "Dennis", "Franz", "Moritz", "Daniel", "Pau", "Marc", "Ricky", "Juancho", "Willy"],
-    lastNamesMale: ["Wembanyama", "Gobert", "Fournier", "Batum", "Hayes", "Risacher", "Sarr", "Diabate", "Maledon", "Yabusele", "Schröder", "Wagner", "Theis", "Gasol", "Rubio", "Hernangomez"],
-    hometowns: ["Paris, France", "Madrid, Spain", "Berlin, Germany", "Rome, Italy", "Barcelona, Spain"],
+    firstNamesMale: [
+      "Adrien","Baptiste","Clément","Dorian","Edouard","Félix","Gauthier","Henri","Ilian","Julien",
+      "Kévin","Laurent","Matthieu","Nicolas","Olivier","Pierrick","Quentin","Romain","Sébastien","Théo",
+      "Ugo","Vianney","Wilhelm","Axel","Benedikt","Christoph","Dieter","Ernst","Fabian","Gregor",
+      "Hannes","Ingo","Jonas","Klaus","Lennart","Marek","Nils","Oskar","Philipp","Raffael",
+      "Sergio","Tomás","Unai","Vicente","Xavier","Yago","Álvaro","Borja","César","Diego"
+    ],
+    lastNamesMale: [
+      "Leblanc","Dupont","Leroy","Moreau","Simon","Laurent","Lefebvre","Roux","David","Bertrand",
+      "Morin","Fontaine","Chevalier","Garnier","Faure","Rousseau","Blanc","Guerin","Muller","Henry",
+      "Schmitt","Weber","Becker","Hoffmann","Zimmermann","Richter","Lang","Neumann","Braun","Werner",
+      "Gonzalez","Rodriguez","Lopez","Martinez","Sanchez","Fernandez","Jimenez","Navarro","Molina","Castillo",
+      "Rossi","Ferrari","Russo","Esposito","Romano","Colombo","Ricci","Marino","Greco","Bruno"
+    ],
+    hometowns: ["Paris, France", "Madrid, Spain", "Berlin, Germany", "Rome, Italy", "Barcelona, Spain", "Lyon, France"],
     flavor: { athleticism: 0, shooting: 2, passing: 2, iq: 2 }
+  },
+  {
+    id: 'europe_baltic',
+    name: 'Baltic & Nordic',
+    weight: 2,
+    origins: ["Žalgiris", "Rytas", "BC Ventspils", "Kalev/Cramo", "Kauno Žalgiris"],
+    firstNamesMale: [
+      "Mantas","Mindaugas","Rokas","Tadas","Vytautas","Arvydas","Edgaras","Gintaras","Ignas","Justinas",
+      "Karolis","Lukas","Marius","Nerijus","Povilas","Rimas","Saulius","Tomas","Valdas","Zygimantas",
+      "Andris","Arturs","Davis","Edgars","Kristaps","Klavsons","Martins","Ralfs","Ronalds","Toms",
+      "Erik","Mikkel","Rasmus","Søren","Tobias","Andreas","Elias","Henrik","Lars","Magnus"
+    ],
+    lastNamesMale: [
+      "Sabonis","Valančiūnas","Brazdeikis","Kleiza","Butaitis","Gudaitis","Mozgeika","Ulanovas","Venslovas","Zukauskas",
+      "Bertans","Berzins","Blūms","Cimmers","Gailitis","Ikstens","Jansons","Krumins","Lasis","Maciulis",
+      "Norvik","Ozols","Rozitis","Skele","Timma","Urdze","Valters","Zagars","Kalnietis","Lavrinovic",
+      "Andersen","Christoffersen","Eriksen","Halverson","Lindqvist","Magnusson","Nielsen","Petersen","Rasmussen","Sorensen"
+    ],
+    hometowns: ["Kaunas, Lithuania", "Riga, Latvia", "Tallinn, Estonia", "Vilnius, Lithuania", "Copenhagen, Denmark"],
+    flavor: { athleticism: -1, shooting: 3, passing: 2, iq: 3 }
   },
   {
     id: 'oceania',
     name: 'Oceania',
     weight: 3,
     origins: ["Melbourne United", "Sydney Kings", "Perth Wildcats", "New Zealand Breakers", "Tasmania JackJumpers"],
-    firstNamesMale: ["Josh", "Patty", "Ben", "Joe", "Dante", "Matisse", "Duop", "Jock", "Dyson", "Jack", "Mitch", "Matthew"],
-    lastNamesMale: ["Giddey", "Mills", "Simmons", "Ingles", "Exum", "Thybulle", "Reath", "Landale", "Daniels", "McVeigh", "Creek", "Dellavedova"],
-    hometowns: ["Melbourne, Australia", "Sydney, Australia", "Perth, Australia", "Auckland, New Zealand"],
+    firstNamesMale: [
+      "Lachlan","Callum","Hamish","Angus","Declan","Rory","Kieran","Finn","Ewan","Brodie",
+      "Brayden","Cody","Dylan","Ethan","Fletcher","Harrison","Jett","Koby","Levi","Mitch",
+      "Nathan","Oliver","Patrick","Quinn","Riley","Sawyer","Taine","Wyatt","Zac","Archie",
+      "Cameron","Duncan","Fraser","Grant","Hayden","Isak","Jensen","Kane","Logan","Marco"
+    ],
+    lastNamesMale: [
+      "Andersen","Blackmore","Carmichael","Doherty","Everett","Forbes","Gallagher","Heckenberg","Ingleton","Jarvis",
+      "Kickert","Loughton","Mackinnon","Neilson","O'Brien","Pringle","Roberson","Soragna","Thwaites","Uluru",
+      "Vickery","Worthington","Yabsley","Zeigler","Bartholomew","Couisineau","Dennison","Eldridge","Farquhar","Gliddon",
+      "Hodgson","Illawarra","Jenkinson","Kirkland","Leuer","Mcilroy","Nnaji","Orford","Pakula","Rennie"
+    ],
+    hometowns: ["Melbourne, Australia", "Sydney, Australia", "Perth, Australia", "Auckland, New Zealand", "Brisbane, Australia"],
     flavor: { athleticism: 3, shooting: 1, passing: 1, iq: 0 }
   },
   {
     id: 'africa',
     name: 'Africa',
     weight: 3,
-    origins: ["NBA Academy Africa", "AS Douanes", "Petro de Luanda", "Cape Town Tigers"],
-    firstNamesMale: ["Joel", "Pascal", "Hakeem", "Dikembe", "Bismack", "Serge", "Precious", "Josh", "Udoka", "Charles", "Giannis"],
-    lastNamesMale: ["Embiid", "Siakam", "Olajuwon", "Mutombo", "Biyombo", "Ibaka", "Achiuwa", "Okogie", "Bassey", "Antetokounmpo"],
-    hometowns: ["Lagos, Nigeria", "Dakar, Senegal", "Yaoundé, Cameroon", "Johannesburg, South Africa"],
+    origins: ["NBA Academy Africa", "AS Douanes", "Petro de Luanda", "Cape Town Tigers", "Rivers Hoopers"],
+    firstNamesMale: [
+      "Chimezie","Ekpe","Festus","Goga","Hamidou","Ibou","Jalen","Karim","Landry","Moussa",
+      "Ndidi","Obinna","Prosper","Quincy","Remy","Seun","Thon","Uchenna","Valdez","Waris",
+      "Xola","Yannick","Zion","Adewale","Bankole","Chisom","Deji","Emeka","Folarin","Gbenga",
+      "Hammed","Isiaq","Jide","Kola","Lamin","Modou","Nnamdi","Obi","Pape","Ramzi",
+      "Sidy","Toumani","Uche","Vieux","Wemba","Xhemal","Youssouf","Zoumanigui","Adama","Bamba"
+    ],
+    lastNamesMale: [
+      "Nwosu","Diallo","Coulibaly","Traore","Keita","Toure","Kouyate","Camara","Doumbia","Diabate",
+      "Badji","Ndiaye","Sene","Mbaye","Diouf","Thiam","Sarr","Cisse","Faye","Gaye",
+      "Okonkwo","Eze","Fabian","Nzingha","Osei","Tetteh","Asante","Bonsu","Coffie","Darko",
+      "Okafor","Nzikeba","Okeke","Aniekwe","Ideye","Jibrin","Abubakar","Balogun","Chikeluba","Danladi",
+      "Ekwueme","Fabunmi","Garba","Haruna","Ilori","Jelani","Kanu","Lawal","Musa","Nduka"
+    ],
+    hometowns: ["Lagos, Nigeria", "Dakar, Senegal", "Yaoundé, Cameroon", "Johannesburg, South Africa", "Accra, Ghana"],
     flavor: { athleticism: 5, shooting: -2, passing: -2, iq: 0 }
   },
   {
     id: 'asia',
     name: 'Asia',
     weight: 2,
-    origins: ["Chiba Jets", "Alvark Tokyo", "Guangdong Tigers", "Beijing Ducks", "Seoul SK Knights"],
-    firstNamesMale: ["Yuta", "Rui", "Yuki", "Keisei", "Zhou", "Guo", "Kai", "Jordan", "Dwight", "Justin"],
-    lastNamesMale: ["Watanabe", "Hachimura", "Kawamura", "Tominaga", "Qi", "Ailun", "Sotto", "Clarkson", "Ramos", "Brown"],
-    hometowns: ["Tokyo, Japan", "Beijing, China", "Manila, Philippines", "Seoul, South Korea"],
+    origins: ["Chiba Jets", "Alvark Tokyo", "Guangdong Tigers", "Beijing Royal Fighters", "Seoul SK Knights"],
+    firstNamesMale: [
+      "Ryota","Shuhei","Naoki","Takuma","Keijiro","Hiroshi","Kazuki","Takeshi","Daiki","Yuya",
+      "Ao","Chang","Fang","Hao","Jiwei","Long","Mingzhe","Peng","Qi","Ruizhe",
+      "Sheng","Tianle","Wei","Xiaolong","Yupeng","Zijun","Arvin","Dwane","Eloy","Fil",
+      "Gian","Herbie","Ibarra","Jayvee","Kris","Liam","Matteo","Noy","Ogie","Pio",
+      "Robi","Santino","Tino","Urie","Val","Wowie","Xian","Yuri","Zeejay","Amos"
+    ],
+    lastNamesMale: [
+      "Nakamura","Yoshida","Tanaka","Suzuki","Inoue","Watanabe","Kobayashi","Kato","Yamamoto","Hayashi",
+      "Ito","Shimizu","Yamaguchi","Matsumoto","Ogawa","Hashimoto","Nishimura","Ikeda","Okamoto","Aoki",
+      "Chen","Wang","Li","Zhang","Liu","Yang","Huang","Zhao","Wu","Zhu",
+      "Santos","Reyes","Cruz","Bautista","Ocampo","Garcia","Dela Cruz","Mendoza","Tolentino","Villanueva",
+      "Kim","Park","Lee","Choi","Jung","Ahn","Han","Yoon","Jang","Lim"
+    ],
+    hometowns: ["Tokyo, Japan", "Beijing, China", "Manila, Philippines", "Seoul, South Korea", "Osaka, Japan"],
     flavor: { athleticism: -1, shooting: 3, passing: 1, iq: 1 }
   },
   {
@@ -97,25 +241,57 @@ const REGIONS = [
     name: 'Latin America',
     weight: 2,
     origins: ["Flamengo", "Sesi Franca", "Quimsa", "San Lorenzo", "Capitanes de Ciudad de México"],
-    firstNamesMale: ["Gui", "Raul", "Leandro", "Anderson", "Nene", "Facundo", "Manu", "Luis", "Gabriel", "Jaime"],
-    lastNamesMale: ["Santos", "Neto", "Barbosa", "Varejao", "Hilario", "Campazzo", "Ginobili", "Scola", "Deck", "Jaquez"],
-    hometowns: ["São Paulo, Brazil", "Buenos Aires, Argentina", "Mexico City, Mexico", "Rio de Janeiro, Brazil"],
+    firstNamesMale: [
+      "Agustín","Bruno","Carlos","Diego","Eduardo","Franco","Germán","Hernán","Ignacio","Julián",
+      "Leonardo","Matías","Nicolás","Octavio","Pablo","Rafael","Sebastián","Tomás","Ulises","Vicente",
+      "Alonso","Bernardo","Caio","Davi","Enzo","Felipe","Guilherme","Hugo","Ivan","João",
+      "Lucas","Marcelo","Nelson","Otávio","Pedro","Renato","Ricardo","Rodrigo","Tiago","Vitor",
+      "Alejandro","Benjamín","Claudio","Daniel","Emilio","Fabricio","Gonzalo","Hernan","Isidro","Javier"
+    ],
+    lastNamesMale: [
+      "Silva","Oliveira","Souza","Rodrigues","Ferreira","Alves","Pereira","Lima","Gomes","Costa",
+      "Martins","Rocha","Ribeiro","Carvalho","Cavalcanti","Barbosa","Nascimento","Araujo","Andrade","Melo",
+      "Gonzalez","Rodriguez","Martinez","Lopez","Garcia","Hernandez","Perez","Sanchez","Ramirez","Torres",
+      "Flores","Reyes","Cruz","Morales","Gutierrez","Chavez","Mendoza","Diaz","Vargas","Castillo",
+      "Pereyra","Romero","Soria","Benítez","Acosta","Villalba","Esquivel","Monzón","Quiroga","Zalazar"
+    ],
+    hometowns: ["São Paulo, Brazil", "Buenos Aires, Argentina", "Mexico City, Mexico", "Rio de Janeiro, Brazil", "Montevideo, Uruguay"],
     flavor: { athleticism: 1, shooting: 1, passing: 2, iq: 2 }
   },
   {
     id: 'canada',
     name: 'Canada',
     weight: 2,
-    origins: ["Orangeville Prep", "Scarborough Shooting Stars", "Montreal Alliance", "Carleton University"],
-    firstNamesMale: ["Shai", "Jamal", "RJ", "Andrew", "Dillon", "Luguentz", "Bennedict", "Shaedon", "Kelly", "Dwight"],
-    lastNamesMale: ["Gilgeous-Alexander", "Murray", "Barrett", "Wiggins", "Brooks", "Dort", "Mathurin", "Sharpe", "Olynyk", "Powell"],
-    hometowns: ["Toronto, Canada", "Montreal, Canada", "Vancouver, Canada", "Ottawa, Canada"],
+    origins: ["Orangeville Prep", "Scarborough Shooting Stars", "Montreal Alliance", "Carleton University", "Niagara River Lions"],
+    firstNamesMale: [
+      "Brady","Caleb","Dylan","Ethan","Fletcher","Gavin","Hayden","Ian","Jensen","Kieran",
+      "Liam","Mason","Nathan","Oliver","Parker","Quinn","Ryder","Sawyer","Tyler","Upton",
+      "Vaughn","Wesley","Xander","Yannick","Zach","Aiden","Brendan","Connor","Darian","Easton",
+      "Finn","Griffon","Harlow","Idris","Josiah","Keaton","Laurent","Maverick","Nolan","Orion",
+      "Prescott","Redding","Spencer","Thatcher","Ulric","Vance","Walker","Xylon","Yarrow","Zane"
+    ],
+    lastNamesMale: [
+      "Tremblay","Gagnon","Bouchard","Côté","Fortin","Gagné","McNeil","Paquette","Lavoie","Belanger",
+      "Levesque","Pelletier","Leclerc","Bergeron","Ouellet","Couture","Morin","Lapointe","Charron","Vaillancourt",
+      "O'Brien","MacDonald","MacLeod","Campbell","Fraser","McKenzie","Morrison","Henderson","Crawford","MacPherson",
+      "Johansson","Lindberg","Gustavsson","Eriksson","Hoglund","Sundqvist","Backstrom","Ekholm","Granlund","Nylander",
+      "Beaumont","Castillo","Delacroix","Ellison","Fairweather","Germain","Hendricks","Ismail","Jourdain","Korte"
+    ],
+    hometowns: ["Toronto, Canada", "Montreal, Canada", "Vancouver, Canada", "Ottawa, Canada", "Hamilton, Canada"],
     flavor: { athleticism: 2, shooting: 2, passing: 1, iq: 1 }
   }
 ];
 
-const COACH_FIRST_NAMES_MALE = ["Gregg", "Erik", "Steve", "Phil", "Doc", "Nick", "Ime", "Joe", "Monty", "Jason", "Tyronn", "Mike", "Rick", "Darko", "Billy"];
-const COACH_FIRST_NAMES_FEMALE = ["Becky", "Dawn", "Cheryl", "Teresa", "Sandy", "Kara", "Noelle", "Tanisha", "Stephanie", "Latricia", "Nell", "Pat", "Geno", "Kim", "Holly"];
+const COACH_FIRST_NAMES_MALE = [
+  "Alonzo","Bertrand","Carlton","Desmond","Edmund","Franklin","Gerard","Hector","Irving","Jerome",
+  "Kenneth","Lloyd","Melvin","Norman","Oscar","Percival","Reginald","Sherman","Thurston","Virgil",
+  "Wendell","Xavier","Yusuf","Zander","Aldous","Boris","Clifton","Darnell","Earl","Floyd"
+];
+const COACH_FIRST_NAMES_FEMALE = [
+  "Ada","Bernadette","Claudette","Dorothea","Eunice","Francesca","Geraldine","Harriet","Inez","Josephine",
+  "Kathleen","Lorraine","Madeleine","Nadine","Ophelia","Paulette","Rosalind","Sylvia","Thea","Ursula",
+  "Vivienne","Wilhelmina","Xena","Yvonne","Zelda","Arlene","Beatrice","Constance","Delphine","Estelle"
+];
 
 export const TEAM_DATA = [
   { city: "New York", name: "Titans", conf: "Eastern", div: "Atlantic", market: "Large", primary: "#F58426", secondary: "#006BB6" },
