@@ -630,6 +630,66 @@ const PlayerModal: React.FC<PlayerModalProps> = ({
             </div>
           </section>
 
+          {player.tendencies && (
+          <section className="space-y-8">
+            <div className="flex items-center gap-4">
+              <h3 className="text-[10px] font-black text-amber-500 uppercase tracking-[0.5em] whitespace-nowrap">Tendencies</h3>
+              <div className="h-px w-full bg-slate-800/50"></div>
+            </div>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-10">
+              {/* Offensive Tendencies */}
+              <div className="space-y-4">
+                <h4 className="text-[10px] font-black text-sky-400 uppercase tracking-widest pb-2 border-b border-slate-800/50">⚡ Offensive</h4>
+                <div className="space-y-3">
+                  {([
+                    ['Pull-Up 3', player.tendencies.offensiveTendencies.pullUpThree],
+                    ['Post Up', player.tendencies.offensiveTendencies.postUp],
+                    ['Drive to Basket', player.tendencies.offensiveTendencies.driveToBasket],
+                    ['Mid-Range', player.tendencies.offensiveTendencies.midRangeJumper],
+                    ['Kick-Out Passer', player.tendencies.offensiveTendencies.kickOutPasser],
+                    ['Iso Heavy', player.tendencies.offensiveTendencies.isoHeavy],
+                    ['Transition Hunter', player.tendencies.offensiveTendencies.transitionHunter],
+                  ] as [string, number][]).map(([label, val]) => (
+                    <div key={label} className="flex items-center gap-3">
+                      <span className="text-[10px] text-slate-400 font-semibold w-32 shrink-0">{label}</span>
+                      <div className="flex-1 h-1.5 bg-slate-800 rounded-full overflow-hidden">
+                        <div
+                          className={`h-full rounded-full transition-all ${val >= 70 ? 'bg-sky-400' : val >= 45 ? 'bg-sky-600' : 'bg-slate-600'}`}
+                          style={{ width: `${val}%` }}
+                        />
+                      </div>
+                      <span className={`text-[10px] font-black w-7 text-right tabular-nums ${val >= 70 ? 'text-sky-400' : val >= 45 ? 'text-slate-300' : 'text-slate-500'}`}>{val}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+              {/* Defensive Tendencies */}
+              <div className="space-y-4">
+                <h4 className="text-[10px] font-black text-rose-400 uppercase tracking-widest pb-2 border-b border-slate-800/50">🛡️ Defensive</h4>
+                <div className="space-y-3">
+                  {([
+                    ['Gambles', player.tendencies.defensiveTendencies.gambles],
+                    ['Help Defender', player.tendencies.defensiveTendencies.helpDefender],
+                    ['Physicality', player.tendencies.defensiveTendencies.physicality],
+                    ['Face-Up Guard', player.tendencies.defensiveTendencies.faceUpGuard],
+                  ] as [string, number][]).map(([label, val]) => (
+                    <div key={label} className="flex items-center gap-3">
+                      <span className="text-[10px] text-slate-400 font-semibold w-32 shrink-0">{label}</span>
+                      <div className="flex-1 h-1.5 bg-slate-800 rounded-full overflow-hidden">
+                        <div
+                          className={`h-full rounded-full transition-all ${val >= 70 ? 'bg-rose-400' : val >= 45 ? 'bg-rose-700' : 'bg-slate-600'}`}
+                          style={{ width: `${val}%` }}
+                        />
+                      </div>
+                      <span className={`text-[10px] font-black w-7 text-right tabular-nums ${val >= 70 ? 'text-rose-400' : val >= 45 ? 'text-slate-300' : 'text-slate-500'}`}>{val}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
+          </section>
+          )}
+
           <section className="space-y-8">
              <div className="flex items-center justify-between">
                 <h3 className="text-[10px] font-black text-amber-500 uppercase tracking-[0.5em]">Gemini Scouting analysis</h3>
