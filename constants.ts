@@ -63,6 +63,15 @@ export const COACH_BADGES: CoachBadge[] = [
   'Offensive Architect', 'Clutch Specialist', 'Recruiting Ace'
 ];
 
+export type PosAttrRangeKey = 'shooting' | 'playmaking' | 'defense' | 'rebounding' | 'athleticism';
+export const POS_ATTR_RANGES: Record<Position, Record<PosAttrRangeKey, [number, number]>> = {
+  PG: { shooting: [80, 95], playmaking: [85, 98], defense: [65, 85], rebounding: [55, 75], athleticism: [75, 90] },
+  SG: { shooting: [80, 95], playmaking: [70, 85], defense: [65, 85], rebounding: [55, 75], athleticism: [80, 95] },
+  SF: { shooting: [70, 90], playmaking: [65, 85], defense: [75, 90], rebounding: [65, 85], athleticism: [85, 98] },
+  PF: { shooting: [65, 85], playmaking: [60, 80], defense: [80, 95], rebounding: [85, 98], athleticism: [80, 95] },
+  C:  { shooting: [55, 80], playmaking: [50, 75], defense: [85, 98], rebounding: [90, 98], athleticism: [80, 95] },
+};
+
 const COLLEGES = ["Duke", "Kentucky", "Kansas", "UNC", "Gonzaga", "UCLA", "Villanova", "Arizona", "Michigan State", "UConn", "Purdue", "Houston", "Baylor", "Virginia", "Texas"];
 
 // ─── US Male first names: 120+ unique, no current NBA stars ──────────────────
@@ -623,12 +632,14 @@ export const generatePlayer = (id: string, ageRange: [number, number] = [19, 38]
   const playerHometown = region.hometowns[Math.floor(Math.random() * region.hometowns.length)];
   const physGender = gender === 'Female' ? 'Female' : 'Male';
   const phys = genPhysical(pos, physGender);
+  const posRanges = POS_ATTR_RANGES[pos];
+  const clampPos = (val: number, key: PosAttrRangeKey) => { const [lo, hi] = posRanges[key]; return Math.min(Math.min(99, hi), Math.max(lo, val)); };
   const rawAttrs: AttrMap = {
-    shooting: rating + f.shooting, 
-    defense: rating, 
-    rebounding: rating, 
-    playmaking: rating + f.passing, 
-    athleticism: rating + f.athleticism,
+    shooting:    clampPos(rating + f.shooting,     'shooting'),
+    defense:     clampPos(rating,                  'defense'),
+    rebounding:  clampPos(rating,                  'rebounding'),
+    playmaking:  clampPos(rating + f.passing,      'playmaking'),
+    athleticism: clampPos(rating + f.athleticism,  'athleticism'),
     shootingInside: getRandomAttr(rating), 
     shootingMid: getRandomAttr(rating, f.shooting), 
     shooting3pt: getRandomAttr(rating, f.shooting), 
@@ -743,12 +754,14 @@ export const generateProspects = (year: number, count: number = 100, genderRatio
     const prospectHometown = region.hometowns[Math.floor(Math.random() * region.hometowns.length)];
     const physGender = gender === 'Female' ? 'Female' : 'Male';
     const phys = genPhysical(pos, physGender);
+    const posRanges = POS_ATTR_RANGES[pos];
+    const clampPos = (val: number, key: PosAttrRangeKey) => { const [lo, hi] = posRanges[key]; return Math.min(Math.min(99, hi), Math.max(lo, val)); };
     const rawAttrs: AttrMap = {
-      shooting: rating + f.shooting, 
-      defense: rating, 
-      rebounding: rating, 
-      playmaking: rating + f.passing, 
-      athleticism: rating + f.athleticism,
+      shooting:    clampPos(rating + f.shooting,    'shooting'),
+      defense:     clampPos(rating,                 'defense'),
+      rebounding:  clampPos(rating,                 'rebounding'),
+      playmaking:  clampPos(rating + f.passing,     'playmaking'),
+      athleticism: clampPos(rating + f.athleticism, 'athleticism'),
       shootingInside: getRandomAttr(rating), 
       shootingMid: getRandomAttr(rating, f.shooting), 
       shooting3pt: getRandomAttr(rating, f.shooting), 

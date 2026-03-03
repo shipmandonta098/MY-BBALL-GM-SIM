@@ -1,6 +1,8 @@
 import React, { useEffect } from 'react';
 import { Player, PlayerStatus, PersonalityTrait, Position } from '../types';
-import { getFlag } from '../constants';
+import { getFlag, POS_ATTR_RANGES, PosAttrRangeKey } from '../constants';
+
+const POS_RANGE_KEYS: PosAttrRangeKey[] = ['shooting', 'playmaking', 'defense', 'rebounding', 'athleticism'];
 
 interface PlayerModalProps {
   player: Player;
@@ -260,7 +262,16 @@ const PlayerModal: React.FC<PlayerModalProps> = ({
                     <label className="text-[10px] font-black uppercase text-slate-500 tracking-widest">Position</label>
                     <select 
                       value={editedPlayer.position}
-                      onChange={e => setEditedPlayer({...editedPlayer, position: e.target.value as Position})}
+                      onChange={e => {
+                        const newPos = e.target.value as Position;
+                        const ranges = POS_ATTR_RANGES[newPos];
+                        const newAttrs = { ...editedPlayer.attributes } as any;
+                        POS_RANGE_KEYS.forEach(k => {
+                          const [lo, hi] = ranges[k];
+                          newAttrs[k] = Math.min(hi, Math.max(lo, newAttrs[k]));
+                        });
+                        setEditedPlayer({ ...editedPlayer, position: newPos, attributes: newAttrs });
+                      }}
                       className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-3 text-white font-bold focus:outline-none focus:border-amber-500/50"
                     >
                       {positions.map(pos => <option key={pos} value={pos}>{pos}</option>)}
@@ -355,19 +366,41 @@ const PlayerModal: React.FC<PlayerModalProps> = ({
 
                     <div className="h-px w-full bg-slate-800/50 my-4"></div>
 
-                    {Object.entries(editedPlayer.attributes).slice(0, 12).map(([key, val]) => (
+                    {Object.entries(editedPlayer.attributes).slice(0, 12).map(([key, val]) => {
+                      const isRangedKey = POS_RANGE_KEYS.includes(key as PosAttrRangeKey);
+                      const posRange = isRangedKey ? POS_ATTR_RANGES[editedPlayer.position][key as PosAttrRangeKey] : null;
+                      const sliderMin = posRange ? posRange[0] : 0;
+                      const sliderMax = posRange ? posRange[1] : 99;
+                      const outOfRange = posRange && (val as number) > posRange[1];
+                      const warnLabels: Record<string, string> = {
+                        rebounding: 'Guards rarely exceed',
+                        shooting: 'Bigs rarely reach',
+                        playmaking: 'Bigs rarely reach',
+                        defense: 'Guards rarely reach',
+                        athleticism: 'Out of typical range',
+                      };
+                      return (
                       <div key={key} className="space-y-2">
                         <div className="flex justify-between items-center">
                           <label className="text-[9px] font-bold uppercase text-slate-500 tracking-wider">{key.replace(/([A-Z])/g, ' $1')}</label>
-                          <span className="text-slate-300 font-mono text-xs">{val}</span>
+                          <div className="flex items-center gap-2">
+                            {posRange && <span className="text-[8px] text-slate-600 font-mono">{posRange[0]}–{posRange[1]}</span>}
+                            <span className={`font-mono text-xs ${outOfRange ? 'text-amber-400' : 'text-slate-300'}`}>{val}</span>
+                          </div>
                         </div>
                         <input 
-                          type="range" min="0" max="99" value={val as number}
+                          type="range" min={sliderMin} max={sliderMax} value={val as number}
                           onChange={e => handleAttributeChange(key as any, parseInt(e.target.value))}
-                          className="w-full h-1 bg-slate-950 rounded-lg appearance-none cursor-pointer accent-slate-600"
+                          className={`w-full h-1 bg-slate-950 rounded-lg appearance-none cursor-pointer ${outOfRange ? 'accent-amber-400' : 'accent-slate-600'}`}
                         />
+                        {outOfRange && (
+                          <p className="text-[8px] text-amber-500/80 font-semibold">
+                            ⚠ {warnLabels[key] ?? 'Out of typical range'} {posRange![1]} for {editedPlayer.position}
+                          </p>
+                        )}
                       </div>
-                    ))}
+                      );
+                    })}
                   </div>
 
                   <div className="space-y-6">
