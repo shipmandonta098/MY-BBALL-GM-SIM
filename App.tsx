@@ -2,7 +2,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { LeagueState, Player, Team, GameResult, PlayerStatus, ScheduleGame, BulkSimSummary, Prospect, Coach, TradeProposal, Position, NewsItem, NewsCategory, LeagueSettings, SeasonAwards, PlayoffBracket, PlayoffSeries, Transaction, TransactionType, PowerRankingSnapshot, PowerRankingEntry, GMProfile, GMMilestone, RivalryStats, InjuryType } from './types';
 import { generateLeagueTeams, generateSeasonSchedule, generateProspects, generateFreeAgentPool, generateCoachPool, EXPANSION_TEAM_POOL, generateCoach, enforcePositionalBounds } from './constants';
-import { simulateGame } from './utils/simEngine';
+import { simulateGame, normalizeLeagueOVRs } from './utils/simEngine';
 import { generateGameRecap, generateScoutingReport, generateSeasonNarrative, generateCoachScoutingReport, generateNewsHeadline } from './services/geminiService';
 import { generateAwards } from './utils/awardEngine';
 import { assignAIPersonalities, runAIGMOffseason, aiGMTradeDeadlineAction } from './utils/aiGMEngine';
@@ -719,6 +719,9 @@ const App: React.FC = () => {
     if (aiResult.transactions.length > 0) {
       tempState.transactions = [...aiResult.transactions, ...(tempState.transactions || [])].slice(0, 1000);
     }
+
+    // ── Normalize league OVRs to prevent runaway team ratings ──
+    tempState = normalizeLeagueOVRs(tempState);
     
     tempState.newsFeed.unshift({
       id: `offseason-start-${Date.now()}`,
