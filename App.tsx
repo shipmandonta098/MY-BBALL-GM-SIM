@@ -541,6 +541,35 @@ const App: React.FC = () => {
       newState = await finalizeGameResult(newState, game.id, result);
     }
     newState = await processDailyLeagueEvents(newState);
+
+    // ── 10-game win% reality check (advisory only, no sim changes) ──
+    const uTeam = newState.teams.find(t => t.id === newState.userTeamId);
+    if (uTeam) {
+      const totalUserGames = uTeam.wins + uTeam.losses;
+      if (totalUserGames > 0 && totalUserGames % 10 === 0) {
+        const userWinPct = uTeam.wins / totalUserGames;
+        // League avg win% is always 0.500 (zero-sum), threshold is 65%
+        if (userWinPct > 0.65) {
+          const existing = (newState.newsFeed ?? []).find(
+            n => n.id === `winpct-check-${totalUserGames}`);
+          if (!existing) {
+            newState = {
+              ...newState,
+              newsFeed: [{
+                id: `winpct-check-${totalUserGames}`,
+                category: 'milestone' as const,
+                headline: '📊 PERFORMANCE ADVISORY',
+                content: `After ${totalUserGames} games your team is winning at ${Math.round(userWinPct * 100)}% — significantly above the 50% league average. You may be outperforming expectations. Consider raising difficulty in Settings if you want a greater challenge.`,
+                timestamp: newState.currentDay,
+                realTimestamp: Date.now(),
+                isBreaking: false,
+              }, ...newState.newsFeed],
+            };
+          }
+        }
+      }
+    }
+
     return { newState: { ...newState, currentDay: newState.currentDay + 1 }, dayResults };
   };
 
@@ -722,6 +751,33 @@ const App: React.FC = () => {
 
     // ── Normalize league OVRs to prevent runaway team ratings ──
     tempState = normalizeLeagueOVRs(tempState);
+
+    // ── Roster OVR Audit: advisory if human team ranks top-3 ──
+    const teamOVR = (t: typeof tempState.teams[0]) =>
+      t.roster.slice().sort((a, b) => b.rating - a.rating).slice(0, 10)
+        .reduce((s, p) => s + p.rating, 0) / Math.min(10, t.roster.length || 1);
+    const sortedByOVR = [...tempState.teams]
+      .filter(t => t.roster.length > 0)
+      .sort((a, b) => teamOVR(b) - teamOVR(a));
+    const humanRank = sortedByOVR.findIndex(t => t.id === tempState.userTeamId) + 1;
+    const leagueAvgOVR = sortedByOVR.reduce((s, t) => s + teamOVR(t), 0) / (sortedByOVR.length || 1);
+    const humanAvgOVR = teamOVR(tempState.teams.find(t => t.id === tempState.userTeamId)!);
+    let humanOvrAlert: string | undefined;
+    if (humanRank > 0 && humanRank <= 3) {
+      humanOvrAlert = `Your roster (avg OVR ${Math.round(humanAvgOVR)}) ranks #${humanRank} in the league (league avg ${Math.round(leagueAvgOVR)}). Your team is significantly stronger than average — consider raising difficulty in Settings for a greater challenge.`;
+      if (!tempState.newsFeed.find(n => n.id === `ovr-audit-${tempState.season}`)) {
+        tempState.newsFeed.unshift({
+          id: `ovr-audit-${tempState.season}`,
+          category: 'milestone' as const,
+          headline: '⚠️ ROSTER STRENGTH ADVISORY',
+          content: humanOvrAlert,
+          timestamp: tempState.currentDay,
+          realTimestamp: Date.now(),
+          isBreaking: false,
+        });
+      }
+    }
+    tempState = { ...tempState, humanOvrAlert };
     
     tempState.newsFeed.unshift({
       id: `offseason-start-${Date.now()}`,

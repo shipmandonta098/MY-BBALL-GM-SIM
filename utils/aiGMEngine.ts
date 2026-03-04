@@ -133,6 +133,29 @@ function draftPickValue(
   return base;
 }
 
+// ─── Difficulty Normalizer ──────────────────────────────────
+/**
+ * Maps any supported difficulty string to a canonical 4-tier level.
+ * Rookie/Easy = 1 (suboptimal AI), Pro/Medium = 2 (average),
+ * All-Star/Hard = 3 (optimized), Legend/Extreme = 4 (targets human weaknesses).
+ * Simulation math is NEVER modified by difficulty — only AI GM decision quality.
+ */
+export function normalizeDifficulty(d: string): 1 | 2 | 3 | 4 {
+  switch (d) {
+    case 'Rookie': case 'Easy':    return 1;
+    case 'Pro':    case 'Medium':  return 2;
+    case 'All-Star': case 'Hard':  return 3;
+    case 'Legend': case 'Extreme': return 4;
+    default:                       return 2; // fallback to Pro
+  }
+}
+
+/** Returns true when difficulty is at All-Star or Legend level. */
+export function isHighDifficulty(d: string): boolean { return normalizeDifficulty(d) >= 3; }
+
+/** Returns true when AI should actively target human team's weaknesses. */
+export function isLegendDifficulty(d: string): boolean { return normalizeDifficulty(d) === 4; }
+
 // ─── Free agent value / salary bid ──────────────────────────
 function faOfferAmount(
   p: Player,
@@ -180,10 +203,11 @@ function faOfferAmount(
     multiplier *= 1.15; // +15% in bidding wars
   }
 
-  // Difficulty modifier
-  if (difficulty === 'Easy' || difficulty === 'Rookie') multiplier *= 0.8;
-  if (difficulty === 'Hard')     multiplier *= 1.1;
-  if (difficulty === 'Extreme' || difficulty === 'Legend') multiplier *= 1.2;
+  // Difficulty modifier — affects AI GM decision quality, NOT simulation math
+  const dTier = normalizeDifficulty(difficulty);
+  if (dTier === 1) multiplier *= 0.80; // Rookie: AI overpays / poor decisions
+  if (dTier === 3) multiplier *= 1.10; // All-Star: optimized bidding
+  if (dTier === 4) multiplier *= 1.20; // Legend: maximally aggressive
 
   // Poor negotiation → overpays
   if (negotiationRating < 60) multiplier *= 1.0 + (0.2 * (1 - negotiationRating / 100));
@@ -222,7 +246,7 @@ function scoutingAdjustedRating(
   scoutingRating: number,
   difficulty: string
 ): number {
-  if (scoutingRating >= 80 || difficulty === 'Legend' || difficulty === 'All-Star' || difficulty === 'Hard' || difficulty === 'Extreme') {
+  if (scoutingRating >= 80 || isHighDifficulty(difficulty)) {
     return player.rating;
   }
   // Poor scouting: random noise up to ±10

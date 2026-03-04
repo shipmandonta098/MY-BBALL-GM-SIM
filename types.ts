@@ -499,8 +499,12 @@ export interface GameResult {
   quarterDetails?: QuarterDetail[];
 }
 
+/** Rookie=easiest AI GM, Pro=balanced, All-Star=optimized, Legend=targets human weaknesses.
+ *  Legacy values Easy/Medium/Hard/Extreme treated as Rookie/Pro/All-Star/Legend respectively. */
+export type DifficultyLevel = 'Easy' | 'Medium' | 'Hard' | 'Extreme' | 'Rookie' | 'Pro' | 'All-Star' | 'Legend';
+
 export interface LeagueSettings {
-  difficulty: 'Easy' | 'Medium' | 'Hard' | 'Extreme';
+  difficulty: DifficultyLevel;
   ownerMeterEnabled: boolean;
   expansionYear?: number;
   salaryCap: number;
@@ -593,6 +597,8 @@ export interface LeagueState {
     expansionTeamIds: string[];
     draftLog: string[];
   };
+  /** Populated when the human roster OVR ranks top-3 at season start (advisory only). */
+  humanOvrAlert?: string;
   liveGame?: {
     gameId: string;
     homeScore: number;

@@ -1142,6 +1142,27 @@ export const simulateGame = (
   homePlayerStats = homePlayerStats.map(p => ({ ...p, plusMinus: margin }));
   awayPlayerStats = awayPlayerStats.map(p => ({ ...p, plusMinus: -margin }));
 
+  // ── Simulation Symmetry Check (dev console only — never affects sim math) ──
+  // Logs a warning if one team's FG% is 8%+ better than the opponent in this game.
+  (() => {
+    const avgFgPct = (stats: typeof homePlayerStats) => {
+      const fga = stats.reduce((s, p) => s + (p.fga ?? 0), 0);
+      const fgm = stats.reduce((s, p) => s + (p.fgm ?? 0), 0);
+      return fga > 0 ? fgm / fga : 0;
+    };
+    const hFg = avgFgPct(homePlayerStats);
+    const aFg = avgFgPct(awayPlayerStats);
+    const diff = Math.abs(hFg - aFg);
+    if (diff >= 0.08) {
+      console.warn(
+        `[SIM SYMMETRY CHECK] ${home.name} FG%: ${(hFg * 100).toFixed(1)}% | ` +
+        `${away.name} FG%: ${(aFg * 100).toFixed(1)}% | ` +
+        `Diff: ${(diff * 100).toFixed(1)}% >= 8% threshold | ` +
+        `Score: ${totalHome}-${totalAway} | POSSIBLE SIMULATION BIAS DETECTED`
+      );
+    }
+  })();
+
   const allLines = [...homePlayerStats, ...awayPlayerStats].sort((a, b) => b.pts - a.pts);
 
   return {

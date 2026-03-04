@@ -190,7 +190,7 @@ const Settings: React.FC<SettingsProps> = ({ league, updateLeague }) => {
             <div className="space-y-3 bg-slate-950/40 p-6 rounded-2xl border border-slate-800">
               <label className="text-[10px] font-black uppercase text-slate-500 tracking-widest">Overall Difficulty</label>
               <div className="flex gap-2">
-                {['Easy', 'Medium', 'Hard'].map(d => (
+                {['Rookie', 'Pro', 'All-Star', 'Legend'].map(d => (
                   <button
                     key={d}
                     onClick={() => updateSettings({ difficulty: d as any })}
