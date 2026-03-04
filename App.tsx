@@ -39,6 +39,7 @@ import LiveGameModal from './components/LiveGameModal';
 import FranchiseHistory from './components/FranchiseHistory';
 import Rotations from './components/Rotations';
 import TeamManagement from './components/TeamManagement';
+import Players from './components/Players';
 
 const SETTINGS_KEY = 'HOOPS_DYNASTY_SETTINGS_V1';
 
@@ -47,7 +48,7 @@ type AppStatus = 'title' | 'config' | 'setup' | 'game';
 const App: React.FC = () => {
   const [status, setStatus] = useState<AppStatus>('title');
   const [league, setLeague] = useState<LeagueState | null>(null);
-  const [activeTab, setActiveTab] = useState<'dashboard' | 'news' | 'roster' | 'rotations' | 'free_agency' | 'results' | 'standings' | 'schedule' | 'draft' | 'coaching' | 'stats' | 'finances' | 'trade' | 'expansion' | 'settings' | 'coach_market' | 'awards' | 'playoffs' | 'transactions' | 'power_rankings' | 'gm_profile' | 'team_management'>('dashboard');
+  const [activeTab, setActiveTab] = useState<'dashboard' | 'news' | 'roster' | 'rotations' | 'free_agency' | 'results' | 'standings' | 'schedule' | 'draft' | 'coaching' | 'stats' | 'finances' | 'trade' | 'expansion' | 'settings' | 'coach_market' | 'awards' | 'playoffs' | 'transactions' | 'power_rankings' | 'gm_profile' | 'team_management' | 'players'>('dashboard');
   const [rosterTeamId, setRosterTeamId] = useState<string>('');
   const [teamManagementId, setTeamManagementId] = useState<string>('');
   const [loading, setLoading] = useState(false);
@@ -893,6 +894,7 @@ const App: React.FC = () => {
           {activeTab === 'draft' && <Draft league={league} updateLeague={updateLeagueState} onScout={handleScoutPlayer} scoutingReport={scoutingReport} />}
           {activeTab === 'coaching' && <Coaching league={league} updateLeague={updateLeagueState} />}
           {activeTab === 'stats' && <Stats league={league} onViewRoster={handleViewRoster} onManageTeam={handleManageTeam} onViewPlayer={p => setSelectedPlayer(p)} />}
+          {activeTab === 'players' && <Players league={league} onViewPlayer={p => setSelectedPlayer(p)} />}
           {activeTab === 'finances' && <Finances league={league} updateLeague={updateLeagueState} />}
           {activeTab === 'trade' && <Trade league={league} updateLeague={updateLeagueState} recordTransaction={recordTransaction} />}
           {activeTab === 'settings' && <Settings league={league} updateLeague={updateLeagueState} />}
