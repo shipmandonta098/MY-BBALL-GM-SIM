@@ -1,6 +1,6 @@
 import React, { useEffect } from 'react';
 import { Player, PlayerStatus, PersonalityTrait, Position } from '../types';
-import { getFlag, POS_ATTR_RANGES, PosAttrRangeKey } from '../constants';
+import { getFlag, POS_ATTR_RANGES, PosAttrRangeKey, enforcePositionalBounds } from '../constants';
 
 const POS_RANGE_KEYS: PosAttrRangeKey[] = ['shooting', 'playmaking', 'defense', 'rebounding', 'athleticism'];
 
@@ -130,19 +130,16 @@ const PlayerModal: React.FC<PlayerModalProps> = ({
 
   const handleSave = () => {
     if (onUpdatePlayer) {
-      onUpdatePlayer(editedPlayer);
+      onUpdatePlayer(enforcePositionalBounds(editedPlayer));
     }
     setIsEditing(false);
   };
 
   const handleAttributeChange = (key: keyof Player['attributes'], val: number) => {
-    setEditedPlayer(prev => ({
-      ...prev,
-      attributes: {
-        ...prev.attributes,
-        [key]: val
-      }
-    }));
+    setEditedPlayer(prev => {
+      const updated = { ...prev, attributes: { ...prev.attributes, [key]: val } };
+      return enforcePositionalBounds(updated);
+    });
   };
 
   const handleDraftInfoChange = (key: keyof Player['draftInfo'], val: any) => {

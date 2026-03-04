@@ -1,7 +1,7 @@
 
 import React, { useState, useEffect, useCallback } from 'react';
 import { LeagueState, Player, Team, GameResult, PlayerStatus, ScheduleGame, BulkSimSummary, Prospect, Coach, TradeProposal, Position, NewsItem, NewsCategory, LeagueSettings, SeasonAwards, PlayoffBracket, PlayoffSeries, Transaction, TransactionType, PowerRankingSnapshot, PowerRankingEntry, GMProfile, GMMilestone, RivalryStats, InjuryType } from './types';
-import { generateLeagueTeams, generateSeasonSchedule, generateProspects, generateFreeAgentPool, generateCoachPool, EXPANSION_TEAM_POOL, generateCoach } from './constants';
+import { generateLeagueTeams, generateSeasonSchedule, generateProspects, generateFreeAgentPool, generateCoachPool, EXPANSION_TEAM_POOL, generateCoach, enforcePositionalBounds } from './constants';
 import { simulateGame } from './utils/simEngine';
 import { generateGameRecap, generateScoutingReport, generateSeasonNarrative, generateCoachScoutingReport, generateNewsHeadline } from './services/geminiService';
 import { generateAwards } from './utils/awardEngine';
@@ -682,7 +682,8 @@ const App: React.FC = () => {
         } else if (p.age > 33) {
           growth = -Math.floor(Math.random() * 3 * vetRate);
         }
-        return { ...p, rating: Math.min(99, Math.max(50, p.rating + growth)) };
+        const progressed = { ...p, rating: Math.min(99, Math.max(50, p.rating + growth)) };
+        return enforcePositionalBounds(progressed);
       });
       return { ...t, roster: rosterWithProg.map(p => ({ ...p, contractYears: Math.max(0, p.contractYears - 1) })), prevSeasonWins: t.wins, wins: 0, losses: 0, lastTen: [] };
     });

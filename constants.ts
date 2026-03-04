@@ -72,6 +72,70 @@ export const POS_ATTR_RANGES: Record<Position, Record<PosAttrRangeKey, [number, 
   C:  { shooting: [55, 80], playmaking: [50, 75], defense: [85, 98], rebounding: [90, 98], athleticism: [80, 95] },
 };
 
+// ── Granular per-attribute hard caps & floors ────────────────────────────────
+type AttrBounds = Partial<Record<keyof Player['attributes'], number>>;
+export const POSITION_HARD_CAPS: Record<Position, AttrBounds> = {
+  PG: { blocks: 72, interiorDef: 74, postScoring: 70, offReb: 68, defReb: 72, strength: 75, shootingInside: 73 },
+  SG: { blocks: 75, interiorDef: 76, postScoring: 73, offReb: 70, defReb: 74, strength: 77, shootingInside: 75 },
+  SF: { blocks: 82, interiorDef: 80, postScoring: 80, offReb: 78, defReb: 80 },
+  PF: { shooting3pt: 80, ballHandling: 76, speed: 82, perimeterDef: 79 },
+  C:  { shooting3pt: 78, ballHandling: 74, speed: 78, perimeterDef: 76, passing: 72 },
+};
+export const POSITION_HARD_FLOORS: Record<Position, AttrBounds> = {
+  PG: { ballHandling: 75, speed: 78, passing: 72, perimeterDef: 70 },
+  SG: { shooting3pt: 68, speed: 74, perimeterDef: 72 },
+  SF: {},
+  PF: { strength: 76, interiorDef: 74, offReb: 72, defReb: 74 },
+  C:  { strength: 80, interiorDef: 78, offReb: 74, defReb: 76, blocks: 74, postScoring: 74 },
+};
+
+// Parses "6-2" or "7-1" height string → total inches
+const parseHeightStr = (h: string): number => {
+  const m = h?.match(/^(\d+)-(\d+)$/);
+  return m ? parseInt(m[1]) * 12 + parseInt(m[2]) : 0;
+};
+
+/** Low-level attrs-only bounds pass. Call this from generators and enforcePositionalBounds. */
+export const applyAttrBounds = (
+  attrs: Player['attributes'],
+  pos: Position,
+  opts?: { capBonus?: number; heightBonus?: number; stretchBig?: boolean }
+): Player['attributes'] => {
+  const caps   = POSITION_HARD_CAPS[pos]  ?? {};
+  const floors = POSITION_HARD_FLOORS[pos] ?? {};
+  const capBonus    = opts?.capBonus    ?? 0;
+  const heightBonus = opts?.heightBonus ?? 0;
+  const stretchBonus = (opts?.stretchBig ?? false) ? 8 : 0;
+  const heightBonusKeys = new Set(['blocks', 'offReb', 'defReb', 'rebounding']);
+  const a = { ...attrs } as any;
+  for (const [key, cap] of Object.entries(caps)) {
+    if (a[key] === undefined) continue;
+    let adj = (cap as number) + capBonus;
+    if (heightBonusKeys.has(key)) adj += heightBonus;
+    if (key === 'shooting3pt')    adj += stretchBonus;
+    if (a[key] > adj) a[key] = adj;
+  }
+  for (const [key, floor] of Object.entries(floors)) {
+    if (a[key] !== undefined && a[key] < (floor as number)) a[key] = floor as number;
+  }
+  return a as Player['attributes'];
+};
+
+/** Full-player wrapper — computes exceptions from player data then delegates to applyAttrBounds. */
+export const enforcePositionalBounds = (player: Player): Player => {
+  const pos = player.position;
+  const playerBadges: string[] = (player as any).playerBadges ?? [];
+  const capBonus = (playerBadges.includes('Freak') || playerBadges.includes('Unicorn')) ? 6 : 0;
+  // Height bonus: resolved lazily inside the function so HEIGHT_WEIGHT is already initialised
+  const physGender: 'Male' | 'Female' = player.gender === 'Female' ? 'Female' : 'Male';
+  const htData = HEIGHT_WEIGHT[pos]?.[physGender];
+  const playerHeightIn = parseHeightStr(player.height ?? '');
+  const heightBonus = (htData && playerHeightIn > 0 && playerHeightIn >= htData.avgH + 3) ? 5 : 0;
+  const stretchBig = (pos === 'PF' || pos === 'C') &&
+    (player.archetype?.toLowerCase().includes('stretch') || (player.attributes?.shooting3pt ?? 0) >= 75);
+  return { ...player, attributes: applyAttrBounds(player.attributes, pos, { capBonus, heightBonus, stretchBig }) };
+};
+
 const COLLEGES = ["Duke", "Kentucky", "Kansas", "UNC", "Gonzaga", "UCLA", "Villanova", "Arizona", "Michigan State", "UConn", "Purdue", "Houston", "Baylor", "Virginia", "Texas"];
 
 // ─── US Male first names: 120+ unique, no current NBA stars ──────────────────
@@ -663,7 +727,7 @@ export const generatePlayer = (id: string, ageRange: [number, number] = [19, 38]
   const pAttrs = applyPhysical(rawAttrs, pos, physGender, phys.heightIn, phys.weight);
   const playerTraits = getRandomTraits();
   
-  return {
+  const rawPlayer: Player = {
     id,
     name: `${firstNames[Math.floor(Math.random() * firstNames.length)]} ${lastNames[Math.floor(Math.random() * lastNames.length)]}`,
     gender,
@@ -700,6 +764,7 @@ export const generatePlayer = (id: string, ageRange: [number, number] = [19, 38]
     college: region.id === 'usa' ? COLLEGES[Math.floor(Math.random() * COLLEGES.length)] : region.name,
     draftInfo: { team: "Titans", round: 1, pick: 1, year: 2015 }
   };
+  return enforcePositionalBounds(rawPlayer);
 };
 
 export const generateFreeAgentPool = (count: number, season: number, genderRatio: number = 0): Player[] => {
@@ -783,9 +848,12 @@ export const generateProspects = (year: number, count: number = 100, genderRatio
       defReb: getRandomAttr(rating),
     };
     const pAttrs = applyPhysical(rawAttrs, pos, physGender, phys.heightIn, phys.weight);
+    const bAttrs  = applyAttrBounds(pAttrs as Player['attributes'], pos, {
+      heightBonus: phys.heightIn >= (HEIGHT_WEIGHT[pos]?.[physGender]?.avgH ?? 0) + 3 ? 5 : 0,
+    });
     const prospectTraits = getRandomTraits();
 
-    return {
+    const rawProspect = {
       id,
       name: `${firstNames[Math.floor(Math.random() * firstNames.length)]} ${lastNames[Math.floor(Math.random() * lastNames.length)]}`,
       gender,
@@ -797,7 +865,7 @@ export const generateProspects = (year: number, count: number = 100, genderRatio
       school: region.origins[Math.floor(Math.random() * region.origins.length)],
       revealed: false,
       mockRank: i + 1,
-      attributes: pAttrs as Player['attributes'],
+      attributes: bAttrs,
       jerseyNumber: Math.floor(Math.random() * 99),
       height: phys.heightStr, weight: phys.weight, archetype: phys.archetype,
       personalityTraits: prospectTraits,
@@ -818,6 +886,7 @@ export const generateProspects = (year: number, count: number = 100, genderRatio
         threepm: 0
       }
     };
+    return rawProspect;
   });
 };
 
