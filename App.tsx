@@ -675,6 +675,13 @@ const App: React.FC = () => {
 
     tempState.teams = tempState.teams.map(t => {
       const devMultiplier = (t.staff.assistantDev?.ratingDevelopment || 60) / 75;
+      const POS_DEV_KEYS: Record<string, (keyof Player['attributes'])[]> = {
+        PG: ['ballHandling','passing','shooting3pt','offensiveIQ','perimeterDef'],
+        SG: ['shooting3pt','shooting','shootingMid','perimeterDef','speed'],
+        SF: ['athleticism','shooting','perimeterDef','interiorDef','defReb'],
+        PF: ['interiorDef','defReb','offReb','postScoring','strength'],
+        C:  ['interiorDef','strength','offReb','defReb','blocks'],
+      };
       const rosterWithProg = t.roster.map(p => {
         let growth = 0;
         if (p.age < 25) {
@@ -682,8 +689,15 @@ const App: React.FC = () => {
         } else if (p.age > 33) {
           growth = -Math.floor(Math.random() * 3 * vetRate);
         }
-        const progressed = { ...p, rating: Math.min(99, Math.max(50, p.rating + growth)) };
-        return enforcePositionalBounds(progressed);
+        if (growth === 0) return enforcePositionalBounds(p);
+        const devKeys = POS_DEV_KEYS[p.position] ?? POS_DEV_KEYS['SF'];
+        // Apply growth to 2 random relevant attributes
+        const picked = [...devKeys].sort(() => 0.5 - Math.random()).slice(0, 2);
+        const newAttrs = { ...p.attributes } as any;
+        picked.forEach(k => {
+          newAttrs[k] = Math.min(99, Math.max(0, (newAttrs[k] ?? 50) + growth));
+        });
+        return enforcePositionalBounds({ ...p, attributes: newAttrs as Player['attributes'] });
       });
       return { ...t, roster: rosterWithProg.map(p => ({ ...p, contractYears: Math.max(0, p.contractYears - 1) })), prevSeasonWins: t.wins, wins: 0, losses: 0, lastTen: [] };
     });

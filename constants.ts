@@ -75,18 +75,61 @@ export const POS_ATTR_RANGES: Record<Position, Record<PosAttrRangeKey, [number, 
 // ── Granular per-attribute hard caps & floors ────────────────────────────────
 type AttrBounds = Partial<Record<keyof Player['attributes'], number>>;
 export const POSITION_HARD_CAPS: Record<Position, AttrBounds> = {
-  PG: { blocks: 72, interiorDef: 74, postScoring: 70, offReb: 68, defReb: 72, strength: 75, shootingInside: 73 },
-  SG: { blocks: 75, interiorDef: 76, postScoring: 73, offReb: 70, defReb: 74, strength: 77, shootingInside: 75 },
-  SF: { blocks: 82, interiorDef: 80, postScoring: 80, offReb: 78, defReb: 80 },
-  PF: { shooting3pt: 80, ballHandling: 76, speed: 82, perimeterDef: 79 },
-  C:  { shooting3pt: 78, ballHandling: 74, speed: 78, perimeterDef: 76, passing: 72 },
+  PG: { blocks: 55, interiorDef: 58, offReb: 52, defReb: 65, postScoring: 60, strength: 68, shootingInside: 65 },
+  SG: { blocks: 62, interiorDef: 65, offReb: 58, defReb: 68, postScoring: 65, strength: 72 },
+  SF: { blocks: 75, interiorDef: 78, offReb: 74, defReb: 78, shooting3pt: 92, strength: 80 },
+  PF: { shooting3pt: 82, ballHandling: 74, speed: 80, perimeterDef: 78, passing: 75 },
+  C:  { shooting3pt: 72, ballHandling: 68, speed: 72, perimeterDef: 70, passing: 68 },
 };
 export const POSITION_HARD_FLOORS: Record<Position, AttrBounds> = {
-  PG: { ballHandling: 75, speed: 78, passing: 72, perimeterDef: 70 },
-  SG: { shooting3pt: 68, speed: 74, perimeterDef: 72 },
-  SF: {},
-  PF: { strength: 76, interiorDef: 74, offReb: 72, defReb: 74 },
-  C:  { strength: 80, interiorDef: 78, offReb: 74, defReb: 76, blocks: 74, postScoring: 74 },
+  PG: { ballHandling: 78, speed: 80, passing: 75, perimeterDef: 72, shooting3pt: 70 },
+  SG: { shooting3pt: 72, speed: 76, perimeterDef: 74, ballHandling: 70 },
+  SF: { speed: 74, perimeterDef: 72, athleticism: 76 },
+  PF: { strength: 78, interiorDef: 76, offReb: 72, defReb: 75 },
+  C:  { strength: 82, interiorDef: 80, offReb: 76, defReb: 78, blocks: 76, postScoring: 76 },
+};
+
+// ── Position-weighted overall rating formula ─────────────────────────────
+export const calcPositionRating = (pos: Position, a: Player['attributes']): number => {
+  let r: number;
+  switch (pos) {
+    case 'PG': r =
+      (a.shooting3pt  ?? 50) * 0.12 + (a.ballHandling  ?? 50) * 0.15 +
+      (a.passing      ?? 50) * 0.14 + (a.offensiveIQ   ?? 50) * 0.12 +
+      (a.speed        ?? 50) * 0.10 + (a.perimeterDef  ?? 50) * 0.10 +
+      (a.defensiveIQ  ?? 50) * 0.08 + (a.shootingMid   ?? 50) * 0.08 +
+      (a.freeThrow    ?? 50) * 0.06 + (a.stamina       ?? 50) * 0.05;
+      break;
+    case 'SG': r =
+      (a.shooting3pt  ?? 50) * 0.15 + (a.shooting      ?? 50) * 0.13 +
+      (a.ballHandling ?? 50) * 0.10 + (a.speed         ?? 50) * 0.10 +
+      (a.perimeterDef ?? 50) * 0.10 + (a.offensiveIQ   ?? 50) * 0.10 +
+      (a.shootingMid  ?? 50) * 0.09 + (a.passing       ?? 50) * 0.08 +
+      (a.freeThrow    ?? 50) * 0.08 + (a.athleticism   ?? 50) * 0.07;
+      break;
+    case 'SF': r =
+      (a.shooting     ?? 50) * 0.12 + (a.athleticism   ?? 50) * 0.12 +
+      (a.perimeterDef ?? 50) * 0.11 + (a.interiorDef   ?? 50) * 0.10 +
+      (a.shooting3pt  ?? 50) * 0.10 + (a.offensiveIQ   ?? 50) * 0.09 +
+      (a.defReb       ?? 50) * 0.09 + (a.speed         ?? 50) * 0.09 +
+      (a.passing      ?? 50) * 0.08 + (a.postScoring   ?? 50) * 0.10;
+      break;
+    case 'PF': r =
+      (a.interiorDef  ?? 50) * 0.14 + (a.defReb        ?? 50) * 0.13 +
+      (a.offReb       ?? 50) * 0.12 + (a.strength      ?? 50) * 0.11 +
+      (a.postScoring  ?? 50) * 0.11 + (a.blocks        ?? 50) * 0.10 +
+      (a.offensiveIQ  ?? 50) * 0.09 + (a.athleticism   ?? 50) * 0.09 +
+      (a.shooting3pt  ?? 50) * 0.06 + (a.passing       ?? 50) * 0.05;
+      break;
+    case 'C':  r =
+      (a.interiorDef  ?? 50) * 0.16 + (a.strength      ?? 50) * 0.14 +
+      (a.defReb       ?? 50) * 0.13 + (a.offReb        ?? 50) * 0.12 +
+      (a.blocks       ?? 50) * 0.12 + (a.postScoring   ?? 50) * 0.11 +
+      (a.athleticism  ?? 50) * 0.08 + (a.defensiveIQ   ?? 50) * 0.08 +
+      (a.freeThrow    ?? 50) * 0.03 + (a.shooting3pt   ?? 50) * 0.03;
+      break;
+  }
+  return Math.round(Math.min(99, Math.max(40, r)));
 };
 
 // Parses "6-2" or "7-1" height string → total inches
@@ -99,20 +142,26 @@ const parseHeightStr = (h: string): number => {
 export const applyAttrBounds = (
   attrs: Player['attributes'],
   pos: Position,
-  opts?: { capBonus?: number; heightBonus?: number; stretchBig?: boolean }
+  opts?: { capBonus?: number; heightBonus?: number; stretchBig?: boolean; glassCleaner?: boolean }
 ): Player['attributes'] => {
   const caps   = POSITION_HARD_CAPS[pos]  ?? {};
   const floors = POSITION_HARD_FLOORS[pos] ?? {};
   const capBonus    = opts?.capBonus    ?? 0;
   const heightBonus = opts?.heightBonus ?? 0;
-  const stretchBonus = (opts?.stretchBig ?? false) ? 8 : 0;
+  // STRETCH BIG badge lifts 3PT cap to 92 for PF/C (override, not additive)
+  const stretchBigOverride = opts?.stretchBig ?? false;
+  // GLASS CLEANER badge → reb caps +8 for PG/SG
+  const glassBonus = (opts?.glassCleaner && (pos === 'PG' || pos === 'SG')) ? 8 : 0;
   const heightBonusKeys = new Set(['blocks', 'offReb', 'defReb', 'rebounding']);
+  const rebBonusKeys    = new Set(['offReb', 'defReb', 'rebounding']);
   const a = { ...attrs } as any;
   for (const [key, cap] of Object.entries(caps)) {
     if (a[key] === undefined) continue;
     let adj = (cap as number) + capBonus;
     if (heightBonusKeys.has(key)) adj += heightBonus;
-    if (key === 'shooting3pt')    adj += stretchBonus;
+    if (rebBonusKeys.has(key))    adj += glassBonus;
+    // STRETCH BIG → 3PT cap hard-set to 92 for PF/C
+    if (key === 'shooting3pt' && stretchBigOverride && (pos === 'PF' || pos === 'C')) adj = Math.max(adj, 92);
     if (a[key] > adj) a[key] = adj;
   }
   for (const [key, floor] of Object.entries(floors)) {
@@ -121,19 +170,25 @@ export const applyAttrBounds = (
   return a as Player['attributes'];
 };
 
-/** Full-player wrapper — computes exceptions from player data then delegates to applyAttrBounds. */
+/** Full-player wrapper — computes exceptions, delegates to applyAttrBounds, then recalculates rating. */
 export const enforcePositionalBounds = (player: Player): Player => {
   const pos = player.position;
   const playerBadges: string[] = (player as any).playerBadges ?? [];
-  const capBonus = (playerBadges.includes('Freak') || playerBadges.includes('Unicorn')) ? 6 : 0;
-  // Height bonus: resolved lazily inside the function so HEIGHT_WEIGHT is already initialised
+  // UNICORN badge → all caps +8
+  const capBonus = playerBadges.includes('Unicorn') ? 8 : 0;
+  // 3"+ taller than pos avg → blocks/reb caps +6
   const physGender: 'Male' | 'Female' = player.gender === 'Female' ? 'Female' : 'Male';
   const htData = HEIGHT_WEIGHT[pos]?.[physGender];
   const playerHeightIn = parseHeightStr(player.height ?? '');
-  const heightBonus = (htData && playerHeightIn > 0 && playerHeightIn >= htData.avgH + 3) ? 5 : 0;
-  const stretchBig = (pos === 'PF' || pos === 'C') &&
-    (player.archetype?.toLowerCase().includes('stretch') || (player.attributes?.shooting3pt ?? 0) >= 75);
-  return { ...player, attributes: applyAttrBounds(player.attributes, pos, { capBonus, heightBonus, stretchBig }) };
+  const heightBonus = (htData && playerHeightIn > 0 && playerHeightIn >= htData.avgH + 3) ? 6 : 0;
+  // STRETCH BIG badge → 3PT cap 92 for PF/C
+  const stretchBig = playerBadges.includes('Stretch Big') ||
+    ((pos === 'PF' || pos === 'C') && player.archetype?.toLowerCase().includes('stretch'));
+  // GLASS CLEANER badge → reb caps +8 for PG/SG
+  const glassCleaner = playerBadges.includes('Glass Cleaner');
+  const newAttrs = applyAttrBounds(player.attributes, pos, { capBonus, heightBonus, stretchBig, glassCleaner });
+  const newRating = calcPositionRating(pos, newAttrs);
+  return { ...player, attributes: newAttrs, rating: newRating };
 };
 
 const COLLEGES = ["Duke", "Kentucky", "Kansas", "UNC", "Gonzaga", "UCLA", "Villanova", "Arizona", "Michigan State", "UConn", "Purdue", "Houston", "Baylor", "Virginia", "Texas"];
