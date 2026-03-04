@@ -413,6 +413,9 @@ export interface Team {
   borderStyle: 'None' | 'Solid' | 'Gradient';
   status: 'Active' | 'Inactive' | 'Relocating' | 'Expansion';
   aiGM?: AIGMData;
+  /** Team pace rating 60-100. Controls possessions per game via tier table.
+   *  Defaults to scheme-based value if not set. */
+  paceRating?: number;
 }
 
 export interface TradePiece {
@@ -450,6 +453,21 @@ export interface PlayByPlayEvent {
   quarter: number;
 }
 
+/** Per-quarter output from the pace/possession engine */
+export interface QuarterDetail {
+  quarter: number;
+  homePossessions: number;
+  awayPossessions: number;
+  homeScore: number;
+  awayScore: number;
+  gamePace: number;
+  avgShotClockUsed: { home: number; away: number };
+  shotClockViolations: { home: number; away: number };
+  timeoutsUsed: { home: number; away: number };
+  fastBreakPossessions: { home: number; away: number };
+  overtimeFlag?: boolean;
+}
+
 export interface GameResult {
   id: string;
   homeTeamId: string;
@@ -477,6 +495,8 @@ export interface GameResult {
   isChippy?: boolean;
   season: number;
   gameInjuries?: Array<{playerId: string; playerName: string; injuryType: InjuryType; daysOut: number; teamId: string}>;
+  /** Detailed per-quarter pace/possession stats */
+  quarterDetails?: QuarterDetail[];
 }
 
 export interface LeagueSettings {

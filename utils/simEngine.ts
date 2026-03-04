@@ -1,11 +1,176 @@
-import { Team, GameResult, Player, GamePlayerLine, CoachScheme, PlayByPlayEvent, InjuryType, LeagueState } from '../types';
+import { Team, GameResult, Player, GamePlayerLine, CoachScheme, PlayByPlayEvent, InjuryType, LeagueState, QuarterDetail } from '../types';
 
 // ─── Constants ───────────────────────────────────────────────────────────────
-const BASE_PACE      = 100;
 const BASE_PPP       = 1.12;
 const SCORE_VARIANCE = 0.04;
 const HOME_COURT_ADV = 0.025;  // +2.5% shooting efficiency for home team
 const VISIT_TOV_PEN  = 0.008;  // road team slight TOV penalty
+
+// ─── Pace / Possession Engine ─────────────────────────────────────────────────
+/** Pace rating (60-100) → total possessions per 48 min (per team) */
+const PACE_TABLE: Array<{ lo: number; hi: number; possLo: number; possHi: number }> = [
+  { lo: 60, hi: 65,  possLo: 88,  possHi: 92  },  // very slow, grind it out
+  { lo: 66, hi: 70,  possLo: 93,  possHi: 97  },  // slow, halfcourt heavy
+  { lo: 71, hi: 75,  possLo: 98,  possHi: 102 },  // below average pace
+  { lo: 76, hi: 80,  possLo: 103, possHi: 107 },  // average NBA pace
+  { lo: 81, hi: 85,  possLo: 108, possHi: 112 },  // uptempo
+  { lo: 86, hi: 90,  possLo: 113, possHi: 117 },  // very fast
+  { lo: 91, hi: 100, possLo: 118, possHi: 125 },  // run and gun
+];
+
+/** Base scheme pace ratings. Used when team.paceRating is not set. */
+const SCHEME_DEFAULT_PACE: Record<CoachScheme, number> = {
+  'Balanced':       78,
+  'Pace and Space': 87,
+  'Grit and Grind': 64,
+  'Triangle':       73,
+  'Small Ball':     82,
+  'Showtime':       91,
+};
+
+/** Look up total per-team possessions from a pace rating (adds random variance). */
+const paceToTotalPossessions = (pace: number): number => {
+  const tier = PACE_TABLE.find(t => pace >= t.lo && pace <= t.hi) ?? PACE_TABLE[3];
+  return Math.round(tier.possLo + Math.random() * (tier.possHi - tier.possLo));
+};
+
+/**
+ * Get a team's effective pace rating for a specific game.
+ * Applies: coach badges, scheme default, B2B fatigue.
+ * @param team         - the team whose pace we're computing
+ * @param opponent     - opponent team (for Defensive Guru reduction)
+ * @param scoreDiff    - running score diff; trailing team gets urgency boost
+ * @param isGarbageTime - if true, both teams slow down
+ * @param isB2B        - back-to-back reduces urgency slightly
+ */
+const getTeamEffectivePace = (
+  team: Team,
+  opponent: Team,
+  scoreDiff = 0,       // positive = team is trailing by this much
+  isGarbageTime = false,
+  isB2B = false,
+): number => {
+  let pace = team.paceRating ?? SCHEME_DEFAULT_PACE[team.activeScheme] ?? 78;
+
+  // Coach badge: Pace Master
+  const hcBadges = (team.staff.headCoach?.badges as unknown as string[] | undefined) ?? [];
+  if (hcBadges.includes('Pace Master')) pace += 8;
+
+  // Opponent coach badge: Defensive Guru slows this team's pace
+  const oppBadges = (opponent.staff.headCoach?.badges as unknown as string[] | undefined) ?? [];
+  if (oppBadges.includes('Defensive Guru')) pace -= 5;
+
+  // Trailing urgency (push tempo) / leading comfort (milk clock)
+  if (scoreDiff >= 10)      pace += 6;   // trailing team — hurry up
+  else if (scoreDiff <= -15) pace -= 8;  // leading team  — milk clock
+
+  // Foul trouble (proxy: many low-rated bench players → more caution)
+  const lowRatedBench = team.roster.slice(5, 10).filter(p => p.rating < 68).length;
+  if (lowRatedBench >= 2) pace -= 4;
+
+  // Garbage time: everyone slows down
+  if (isGarbageTime) pace -= 15;
+
+  // B2B: slight energy deficit
+  if (isB2B) pace -= 2;
+
+  return Math.max(60, Math.min(100, Math.round(pace)));
+};
+
+/** Expected quarter scoring bounds for a team given possessions and game pace. */
+const getQuarterScoringBounds = (
+  possessions: number,
+  gamePace: number,
+): { lo: number; hi: number } => {
+  // Points = possessions × PPP; PPP varies by game tempo
+  const basePPP = gamePace <= 70 ? 1.02 :
+                  gamePace <= 80 ? 1.08 :
+                  gamePace <= 90 ? 1.12 : 1.16;
+  const expected  = possessions * basePPP;
+  const variance  = possessions * 0.14;
+  return { lo: Math.round(expected - variance), hi: Math.round(expected + variance) };
+};
+
+/** Aggregate shot-clock stats for a quarter (without generating full PBP). */
+interface QuarterClockStats {
+  avgClock: number;
+  violations: number;
+  fastBreaks: number;
+  timeouts: number;
+}
+
+const simulateQuarterClock = (
+  team: Team,
+  scheme: CoachScheme,
+  possessions: number,
+  isGarbageTime: boolean,
+): QuarterClockStats => {
+  const rotation = team.rotation
+    ? [...Object.values(team.rotation.starters), ...team.rotation.bench.slice(0, 4)]
+        .map(id => team.roster.find(p => p.id === id))
+        .filter(Boolean) as Player[]
+    : team.roster.slice(0, 8);
+
+  if (!rotation.length) return { avgClock: 14, violations: 0, fastBreaks: 0, timeouts: 0 };
+
+  let totalClock = 0;
+  let violations = 0;
+  let fastBreaks = 0;
+  let timeouts   = 0;
+  let streak     = 0; // momentum streak → timeout trigger
+
+  for (let i = 0; i < possessions; i++) {
+    const handler = rotation[Math.floor(Math.random() * rotation.length)];
+    const ot = handler.tendencies?.offensiveTendencies;
+
+    // Dominant tendency
+    const doms: [string, number][] = [
+      ['isoHeavy',         ot?.isoHeavy         ?? 50],
+      ['postUp',           ot?.postUp           ?? 50],
+      ['transitionHunter', ot?.transitionHunter ?? 50],
+      ['kickOutPasser',    ot?.kickOutPasser    ?? 50],
+    ];
+    const [dom] = doms.reduce((a, b) => b[1] > a[1] ? b : a);
+
+    let lo: number, hi: number;
+    let fbChance = 0.08;
+    switch (dom) {
+      case 'isoHeavy':         lo = 16; hi = 22; fbChance = 0.04; break;
+      case 'postUp':           lo = 14; hi = 20; fbChance = 0.03; break;
+      case 'transitionHunter': lo = 4;  hi = 10; fbChance = 0.42; break;
+      case 'kickOutPasser':    lo = 12; hi = 18; fbChance = 0.12; break;
+      default:                 lo = 12; hi = 18;
+    }
+    if (isGarbageTime) { lo += 4; hi += 4; fbChance *= 0.3; }
+
+    const isFB = Math.random() < fbChance;
+    if (isFB) { lo = 3; hi = 8; fastBreaks++; }
+
+    const clockUsed = Math.min(24, lo + Math.random() * (hi - lo));
+    totalClock += clockUsed;
+
+    // Shot-clock violation
+    let vChance = 0;
+    if (clockUsed >= 22)   vChance = 0.06;
+    if (clockUsed >= 23.5) vChance = 0.20;
+    const bh = handler.attributes.ballHandling ?? 50;
+    if (bh < 65) vChance += 0.08;
+    if (dom === 'isoHeavy' && (scheme === 'Pace and Space' || scheme === 'Triangle')) vChance += 0.12;
+    if (handler.personalityTraits.includes('Professional')) vChance *= 0.5;
+    if (Math.random() < vChance) violations++;
+
+    // Timeout from opposing run (5% per possession)
+    streak = Math.random() < 0.55 ? streak + 1 : 0;
+    if (streak >= 4) { timeouts++; streak = 0; }
+  }
+
+  return {
+    avgClock:  possessions > 0 ? +(totalClock / possessions).toFixed(1) : 14,
+    violations,
+    fastBreaks,
+    timeouts,
+  };
+};
 
 // ─── League OVR Normalization ─────────────────────────────────────────────────
 /**
@@ -612,7 +777,6 @@ export const simulateGame = (
 ): GameResult => {
 
   // ── 1. Player Variance Rolls (tip-off) ────────────────────────────────────
-  // Each player gets a game-level variance: modifies their FG% in stat lines.
   const playerVariance = new Map<string, number>();
   [...home.roster, ...away.roster].forEach(p => {
     let lo = -15, hi = 15;
@@ -631,7 +795,6 @@ export const simulateGame = (
   const clutchBonus   = (t: Team) => t.roster.filter(p => p.personalityTraits.includes('Clutch')).length  * 0.15;
   const lazyPenalty   = (t: Team) => t.roster.filter(p => p.personalityTraits.includes('Lazy')).length    * 0.10;
 
-  // Average player variance boosts for the rotation → modulates team PPP
   const rotationVariance = (team: Team) => {
     const rot = team.rotation
       ? [...Object.values(team.rotation.starters), ...team.rotation.bench]
@@ -648,31 +811,37 @@ export const simulateGame = (
   const homeDef     = awayRatings.def + getStaffBonus(away);
   const awayDef     = homeRatings.def + getStaffBonus(home);
 
-  const basePPP = (off: number, def: number, isB2B: boolean) => {
+  const calcBasePPP = (off: number, def: number, isB2B: boolean) => {
     let ppp = BASE_PPP + (off - def) / 100 * 0.5;
     if (isB2B) ppp *= 0.93;
     return ppp + (Math.random() * SCORE_VARIANCE * 2 - SCORE_VARIANCE);
   };
-  const homePPP = basePPP(homeBaseOff, homeDef, homeB2B);
-  const awayPPP = basePPP(awayBaseOff, awayDef, awayB2B);
+  const homePPP = calcBasePPP(homeBaseOff, homeDef, homeB2B);
+  const awayPPP = calcBasePPP(awayBaseOff, awayDef, awayB2B);
 
-  // ── 4. Pace ───────────────────────────────────────────────────────────────
-  let pace = BASE_PACE;
-  if (home.activeScheme === 'Pace and Space' || home.activeScheme === 'Showtime') pace += 4;
-  if (away.activeScheme === 'Pace and Space' || away.activeScheme === 'Showtime') pace += 4;
-  if (home.activeScheme === 'Grit and Grind') pace -= 5;
-  if (away.activeScheme === 'Grit and Grind') pace -= 5;
-  if ((home.activeScheme === 'Pace and Space' || home.activeScheme === 'Showtime') &&
-      home.roster.slice(0, 8).filter(p => (p.tendencies?.offensiveTendencies.postUp ?? 0) > 75).length >= 2) pace -= 5;
-  if ((away.activeScheme === 'Pace and Space' || away.activeScheme === 'Showtime') &&
-      away.roster.slice(0, 8).filter(p => (p.tendencies?.offensiveTendencies.postUp ?? 0) > 75).length >= 2) pace -= 5;
-  pace += (Math.random() * 6 - 3);
+  // ── 4. Pace / Possession Engine ───────────────────────────────────────────
+  // Each team has their own pace rating (with coach badge effects).
+  // Defensive Guru on the opponent applies pressure on this team's pace.
+  const homeEffPace = getTeamEffectivePace(home, away, 0, false, homeB2B);
+  const awayEffPace = getTeamEffectivePace(away, home, 0, false, awayB2B);
+  const gamePace    = Math.round((homeEffPace + awayEffPace) / 2);
 
-  // ── 5. Quarter-by-Quarter Score Simulation with Balance Modifiers ─────────
-  const homeQScores: number[] = [];
-  const awayQScores: number[] = [];
+  // Total possessions per team per 48-min game, then per quarter
+  const totalPoss  = paceToTotalPossessions(gamePace);
+  // Q4 gets ~94% of base possessions (intentional fouling, timeouts)
+  const baseQPoss: Record<number, number> = {
+    1: Math.round(totalPoss / 4),
+    2: Math.round(totalPoss / 4),
+    3: Math.round(totalPoss / 4),
+    4: Math.round(totalPoss / 4 * 0.94),
+  };
+
+  // ── 5. Quarter-by-Quarter Simulation ─────────────────────────────────────
+  const homeQScores: number[]   = [];
+  const awayQScores: number[]   = [];
+  const quarterDetails: QuarterDetail[] = [];
   let runningHome = 0, runningAway = 0;
-  let homeQStreak = 0, awayQStreak = 0; // carry momentum across quarters
+  let homeQStreak = 0, awayQStreak = 0;
 
   const pbp: PlayByPlayEvent[] = [
     { time: '12:00', text: 'Game Tip-off', type: 'info', quarter: 1 },
@@ -681,7 +850,6 @@ export const simulateGame = (
   const awayScheme = away.activeScheme ?? 'Balanced';
   const homeStreaks = new Map<string, number>();
   const awayStreaks = new Map<string, number>();
-  const qPoss = Math.round(pace / 4); // possessions per team per quarter
 
   const hasClutchCoach = (t: Team) =>
     !!(t.staff.headCoach?.badges as unknown as string[] | undefined)?.includes?.('Clutch Specialist');
@@ -689,25 +857,34 @@ export const simulateGame = (
   let garbageTime = false;
 
   for (let q = 1; q <= 4; q++) {
-    const scoreDiff     = runningHome - runningAway; // + = home leads
-    const absScoreDiff  = Math.abs(scoreDiff);
-    const homeTrailing  = scoreDiff < 0;
-    const awayTrailing  = scoreDiff > 0;
+    const scoreDiff    = runningHome - runningAway;
+    const absScoreDiff = Math.abs(scoreDiff);
+    const homeTrailing = scoreDiff < 0;
+    const awayTrailing = scoreDiff > 0;
 
-    // Quarter reset: streak momentum reset, fatigue slightly recovered
+    // Quarter momentum carry-over (30%) and reset
     if (q > 1) {
-      homeQStreak = Math.round(homeQStreak * 0.3); // carry 30% momentum
+      homeQStreak = Math.round(homeQStreak * 0.3);
       awayQStreak = Math.round(awayQStreak * 0.3);
     }
 
-    // Garbage time check (Q4 only)
     garbageTime = q === 4 && absScoreDiff >= 30;
+
+    // Per-quarter possessions with ±3 random variance
+    const homeQPoss = Math.max(18, baseQPoss[q] + (Math.floor(Math.random() * 7) - 3));
+    const awayQPoss = Math.max(18, baseQPoss[q] + (Math.floor(Math.random() * 7) - 3));
+
+    // Effective pace for this quarter (trailing urgency, leading milking)
+    const homeQPaceScore = getTeamEffectivePace(home, away,
+      homeTrailing ? absScoreDiff : -absScoreDiff, garbageTime, homeB2B);
+    const awayQPaceScore = getTeamEffectivePace(away, home,
+      awayTrailing ? absScoreDiff : -absScoreDiff, garbageTime, awayB2B);
+    const qGamePace = Math.round((homeQPaceScore + awayQPaceScore) / 2);
 
     // ── Situational PPP modifiers ─────────────────────────────────────────
     let homeOff = HOME_COURT_ADV;
     let awayOff = -VISIT_TOV_PEN;
 
-    // Blowout balance (comeback / complacency)
     if (absScoreDiff >= 10 && absScoreDiff < 20) {
       if (homeTrailing) homeOff += 0.040; else homeOff -= 0.030;
       if (awayTrailing) awayOff += 0.040; else awayOff -= 0.030;
@@ -720,60 +897,86 @@ export const simulateGame = (
       if (homeTrailing) homeOff += 0.060; else homeOff -= 0.070;
       if (awayTrailing) awayOff += 0.060; else awayOff -= 0.070;
     }
-
-    // Second half adjustments
     if (q >= 3) {
       if (homeTrailing) homeOff += 0.030;
       if (awayTrailing) awayOff += 0.030;
     }
-
-    // Momentum carry-over from previous quarter
     homeOff += homeQStreak * 0.008;
     awayOff += awayQStreak * 0.008;
 
-    // Close game amplifier (Q4)
     if (q === 4 && absScoreDiff <= 5) {
       homeOff += hasClutchCoach(home) ? 0.10 : 0.05;
       awayOff += hasClutchCoach(away) ? 0.10 : 0.05;
     }
 
-    // Pace factor (garbage time slows the game)
+    // Pace factor for score calc (garbage time reduces scoring)
     const qPaceFactor = garbageTime ? 0.80 : 1.0;
 
-    const hQScore = Math.max(15, Math.min(50,
-      Math.round(qPoss * qPaceFactor * (homePPP + homeOff) / 4 + (Math.random() * 4 - 2))));
-    const aQScore = Math.max(15, Math.min(50,
-      Math.round(qPoss * qPaceFactor * (awayPPP + awayOff) / 4 + (Math.random() * 4 - 2))));
+    // ── Core Quarter Score Calculation ────────────────────────────────────
+    // Formula: possessions × PPP × pace_factor + small noise
+    // PPP ~1.1 × ~25 possessions = ~27 pts per quarter (realistic)
+    let hQScore = Math.round(homeQPoss * qPaceFactor * (homePPP + homeOff) + (Math.random() * 4 - 2));
+    let aQScore = Math.round(awayQPoss * qPaceFactor * (awayPPP + awayOff) + (Math.random() * 4 - 2));
+
+    // ── Scoring Bounds Validation ─────────────────────────────────────────
+    const { lo: qLo, hi: qHi } = getQuarterScoringBounds(homeQPoss, qGamePace);
+    const aBounds = getQuarterScoringBounds(awayQPoss, qGamePace);
+
+    // Score cooldown/spark: clamp unrealistic outliers with soft correction
+    if (hQScore > qHi + 5) {
+      hQScore = Math.round((hQScore * 0.6 + (qHi + 5) * 0.4));
+    } else if (hQScore < qLo - 5) {
+      hQScore = Math.round((hQScore * 0.6 + (qLo - 5) * 0.4));
+    }
+    if (aQScore > aBounds.hi + 5) {
+      aQScore = Math.round((aQScore * 0.6 + (aBounds.hi + 5) * 0.4));
+    } else if (aQScore < aBounds.lo - 5) {
+      aQScore = Math.round((aQScore * 0.6 + (aBounds.lo - 5) * 0.4));
+    }
+
+    // Hard floor/ceiling
+    hQScore = Math.max(13, Math.min(52, hQScore));
+    aQScore = Math.max(13, Math.min(52, aQScore));
 
     homeQScores.push(hQScore);
     awayQScores.push(aQScore);
     runningHome += hQScore;
     runningAway += aQScore;
 
-    // Timeout PBP for large blowout moments (20+ point lead)
-    if (absScoreDiff >= 20 && q < 4) {
-      const trailingTeam = homeTrailing ? home : away;
-      const coachName = trailingTeam.staff.headCoach?.name?.split(' ').at(-1) ?? 'The coach';
-      pbp.push({ time: '6:00', text: `${coachName} calls a timeout — trying to stop the bleeding`, type: 'info', quarter: q });
-    }
+    // ── Shot Clock Stats for this quarter ─────────────────────────────────
+    const hClk = simulateQuarterClock(home, homeScheme, homeQPoss, garbageTime);
+    const aClk = simulateQuarterClock(away, awayScheme, awayQPoss, garbageTime);
 
-    // Garbage time announcement
+    quarterDetails.push({
+      quarter: q,
+      homePossessions: homeQPoss,
+      awayPossessions: awayQPoss,
+      homeScore:       hQScore,
+      awayScore:       aQScore,
+      gamePace:        qGamePace,
+      avgShotClockUsed:       { home: hClk.avgClock,  away: aClk.avgClock },
+      shotClockViolations:    { home: hClk.violations, away: aClk.violations },
+      timeoutsUsed:           { home: hClk.timeouts,  away: aClk.timeouts },
+      fastBreakPossessions:   { home: hClk.fastBreaks, away: aClk.fastBreaks },
+    });
+
+    // ── PBP Narrative Events ──────────────────────────────────────────────
+    if (absScoreDiff >= 20 && q < 4) {
+      const trailing = homeTrailing ? home : away;
+      const cn = trailing.staff.headCoach?.name?.split(' ').at(-1) ?? 'The coach';
+      pbp.push({ time: '6:00', text: `${cn} calls a timeout — trying to stop the bleeding`, type: 'info', quarter: q });
+    }
     if (garbageTime) {
       pbp.push({ time: '6:00', text: `Garbage time — benches emptying in the ${home.name} vs ${away.name} matchup`, type: 'info', quarter: q });
     }
-
-    // Close game drama
     if (q === 4 && Math.abs(runningHome - runningAway) <= 5) {
-      pbp.push({ time: '4:00', text: `We have a BALL GAME! ${Math.abs(runningHome - runningAway) <= 2 ? 'Anyone\'s game with 4 minutes left!' : 'One possession game down the stretch!'}`, type: 'info', quarter: q });
+      pbp.push({ time: '4:00', text: `We have a BALL GAME! ${Math.abs(runningHome - runningAway) <= 2 ? "Anyone's game with 4 minutes left!" : 'One possession game down the stretch!'}`, type: 'info', quarter: q });
     }
 
-    // ── Per-quarter PBP events ──────────────────────────────────────────────
-    // PBP boost = fraction of PPP delta translated to per-possession probability
     const homePBPBoost = homeOff * 0.5;
     const awayPBPBoost = awayOff * 0.5;
-    const hResult = generateQuarterPBP(home, away, q, qPoss, homeScheme, homeStreaks, homePBPBoost, garbageTime, homeQStreak);
-    const aResult = generateQuarterPBP(away, home, q, qPoss, awayScheme, awayStreaks, awayPBPBoost, garbageTime, awayQStreak);
-
+    const hResult = generateQuarterPBP(home, away, q, homeQPoss, homeScheme, homeStreaks, homePBPBoost, garbageTime, homeQStreak);
+    const aResult = generateQuarterPBP(away, home, q, awayQPoss, awayScheme, awayStreaks, awayPBPBoost, garbageTime, awayQStreak);
     homeQStreak = hResult.teamStreak;
     awayQStreak = aResult.teamStreak;
 
@@ -788,15 +991,29 @@ export const simulateGame = (
     }
   }
 
+  // ── 6. Validation Flags ───────────────────────────────────────────────────
+  const combined = runningHome + runningAway;
+  if (combined > 280) {
+    // Unrealistically high: soft clamp both quarterly totals by pulling each down
+    const factor = 280 / combined;
+    runningHome = Math.round(runningHome * factor);
+    runningAway = Math.round(runningAway * factor);
+  } else if (combined < 150) {
+    const factor = 150 / combined;
+    runningHome = Math.round(runningHome * factor);
+    runningAway = Math.round(runningAway * factor);
+  }
+
   let totalHome = Math.max(85, Math.min(145, runningHome));
   let totalAway = Math.max(85, Math.min(145, runningAway));
 
-  // ── 6. Player stat distribution ──────────────────────────────────────────
+  // ── 7. Player stat distribution ──────────────────────────────────────────
+  const statPace = totalPoss; // use actual total possessions for FGA/REB scaling
   const distributeToPlayers = (team: Team, totalPts: number, isHome: boolean, isGT: boolean) => {
     const roster      = team.roster;
     const totalRating = roster.reduce((acc, p) => acc + p.rating, 0);
-    const teamFga     = Math.round(pace * 0.88);
-    const teamReb     = Math.round(pace * 0.44);
+    const teamFga     = Math.round(statPace * 0.88);
+    const teamReb     = Math.round(statPace * 0.44);
     const teamAst     = Math.round((totalPts / 2.2) * 0.6);
     return roster.map((p, i) => {
       let mins = 0;
@@ -807,14 +1024,12 @@ export const simulateGame = (
         else if (i < 9) mins = 14 + Math.floor(Math.random() * 10);
         else if (i < 12) mins = Math.floor(Math.random() * 6);
       }
-      // Garbage time: bench players get more minutes, starters fewer
       if (isGT) {
         if (i < 5) mins = Math.max(20, mins - 10);
         else if (i < 9) mins = Math.min(30, mins + 8);
       }
-      // Home court FT bonus
-      const ftBonus = isHome ? 0.03 : 0;
-      const varRoll = playerVariance.get(p.id) ?? 0;
+      const ftBonus    = isHome ? 0.03 : 0;
+      const varRoll    = playerVariance.get(p.id) ?? 0;
       const usageShare = p.rating / totalRating;
       const line = simulatePlayerGameLine(p, totalPts, teamFga, teamReb, teamAst, mins, usageShare, varRoll, ftBonus);
       return { ...line, techs: 0, flagrants: 0, ejected: false };
@@ -827,7 +1042,7 @@ export const simulateGame = (
   totalHome = homePlayerStats.reduce((s, p) => s + p.pts, 0);
   totalAway = awayPlayerStats.reduce((s, p) => s + p.pts, 0);
 
-  // ── 7. Chippy / tech rolls ────────────────────────────────────────────────
+  // ── 8. Chippy / tech rolls ────────────────────────────────────────────────
   let isChippy = false;
   const rivalryMod = ['Hot', 'Red Hot'].includes(rivalryLevel) ? 1.5 : 1.0;
   const rollForChippy = (stats: GamePlayerLine[], isHome: boolean) => {
@@ -848,7 +1063,7 @@ export const simulateGame = (
   rollForChippy(homePlayerStats, true);
   rollForChippy(awayPlayerStats, false);
 
-  // ── 8. Injury rolls ──────────────────────────────────────────────────────
+  // ── 9. Injury rolls ──────────────────────────────────────────────────────
   const gameInjuries: Array<{ playerId: string; playerName: string; injuryType: InjuryType; daysOut: number; teamId: string }> = [];
   const rollForInjuries = (stats: GamePlayerLine[], isHome: boolean) => {
     const tm    = isHome ? home : away;
@@ -872,17 +1087,49 @@ export const simulateGame = (
   rollForInjuries(homePlayerStats, true);
   rollForInjuries(awayPlayerStats, false);
 
-  // ── 9. Overtime ───────────────────────────────────────────────────────────
+  // ── 10. Overtime (up to 3 OT periods) ────────────────────────────────────
   let isOvertime = false;
-  if (Math.abs(totalHome - totalAway) < 1) {
+  let otPeriod   = 0;
+
+  while (totalHome === totalAway && otPeriod < 3) {
     isOvertime = true;
-    totalHome += Math.floor(Math.random() * 12) + 2;
-    totalAway += Math.floor(Math.random() * 12) + 2;
-    if (totalHome === totalAway) totalHome += 1;
-    pbp.push({ time: '5:00', text: 'OVERTIME!', type: 'info', quarter: 5 });
+    otPeriod++;
+    const otLabel = otPeriod === 1 ? 'OVERTIME!' : `${otPeriod}OT!`;
+    pbp.push({ time: '5:00', text: otLabel, type: 'info', quarter: 4 + otPeriod });
+
+    // 8-10 possessions per team per OT period; urgency boosts scoring slightly
+    const otPoss  = 8 + Math.floor(Math.random() * 3);
+    const otBoost = 0.05; // PPP lift from urgency
+    const otH = Math.max(6, Math.round(otPoss * (homePPP + HOME_COURT_ADV + otBoost)));
+    const otA = Math.max(6, Math.round(otPoss * (awayPPP + otBoost)));
+
+    totalHome += otH;
+    totalAway += otA;
+
+    // Force a winner in 3rd OT if still tied
+    if (otPeriod === 3 && totalHome === totalAway) {
+      // Higher overall OVR wins the final possession
+      const hOvr = homeRatings.off + homeRatings.def;
+      const aOvr = awayRatings.off + awayRatings.def;
+      if (hOvr >= aOvr) totalHome += 1; else totalAway += 1;
+    }
+
+    quarterDetails.push({
+      quarter: 4 + otPeriod,
+      homePossessions: otPoss,
+      awayPossessions: otPoss,
+      homeScore: otH,
+      awayScore: otA,
+      gamePace: gamePace + 5,
+      avgShotClockUsed:      { home: 10, away: 10 },
+      shotClockViolations:   { home: 0, away: 0 },
+      timeoutsUsed:          { home: 1, away: 1 },
+      fastBreakPossessions:  { home: 1, away: 1 },
+      overtimeFlag: true,
+    });
   }
 
-  // ── 10. Final flags ───────────────────────────────────────────────────────
+  // ── 11. Final flags ───────────────────────────────────────────────────────
   const isBuzzerBeater = Math.abs(totalHome - totalAway) <= 2 && Math.random() < 0.3;
   const isComeback =
     (homeQScores[0] + homeQScores[1] < awayQScores[0] + awayQScores[1] - 15 && totalHome > totalAway) ||
@@ -904,6 +1151,7 @@ export const simulateGame = (
     homeScore:    totalHome,
     awayScore:    totalAway,
     quarterScores: { home: homeQScores, away: awayQScores },
+    quarterDetails,
     homePlayerStats,
     awayPlayerStats,
     topPerformers: allLines.slice(0, 3).map(l => ({ playerId: l.playerId, points: l.pts, rebounds: l.reb, assists: l.ast })),
