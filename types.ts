@@ -28,6 +28,22 @@ export interface PlayerTendencies {
 }
 export type CoachBadge = 'Developmental Genius' | 'Pace Master' | 'Star Handler' | 'Defensive Guru' | 'Offensive Architect' | 'Clutch Specialist' | 'Recruiting Ace';
 
+// ─── AI GM ──────────────────────────────────────────────────
+export type AIGMPersonality = 'Rebuilder' | 'Win Now' | 'Analytics' | 'Loyalist' | 'Superstar Chaser' | 'Balanced';
+
+export interface AIGMRatings {
+  scouting: number;
+  negotiation: number;
+  development: number;
+  adaptability: number;
+  riskTolerance: number;
+}
+
+export interface AIGMData {
+  personality: AIGMPersonality;
+  ratings: AIGMRatings;
+}
+
 export type CoachScheme = 'Balanced' | 'Pace and Space' | 'Grit and Grind' | 'Triangle' | 'Small Ball' | 'Showtime';
 export type CoachRole = 'Head Coach' | 'Assistant Offense' | 'Assistant Defense' | 'Assistant Dev' | 'Trainer';
 export type OwnerGoal = 'Win Now' | 'Rebuild' | 'Profit';
@@ -396,6 +412,7 @@ export interface Team {
   stadiumCapacity: number;
   borderStyle: 'None' | 'Solid' | 'Gradient';
   status: 'Active' | 'Inactive' | 'Relocating' | 'Expansion';
+  aiGM?: AIGMData;
 }
 
 export interface TradePiece {

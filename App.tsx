@@ -5,6 +5,7 @@ import { generateLeagueTeams, generateSeasonSchedule, generateProspects, generat
 import { simulateGame } from './utils/simEngine';
 import { generateGameRecap, generateScoutingReport, generateSeasonNarrative, generateCoachScoutingReport, generateNewsHeadline } from './services/geminiService';
 import { generateAwards } from './utils/awardEngine';
+import { assignAIPersonalities, runAIGMOffseason, aiGMTradeDeadlineAction } from './utils/aiGMEngine';
 import { db } from './db';
 
 // Components
@@ -150,6 +151,8 @@ const App: React.FC = () => {
     const freshProspects = generateProspects(year, 100, genderRatio);
     const initialFAs = generateFreeAgentPool(25, year, genderRatio);
     const coachPool = generateCoachPool(30, finalSettings.coachGenderRatio);
+    // Assign AI GM personalities to all non-user teams (userTeamId assigned at team selection)
+    const teamsWithAI = freshTeams; // personalities applied after user picks team in handleSelectTeam
     
     const initialGMProfile: GMProfile = {
       name: 'User GM',
@@ -164,7 +167,7 @@ const App: React.FC = () => {
 
     const newLeague: LeagueState = {
       id: `league-${Date.now()}`, lastUpdated: Date.now(), currentDay: 1, season: year, leagueName: name, userTeamId: '',
-      gmProfile: initialGMProfile, teams: freshTeams, schedule: freshSchedule, isOffseason: false, offseasonDay: 0,
+      gmProfile: initialGMProfile, teams: teamsWithAI, schedule: freshSchedule, isOffseason: false, offseasonDay: 0,
       draftPhase: 'scouting', prospects: freshProspects, freeAgents: initialFAs, coachPool, history: [],
       savedTrades: [], newsFeed: [], awardHistory: [], championshipHistory: [], transactions: [], settings: finalSettings,
       draftPicks: []
@@ -228,9 +231,11 @@ const App: React.FC = () => {
        id: `hired-${Date.now()}`, year: league.season, day: league.currentDay, text: `Named General Manager of the ${team.city} ${team.name}.`, type: 'signing'
     }];
     const updated = { ...league, userTeamId: teamId, gmProfile: { ...league.gmProfile, milestones: updatedMilestones }, lastUpdated: Date.now() };
-    setLeague(updated);
+    // Assign AI GM personalities now that we know which team the user picked
+    const updatedWithAI = { ...updated, teams: assignAIPersonalities(updated.teams, teamId) };
+    setLeague(updatedWithAI);
     setRosterTeamId(teamId);
-    await db.leagues.put(updated);
+    await db.leagues.put(updatedWithAI);
     setStatus('game');
   };
 
@@ -707,6 +712,13 @@ const App: React.FC = () => {
     tempState.freeAgents = [...generateFreeAgentPool(15, tempState.season, tempState.settings.playerGenderRatio)];
     tempState.coachPool = [...generateCoachPool(20, tempState.settings.coachGenderRatio)];
     tempState.season += 1;
+
+    // ── Run AI GM offseason decisions ───────────────────────
+    const aiResult = runAIGMOffseason(tempState, tempState.settings.difficulty);
+    tempState = aiResult.updatedState;
+    if (aiResult.transactions.length > 0) {
+      tempState.transactions = [...aiResult.transactions, ...(tempState.transactions || [])].slice(0, 1000);
+    }
     
     tempState.newsFeed.unshift({
       id: `offseason-start-${Date.now()}`,

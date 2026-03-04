@@ -1,6 +1,7 @@
 import React, { useState, useMemo, useEffect } from 'react';
 import { LeagueState, Team, Prospect, DraftPick, Player } from '../types';
 import { getFlag } from '../constants';
+import { aiGMDraftPick } from '../utils/aiGMEngine';
 
 interface DraftProps {
   league: LeagueState;
@@ -139,9 +140,12 @@ const Draft: React.FC<DraftProps> = ({ league, updateLeague, onScout, scoutingRe
       return;
     }
 
-    // AI Pick
+    // AI Pick — use personality-aware engine if team has an AI GM, else fall back to mock rank
     const availableProspects = league.prospects.filter(p => !league.teams.some(t => t.roster.some(player => player.id === p.id)));
-    const bestProspect = availableProspects[0]; // Simple AI: pick best mock rank
+    const pickTeam = league.teams.find(t => t.id === currentPick.currentTeamId);
+    const bestProspect = pickTeam
+      ? (aiGMDraftPick(pickTeam, availableProspects, league.settings.difficulty ?? 'Medium') ?? availableProspects[0])
+      : availableProspects[0];
     
     makePick(currentPick.currentTeamId, bestProspect);
   };
