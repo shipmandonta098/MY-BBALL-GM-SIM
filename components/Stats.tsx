@@ -6,15 +6,23 @@ interface StatsProps {
   league: LeagueState;
   onViewRoster?: (teamId: string) => void;
   onManageTeam?: (teamId: string) => void;
+  onViewPlayer?: (player: Player) => void;
 }
 
-type StatTab = 'leaderboards' | 'advanced' | 'compare' | 'teams';
+type StatTab = 'leaderboards' | 'advanced' | 'compare' | 'teams' | 'players';
+type PlayerSubTab = 'traditional' | 'advanced' | 'per36' | 'shooting';
 
-const Stats: React.FC<StatsProps> = ({ league, onViewRoster, onManageTeam }) => {
+const Stats: React.FC<StatsProps> = ({ league, onViewRoster, onManageTeam, onViewPlayer }) => {
   const [activeTab, setActiveTab] = useState<StatTab>('leaderboards');
   const [compareList, setCompareList] = useState<string[]>([]);
   const [minGames, setMinGames] = useState(1);
   const [searchTerm, setSearchTerm] = useState('');
+  const [posFilter, setPosFilter] = useState<'ALL' | Position>('ALL');
+  const [teamFilter, setTeamFilter] = useState<string>('ALL');
+  const [playerSubTab, setPlayerSubTab] = useState<PlayerSubTab>('traditional');
+  const [sortKey, setSortKey] = useState<string>('ppg');
+  const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc');
+  const [page, setPage] = useState(0);
 
   const allPlayers = useMemo(() => {
     return league.teams.flatMap(t => t.roster.map(p => ({ ...p, teamName: t.name, teamLogo: t.logo })));
@@ -236,6 +244,336 @@ const Stats: React.FC<StatsProps> = ({ league, onViewRoster, onManageTeam }) => 
     );
   };
 
+  // ─── PLAYER STATS TABLE ────────────────────────────────────────────────
+  const PlayerStatsTable = () => {
+    const PAGE_SIZE = 25;
+    const positions: Array<'ALL' | Position> = ['ALL', 'PG', 'SG', 'SF', 'PF', 'C'];
+
+    // Aggregate stats per player
+    const playerRows = useMemo(() => {
+      return league.teams.flatMap(team =>
+        team.roster.map(p => {
+          const gp  = Math.max(1, p.stats.gamesPlayed);
+          const min = p.stats.minutes;
+          const pts = p.stats.points;
+          const reb = p.stats.rebounds;
+          const ast = p.stats.assists;
+          const stl = p.stats.steals;
+          const blk = p.stats.blocks;
+          const tov = p.stats.tov;
+          const fgm = p.stats.fgm;
+          const fga = p.stats.fga;
+          const tpm = p.stats.threepm;
+          const tpa = p.stats.threepa;
+          const ftm = p.stats.ftm;
+          const fta = p.stats.fta;
+          const pm  = p.stats.plusMinus;
+
+          const ppg = pts / gp;
+          const rpg = reb / gp;
+          const apg = ast / gp;
+          const spg = stl / gp;
+          const bpg = blk / gp;
+          const tpg = tov / gp;
+          const mpg = min / gp;
+          const fgPct  = fga > 0 ? fgm / fga : 0;
+          const tpPct  = tpa > 0 ? tpm / tpa : 0;
+          const ftPct  = fta > 0 ? ftm / fta : 0;
+          // 2-pt (mid + post) derived
+          const twom = fgm - tpm;
+          const twoa = fga - tpa;
+          const twoPct = twoa > 0 ? twom / twoa : 0;
+          // Advanced
+          const per = min > 0
+            ? (pts + reb + ast + stl + blk - (fga - fgm) - (fta - ftm) - tov) / min * 30
+            : 0;
+          const ts  = (fga + 0.44 * fta) > 0 ? pts / (2 * (fga + 0.44 * fta)) : 0;
+          const usg = min > 0 ? (fga + 0.44 * fta + tov) / min : 0;
+          const bpm = gp > 0 ? pm / gp : 0;
+          const vorp = bpm * (gp / 82) * 2.7;
+          const pmPg = gp > 0 ? pm / gp : 0;
+          // Per 36
+          const p36 = (stat: number) => min > 0 ? (stat / min) * 36 : 0;
+
+          return {
+            id: p.id,
+            player: p,
+            name: p.name,
+            teamId: team.id,
+            teamName: team.name,
+            team,
+            pos: p.position,
+            gp, mpg, ppg, rpg, apg, spg, bpg, tpg,
+            fgm, fga, fgPct, tpm, tpa, tpPct, ftm, fta, ftPct,
+            twom, twoa, twoPct,
+            per, ts, usg, bpm, vorp, pmPg,
+            p36pts: p36(pts), p36reb: p36(reb), p36ast: p36(ast),
+            p36stl: p36(stl), p36blk: p36(blk), p36tov: p36(tov),
+            p36fgPct: fgPct, p36tpPct: tpPct, p36ftPct: ftPct,
+          };
+        })
+      );
+    }, [league.teams]);
+
+    // Filter
+    const filtered = useMemo(() => {
+      return playerRows.filter(r => {
+        if (r.gp < minGames) return false;
+        if (searchTerm && !r.name.toLowerCase().includes(searchTerm.toLowerCase())) return false;
+        if (teamFilter !== 'ALL' && r.teamId !== teamFilter) return false;
+        if (posFilter !== 'ALL' && r.pos !== posFilter) return false;
+        return true;
+      });
+    }, [playerRows, minGames, searchTerm, teamFilter, posFilter]);
+
+    // Sort
+    const sorted = useMemo(() => {
+      return [...filtered].sort((a, b) => {
+        const av = (a as any)[sortKey] ?? 0;
+        const bv = (b as any)[sortKey] ?? 0;
+        return sortDir === 'desc' ? bv - av : av - bv;
+      });
+    }, [filtered, sortKey, sortDir]);
+
+    const paged = sorted.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE);
+    const totalPages = Math.ceil(sorted.length / PAGE_SIZE);
+
+    const handleSort = (key: string) => {
+      if (sortKey === key) setSortDir(d => d === 'asc' ? 'desc' : 'asc');
+      else { setSortKey(key); setSortDir('desc'); setPage(0); }
+    };
+    const Th = ({ k, label, right }: { k: string; label: string; right?: boolean }) => (
+      <th
+        className={`px-2 py-3 text-center cursor-pointer select-none whitespace-nowrap transition-colors hover:text-white ${
+          sortKey === k ? 'text-amber-500' : 'text-slate-500'
+        }`}
+        onClick={() => handleSort(k)}
+      >
+        {label}{sortKey === k ? (sortDir === 'desc' ? ' ↓' : ' ↑') : ''}
+      </th>
+    );
+
+    const pct = (v: number) => (v * 100).toFixed(1) + '%';
+    const fix1 = (v: number) => v.toFixed(1);
+    const fix2 = (v: number) => v.toFixed(2);
+
+    const rowTint = (rank: number) => {
+      if (rank === 0) return 'bg-yellow-500/10';
+      if (rank === 1) return 'bg-slate-400/10';
+      if (rank === 2) return 'bg-amber-700/10';
+      return '';
+    };
+
+    // Spotlight leaders
+    const scoringLeader  = [...playerRows].sort((a, b) => b.ppg - a.ppg)[0];
+    const assistsLeader  = [...playerRows].sort((a, b) => b.apg - a.apg)[0];
+    const reboundsLeader = [...playerRows].sort((a, b) => b.rpg - a.rpg)[0];
+    const blocksLeader   = [...playerRows].sort((a, b) => b.bpg - a.bpg)[0];
+
+    const SpotCard = ({ title, row, stat, label }: { title: string; row: typeof playerRows[0] | undefined; stat: number; label: string }) => (
+      <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 flex flex-col gap-2">
+        <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest">{title}</span>
+        {row ? (
+          <>
+            <span className="font-display font-bold text-white uppercase text-lg leading-none">{row.name}</span>
+            <div className="flex items-center gap-2">
+              <TeamBadge team={row.team} size="xs" />
+              <span className="text-[10px] font-black text-slate-500 uppercase">{row.teamName}</span>
+            </div>
+            <span className="text-3xl font-display font-bold text-amber-500">{fix1(stat)}</span>
+            <span className="text-[10px] font-black text-slate-600 uppercase">{label}</span>
+          </>
+        ) : <span className="text-slate-600">—</span>}
+      </div>
+    );
+
+    return (
+      <div className="space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-500">
+        {/* Spotlight */}
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+          <SpotCard title="Scoring Leader"  row={scoringLeader}  stat={scoringLeader?.ppg  ?? 0} label="PPG" />
+          <SpotCard title="Assists Leader"  row={assistsLeader}  stat={assistsLeader?.apg  ?? 0} label="APG" />
+          <SpotCard title="Rebounds Leader" row={reboundsLeader} stat={reboundsLeader?.rpg ?? 0} label="RPG" />
+          <SpotCard title="Blocks Leader"   row={blocksLeader}   stat={blocksLeader?.bpg   ?? 0} label="BPG" />
+        </div>
+
+        {/* Sub-tabs */}
+        <div className="flex gap-2 flex-wrap">
+          {(['traditional', 'advanced', 'per36', 'shooting'] as PlayerSubTab[]).map(t => (
+            <button
+              key={t}
+              onClick={() => { setPlayerSubTab(t); setSortKey(t === 'advanced' ? 'per' : t === 'shooting' ? 'fgPct' : 'ppg'); setSortDir('desc'); setPage(0); }}
+              className={`text-[10px] font-black uppercase tracking-widest px-4 py-2 rounded-full transition-all ${
+                playerSubTab === t ? 'bg-amber-500 text-slate-950' : 'bg-slate-800 text-slate-500 hover:text-white'
+              }`}
+            >
+              {t === 'per36' ? 'Per 36' : t}
+            </button>
+          ))}
+        </div>
+
+        {/* Table */}
+        <div className="bg-slate-900 border border-slate-800 rounded-3xl overflow-hidden shadow-2xl">
+          <div className="overflow-x-auto">
+            <table className="w-full text-left border-collapse text-xs">
+              <thead>
+                <tr className="text-[10px] font-black uppercase tracking-widest border-b border-slate-800 bg-slate-950/50">
+                  <th className="px-3 py-3 text-slate-500 text-center sticky left-0 bg-slate-950/90 z-10">#</th>
+                  <th className="px-4 py-3 text-slate-500 sticky left-8 bg-slate-950/90 z-10 whitespace-nowrap">Player</th>
+                  <th className="px-2 py-3 text-slate-500 text-center">Team</th>
+                  <th className="px-2 py-3 text-slate-500 text-center">Pos</th>
+                  <Th k="gp"  label="GP" />
+                  {playerSubTab === 'traditional' && (<>
+                    <Th k="mpg" label="MPG" />
+                    <Th k="ppg" label="PPG" />
+                    <Th k="rpg" label="RPG" />
+                    <Th k="apg" label="APG" />
+                    <Th k="spg" label="SPG" />
+                    <Th k="bpg" label="BPG" />
+                    <Th k="tpg" label="TPG" />
+                    <Th k="fgPct" label="FG%" />
+                    <Th k="tpPct" label="3P%" />
+                    <Th k="ftPct" label="FT%" />
+                  </>)}
+                  {playerSubTab === 'advanced' && (<>
+                    <Th k="per"  label="PER" />
+                    <Th k="ts"   label="TS%" />
+                    <Th k="usg"  label="USG%" />
+                    <Th k="bpm"  label="BPM" />
+                    <Th k="vorp" label="VORP" />
+                    <Th k="pmPg" label="+/-" />
+                  </>)}
+                  {playerSubTab === 'per36' && (<>
+                    <Th k="mpg"    label="MPG" />
+                    <Th k="p36pts" label="PTS" />
+                    <Th k="p36reb" label="REB" />
+                    <Th k="p36ast" label="AST" />
+                    <Th k="p36stl" label="STL" />
+                    <Th k="p36blk" label="BLK" />
+                    <Th k="p36tov" label="TOV" />
+                    <Th k="p36fgPct" label="FG%" />
+                    <Th k="p36tpPct" label="3P%" />
+                    <Th k="p36ftPct" label="FT%" />
+                  </>)}
+                  {playerSubTab === 'shooting' && (<>
+                    <Th k="fga"    label="FGA" />
+                    <Th k="fgPct"  label="FG%" />
+                    <Th k="tpa"    label="3PA" />
+                    <Th k="tpPct"  label="3P%" />
+                    <Th k="fta"    label="FTA" />
+                    <Th k="ftPct"  label="FT%" />
+                    <Th k="twoa"   label="2PA" />
+                    <Th k="twoPct" label="2P%" />
+                  </>)}
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-800/40">
+                {paged.map((r, idx) => {
+                  const globalRank = page * PAGE_SIZE + idx;
+                  return (
+                    <tr
+                      key={r.id}
+                      className={`hover:bg-slate-800/40 transition-all cursor-pointer ${rowTint(globalRank)}`}
+                      onClick={() => onViewPlayer?.(r.player)}
+                    >
+                      <td className="px-3 py-3 text-center font-mono text-slate-500 sticky left-0 bg-slate-900/95 z-10 text-xs">
+                        {globalRank + 1}
+                      </td>
+                      <td className="px-4 py-3 font-bold text-slate-200 uppercase tracking-tight whitespace-nowrap sticky left-8 bg-slate-900/95 z-10">
+                        {r.name}
+                      </td>
+                      <td className="px-2 py-3 text-center">
+                        <TeamBadge team={r.team} size="xs" />
+                      </td>
+                      <td className="px-2 py-3 text-center text-slate-400 font-black text-[10px] uppercase">{r.pos}</td>
+                      <td className="px-2 py-3 text-center font-mono">{r.gp}</td>
+                      {playerSubTab === 'traditional' && (<>
+                        <td className="px-2 py-3 text-center font-mono">{fix1(r.mpg)}</td>
+                        <td className="px-2 py-3 text-center font-mono font-bold text-amber-400">{fix1(r.ppg)}</td>
+                        <td className="px-2 py-3 text-center font-mono">{fix1(r.rpg)}</td>
+                        <td className="px-2 py-3 text-center font-mono">{fix1(r.apg)}</td>
+                        <td className="px-2 py-3 text-center font-mono">{fix1(r.spg)}</td>
+                        <td className="px-2 py-3 text-center font-mono">{fix1(r.bpg)}</td>
+                        <td className="px-2 py-3 text-center font-mono text-rose-400/70">{fix1(r.tpg)}</td>
+                        <td className="px-2 py-3 text-center font-mono">{pct(r.fgPct)}</td>
+                        <td className="px-2 py-3 text-center font-mono">{r.tpa > 0 ? pct(r.tpPct) : '—'}</td>
+                        <td className="px-2 py-3 text-center font-mono">{r.fta > 0 ? pct(r.ftPct) : '—'}</td>
+                      </>)}
+                      {playerSubTab === 'advanced' && (<>
+                        <td className="px-2 py-3 text-center font-mono font-bold text-amber-400">{fix1(r.per)}</td>
+                        <td className="px-2 py-3 text-center font-mono">{pct(r.ts)}</td>
+                        <td className="px-2 py-3 text-center font-mono">{fix2(r.usg)}</td>
+                        <td className={`px-2 py-3 text-center font-mono font-bold ${r.bpm >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>{fix1(r.bpm)}</td>
+                        <td className={`px-2 py-3 text-center font-mono font-bold ${r.vorp >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>{fix2(r.vorp)}</td>
+                        <td className={`px-2 py-3 text-center font-mono font-bold ${r.pmPg >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>{r.pmPg >= 0 ? '+' : ''}{fix1(r.pmPg)}</td>
+                      </>)}
+                      {playerSubTab === 'per36' && (<>
+                        <td className="px-2 py-3 text-center font-mono">{fix1(r.mpg)}</td>
+                        <td className="px-2 py-3 text-center font-mono font-bold text-amber-400">{fix1(r.p36pts)}</td>
+                        <td className="px-2 py-3 text-center font-mono">{fix1(r.p36reb)}</td>
+                        <td className="px-2 py-3 text-center font-mono">{fix1(r.p36ast)}</td>
+                        <td className="px-2 py-3 text-center font-mono">{fix1(r.p36stl)}</td>
+                        <td className="px-2 py-3 text-center font-mono">{fix1(r.p36blk)}</td>
+                        <td className="px-2 py-3 text-center font-mono text-rose-400/70">{fix1(r.p36tov)}</td>
+                        <td className="px-2 py-3 text-center font-mono">{pct(r.p36fgPct)}</td>
+                        <td className="px-2 py-3 text-center font-mono">{r.tpa > 0 ? pct(r.p36tpPct) : '—'}</td>
+                        <td className="px-2 py-3 text-center font-mono">{r.fta > 0 ? pct(r.p36ftPct) : '—'}</td>
+                      </>)}
+                      {playerSubTab === 'shooting' && (<>
+                        <td className="px-2 py-3 text-center font-mono">{r.fga}</td>
+                        <td className="px-2 py-3 text-center font-mono font-bold">{pct(r.fgPct)}</td>
+                        <td className="px-2 py-3 text-center font-mono">{r.tpa}</td>
+                        <td className="px-2 py-3 text-center font-mono">{r.tpa > 0 ? pct(r.tpPct) : '—'}</td>
+                        <td className="px-2 py-3 text-center font-mono">{r.fta}</td>
+                        <td className="px-2 py-3 text-center font-mono">{r.fta > 0 ? pct(r.ftPct) : '—'}</td>
+                        <td className="px-2 py-3 text-center font-mono">{r.twoa}</td>
+                        <td className="px-2 py-3 text-center font-mono font-bold">{r.twoa > 0 ? pct(r.twoPct) : '—'}</td>
+                      </>)}
+                    </tr>
+                  );
+                })}
+                {paged.length === 0 && (
+                  <tr><td colSpan={20} className="py-16 text-center text-slate-600 font-display uppercase tracking-widest">No players match filters</td></tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+
+          {/* Pagination */}
+          {totalPages > 1 && (
+            <div className="flex items-center justify-between px-6 py-4 border-t border-slate-800/60 bg-slate-950/30">
+              <span className="text-[10px] font-black text-slate-500 uppercase">
+                {page * PAGE_SIZE + 1}–{Math.min((page + 1) * PAGE_SIZE, sorted.length)} of {sorted.length}
+              </span>
+              <div className="flex gap-2">
+                <button
+                  disabled={page === 0}
+                  onClick={() => setPage(p => p - 1)}
+                  className="px-4 py-2 text-[10px] font-black uppercase rounded-lg bg-slate-800 text-slate-400 disabled:opacity-30 hover:text-white transition-colors"
+                >Prev</button>
+                {Array.from({ length: totalPages }, (_, i) => (
+                  <button
+                    key={i}
+                    onClick={() => setPage(i)}
+                    className={`w-8 h-8 text-[10px] font-black rounded-lg transition-colors ${
+                      i === page ? 'bg-amber-500 text-slate-950' : 'bg-slate-800 text-slate-500 hover:text-white'
+                    }`}
+                  >{i + 1}</button>
+                ))}
+                <button
+                  disabled={page === totalPages - 1}
+                  onClick={() => setPage(p => p + 1)}
+                  className="px-4 py-2 text-[10px] font-black uppercase rounded-lg bg-slate-800 text-slate-400 disabled:opacity-30 hover:text-white transition-colors"
+                >Next</button>
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
+    );
+  };
+
+  // ─── TEAM STATS TABLE ────────────────────────────────────────────────────
   const TeamStatsTable = () => {
     const [sortKey, setSortKey] = useState<keyof typeof teamStats[0]>('winPct');
     const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc');
@@ -448,39 +786,59 @@ const Stats: React.FC<StatsProps> = ({ league, onViewRoster, onManageTeam }) => 
         <div className="relative z-10 flex flex-col lg:flex-row items-center justify-between gap-8">
           <div>
             <h2 className="text-4xl font-display font-bold uppercase tracking-tight text-white mb-2">League Intelligence</h2>
-            <div className="flex gap-4">
-              {['leaderboards', 'advanced', 'compare', 'teams'].map(t => (
+            <div className="flex gap-2 flex-wrap">
+              {(['leaderboards', 'advanced', 'compare', 'teams', 'players'] as StatTab[]).map(t => (
                 <button 
                   key={t}
-                  onClick={() => setActiveTab(t as any)}
+                  onClick={() => { setActiveTab(t); setPage(0); }}
                   className={`text-[10px] font-black uppercase tracking-widest px-4 py-2 rounded-full transition-all ${activeTab === t ? 'bg-amber-500 text-slate-950' : 'bg-slate-800 text-slate-500 hover:text-white'}`}
                 >
-                  {t === 'teams' ? 'Team Stats' : t}
+                  {t === 'teams' ? 'Team Stats' : t === 'players' ? 'Player Stats' : t}
                 </button>
               ))}
             </div>
           </div>
           
-          <div className="flex gap-4 w-full lg:w-auto items-center">
-             <div className="flex-1 lg:w-64 relative">
+          <div className="flex gap-3 w-full lg:w-auto items-center flex-wrap">
+             <div className="flex-1 lg:w-52 relative">
                 <input 
                   type="text" 
-                  placeholder={activeTab === 'teams' ? "Filter Team..." : "Filter Player..."} 
+                  placeholder={activeTab === 'teams' ? 'Filter Team...' : 'Filter Player...'} 
                   className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-3 text-sm focus:outline-none focus:border-amber-500/50"
                   value={searchTerm}
-                  onChange={(e) => setSearchTerm(e.target.value)}
+                  onChange={(e) => { setSearchTerm(e.target.value); setPage(0); }}
                 />
              </div>
-             <button className="p-3 bg-slate-950 border border-slate-800 rounded-xl text-slate-500 hover:text-white transition-colors">
-                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M3 4a1 1 0 011-1h16a1 1 0 011 1v2.586a1 1 0 01-.293.707l-6.414 6.414a1 1 0 00-.293.707V17l-4 4v-6.586a1 1 0 00-.293-.707L3.293 7.293A1 1 0 013 6.586V4z" /></svg>
-             </button>
+             {activeTab === 'players' && (
+               <>
+                 <select
+                   className="bg-slate-950 border border-slate-800 rounded-xl px-3 py-3 text-xs font-black text-slate-400 focus:outline-none focus:border-amber-500/50"
+                   value={teamFilter}
+                   onChange={e => { setTeamFilter(e.target.value); setPage(0); }}
+                 >
+                   <option value="ALL">All Teams</option>
+                   {league.teams.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
+                 </select>
+                 <div className="flex gap-1">
+                   {(['ALL', 'PG', 'SG', 'SF', 'PF', 'C'] as Array<'ALL' | 'PG' | 'SG' | 'SF' | 'PF' | 'C'>).map(pos => (
+                     <button
+                       key={pos}
+                       onClick={() => { setPosFilter(pos as any); setPage(0); }}
+                       className={`text-[10px] font-black px-2 py-2 rounded-lg transition-all ${
+                         posFilter === pos ? 'bg-amber-500 text-slate-950' : 'bg-slate-800 text-slate-500 hover:text-white'
+                       }`}
+                     >{pos}</button>
+                   ))}
+                 </div>
+               </>
+             )}
              <div className="bg-slate-950 border border-slate-800 rounded-xl px-4 py-3 flex items-center gap-3">
                 <span className="text-[10px] font-black text-slate-600 uppercase">Min GP</span>
                 <input 
                   type="number" 
                   className="bg-transparent text-amber-500 font-display font-bold w-12 focus:outline-none" 
                   value={minGames} 
-                  onChange={(e) => setMinGames(parseInt(e.target.value) || 0)} 
+                  onChange={(e) => { setMinGames(parseInt(e.target.value) || 0); setPage(0); }} 
                 />
              </div>
           </div>
@@ -506,6 +864,8 @@ const Stats: React.FC<StatsProps> = ({ league, onViewRoster, onManageTeam }) => 
       {activeTab === 'compare' && <PlayerComparison />}
 
       {activeTab === 'teams' && <TeamStatsTable />}
+
+      {activeTab === 'players' && <PlayerStatsTable />}
     </div>
   );
 };
