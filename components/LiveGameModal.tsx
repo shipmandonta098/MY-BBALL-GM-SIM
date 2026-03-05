@@ -214,6 +214,7 @@ const LiveGameModal: React.FC<LiveGameModalProps> = ({
     const possessionBefore = possessionTeamId;
     // Default: possession stays — overridden below for turnovers, makes, def rebounds
     let possessionAfter = possessionBefore;
+    let overrideTeamId: string | undefined; // BUG 1 FIX: for steals, badge shows defender
     const offTeam = isHomePossession ? homeTeam : awayTeam;
     const defTeam = isHomePossession ? awayTeam : homeTeam;
     
@@ -275,7 +276,24 @@ const LiveGameModal: React.FC<LiveGameModalProps> = ({
       time: formatTime(newTime), quarter, text, type, teamId, possessionBefore: pBefore, possessionAfter: pAfter
     });
 
-    const tov_types = ['Lost Ball Turnover', 'Bad Pass Turnover', 'Step Out of Bounds Turnover', 'Offensive Foul Turnover'];
+    // BUG 2 FIX: weighted turnover types so step-out is only ~3%
+    const steal_tov_types = ['Lost Ball Turnover', 'Bad Pass Turnover'];
+    const tov_weights = [
+      { label: 'Bad Pass Turnover',         weight: 35 },
+      { label: 'Lost Ball Turnover',         weight: 25 },
+      { label: 'Offensive Foul Turnover',    weight: 12 },
+      { label: 'Travel',                     weight: 10 },
+      { label: 'Shot Clock Violation',       weight: 8  },
+      { label: 'Palming/Double Dribble',     weight: 5  },
+      { label: 'Step Out of Bounds Turnover', weight: 3 },
+      { label: 'Illegal Screen',             weight: 2  },
+    ];
+    const pickTov = () => {
+      const total = tov_weights.reduce((s: number, t: { label: string; weight: number }) => s + t.weight, 0);
+      let r = Math.random() * total;
+      for (const t of tov_weights) { r -= t.weight; if (r <= 0) return t.label; }
+      return 'Bad Pass Turnover';
+    };
     const non_shooting_fouls = ['Personal Take Foul', 'Loose Ball Foul', 'Illegal Screen'];
     const shot2_types_make = ['Driving Layup', 'Floating Jump Shot', 'Turnaround Mid-range Jumper', 'Pull-up Jump Shot', 'Running Layup', 'Putback Layup'];
     const shot2_types_miss = ['Driving Layup', 'Floating Jump Shot', 'Turnaround Jumper', 'Pull-up Mid-range', 'Running Floater', 'Hook Shot'];
@@ -429,13 +447,14 @@ const LiveGameModal: React.FC<LiveGameModalProps> = ({
       const stealer = defPlayers[Math.floor(Math.random() * defPlayers.length)];
       const newStl = getStat(!isHomePossession, stealer.id, 'stl') + 1;
       const newTov = getStat(isHomePossession, shooter.id, 'tov') + 1;
-      eventText = `${abbrev(stealer.name)} Steal (${newStl} steal${newStl !== 1 ? 's' : ''}). ${abbrev(shooter.name)} ${pick(tov_types)} (${newTov} TO)`;
+      eventText = `${abbrev(stealer.name)} Steal (${newStl} steal${newStl !== 1 ? 's' : ''}). ${abbrev(shooter.name)} ${pick(steal_tov_types)} (${newTov} TO)`;
       eventType = 'turnover';
+      overrideTeamId = defTeam.id; // BUG 1 FIX: steal badge shows STEALING (defensive) team
       updatePlayerStat(!isHomePossession, stealer.id, 'stl', 1);
       updatePlayerStat(isHomePossession, shooter.id, 'tov', 1);
       possessionAfter = defTeam.id; // steal → possession to stealing team
     } else if (roll < 10) { // Turnover (no steal)
-      const tovType = pick(tov_types);
+      const tovType = pickTov(); // BUG 2 FIX: weighted so step-out is only ~3%
       const newTov = getStat(isHomePossession, shooter.id, 'tov') + 1;
       eventText = `${abbrev(shooter.name)} ${tovType} (${newTov} turnover${newTov !== 1 ? 's' : ''})`;
       eventType = 'turnover';
@@ -486,7 +505,8 @@ const LiveGameModal: React.FC<LiveGameModalProps> = ({
       const shotType = pts === 3 ? pick(shot3_types_make) : pick(shot2_types_make);
       const newPts = getStat(isHomePossession, shooter.id, 'pts') + pts;
       const newAst = getStat(isHomePossession, assister.id, 'ast') + 1;
-      eventText = `${abbrev(shooter.name)} ${shotType}: Made (${newPts} pts). ${abbrev(assister.name)} ${newAst} assist${newAst !== 1 ? 's' : ''}`;
+      // BUG 4 FIX: canonical assist format
+      eventText = `${abbrev(shooter.name)} ${shotType}: Made. (${newPts} pts). Assist by ${abbrev(assister.name)} (${newAst} ast).`;
       eventType = 'score';
       if (isHomePossession) {
         setHomeScore(s => s + pts);
@@ -534,7 +554,16 @@ const LiveGameModal: React.FC<LiveGameModalProps> = ({
         const isDunk = (shooter.attributes?.jumping ?? 0) > 85 && !isThree && Math.random() > 0.7;
         const shotType = isDunk ? 'Slam Dunk' : isThree ? pick(shot3_types_make) : pick(shot2_types_make);
         const newPts = getStat(isHomePossession, shooter.id, 'pts') + pts;
-        eventText = `${abbrev(shooter.name)} ${shotType}: Made. (${newPts} points)`;
+        // BUG 3 FIX: Catch-and-Shoot & Corner 3 always award an assist on a make
+        if (shotType === 'Catch-and-Shoot 3' || shotType === 'Corner 3-pointer') {
+          const casAssister = offPlayers.filter(p => p.id !== shooter.id)[Math.floor(Math.random() * 4)] ?? shooter;
+          const casAst = getStat(isHomePossession, casAssister.id, 'ast') + 1;
+          // BUG 4 FIX: canonical format for CAS assists
+          eventText = `${abbrev(shooter.name)} ${shotType}: Made. (${newPts} pts). Assist by ${abbrev(casAssister.name)} (${casAst} ast).`;
+          updatePlayerStat(isHomePossession, casAssister.id, 'ast', 1);
+        } else {
+          eventText = `${abbrev(shooter.name)} ${shotType}: Made. (${newPts} pts)`;
+        }
         eventType = 'score';
 
         if (isHomePossession) {
@@ -618,7 +647,7 @@ const LiveGameModal: React.FC<LiveGameModalProps> = ({
 
       if (subEvts.length > 0) {
         // Append sub events after whatever just happened
-        const allEvts = [...(batchEvents.length > 0 ? batchEvents : [{ time: formatTime(newTime), quarter, text: eventText, type: eventType, teamId: isHomePossession ? homeTeam.id : awayTeam.id, possessionBefore, possessionAfter }]), ...subEvts];
+        const allEvts = [...(batchEvents.length > 0 ? batchEvents : [{ time: formatTime(newTime), quarter, text: eventText, type: eventType, teamId: overrideTeamId ?? (isHomePossession ? homeTeam.id : awayTeam.id), possessionBefore, possessionAfter }]), ...subEvts];
         possessionRef.current = allEvts[allEvts.length - 1].possessionAfter ?? possessionAfter;
         lastPlayTypeRef.current = allEvts[allEvts.length - 1].type;
         setEvents(prev => [...prev, ...allEvts].slice(-80));
@@ -641,7 +670,7 @@ const LiveGameModal: React.FC<LiveGameModalProps> = ({
       quarter,
       text: eventText,
       type: eventType,
-      teamId: isHomePossession ? homeTeam.id : awayTeam.id,
+      teamId: overrideTeamId ?? (isHomePossession ? homeTeam.id : awayTeam.id),
       possessionBefore,
       possessionAfter,
     };
