@@ -1031,7 +1031,7 @@ export const generateLeagueTeams = (genderRatio: number = 0): Team[] => {
       activeScheme: 'Balanced',
       wins: 0, losses: 0, homeWins: 0, homeLosses: 0, roadWins: 0, roadLosses: 0, confWins: 0, confLosses: 0, lastTen: [],
       budget: 180000000,
-      logo: `https://picsum.photos/seed/${data.city.replace(/\s/g, '')}${data.name}/400`,
+      logo: '',  // no stock photo; TeamBadge renders letter badge as default
       conference: data.conf as Conference,
       division: data.div as Division,
       marketSize: data.market as MarketSize,

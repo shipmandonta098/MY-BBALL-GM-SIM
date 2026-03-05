@@ -1,6 +1,7 @@
 
 import React, { useState, useMemo } from 'react';
 import { LeagueState, SeasonAwards, AwardWinner, Player, Coach, Team } from '../types';
+import TeamBadge from './TeamBadge';
 
 interface AwardsProps {
   league: LeagueState;
@@ -150,7 +151,7 @@ const Awards: React.FC<AwardsProps> = ({ league, onScout, onScoutCoach, onManage
           <h4 className="text-[10px] font-black uppercase tracking-[0.4em] text-slate-500 mb-4">{title}</h4>
           <h3 className="text-3xl font-display font-bold text-white uppercase mb-1 group-hover:text-amber-500 transition-colors">{winner.name}</h3>
           <div className="flex items-center gap-2 mb-4">
-             <img src={team?.logo} className="w-5 h-5 rounded" alt="" />
+             {team && <TeamBadge team={team} size="xs" />}
              <p className="text-xs font-bold text-slate-400 uppercase tracking-widest">{winner.teamName}</p>
           </div>
           <p className="text-lg font-mono text-emerald-400 font-bold mb-4">{winner.statsLabel}</p>
@@ -275,7 +276,7 @@ const Awards: React.FC<AwardsProps> = ({ league, onScout, onScoutCoach, onManage
                         className="flex items-center gap-2 cursor-pointer group/team hover:opacity-80 transition-opacity"
                         onClick={() => onManageTeam(c.team.id)}
                       >
-                         <img src={c.team.logo} className="w-4 h-4 rounded-sm" alt="" referrerPolicy="no-referrer" />
+                         <TeamBadge team={c.team} size="xs" />
                          <span className="text-[10px] font-bold text-slate-400 uppercase group-hover/team:text-amber-500 transition-colors">{c.team.name} ({c.team.wins}-{c.team.losses})</span>
                       </div>
                     </td>

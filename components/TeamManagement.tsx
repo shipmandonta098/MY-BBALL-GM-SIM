@@ -1,6 +1,7 @@
 
 import React, { useState, useEffect } from 'react';
 import { Team, LeagueState, Division, Conference } from '../types';
+import TeamBadge from './TeamBadge';
 
 interface TeamManagementProps {
   league: LeagueState;
@@ -13,12 +14,15 @@ const TeamManagement: React.FC<TeamManagementProps> = ({ league, updateLeague, i
   const userTeam = league.teams.find(t => t.id === league.userTeamId)!;
   const [selectedTeamId, setSelectedTeamId] = useState(initialTeamId || league.userTeamId);
   const [editedTeam, setEditedTeam] = useState<Team | null>(null);
+  const [logoPreviewError, setLogoPreviewError] = React.useState(false);
 
   const selectedTeam = league.teams.find(t => t.id === selectedTeamId) || userTeam;
 
   useEffect(() => {
     setEditedTeam({ ...selectedTeam });
   }, [selectedTeamId, league.teams]);
+
+  useEffect(() => { setLogoPreviewError(false); }, [editedTeam?.logo]);
 
   if (!editedTeam) return null;
 
@@ -73,12 +77,21 @@ const TeamManagement: React.FC<TeamManagementProps> = ({ league, updateLeague, i
             
             <div className="space-y-4">
               <div className="aspect-square bg-slate-950 rounded-3xl border border-slate-800 flex items-center justify-center overflow-hidden relative group">
-                <img 
-                  src={editedTeam.logo} 
-                  alt="Logo Preview" 
-                  className="w-48 h-48 object-contain transition-transform group-hover:scale-110 duration-500"
-                  referrerPolicy="no-referrer"
-                />
+                {editedTeam.logo && !logoPreviewError
+                  ? <img
+                      src={editedTeam.logo}
+                      alt="Logo Preview"
+                      className="w-48 h-48 object-contain transition-transform group-hover:scale-110 duration-500"
+                      referrerPolicy="no-referrer"
+                      onError={() => setLogoPreviewError(true)}
+                    />
+                  : <div
+                      className="w-48 h-48 flex items-center justify-center rounded-2xl text-white font-black text-5xl select-none"
+                      style={{ backgroundColor: editedTeam.primaryColor }}
+                    >
+                      {(editedTeam.abbreviation || editedTeam.name).substring(0, 3).toUpperCase()}
+                    </div>
+                }
                 <div className="absolute inset-0 bg-slate-950/60 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
                    <p className="text-[10px] font-black text-white uppercase tracking-widest">Logo Preview</p>
                 </div>

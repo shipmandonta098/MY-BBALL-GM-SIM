@@ -1,6 +1,7 @@
 
 import React, { useState, useRef } from 'react';
 import { LeagueState } from '../types';
+import TeamBadge from './TeamBadge';
 
 interface TitleScreenProps {
   onNewLeague: () => void;
@@ -192,8 +193,8 @@ const TitleScreen: React.FC<TitleScreenProps> = ({
                     <div key={s.id} className="group relative bg-slate-900 border border-slate-800 rounded-2xl p-6 flex flex-col md:flex-row md:items-center justify-between hover:border-amber-500/30 transition-all gap-6">
                       <div className="flex items-center gap-6">
                         <div className="w-20 h-20 bg-slate-800 rounded-2xl overflow-hidden flex items-center justify-center border border-slate-700 shadow-inner group-hover:scale-105 transition-transform">
-                          {userTeam?.logo ? (
-                            <img src={userTeam.logo} className="w-full h-full object-cover" alt="" />
+                          {userTeam ? (
+                            <TeamBadge team={userTeam} size="lg" />
                           ) : (
                             <span className="font-display text-2xl text-slate-600">?</span>
                           )}

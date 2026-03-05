@@ -25,7 +25,14 @@ const Stats: React.FC<StatsProps> = ({ league, onViewRoster, onManageTeam, onVie
   const [page, setPage] = useState(0);
 
   const allPlayers = useMemo(() => {
-    return league.teams.flatMap(t => t.roster.map(p => ({ ...p, teamName: t.name, teamLogo: t.logo })));
+    return league.teams.flatMap(t => t.roster.map(p => ({
+      ...p,
+      teamName: t.name,
+      teamLogo: t.logo,
+      teamPrimaryColor: t.primaryColor,
+      teamSecondaryColor: t.secondaryColor,
+      teamAbbreviation: t.abbreviation,
+    })));
   }, [league.teams]);
 
   const teamStats = useMemo(() => {
@@ -173,7 +180,10 @@ const Stats: React.FC<StatsProps> = ({ league, onViewRoster, onManageTeam, onVie
                     </td>
                     <td className="px-6 py-4">
                        <div className="flex items-center gap-2">
-                          <img src={p.teamLogo} className="w-5 h-5 opacity-50" alt="" />
+                          <TeamBadge
+                            team={{ name: p.teamName, primaryColor: (p as any).teamPrimaryColor ?? '#888', secondaryColor: (p as any).teamSecondaryColor ?? '#333', logo: p.teamLogo, abbreviation: (p as any).teamAbbreviation }}
+                            size="xs"
+                          />
                           <span className="text-[10px] font-black text-slate-500 uppercase">{p.teamName}</span>
                        </div>
                     </td>
@@ -208,7 +218,12 @@ const Stats: React.FC<StatsProps> = ({ league, onViewRoster, onManageTeam, onVie
                     <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12" /></svg>
                  </button>
                  <div className="text-center mb-6">
-                    <img src={p.teamLogo} className="w-12 h-12 mx-auto mb-4 opacity-30 group-hover:opacity-60 transition-opacity" alt="" />
+                    <div className="flex justify-center mb-4">
+                      <TeamBadge
+                        team={{ name: p.teamName, primaryColor: (p as any).teamPrimaryColor ?? '#888', secondaryColor: (p as any).teamSecondaryColor ?? '#333', logo: p.teamLogo, abbreviation: (p as any).teamAbbreviation }}
+                        size="lg"
+                      />
+                    </div>
                     <h4 className="text-2xl font-display font-bold text-white uppercase">{p.name}</h4>
                     <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest">{p.teamName} • {p.position}</p>
                  </div>

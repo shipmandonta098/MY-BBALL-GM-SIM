@@ -1,5 +1,6 @@
 import React, { useState, useMemo } from 'react';
 import { LeagueState, NewsItem, NewsCategory, Team, Player } from '../types';
+import TeamBadge from './TeamBadge';
 
 interface NewsFeedProps {
   league: LeagueState;
@@ -96,7 +97,11 @@ const NewsFeed: React.FC<NewsFeedProps> = ({ league, onViewPlayer, onViewRoster,
                 className="p-6 hover:bg-slate-900/40 transition-colors cursor-pointer group flex gap-4"
               >
                 <div className="w-12 h-12 rounded-full bg-slate-800 flex items-center justify-center text-xl shrink-0 border border-slate-700 shadow-inner group-hover:border-amber-500/50 transition-colors overflow-hidden">
-                  {team ? <img src={team.logo} className="w-full h-full object-cover" alt="" /> : <span>{getCategoryIcon(item.category)}</span>}
+                  {team
+                    ? <div className="w-full h-full flex items-center justify-center font-black text-white text-[9px]" style={{ backgroundColor: team.primaryColor }}>
+                        {(team.abbreviation || team.name).substring(0, 2).toUpperCase()}
+                      </div>
+                    : <span>{getCategoryIcon(item.category)}</span>}
                 </div>
                 
                 <div className="flex-1 space-y-1">
