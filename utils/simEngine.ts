@@ -639,11 +639,111 @@ const generateQuarterPBP = (
       poss.result === 'FOUL_DRAWN' ? 'foul'     :
       poss.result === 'MADE'       ? 'score'    : 'miss';
 
-    const pbpText = isGarbageTime
-      ? poss.pbpText.replace('— Good.', '— garbage time bucket.').replace('relentlessly', 'through the motions')
-      : poss.pbpText;
+    // ── BUG 1 FIX: Assist credit on catch-and-shoot / post-feed ──────────
+    // Catch-and-shoot, corner 3, kick-out 3, post feeds ALWAYS have an assist on a make.
+    // Pull-up jumpers, iso shots, self-created mid-range do NOT get assists.
+    const isCatchAndShootAction = poss.shotType === 'CATCH_AND_SHOOT_3';
+    const isPostFeedAction      = poss.actionTaken === 'POST_UP' && made
+                                    && poss.shotType !== 'PULL_UP_3'
+                                    && poss.shotType !== 'MID_RANGE';
+    const requiresAssist        = (isCatchAndShootAction || isPostFeedAction) && made;
 
-    events.push({ time, text: pbpText, type: evType, quarter });
+    let finalPbpText: string;
+    if (requiresAssist) {
+      if (isCatchAndShootAction) {
+        // The current handler was the PASSER; pick the shooter from the rotation.
+        const shootCandidates = rotation.filter(p => p.id !== handler.id);
+        let shooter = handler; // fallback if only one player
+        if (shootCandidates.length > 0) {
+          const sorted3 = [...shootCandidates].sort((a, b) =>
+            (b.attributes.shooting3pt ?? 50) - (a.attributes.shooting3pt ?? 50));
+          shooter = Math.random() < 0.55
+            ? sorted3[0]
+            : sorted3[Math.floor(Math.random() * Math.min(3, sorted3.length))];
+        }
+        const shooterLn = lastName(shooter);
+        const passerLn  = lastName(handler); // handler threw the pass → earns the assist
+        finalPbpText = `${shooterLn} Catch-and-Shoot 3: Made. Assist by ${passerLn}.`;
+      } else {
+        // Post feed: handler scored in the post, someone else fed them the ball.
+        const passerCandidates = rotation.filter(p => p.id !== handler.id);
+        let passerLn = '';
+        if (passerCandidates.length > 0) {
+          const sortedPM = [...passerCandidates].sort((a, b) =>
+            (b.attributes.playmaking ?? 50) - (a.attributes.playmaking ?? 50));
+          const idx = Math.random() < 0.60 ? 0 : Math.floor(Math.random() * Math.min(3, sortedPM.length));
+          passerLn = lastName(sortedPM[idx]);
+        }
+        const handlerLn = lastName(handler);
+        finalPbpText = passerLn
+          ? `${handlerLn} Post Feed: Made. Assist by ${passerLn}.`
+          : `${handlerLn} Post Fade: Made.`;
+      }
+    } else {
+      // Catch-and-shoot miss: name the actual shooter clearly, no assist line.
+      if (isCatchAndShootAction && !made) {
+        const shootCandidates = rotation.filter(p => p.id !== handler.id);
+        if (shootCandidates.length > 0) {
+          const sorted3 = [...shootCandidates].sort((a, b) =>
+            (b.attributes.shooting3pt ?? 50) - (a.attributes.shooting3pt ?? 50));
+          const shooter = Math.random() < 0.55
+            ? sorted3[0]
+            : sorted3[Math.floor(Math.random() * Math.min(3, sorted3.length))];
+          finalPbpText = `${lastName(shooter)} Catch-and-Shoot 3: Missed.`;
+        } else {
+          finalPbpText = isGarbageTime
+            ? poss.pbpText.replace('— Good.', '— garbage time bucket.').replace('relentlessly', 'through the motions')
+            : poss.pbpText;
+        }
+      } else {
+        // All other shot types: use original PBP text (no assist for pull-up / iso / self-created)
+        finalPbpText = isGarbageTime
+          ? poss.pbpText.replace('— Good.', '— garbage time bucket.').replace('relentlessly', 'through the motions')
+          : poss.pbpText;
+      }
+    }
+
+    events.push({ time, text: finalPbpText, type: evType, quarter });
+
+    // ── BUG 2 & 3 FIX: Putback sequence — missed shot MUST precede putback ──
+    // After any missed field goal: roll for offensive rebound.
+    // If OReb: push the rebound event THEN the putback attempt (made or missed).
+    // The rebounder and putback scorer are the same player.
+    // Putback does NOT earn an assist. It IS an offensive rebound.
+    if (poss.result === 'MISSED' && Math.random() < 0.12) {
+      // Prefer big men (high offReb + shootingInside); exclude the original missed shooter.
+      const rebCandidates = rotation.filter(p =>
+        p.id !== handler.id && (p.attributes.shootingInside ?? 40) >= 40);
+      const pool = rebCandidates.length > 0
+        ? rebCandidates
+        : rotation.filter(p => p.id !== handler.id);
+      if (pool.length > 0) {
+        const sortedReb = [...pool].sort((a, b) =>
+          (b.attributes.offReb ?? 50) - (a.attributes.offReb ?? 50));
+        const rebounder = Math.random() < 0.55
+          ? sortedReb[0]
+          : sortedReb[Math.floor(Math.random() * Math.min(3, sortedReb.length))];
+        const rebLn = lastName(rebounder);
+
+        // Step 2: Offensive Rebound event (BUG 3: counts as OReb, same possession)
+        events.push({ time, text: `${rebLn} Offensive Rebound.`, type: 'info', quarter });
+
+        // Step 3: Putback attempt — success rate = (offReb × 0.4 + shootingInside × 0.6) / 100
+        const putbackChance = (
+          (rebounder.attributes.offReb ?? 50) * 0.4 +
+          (rebounder.attributes.shootingInside ?? 50) * 0.6
+        ) / 100;
+        const putbackMade = Math.random() < putbackChance;
+        if (putbackMade) {
+          // Putback Made: updates teamStreak, no assist credited
+          events.push({ time, text: `${rebLn} Putback Layup: Made.`, type: 'score', quarter });
+          teamStreak++;
+          streakMap.set(rebounder.id, Math.max(0, streakMap.get(rebounder.id) ?? 0) + 1);
+        } else {
+          events.push({ time, text: `${rebLn} Putback Layup: Missed.`, type: 'miss', quarter });
+        }
+      }
+    }
 
     const newStreak = streakMap.get(handler.id) ?? 0;
     if (Math.abs(newStreak) === 3) {
@@ -971,6 +1071,18 @@ export const simulateGame = (
     }
     if (q === 4 && Math.abs(runningHome - runningAway) <= 5) {
       pbp.push({ time: '4:00', text: `We have a BALL GAME! ${Math.abs(runningHome - runningAway) <= 2 ? "Anyone's game with 4 minutes left!" : 'One possession game down the stretch!'}`, type: 'info', quarter: q });
+    }
+
+    // ── BUG 4 FIX: Starters always open Q1 and Q3 ────────────────────────
+    // In the NBA, starters always open the 1st and 3rd quarters regardless of
+    // foul trouble or fatigue (unless 5 fouls / injured, handled by rotation setup).
+    // Sub logic does not fire for the first 2 minutes of Q3.
+    if (q === 1) {
+      pbp.push({ time: '12:00', text: `${home.name} and ${away.name} are set — starting lineups on the floor for tip-off.`, type: 'info', quarter: 1 });
+    }
+    if (q === 3) {
+      pbp.push({ time: '12:00', text: `${home.name} opens the second half with their starting lineup.`, type: 'info', quarter: 3 });
+      pbp.push({ time: '12:00', text: `${away.name} opens the second half with their starting lineup.`, type: 'info', quarter: 3 });
     }
 
     const homePBPBoost = homeOff * 0.5;
