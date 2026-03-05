@@ -276,23 +276,24 @@ const LiveGameModal: React.FC<LiveGameModalProps> = ({
       time: formatTime(newTime), quarter, text, type, teamId, possessionBefore: pBefore, possessionAfter: pAfter
     });
 
-    // BUG 2 FIX: weighted turnover types so step-out is only ~3%
-    const steal_tov_types = ['Lost Ball Turnover', 'Bad Pass Turnover'];
-    const tov_weights = [
-      { label: 'Bad Pass Turnover',         weight: 35 },
-      { label: 'Lost Ball Turnover',         weight: 25 },
-      { label: 'Offensive Foul Turnover',    weight: 12 },
-      { label: 'Travel',                     weight: 10 },
-      { label: 'Shot Clock Violation',       weight: 8  },
-      { label: 'Palming/Double Dribble',     weight: 5  },
-      { label: 'Step Out of Bounds Turnover', weight: 3 },
-      { label: 'Illegal Screen',             weight: 2  },
+    // Unified turnover table: type is rolled FIRST; steal credit is derived from the type.
+    // This prevents impossible combinations like "Steal + Step Out of Bounds".
+    type TovType = 'STOLEN' | 'BAD_PASS' | 'LOST_BALL' | 'OFFENSIVE_FOUL' | 'TRAVEL' | 'SHOT_CLOCK' | 'STEP_OUT' | 'OTHER';
+    const TOV_TABLE: { type: TovType; weight: number; hasSteal: boolean }[] = [
+      { type: 'BAD_PASS',       weight: 35, hasSteal: true  }, // intercepted pass → stealer credited
+      { type: 'STOLEN',         weight: badge.defGuru ? 30 : 25, hasSteal: true  }, // direct strip/poke
+      { type: 'LOST_BALL',      weight: 20, hasSteal: true  }, // loose ball stripped
+      { type: 'OFFENSIVE_FOUL', weight: 12, hasSteal: false },
+      { type: 'TRAVEL',         weight: 10, hasSteal: false },
+      { type: 'SHOT_CLOCK',     weight: 8,  hasSteal: false },
+      { type: 'STEP_OUT',       weight: 3,  hasSteal: false }, // never combined with a steal
+      { type: 'OTHER',          weight: 2,  hasSteal: false },
     ];
-    const pickTov = () => {
-      const total = tov_weights.reduce((s: number, t: { label: string; weight: number }) => s + t.weight, 0);
+    const pickTovEntry = () => {
+      const total = TOV_TABLE.reduce((s, t) => s + t.weight, 0);
       let r = Math.random() * total;
-      for (const t of tov_weights) { r -= t.weight; if (r <= 0) return t.label; }
-      return 'Bad Pass Turnover';
+      for (const t of TOV_TABLE) { r -= t.weight; if (r <= 0) return t; }
+      return TOV_TABLE[0];
     };
     const non_shooting_fouls = ['Personal Take Foul', 'Loose Ball Foul', 'Illegal Screen'];
     const shot2_types_make = ['Driving Layup', 'Floating Jump Shot', 'Turnaround Mid-range Jumper', 'Pull-up Jump Shot', 'Running Layup', 'Putback Layup'];
@@ -443,23 +444,40 @@ const LiveGameModal: React.FC<LiveGameModalProps> = ({
       // Flagrant → 2 FTs for the fouled team + possession
       makeFTSequence(shooter, isHomePossession, 2, eventText, possessionBefore);
       eventText = ''; // already pushed via batch
-    } else if (roll < (5 + (badge.defGuru ? 0.55 : 0))) { // Steal — Defensive Guru widens steal window
-      const stealer = defPlayers[Math.floor(Math.random() * defPlayers.length)];
-      const newStl = getStat(!isHomePossession, stealer.id, 'stl') + 1;
+    } else if (roll < 10) { // Turnover — type rolled first; steal credit derived from type (never independent)
+      const tovEntry = pickTovEntry();
       const newTov = getStat(isHomePossession, shooter.id, 'tov') + 1;
-      eventText = `${abbrev(stealer.name)} Steal (${newStl} steal${newStl !== 1 ? 's' : ''}). ${abbrev(shooter.name)} ${pick(steal_tov_types)} (${newTov} TO)`;
-      eventType = 'turnover';
-      overrideTeamId = defTeam.id; // BUG 1 FIX: steal badge shows STEALING (defensive) team
-      updatePlayerStat(!isHomePossession, stealer.id, 'stl', 1);
       updatePlayerStat(isHomePossession, shooter.id, 'tov', 1);
-      possessionAfter = defTeam.id; // steal → possession to stealing team
-    } else if (roll < 10) { // Turnover (no steal)
-      const tovType = pickTov(); // BUG 2 FIX: weighted so step-out is only ~3%
-      const newTov = getStat(isHomePossession, shooter.id, 'tov') + 1;
-      eventText = `${abbrev(shooter.name)} ${tovType} (${newTov} turnover${newTov !== 1 ? 's' : ''})`;
+      possessionAfter = defTeam.id;
       eventType = 'turnover';
-      updatePlayerStat(isHomePossession, shooter.id, 'tov', 1);
-      possessionAfter = defTeam.id; // turnover → possession switches
+
+      if (tovEntry.hasSteal) {
+        // STOLEN / BAD_PASS / LOST_BALL → stealer gets credit
+        const stealer = defPlayers[Math.floor(Math.random() * defPlayers.length)];
+        const newStl = getStat(!isHomePossession, stealer.id, 'stl') + 1;
+        updatePlayerStat(!isHomePossession, stealer.id, 'stl', 1);
+        overrideTeamId = defTeam.id; // badge shows stealing (defensive) team
+        if (tovEntry.type === 'STOLEN') {
+          eventText = `${abbrev(stealer.name)} Steal (${newStl} stl). ${abbrev(shooter.name)} Turnover (${newTov} TO).`;
+        } else if (tovEntry.type === 'BAD_PASS') {
+          eventText = `${abbrev(stealer.name)} Steal (${newStl} stl). ${abbrev(shooter.name)} Bad Pass Turnover (${newTov} TO).`;
+        } else { // LOST_BALL
+          eventText = `${abbrev(stealer.name)} Steal (${newStl} stl). ${abbrev(shooter.name)} Lost Ball Turnover (${newTov} TO).`;
+        }
+      } else if (tovEntry.type === 'STEP_OUT') {
+        // No defender mentioned — impossible to have a steal here
+        eventText = `${abbrev(shooter.name)} Steps Out of Bounds. (${newTov} TO).`;
+      } else if (tovEntry.type === 'TRAVEL') {
+        eventText = `${abbrev(shooter.name)} Travel Violation. (${newTov} TO).`;
+      } else if (tovEntry.type === 'OFFENSIVE_FOUL') {
+        const chargeTaker = defPlayers[Math.floor(Math.random() * defPlayers.length)];
+        updatePlayerStat(!isHomePossession, chargeTaker.id, 'pf', 1);
+        eventText = `${abbrev(shooter.name)} Offensive Foul. Charge taken by ${abbrev(chargeTaker.name)}. (${newTov} TO).`;
+      } else if (tovEntry.type === 'SHOT_CLOCK') {
+        eventText = `Shot Clock Violation — ${offTeam.name} Turnover. (${newTov} TO).`;
+      } else {
+        eventText = `${abbrev(shooter.name)} Turnover (${newTov} TO).`;
+      }
     } else if (roll < 15) { // Non-shooting Personal Foul (Loose Ball, Illegal Screen, Take Foul)
       const foulType = pick(non_shooting_fouls);
       const newPf = getStat(!isHomePossession, defender.id, 'pf') + 1;
