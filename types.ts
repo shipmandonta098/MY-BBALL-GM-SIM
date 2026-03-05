@@ -509,9 +509,11 @@ export interface LeagueSettings {
   expansionYear?: number;
   salaryCap: number;
   luxuryTaxLine: number;
-  injuryFrequency: 'Low' | 'Medium' | 'High';
-  tradeDifficulty: 'Easy' | 'Realistic' | 'Hard';
-  rookieProgressionRate: 'Slow' | 'Normal' | 'Fast';
+  franchiseName?: string;
+  startingYear?: number;
+  injuryFrequency: 'None' | 'Low' | 'Medium' | 'High';
+  tradeDifficulty: 'Arcade' | 'Easy' | 'Realistic' | 'Hard' | 'Simulation';
+  rookieProgressionRate: 'Slow' | 'Normal' | 'Fast' | 'Accelerated';
   vetDeclineRate: number;
   simSpeed: 'Normal' | 'Smarter' | 'Faster';
   godMode: boolean;
@@ -519,8 +521,9 @@ export interface LeagueSettings {
   playerGenderRatio: number;
   coachGenderRatio: number;
   allowManualGenderEdits: boolean;
-  b2bFrequency: 'Low' | 'Realistic' | 'High';
+  b2bFrequency: 'None' | 'Low' | 'Realistic' | 'High' | 'Brutal';
   showAdvancedStats: boolean;
+  hardCap?: number;
 
   // ── League Tab additions ──────────────────────────────────────────────────
   playoffFormat?: 6 | 8 | 10 | 16;

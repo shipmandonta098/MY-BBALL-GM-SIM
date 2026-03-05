@@ -138,10 +138,13 @@ const App: React.FC = () => {
     const genderRatio = partialSettings.playerGenderRatio || 0;
     
     const finalSettings: LeagueSettings = {
-      difficulty: 'Medium', ownerMeterEnabled: true, salaryCap: 140000000, luxuryTaxLine: 160000000, injuryFrequency: 'Medium',
+      difficulty: 'Pro', ownerMeterEnabled: true, salaryCap: 140000000, luxuryTaxLine: 160000000, injuryFrequency: 'Medium',
       tradeDifficulty: 'Realistic', rookieProgressionRate: 'Normal', vetDeclineRate: 100, simSpeed: 'Normal', godMode: false,
       seasonLength: 82, playerGenderRatio: 0, coachGenderRatio: 10, allowManualGenderEdits: true, b2bFrequency: 'Realistic',
-      showAdvancedStats: true, ...partialSettings
+      showAdvancedStats: true,
+      franchiseName: name,
+      startingYear: year,
+      ...partialSettings
     };
 
     const freshTeams = generateLeagueTeams(genderRatio).map(t => ({

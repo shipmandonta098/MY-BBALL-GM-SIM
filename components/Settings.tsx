@@ -173,6 +173,22 @@ const Settings: React.FC<SettingsProps> = ({ league, updateLeague }) => {
   };
 
   const s = league.settings;
+  const inSeason = !league.isOffseason;
+
+  // ── Locked mid-season field wrapper ──────────────────────────────────────
+  const LockedField: React.FC<{ children: React.ReactNode }> = ({ children }) => (
+    <div className="relative">
+      <div className="pointer-events-none opacity-40 select-none">{children}</div>
+      <div className="absolute inset-0 flex items-center justify-center z-10">
+        <div className="flex items-center gap-1.5 bg-slate-900/95 border border-slate-700 rounded-xl px-3 py-1.5 shadow-lg">
+          <svg className="w-3.5 h-3.5 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
+          </svg>
+          <span className="text-[9px] font-black uppercase tracking-widest text-slate-400 whitespace-nowrap">Locked until next offseason</span>
+        </div>
+      </div>
+    </div>
+  );
 
   const allPresets = [...BUILT_IN_PRESETS, ...customPresets];
 
@@ -317,6 +333,20 @@ const Settings: React.FC<SettingsProps> = ({ league, updateLeague }) => {
   return (
     <div className="space-y-6 animate-in fade-in duration-500 pb-40 max-w-6xl mx-auto">
 
+      {/* ── Mid-season lock notice ── */}
+      {inSeason && (
+        <div className="flex items-center gap-3 bg-slate-800/80 border border-slate-700 rounded-2xl px-5 py-3">
+          <svg className="w-4 h-4 text-slate-400 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
+          </svg>
+          <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400">
+            Season in progress — some settings are locked until the next offseason.
+            <span className="text-slate-600 ml-2 normal-case font-normal tracking-normal">Changeable: Difficulty, Injuries, God Mode, Trade Realism, Advanced Stats.</span>
+          </p>
+        </div>
+      )}
+
+
       {/* ── Header ── */}
       <header className="bg-slate-900 border border-slate-800 rounded-[2.5rem] p-8 shadow-2xl relative overflow-hidden">
         <div className="absolute top-0 right-0 w-80 h-80 bg-amber-500/5 blur-[100px] rounded-full -mr-40 -mt-40" />
@@ -457,12 +487,22 @@ const Settings: React.FC<SettingsProps> = ({ league, updateLeague }) => {
 
             {/* Basics */}
             <SectionHeader title="Franchise" />
+            {inSeason ? (
+              <LockedField>
+                <div className="space-y-3 bg-slate-950/40 p-5 rounded-2xl border border-slate-800">
+                  <label className="text-[10px] font-black uppercase text-slate-500 tracking-widest">Franchise Name</label>
+                  <input type="text" readOnly value={league.leagueName}
+                    className="w-full bg-slate-900 border border-slate-700 rounded-xl px-4 py-3 text-white font-display text-xl focus:outline-none" />
+                </div>
+              </LockedField>
+            ) : (
             <div className="space-y-3 bg-slate-950/40 p-5 rounded-2xl border border-slate-800">
               <label className="text-[10px] font-black uppercase text-slate-500 tracking-widest">Franchise Name</label>
               <input type="text" value={league.leagueName}
                 onChange={e => updateLeague({ leagueName: e.target.value })}
                 className="w-full bg-slate-900 border border-slate-700 rounded-xl px-4 py-3 text-white font-display text-xl focus:outline-none" />
             </div>
+            )}
             <ToggleField label="Owner Patience Meter" value={s.ownerMeterEnabled}
               onChange={v => updateSettings({ ownerMeterEnabled: v }, 'Owner Patience Meter')} />
             <SliderField label="Salary Cap" value={s.salaryCap} min={80_000_000} max={250_000_000} step={1_000_000}
@@ -516,9 +556,17 @@ const Settings: React.FC<SettingsProps> = ({ league, updateLeague }) => {
 
             {/* Expansion */}
             <SectionHeader title="Expansion" />
-            <SelectField label="Scheduled Expansion" value={s.scheduledExpansion ?? 'Off'}
-              options={['Off','Year 2','Year 3','Year 5']}
-              onChange={v => updateSettings({ scheduledExpansion: v as any }, 'Scheduled Expansion')} />
+            {inSeason ? (
+              <LockedField>
+                <SelectField label="Scheduled Expansion" value={s.scheduledExpansion ?? 'Off'}
+                  options={['Off','Year 2','Year 3','Year 5']}
+                  onChange={() => {}} />
+              </LockedField>
+            ) : (
+              <SelectField label="Scheduled Expansion" value={s.scheduledExpansion ?? 'Off'}
+                options={['Off','Year 2','Year 3','Year 5']}
+                onChange={v => updateSettings({ scheduledExpansion: v as any }, 'Scheduled Expansion')} />
+            )}
             <ButtonField label="Expansion Team Count" options={[1,2,4]}
               value={s.expansionTeamCount ?? 2} onChange={v => updateSettings({ expansionTeamCount: Number(v) as 1|2|4 }, 'Expansion Team Count')} />
             <SelectField label="Expansion Draft Rules" value={s.expansionDraftRules ?? 'Standard'}
@@ -594,8 +642,15 @@ const Settings: React.FC<SettingsProps> = ({ league, updateLeague }) => {
             <SelectField label="Simulation Engine Mode" value={s.simSpeed}
               options={['Normal','Smarter','Faster']}
               onChange={v => updateSettings({ simSpeed: v as any }, 'Simulation Engine Mode')} />
+            {inSeason ? (
+              <LockedField>
+                <SliderField label="Season Length (Games)" value={s.seasonLength} min={10} max={82}
+                  onChange={() => {}} />
+              </LockedField>
+            ) : (
             <SliderField label="Season Length (Games)" value={s.seasonLength} min={10} max={82}
               onChange={v => updateSettings({ seasonLength: v }, 'Season Length')} />
+            )}
           </div>
         )}
 
