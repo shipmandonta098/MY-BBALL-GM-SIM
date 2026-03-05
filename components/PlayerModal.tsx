@@ -1,5 +1,5 @@
 import React, { useEffect } from 'react';
-import { Player, PlayerStatus, PersonalityTrait, Position } from '../types';
+import { Player, PlayerStatus, PersonalityTrait, Position, PlayerTendencies } from '../types';
 import { getFlag, POS_ATTR_RANGES, PosAttrRangeKey, enforcePositionalBounds } from '../constants';
 
 const POS_RANGE_KEYS: PosAttrRangeKey[] = ['shooting', 'playmaking', 'defense', 'rebounding', 'athleticism'];
@@ -54,10 +54,21 @@ const PlayerModal: React.FC<PlayerModalProps> = ({
     postScoring: 50, offReb: 50, defReb: 50
   };
 
+  const defaultTendencies: PlayerTendencies = {
+    offensiveTendencies: {
+      pullUpThree: 50, postUp: 50, driveToBasket: 50,
+      midRangeJumper: 50, kickOutPasser: 50, isoHeavy: 50, transitionHunter: 50,
+    },
+    defensiveTendencies: {
+      gambles: 50, helpDefender: 50, physicality: 50, faceUpGuard: 50,
+    },
+  };
+
   const normalizePlayer = (p: Player): Player => ({
     ...p,
     attributes: p.attributes ?? defaultAttributes,
     personalityTraits: p.personalityTraits ?? [],
+    tendencies: p.tendencies ?? defaultTendencies,
   });
 
   const [editedPlayer, setEditedPlayer] = React.useState<Player>(normalizePlayer(player));
@@ -156,6 +167,20 @@ const PlayerModal: React.FC<PlayerModalProps> = ({
     setEditedPlayer(prev => ({
       ...prev,
       [key]: val
+    }));
+  };
+
+  const handleTendencyChange = (
+    side: 'offensiveTendencies' | 'defensiveTendencies',
+    key: string,
+    val: number,
+  ) => {
+    setEditedPlayer(prev => ({
+      ...prev,
+      tendencies: {
+        ...(prev.tendencies ?? defaultTendencies),
+        [side]: { ...(prev.tendencies ?? defaultTendencies)[side], [key]: val },
+      },
     }));
   };
 
@@ -460,6 +485,95 @@ const PlayerModal: React.FC<PlayerModalProps> = ({
                         />
                       </div>
                     </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* ── Tendencies ─────────────────────────────────────────────────── */}
+            <div className="space-y-6">
+              <div className="flex items-center gap-4">
+                <h3 className="text-[10px] font-black text-amber-500 uppercase tracking-[0.5em] whitespace-nowrap">Tendencies</h3>
+                <div className="h-px w-full bg-slate-800/50"></div>
+                <span className="text-[9px] text-slate-600 font-black uppercase tracking-widest whitespace-nowrap">0 = never · 100 = always</span>
+              </div>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-x-12 gap-y-8">
+                {/* Offensive */}
+                <div className="space-y-4">
+                  <h4 className="text-[10px] font-black text-sky-400 uppercase tracking-widest pb-2 border-b border-slate-800/50">⚡ Offensive Tendencies</h4>
+                  <div className="space-y-4">
+                    {([
+                      ['pullUpThree',      'Pull-Up 3'],
+                      ['postUp',           'Post Up'],
+                      ['driveToBasket',    'Drive to Basket'],
+                      ['midRangeJumper',   'Mid-Range'],
+                      ['kickOutPasser',    'Kick-Out / Passer'],
+                      ['isoHeavy',         'Iso Heavy'],
+                      ['transitionHunter', 'Transition Hunter'],
+                    ] as [keyof PlayerTendencies['offensiveTendencies'], string][]).map(([key, label]) => {
+                      const val = (editedPlayer.tendencies ?? defaultTendencies).offensiveTendencies[key];
+                      return (
+                        <div key={key} className="space-y-1.5">
+                          <div className="flex justify-between items-center">
+                            <label className="text-[9px] font-bold uppercase text-slate-400 tracking-wider">{label}</label>
+                            <span className={`font-mono text-xs ${
+                              val >= 70 ? 'text-sky-400' : val >= 40 ? 'text-slate-300' : 'text-slate-500'
+                            }`}>{val}</span>
+                          </div>
+                          <input
+                            type="range" min="0" max="100" value={val}
+                            onChange={e => handleTendencyChange('offensiveTendencies', key, parseInt(e.target.value))}
+                            className="w-full h-1 bg-slate-950 rounded-lg appearance-none cursor-pointer accent-sky-500"
+                          />
+                          <div className="flex justify-between text-[7px] text-slate-700 font-mono">
+                            <span>0</span><span>50</span><span>100</span>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+                {/* Defensive */}
+                <div className="space-y-4">
+                  <h4 className="text-[10px] font-black text-rose-400 uppercase tracking-widest pb-2 border-b border-slate-800/50">🛡️ Defensive Tendencies</h4>
+                  <div className="space-y-4">
+                    {([
+                      ['gambles',      'Gambles / Steals'],
+                      ['helpDefender', 'Help Defense'],
+                      ['physicality',  'Physicality'],
+                      ['faceUpGuard',  'Face-Up Guard'],
+                    ] as [keyof PlayerTendencies['defensiveTendencies'], string][]).map(([key, label]) => {
+                      const val = (editedPlayer.tendencies ?? defaultTendencies).defensiveTendencies[key];
+                      return (
+                        <div key={key} className="space-y-1.5">
+                          <div className="flex justify-between items-center">
+                            <label className="text-[9px] font-bold uppercase text-slate-400 tracking-wider">{label}</label>
+                            <span className={`font-mono text-xs ${
+                              val >= 70 ? 'text-rose-400' : val >= 40 ? 'text-slate-300' : 'text-slate-500'
+                            }`}>{val}</span>
+                          </div>
+                          <input
+                            type="range" min="0" max="100" value={val}
+                            onChange={e => handleTendencyChange('defensiveTendencies', key, parseInt(e.target.value))}
+                            className="w-full h-1 bg-slate-950 rounded-lg appearance-none cursor-pointer accent-rose-500"
+                          />
+                          <div className="flex justify-between text-[7px] text-slate-700 font-mono">
+                            <span>0</span><span>50</span><span>100</span>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                  <div className="mt-6 p-4 bg-slate-950/60 border border-slate-800/60 rounded-2xl space-y-2">
+                    <p className="text-[9px] font-black text-slate-500 uppercase tracking-widest">Tendency Effects</p>
+                    <ul className="text-[9px] text-slate-600 space-y-1 leading-relaxed">
+                      <li><span className="text-sky-500 font-bold">Gambles ≥ 70</span> — steals more, risks fouls &amp; easy baskets</li>
+                      <li><span className="text-sky-500 font-bold">Help Defense ≥ 70</span> — rotates well, collapses on drives</li>
+                      <li><span className="text-sky-500 font-bold">Physicality ≥ 85</span> — strong body; stops drives to rim</li>
+                      <li><span className="text-sky-500 font-bold">Face-Up Guard ≥ 70</span> — contests 3PT; low = leaks open looks</li>
+                      <li><span className="text-sky-500 font-bold">Iso Heavy ≥ 70</span> — breaks team schemes more often</li>
+                      <li><span className="text-sky-500 font-bold">Transition ≥ 70</span> — pushes pace; forces early shots</li>
+                    </ul>
                   </div>
                 </div>
               </div>
