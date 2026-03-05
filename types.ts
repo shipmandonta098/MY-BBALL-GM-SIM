@@ -11,19 +11,35 @@ export type PersonalityTrait = 'Leader' | 'Diva/Star' | 'Loyal' | 'Professional'
 
 export interface PlayerTendencies {
   offensiveTendencies: {
-    pullUpThree: number;       // 0-100
+    pullUpThree: number;          // 0-100
     postUp: number;
     driveToBasket: number;
     midRangeJumper: number;
     kickOutPasser: number;
     isoHeavy: number;
     transitionHunter: number;
+    // ── New offensive tendencies ──────────────────────────────────
+    spotUp: number;               // relocate off-ball for C&S
+    cutter: number;               // backdoor / basket cuts off-ball
+    offScreen: number;            // uses off-ball screens for open looks
+    rollVsPop?: number;           // C/PF only: 70+ = rolls, <40 = pops
+    attackCloseOuts: number;      // attacks when defender closes out hard
+    drawFoul: number;             // seeks contact / gets to the line
+    dribbleHandOff: number;       // initiates offense via DHOs
+    pullUpOffPnr: number;         // pulls up for jumper off ball-screen
   };
   defensiveTendencies: {
     gambles: number;
     helpDefender: number;
     physicality: number;
     faceUpGuard: number;
+    // ── New defensive tendencies ──────────────────────────────────
+    onBallPest: number;           // full pressure on ball handler
+    denyThePass: number;          // aggressively denies man from receiving
+    shotContestDiscipline: number;// contests without biting pump fakes
+  };
+  situationalTendencies: {
+    clutchShotTaker: number;      // demands ball / takes big shot in clutch
   };
 }
 export type CoachBadge = 'Developmental Genius' | 'Pace Master' | 'Star Handler' | 'Defensive Guru' | 'Offensive Architect' | 'Clutch Specialist' | 'Recruiting Ace';

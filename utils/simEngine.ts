@@ -295,11 +295,13 @@ const simulatePossession = (
   if (isTransition) {
     offAction = 'TRANSITION';
   } else {
+    // dribbleHandOff: boosts both DRIVE (initiator turns corner) and PASS_FIRST (kicks off DHO)
+    const dhoWeight = tendencyWeight(ot?.dribbleHandOff ?? 50);
     const pool: { value: OffAction; weight: number }[] = [
       { value: 'ISO',        weight: tendencyWeight(ot?.isoHeavy      ?? 50) },
       { value: 'POST_UP',    weight: tendencyWeight(ot?.postUp        ?? 50) },
-      { value: 'DRIVE',      weight: tendencyWeight(ot?.driveToBasket ?? 50) },
-      { value: 'PASS_FIRST', weight: tendencyWeight(ot?.kickOutPasser ?? 50) },
+      { value: 'DRIVE',      weight: tendencyWeight(ot?.driveToBasket ?? 50) + dhoWeight * 0.30 },
+      { value: 'PASS_FIRST', weight: tendencyWeight(ot?.kickOutPasser ?? 50) + dhoWeight * 0.40 },
     ];
     offAction = weightedRandom(pool);
   }
@@ -324,10 +326,13 @@ const simulatePossession = (
       if (Math.random() < (ot?.kickOutPasser ?? 50) / 100 * 0.40) {
         shotType = 'CATCH_AND_SHOOT_3';
       } else {
+        // pullUpOffPnr: additional weight for pulling up off a screen
+        const pnrPullWeight = tendencyWeight(ot?.pullUpThree ?? 50) * 0.5
+                            + tendencyWeight(ot?.pullUpOffPnr ?? 50) * 0.40;
         const sp: { value: ShotType; weight: number }[] = [
           { value: 'DRIVE_LAYUP', weight: tendencyWeight(ot?.driveToBasket ?? 50) },
           { value: 'MID_RANGE',   weight: 0.8 },
-          { value: 'PULL_UP_3',   weight: tendencyWeight(ot?.pullUpThree ?? 50) * 0.5 },
+          { value: 'PULL_UP_3',   weight: pnrPullWeight },
         ];
         shotType = weightedRandom(sp);
       }
@@ -399,10 +404,46 @@ const simulatePossession = (
       tendencyUsed  = 'kickOutPasser';
       tendencyScore = ot?.kickOutPasser ?? 50;
       shotModifier  = +0.04;
+      // Spot Up / Off Screen: well-positioned off-ball shooter earns higher-quality looks
+      shotModifier += ((ot?.spotUp    ?? 50) - 50) / 100 * 0.06;
+      shotModifier += ((ot?.offScreen ?? 50) - 50) / 100 * 0.04;
       pbpBase = offAction === 'PASS_FIRST'
         ? `${ln} swings it and finds the open man in the corner...`
         : `${ln} kicks it out to the shooter...`;
       break;
+    }
+  }
+
+  // Step 3.5: Attack Close-Outs -- convert C&S to drive if tendency is high
+  {
+    const atk = ot?.attackCloseOuts ?? 50;
+    if (shotType === 'CATCH_AND_SHOOT_3' && atk >= 65 && !isTransition) {
+      if (Math.random() < (atk - 50) / 200) {
+        shotType      = 'DRIVE_LAYUP';
+        pbpBase       = `${ln} sees the close-out and immediately attacks off the dribble...`;
+        tendencyUsed  = 'attackCloseOuts';
+        tendencyScore = atk;
+        baseProb      = offHandler.attributes.shootingInside / 100 * 0.40 + 0.38;
+        shotModifier  = atk >= 70 ? (atk / 100) * 0.10 : 0;
+      }
+    }
+  }
+
+  // Step 4.5: Draw Foul -- contact-seeker gets to the line
+  {
+    const drawFoulTend = ot?.drawFoul ?? 50;
+    if ((shotType === 'DRIVE_LAYUP' || shotType === 'POST_FADE') && drawFoulTend >= 55 && !isTransition) {
+      if (Math.random() < (drawFoulTend - 50) / 100 * 0.28) {
+        return {
+          ballHandlerName: offHandler.name, ballHandlerId: offHandler.id,
+          tendencyUsed: 'drawFoul', actionTaken: offAction,
+          tendencyScore: drawFoulTend, shotModifier: 0, conflictFired: false,
+          defenderTendency: '', defenseModifier: 0,
+          finalShotProbability: 0, result: 'FOUL_DRAWN',
+          foulsOn: defender?.name, isTransition,
+          pbpText: `${ln} draws contact going to the basket — foul called!`,
+        };
+      }
     }
   }
 
@@ -483,6 +524,57 @@ const simulatePossession = (
       pbpDefPrefix = `${defLn} gets caught ball-watching — `;
       if (!defTendencyUsed) defTendencyUsed = 'faceUpGuardAbsent';
     }
+
+    // On Ball Pest -- suffocating pressure on iso/drive, foul risk at peak values
+    const onBallPest = dt.onBallPest ?? 50;
+    if (onBallPest >= 70 && (offAction === 'ISO' || offAction === 'DRIVE') && !isTransition) {
+      defenseModifier -= 0.05;
+      if (!defTendencyUsed) defTendencyUsed = 'onBallPest';
+      pbpBase += ` ${defLn} gets right in his face.`;
+      if (onBallPest >= 82 && Math.random() < 0.07) {
+        return {
+          ballHandlerName: offHandler.name, ballHandlerId: offHandler.id,
+          tendencyUsed: tendencyUsed || offAction, actionTaken: offAction,
+          tendencyScore, shotModifier: 0, conflictFired: false,
+          defenderTendency: 'onBallPest', defenseModifier: 0,
+          finalShotProbability: 0, result: 'FOUL_DRAWN',
+          foulsOn: defender?.name, isTransition,
+          pbpText: `${defLn} fouls trying to pressure — too aggressive on the ball!`,
+        };
+      }
+    }
+
+    // Deny the Pass -- denying the catch hurts the initiating offense; risk of backdoor
+    const denyPass = dt.denyThePass ?? 50;
+    if (denyPass >= 70 && offAction === 'PASS_FIRST') {
+      defenseModifier -= 0.07;
+      if (!defTendencyUsed) defTendencyUsed = 'denyThePass';
+      pbpDefPrefix = pbpDefPrefix || `${defLn} denies the catch — `;
+      if (denyPass >= 80 && Math.random() < 0.15) {
+        defenseModifier += 0.15;
+        pbpDefPrefix = `${defLn} over-denies — backdoor cut opens up! `;
+      }
+    }
+
+    // Shot Contest Discipline -- low = bites pump fakes; high = disciplined contests
+    const contestDisc = dt.shotContestDiscipline ?? 50;
+    if (contestDisc < 35 && (shotType === 'MID_RANGE' || shotType === 'PULL_UP_3') && offAction !== 'TRANSITION') {
+      if (Math.random() < (40 - contestDisc) / 100 * 0.22) {
+        return {
+          ballHandlerName: offHandler.name, ballHandlerId: offHandler.id,
+          tendencyUsed: tendencyUsed || offAction, actionTaken: offAction,
+          tendencyScore, shotModifier: 0, conflictFired: false,
+          defenderTendency: 'shotContestDiscipline', defenseModifier: 0,
+          finalShotProbability: 0, result: 'FOUL_DRAWN',
+          foulsOn: defender?.name, isTransition,
+          pbpText: `${defLn} bites on the pump fake — foul on the shooting player!`,
+        };
+      }
+    }
+    if (contestDisc >= 70 && (shotType === 'MID_RANGE' || shotType === 'PULL_UP_3' || shotType === 'CATCH_AND_SHOOT_3')) {
+      defenseModifier -= 0.04;
+      if (!defTendencyUsed) defTendencyUsed = 'shotContestDiscipline';
+    }
   }
 
   // ── Step 6: STREAKY trait ──────────────────────────────────────────────────
@@ -553,11 +645,19 @@ const computeTendencyModifiers = (p: Player): TendencyModifiers => {
   const dt = p.tendencies?.defensiveTendencies;
   return {
     threepaBoost: (( ot?.pullUpThree    ?? 50) - 50) / 100 * 0.40,
-    insideBoost:  (( ot?.driveToBasket  ?? 50) - 50) / 100 * 0.30,
-    usageBoost:   (( ot?.isoHeavy       ?? 50) - 50) / 100 * 0.15 - ((ot?.kickOutPasser ?? 50) - 50) / 100 * 0.12,
-    astBoost:     (( ot?.kickOutPasser  ?? 50) - 50) / 100 * 0.35,
-    stlBoost:     (( dt?.gambles        ?? 50) - 50) / 100 * 0.30,
-    foulRisk:     (( dt?.physicality    ?? 50) - 50) / 100 * 0.25 + ((dt?.gambles ?? 50) - 50) / 100 * 0.15,
+    insideBoost:  (( ot?.driveToBasket  ?? 50) - 50) / 100 * 0.30
+                + ((ot?.cutter         ?? 50) - 50) / 100 * 0.12,
+    usageBoost:   (( ot?.isoHeavy       ?? 50) - 50) / 100 * 0.15
+                - ((ot?.kickOutPasser   ?? 50) - 50) / 100 * 0.12
+                + ((ot?.drawFoul        ?? 50) - 50) / 100 * 0.06,
+    astBoost:     (( ot?.kickOutPasser  ?? 50) - 50) / 100 * 0.35
+                + ((ot?.spotUp          ?? 50) - 50) / 100 * 0.08,
+    stlBoost:     (( dt?.gambles        ?? 50) - 50) / 100 * 0.30
+                + ((dt?.denyThePass     ?? 50) - 50) / 100 * 0.10,
+    foulRisk:     (( dt?.physicality    ?? 50) - 50) / 100 * 0.25
+                + ((dt?.gambles         ?? 50) - 50) / 100 * 0.15
+                + ((dt?.onBallPest      ?? 50) - 50) / 100 * 0.10
+                - ((dt?.shotContestDiscipline ?? 50) - 50) / 100 * 0.12,
   };
 };
 
@@ -1007,6 +1107,12 @@ export const simulateGame = (
     if (q === 4 && absScoreDiff <= 5) {
       homeOff += hasClutchCoach(home) ? 0.10 : 0.05;
       awayOff += hasClutchCoach(away) ? 0.10 : 0.05;
+      // Clutch Shot Taker tendency: roster-average score adjusts Q4 scoring output in close games
+      const rosterSz = (t: Team) => Math.min(8, t.roster.length);
+      const homeClutch = home.roster.slice(0, 8).reduce((s, p) => s + (p.tendencies?.situationalTendencies?.clutchShotTaker ?? 50), 0) / rosterSz(home);
+      const awayClutch = away.roster.slice(0, 8).reduce((s, p) => s + (p.tendencies?.situationalTendencies?.clutchShotTaker ?? 50), 0) / rosterSz(away);
+      homeOff += (homeClutch - 50) / 100 * 0.08;
+      awayOff += (awayClutch - 50) / 100 * 0.08;
     }
 
     // Pace factor for score calc (garbage time reduces scoring)
