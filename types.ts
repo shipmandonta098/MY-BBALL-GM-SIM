@@ -516,11 +516,88 @@ export interface LeagueSettings {
   simSpeed: 'Normal' | 'Smarter' | 'Faster';
   godMode: boolean;
   seasonLength: number;
-  playerGenderRatio: number; 
+  playerGenderRatio: number;
   coachGenderRatio: number;
   allowManualGenderEdits: boolean;
   b2bFrequency: 'Low' | 'Realistic' | 'High';
   showAdvancedStats: boolean;
+
+  // ── League Tab additions ──────────────────────────────────────────────────
+  playoffFormat?: 6 | 8 | 10 | 16;
+  playoffSeeding?: 'Conference' | 'League-wide';
+  playInTournament?: boolean;
+  homeCourt?: boolean;
+  tradeDeadline?: 'Disabled' | 'Week 12' | 'Week 14' | 'Week 16';
+  hardCapAtDeadline?: boolean;
+  maxContractYears?: 2 | 3 | 4 | 5;
+  rookieScaleContracts?: boolean;
+  maxPlayerSalaryPct?: 25 | 30 | 35;
+  birdRights?: boolean;
+  draftRounds?: 1 | 2 | 3;
+  draftClassSize?: 'Small' | 'Normal' | 'Large';
+  internationalProspects?: boolean;
+  draftLottery?: boolean;
+  scheduledExpansion?: 'Off' | 'Year 2' | 'Year 3' | 'Year 5';
+  expansionTeamCount?: 1 | 2 | 4;
+  expansionDraftRules?: 'Standard' | 'Protected' | 'Open';
+
+  // ── Gameplay Tab additions ────────────────────────────────────────────────
+  fatigueImpact?: 'None' | 'Low' | 'Medium' | 'High';
+  b2bPenalty?: 'None' | 'Mild' | 'Severe';
+  loadManagement?: boolean;
+  injuryDuration?: 'Short' | 'Realistic' | 'Long';
+  practiceInjuries?: boolean;
+  careerEndingInjuries?: boolean;
+  teamChemistry?: boolean;
+  chemistryImpact?: 'Low' | 'Medium' | 'High';
+  personalityClashPenalties?: boolean;
+  playerMorale?: boolean;
+  moraleAffectsAttributes?: boolean;
+  tradeRequestThreshold?: 'Low' | 'Medium' | 'High';
+
+  // ── Simulation Tab ────────────────────────────────────────────────────────
+  pbpDetailLevel?: 'Full' | 'Standard' | 'Box Score Only';
+  aiDecisionSpeed?: 'Active' | 'Normal' | 'Passive';
+  blowoutFrequency?: 'Low' | 'Medium' | 'High' | 'Realistic';
+  comebackFrequency?: 'Low' | 'Medium' | 'High' | 'Realistic';
+  overtimeFrequency?: 'Low' | 'Medium' | 'High' | 'Realistic';
+  globalPaceOverride?: number;
+  shotClockLength?: 24 | 20 | 14;
+  scoringEra?: 'Low Scoring' | 'Modern' | 'Run & Gun';
+  threePtFrequency?: 'Low' | 'Medium' | 'High' | 'Very High';
+  simBlockFrequency?: 'Low' | 'Medium' | 'High';
+  turnoverFrequency?: 'Low' | 'Medium' | 'High';
+
+  // ── Offensive Sliders ─────────────────────────────────────────────────────
+  sliderLayup?: number;
+  sliderMidRange?: number;
+  slider3pt?: number;
+  sliderFreeThrow?: number;
+  sliderFastBreak?: number;
+  sliderPostUp?: number;
+  sliderPickRoll?: number;
+
+  // ── Defensive Sliders ─────────────────────────────────────────────────────
+  sliderSteal?: number;
+  sliderBlock?: number;
+  sliderFoul?: number;
+  sliderHelpDefense?: number;
+  sliderPerimeterDefense?: number;
+
+  // ── Game Flow Sliders ─────────────────────────────────────────────────────
+  sliderTimeout?: number;
+  sliderSubstitution?: number;
+  sliderTechFoul?: number;
+  sliderFlagrantFoul?: number;
+  sliderInjuryMultiplier?: number;
+
+  // ── God Mode additions ────────────────────────────────────────────────────
+  editAnyPlayer?: boolean;
+  editAnyTeam?: boolean;
+  forceGameOutcomes?: boolean;
+  manipulateStandings?: boolean;
+  freeAgentMarketControl?: boolean;
+  draftClassEditor?: boolean;
 }
 
 export interface GMMilestone {
