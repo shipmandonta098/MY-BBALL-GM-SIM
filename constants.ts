@@ -672,6 +672,94 @@ const randomBirthdate = (age: number): string => {
   return `${birthYear}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
 };
 
+// ── Draft History Generation ────────────────────────────────────────
+interface DraftContext {
+  season: number;
+  teamNames: string[];
+  usedPicks: Map<number, Set<string>>;
+}
+
+const assignUniquePick = (
+  round: number,
+  idealPick: number,
+  draftYear: number,
+  usedPicks: Map<number, Set<string>>
+): number => {
+  if (!usedPicks.has(draftYear)) usedPicks.set(draftYear, new Set());
+  const used = usedPicks.get(draftYear)!;
+  const minPick = round === 1 ? 1 : 31;
+  const maxPick = round === 1 ? 30 : 60;
+  idealPick = Math.min(maxPick, Math.max(minPick, idealPick));
+  // Forward search from ideal
+  for (let p = idealPick; p <= maxPick; p++) {
+    const key = `R${round}P${p}`;
+    if (!used.has(key)) { used.add(key); return p; }
+  }
+  // Backward search from ideal
+  for (let p = idealPick - 1; p >= minPick; p--) {
+    const key = `R${round}P${p}`;
+    if (!used.has(key)) { used.add(key); return p; }
+  }
+  return idealPick; // Fallback (all 30/30 picks exhausted — extremely rare)
+};
+
+const generateDraftInfo = (
+  rating: number,
+  age: number,
+  ctx: DraftContext
+): Player['draftInfo'] => {
+  const { season, teamNames, usedPicks } = ctx;
+
+  // Estimate how many seasons the player has been in the league based on age.
+  // Players typically enter the draft at age 19–21.
+  const entryAge = 19 + Math.floor(Math.random() * 3);
+  const seasonsPlayed = Math.max(0, age - entryAge);
+
+  // Draft year = season they were drafted (not current season)
+  // Rookies (0 seasons played) were drafted the season before current
+  const draftYear = seasonsPlayed === 0 ? season - 1 : season - seasonsPlayed;
+
+  // Determine draft status — higher-rated players almost always drafted
+  const roll = Math.random();
+  let isDrafted: boolean;
+  let draftRound: number;
+
+  if (rating >= 88) {
+    isDrafted = true; draftRound = 1;
+  } else if (rating >= 82) {
+    isDrafted = true; draftRound = roll < 0.85 ? 1 : 2;
+  } else if (rating >= 78) {
+    isDrafted = true; draftRound = roll < 0.65 ? 1 : 2;
+  } else if (rating >= 74) {
+    isDrafted = roll < 0.75; draftRound = roll < 0.35 ? 1 : 2;
+  } else if (rating >= 70) {
+    isDrafted = roll < 0.50; draftRound = 2;
+  } else {
+    isDrafted = roll < 0.25; draftRound = 2;
+  }
+
+  if (!isDrafted) {
+    return { team: "Undrafted", round: 0, pick: 0, year: draftYear };
+  }
+
+  // Pick number based on round and rating
+  let idealPick: number;
+  if (draftRound === 1) {
+    if (rating >= 88)      idealPick = 1  + Math.floor(Math.random() * 5);   // 1–5
+    else if (rating >= 83) idealPick = 3  + Math.floor(Math.random() * 12);  // 3–14
+    else if (rating >= 79) idealPick = 8  + Math.floor(Math.random() * 13);  // 8–20
+    else                   idealPick = 15 + Math.floor(Math.random() * 16);   // 15–30
+  } else {
+    if (rating >= 76)      idealPick = 31 + Math.floor(Math.random() * 15);  // 31–45
+    else                   idealPick = 39 + Math.floor(Math.random() * 22);  // 39–60
+  }
+
+  const assignedPick = assignUniquePick(draftRound, idealPick, draftYear, usedPicks);
+  const draftTeam = teamNames[Math.floor(Math.random() * teamNames.length)];
+
+  return { team: draftTeam, round: draftRound, pick: assignedPick, year: draftYear };
+};
+
 const countryFromHometown = (hometown: string): string => {
   const parts = hometown.split(', ');
   const last = parts[parts.length - 1].trim();
@@ -818,7 +906,7 @@ const applyPhysical = (attrs: AttrMap, pos: string, gender: 'Male'|'Female', hei
   return a;
 };
 
-export const generatePlayer = (id: string, ageRange: [number, number] = [19, 38], genderRatio: number = 0): Player => {
+export const generatePlayer = (id: string, ageRange: [number, number] = [19, 38], genderRatio: number = 0, draftCtx?: DraftContext): Player => {
   const gender = getRandomGender(genderRatio);
   
   // Pick a region based on weights
@@ -914,15 +1002,20 @@ export const generatePlayer = (id: string, ageRange: [number, number] = [19, 38]
     hometown: playerHometown,
     country: countryFromHometown(playerHometown),
     birthdate: randomBirthdate(age), 
-    college: region.id === 'usa' ? COLLEGES[Math.floor(Math.random() * COLLEGES.length)] : region.name,
-    draftInfo: { team: "Titans", round: 1, pick: 1, year: 2015 }
+    college: region.id === 'usa' ? COLLEGES[Math.floor(Math.random() * COLLEGES.length)] : 'None',
+    draftInfo: draftCtx
+      ? generateDraftInfo(rating, age, draftCtx)
+      : { team: "Undrafted", round: 0, pick: 0, year: 0 }
   };
   return enforcePositionalBounds(rawPlayer);
 };
 
-export const generateFreeAgentPool = (count: number, season: number, genderRatio: number = 0): Player[] => {
+export const generateFreeAgentPool = (count: number, season: number, genderRatio: number = 0, extraTeamNames: string[] = []): Player[] => {
+  const teamNames = extraTeamNames.length > 0 ? extraTeamNames : TEAM_DATA.map(t => t.name);
+  const usedPicks = new Map<number, Set<string>>();
   return Array.from({ length: count }).map((_, i) => {
-    const p = generatePlayer(`fa-${season}-${i}`, [21, 36], genderRatio);
+    const draftCtx: DraftContext = { season, teamNames, usedPicks };
+    const p = generatePlayer(`fa-${season}-${i}`, [21, 36], genderRatio, draftCtx);
     return {
       ...p,
       isFreeAgent: true,
@@ -1026,7 +1119,7 @@ export const generateProspects = (year: number, count: number = 100, genderRatio
       hometown: prospectHometown,
       country: countryFromHometown(prospectHometown),
       birthdate: randomBirthdate(19 + Math.floor(Math.random() * 3)), 
-      college: region.id === 'usa' ? "N/A" : region.name,
+      college: 'N/A',
       draftInfo: { team: "N/A", round: 0, pick: 0, year },
       careerStats: [],
       gameLog: [],
@@ -1102,7 +1195,10 @@ export const generateDefaultRotation = (roster: Player[]): TeamRotation => {
   return { starters, bench, reserves, minutes };
 };
 
-export const generateLeagueTeams = (genderRatio: number = 0): Team[] => {
+export const generateLeagueTeams = (genderRatio: number = 0, season: number = 2026): Team[] => {
+  const teamNames = TEAM_DATA.map(t => t.name);
+  const usedPicks = new Map<number, Set<string>>();
+
   return TEAM_DATA.map((data, i) => {
     const teamId = `team-${i}`;
     const picks: DraftPick[] = [
@@ -1111,7 +1207,8 @@ export const generateLeagueTeams = (genderRatio: number = 0): Team[] => {
     ];
 
     const ownerGoals: OwnerGoal[] = ['Win Now', 'Rebuild', 'Profit'];
-    const roster = Array.from({ length: 14 }).map((_, j) => generatePlayer(`p-${i}-${j}`, [19, 38], genderRatio));
+    const draftCtx: DraftContext = { season, teamNames, usedPicks };
+    const roster = Array.from({ length: 14 }).map((_, j) => generatePlayer(`p-${i}-${j}`, [19, 38], genderRatio, draftCtx));
 
     return {
       id: teamId,

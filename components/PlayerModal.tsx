@@ -742,7 +742,9 @@ const PlayerModal: React.FC<PlayerModalProps> = ({
                 <div className="flex items-center gap-4">
                    <span className="text-[10px] text-slate-500 font-black uppercase tracking-[0.2em] w-24">Draft</span>
                    <span className="text-white text-base font-medium">
-                      {player.draftInfo.year} • R{player.draftInfo.round} P{player.draftInfo.pick} ({player.draftInfo.team})
+                      {player.draftInfo.round === 0
+                        ? `Undrafted • Signed ${player.draftInfo.year || '—'}`
+                        : `${player.draftInfo.year || '—'} • R${player.draftInfo.round} P${player.draftInfo.pick} (${player.draftInfo.team})`}
                    </span>
                 </div>
              </div>

@@ -147,7 +147,7 @@ const App: React.FC = () => {
       ...partialSettings
     };
 
-    const freshTeams = generateLeagueTeams(genderRatio).map(t => ({
+    const freshTeams = generateLeagueTeams(genderRatio, year).map(t => ({
       ...t, needs: ['PG', 'C', 'SG', 'PF', 'SF'].sort(() => 0.5 - Math.random()).slice(0, 2) as Position[]
     }));
     const freshSchedule = generateSeasonSchedule(freshTeams, finalSettings.seasonLength);
