@@ -328,6 +328,7 @@ export interface Player {
   country?: string;
   birthdate: string;
   college: string;
+  proLeague?: string;
   draftInfo: {
     team: string;
     round: number;

@@ -701,9 +701,15 @@ const PlayerModal: React.FC<PlayerModalProps> = ({
                       {(player as any).school ? 'School/Origin' : 'College'}
                    </span>
                    <span className="text-white text-base font-medium">
-                      {(player as any).school || player.college}
+                      {(player as any).school || (player.college !== 'None' ? player.college : '—')}
                    </span>
                 </div>
+                {(player as any).proLeague && (
+                  <div className="flex items-center gap-4">
+                     <span className="text-[10px] text-slate-500 font-black uppercase tracking-[0.2em] w-24">Pro League</span>
+                     <span className="text-white text-base font-medium">{(player as any).proLeague}</span>
+                  </div>
+                )}
                 <div className="flex items-center gap-4">
                    <span className="text-[10px] text-slate-500 font-black uppercase tracking-[0.2em] w-24">Hometown</span>
                    <span className="text-white text-base font-medium">{player.hometown} {getFlag(player.country)}</span>

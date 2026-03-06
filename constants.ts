@@ -289,7 +289,72 @@ export const enforcePositionalBounds = (player: Player): Player => {
   return { ...player, attributes: newAttrs, rating: newRating };
 };
 
-const COLLEGES = ["Duke", "Kentucky", "Kansas", "UNC", "Gonzaga", "UCLA", "Villanova", "Arizona", "Michigan State", "UConn", "Purdue", "Houston", "Baylor", "Virginia", "Texas"];
+const COLLEGES_HIGH_MAJOR = [
+  "Duke","Kentucky","Kansas","North Carolina","UCLA","Michigan","Michigan State","Arizona",
+  "Gonzaga","Villanova","Louisville","Syracuse","Ohio State","Indiana","Connecticut","Florida",
+  "Texas","Oregon","Memphis","Georgetown","Notre Dame","Marquette","Creighton","Baylor",
+  "Houston","Arkansas","Alabama","Tennessee","Illinois","Iowa","Purdue","Wisconsin",
+  "Maryland","Virginia","Wake Forest","Georgia Tech","Pittsburgh","Miami (FL)",
+  "LSU","Auburn","Mississippi State","Ole Miss","Oklahoma","Oklahoma State","Texas Tech",
+  "West Virginia","TCU","Iowa State","Kansas State",
+];
+
+const COLLEGES_MID_MAJOR = [
+  "St. Mary's","Wichita State","Murray State","Belmont","Vermont","Davidson","Butler",
+  "Xavier","Dayton","Rhode Island","VCU","Richmond","George Mason","Loyola Chicago",
+  "Cleveland State","Northern Iowa","Drake","Valparaiso","UC Santa Barbara","Long Beach State",
+  "New Mexico State","Grand Canyon","Stephen F. Austin","Abilene Christian",
+  "Furman","Chattanooga","Colgate","Oral Roberts","Morehead State","Iona","Saint Peter's",
+];
+
+// International pro leagues by region
+const INTL_LEAGUES: Record<string, string[]> = {
+  europe_balkans: ["ABA League","Euroleague","EuroCup"],
+  europe_west:    ["ACB (Spain)","Betclic Elite (France)","BBL (Germany)","Lega Basket (Italy)","Pro B (France)"],
+  europe_baltic:  ["LKL (Lithuania)","LBL (Latvia)","Korvpalliliit (Estonia)"],
+  oceania:        ["NBL (Australia)","NBL (New Zealand)"],
+  africa:         ["BAL (Basketball Africa League)","Country Pro League"],
+  asia:           ["CBA (China)","B.League (Japan)","KBL (South Korea)"],
+  latin_america:  ["NBB (Brazil)","Liga Nacional (Argentina)","LNBP (Mexico)"],
+  canada:         ["CEBL (Canada)"],
+};
+
+// Probability (0–100) that a player from this region attended a US college
+const US_COLLEGE_PROB: Record<string, number> = {
+  usa:            100,
+  canada:          65,
+  africa:          35,
+  oceania:         20,
+  latin_america:   15,
+  europe_west:     12,
+  europe_balkans:  10,
+  europe_baltic:   10,
+  asia:             8,
+};
+
+const pickCollegeTier = (rating: number): string => {
+  const highPct =
+    rating >= 88 ? 90 :
+    rating >= 83 ? 75 :
+    rating >= 78 ? 55 :
+    rating >= 74 ? 40 : 20;
+  const list = Math.random() * 100 < highPct ? COLLEGES_HIGH_MAJOR : COLLEGES_MID_MAJOR;
+  return list[Math.floor(Math.random() * list.length)];
+};
+
+const generateCollegeAndLeague = (
+  rating: number,
+  regionId: string
+): { college: string; proLeague?: string } => {
+  const usProb = US_COLLEGE_PROB[regionId] ?? 10;
+  if (Math.random() * 100 < usProb) {
+    // US college or international player who attended US college (pathway 1 & 3)
+    return { college: pickCollegeTier(rating) };
+  }
+  // International – no US college (pathway 2)
+  const leagues = INTL_LEAGUES[regionId] ?? ["Country Pro League"];
+  return { college: "None", proLeague: leagues[Math.floor(Math.random() * leagues.length)] };
+};
 
 // ─── US Male first names: 120+ unique, no current NBA stars ──────────────────
 const US_MALE_FIRST = [
@@ -374,7 +439,7 @@ const REGIONS = [
     id: 'usa',
     name: 'United States',
     weight: 78,
-    origins: ["Duke", "Kentucky", "Kansas", "UNC", "Gonzaga", "UCLA", "Villanova", "Arizona", "Michigan State", "UConn", "Purdue", "Houston", "Baylor", "Virginia", "Texas"],
+    origins: [...COLLEGES_HIGH_MAJOR, ...COLLEGES_MID_MAJOR],
     firstNamesMale: US_MALE_FIRST,
     lastNamesMale: US_MALE_LAST,
     hometowns: ["New York, NY", "Los Angeles, CA", "Chicago, IL", "Houston, TX", "Philadelphia, PA", "Phoenix, AZ", "San Antonio, TX", "San Diego, CA", "Dallas, TX", "San Jose, CA"],
@@ -632,7 +697,7 @@ export const generateCoach = (id: string, tier: 'A' | 'B' | 'C' | 'D' = 'C', gen
     role: COACH_ROLES[Math.floor(Math.random() * COACH_ROLES.length)],
     hometown: cities[Math.floor(Math.random() * cities.length)],
     country: 'United States',
-    college: COLLEGES[Math.floor(Math.random() * COLLEGES.length)],
+    college: pickCollegeTier(60 + Math.floor(Math.random() * 30)),
     experience,
     history: `Served as ${tier === 'A' ? 'lead architect' : 'assistant'} for several championship runs. Known for ${tier === 'A' ? 'elite playcalling' : 'locker room stability'}.`,
     ratingOffense: getRandom(baseRating),
@@ -1002,7 +1067,7 @@ export const generatePlayer = (id: string, ageRange: [number, number] = [19, 38]
     hometown: playerHometown,
     country: countryFromHometown(playerHometown),
     birthdate: randomBirthdate(age), 
-    college: region.id === 'usa' ? COLLEGES[Math.floor(Math.random() * COLLEGES.length)] : 'None',
+    ...generateCollegeAndLeague(rating, region.id),
     draftInfo: draftCtx
       ? generateDraftInfo(rating, age, draftCtx)
       : { team: "Undrafted", round: 0, pick: 0, year: 0 }
