@@ -266,6 +266,7 @@ interface PossessionResult {
   foulsOn?: string;
   isTransition: boolean;
   pbpText: string;
+  defenderRef?: Player;
 }
 
 // ─── Possession Simulator ─────────────────────────────────────────────────────
@@ -440,7 +441,7 @@ const simulatePossession = (
           tendencyScore: drawFoulTend, shotModifier: 0, conflictFired: false,
           defenderTendency: '', defenseModifier: 0,
           finalShotProbability: 0, result: 'FOUL_DRAWN',
-          foulsOn: defender?.name, isTransition,
+          foulsOn: defender?.name, isTransition, defenderRef: defender,
           pbpText: `${ln} draws contact going to the basket — foul called!`,
         };
       }
@@ -467,7 +468,7 @@ const simulatePossession = (
           tendencyScore, shotModifier: 0, conflictFired: false,
           defenderTendency: 'gambles', defenseModifier: 0,
           finalShotProbability: 0, result: 'STEAL',
-          stolenBy: defender?.name, isTransition,
+          stolenBy: defender?.name, isTransition, defenderRef: defender,
           pbpText: `${defLn} gambles for the steal — picks his pocket! Turnover.`,
         };
       }
@@ -481,7 +482,7 @@ const simulatePossession = (
           tendencyScore, shotModifier: 0, conflictFired: false,
           defenderTendency: 'gambles', defenseModifier: 0,
           finalShotProbability: 0, result: 'FOUL_DRAWN',
-          foulsOn: defender?.name, isTransition,
+          foulsOn: defender?.name, isTransition, defenderRef: defender,
           pbpText: `${defLn} reaches in recklessly — foul called on the play!`,
         };
       }
@@ -538,7 +539,7 @@ const simulatePossession = (
           tendencyScore, shotModifier: 0, conflictFired: false,
           defenderTendency: 'onBallPest', defenseModifier: 0,
           finalShotProbability: 0, result: 'FOUL_DRAWN',
-          foulsOn: defender?.name, isTransition,
+          foulsOn: defender?.name, isTransition, defenderRef: defender,
           pbpText: `${defLn} fouls trying to pressure — too aggressive on the ball!`,
         };
       }
@@ -566,7 +567,7 @@ const simulatePossession = (
           tendencyScore, shotModifier: 0, conflictFired: false,
           defenderTendency: 'shotContestDiscipline', defenseModifier: 0,
           finalShotProbability: 0, result: 'FOUL_DRAWN',
-          foulsOn: defender?.name, isTransition,
+          foulsOn: defender?.name, isTransition, defenderRef: defender,
           pbpText: `${defLn} bites on the pump fake — foul on the shooting player!`,
         };
       }
@@ -627,7 +628,7 @@ const simulatePossession = (
     shotType, shotModifier, conflictFired, conflictText,
     defenderTendency: defTendencyUsed, defenseModifier,
     finalShotProbability: finalProb, result: posResult,
-    isTransition, pbpText: fullText,
+    isTransition, pbpText: fullText, defenderRef: defender,
   };
 };
 
@@ -659,6 +660,254 @@ const computeTendencyModifiers = (p: Player): TendencyModifiers => {
                 + ((dt?.onBallPest      ?? 50) - 50) / 100 * 0.10
                 - ((dt?.shotContestDiscipline ?? 50) - 50) / 100 * 0.12,
   };
+};
+
+// ─── Cinematic PBP Narrator ─────────────────────────────────────────────────
+const _pick = <T>(arr: T[]): T => arr[Math.floor(Math.random() * arr.length)];
+const _defLn = (p: Player | undefined) => p ? (p.name.split(' ').at(-1) ?? p.name) : 'the defender';
+
+const generateCinematicLines = (
+  poss: PossessionResult,
+  offHandler: Player,
+  streak: number,
+): { setup: string; attack: string; result: string } | null => {
+  const action = poss.actionTaken;
+  if (!['ISO', 'DRIVE', 'POST_UP'].includes(action)) return null;
+  if (poss.shotType === 'CATCH_AND_SHOOT_3') return null;
+
+  const o   = lastName(offHandler);
+  const def = poss.defenderRef;
+  const d   = _defLn(def);
+  const adv = (offHandler.rating ?? 70) - (def?.rating ?? 70);
+  const oTr = offHandler.personalityTraits ?? [];
+  const dTr = def?.personalityTraits ?? [];
+
+  // ── LINE 1: MATCHUP SETUP ───────────────────────────────────────────────────
+  let setup: string;
+  if (action === 'ISO') {
+    if (oTr.includes('Diva/Star')) {
+      setup = _pick([
+        `${o} is calling his own number here. ISO.`,
+        `Nobody is getting this ball. ${o} wants the ISO.`,
+      ]);
+    } else if (adv >= 8) {
+      setup = _pick([
+        `${o} spots the mismatch immediately.`,
+        `The bench is pointing — ${o} has ${d} isolated. Everyone in the building knows it.`,
+        `They're going right at ${d}. ${o} dribbles over and sets up.`,
+        `ISO. ${o} on ${d}. This is a problem.`,
+        `${o} calls for the ball at the top and waves teammates off. ${d} is all that stands between him and the basket.`,
+      ]);
+    } else if (adv <= -8) {
+      setup = dTr.includes('Workhorse')
+        ? _pick([
+            `${o} takes the challenge anyway. ${d} has been locked in all game.`,
+            `${d} doesn't take plays off. ${o} goes right at him anyway.`,
+          ])
+        : dTr.includes('Hot Head')
+        ? _pick([
+            `Watch ${d} here — he's been chippy. ${o} attacks anyway.`,
+            `${d} is fired up. ${o} takes the challenge.`,
+          ])
+        : _pick([
+            `${o} takes the challenge anyway.`,
+            `${d} locks in — he's been dominant tonight.`,
+            `${o} dribbles into ${d}'s territory. Bold move.`,
+          ]);
+    } else {
+      setup = dTr.includes('Workhorse')
+        ? _pick([
+            `Good luck — ${d} doesn't take plays off.`,
+            `${d} has been locked in all game. ${o} isolates on him anyway.`,
+            `${o} and ${d} have been going at it all night. Here we go again.`,
+          ])
+        : _pick([
+            `This is a battle — ${o} vs ${d}, one on one.`,
+            `${d} slides over. He's ready for this.`,
+            `${o} and ${d} have been going at it all night. Here we go again.`,
+            `${o} calls for the ISO. ${d} steps up.`,
+            `${o} isolates on ${d} at the top of the arc.`,
+            `${o} sizes up ${d} at the elbow.`,
+            `${o} waves off the play — he's got ${d}.`,
+            `${o} catches on the wing. ${d} crouches into his defensive stance.`,
+            `${o} pounds the ball at the top. ${d} is all that stands between him and the basket.`,
+          ]);
+    }
+    if (oTr.includes('Professional')) {
+      setup = `${o} methodically sets up the ISO — controlled, precise.`;
+    }
+    if (streak >= 2) {
+      setup += oTr.includes('Hot Head')
+        ? ` ${o} is locked in — don't foul him.`
+        : ` ${o} is in a zone right now. Nobody is stopping him in ISO.`;
+    } else if (streak <= -2) {
+      setup += ` ${o} keeps going back to the well.`;
+    }
+  } else if (action === 'DRIVE') {
+    setup = _pick([
+      `${o} puts his head down and attacks ${d} off the dribble.`,
+      `${o} surveys the floor, sees the lane, and goes.`,
+      `${o} gets a head of steam — ${d} retreats to protect the rim.`,
+      `${o} attacks ${d} off the dribble, looking to get to the paint.`,
+    ]);
+  } else {
+    setup = _pick([
+      `${o} seals ${d} in the post. Ball goes in.`,
+      `${o} backs ${d} down into the paint.`,
+      `${o} catches at the block. ${d} is trying to front him.`,
+      `${o} calls for the ball on the low block. ${d} sets up behind him.`,
+    ]);
+  }
+
+  // ── LINE 2: ATTACK DESCRIPTION ─────────────────────────────────────────────
+  let attack: string;
+  const shot = poss.shotType;
+
+  if (action === 'ISO') {
+    switch (shot) {
+      case 'DRIVE_LAYUP':
+        attack = _pick([
+          `${o} hits ${d} with a crossover, blows past him to the left.`,
+          `${o} crosses over twice — ${d} bites — and attacks the lane.`,
+          `One hard crossover and ${o} is gone. ${d} is a step behind.`,
+          `${o} plants and goes — euro step leaves ${d} frozen at the arc.`,
+          `${o} changes direction so fast ${d} nearly loses his footing. He's at the rim.`,
+        ]);
+        break;
+      case 'MID_RANGE':
+        attack = _pick([
+          `${o} jab steps right, ${d} shifts — ${o} steps back and elevates.`,
+          `${o} creates space with a step back. ${d} can't close in time.`,
+          `One dribble, step back, ${d} is too late.`,
+          `${o} rocks ${d} to sleep with the dribble, then rises for the mid-range.`,
+          `${o} stops on a dime, rises up over ${d}'s outstretched hand.`,
+        ]);
+        break;
+      case 'PULL_UP_3':
+        attack = _pick([
+          `${o} pulls up in ${d}'s face from well beyond the arc.`,
+          `${o} stops and pops — ${d} had position but ${o} got his shot off.`,
+          `Mid-dribble, ${o} elevates. ${d} jumps but he's a fraction late.`,
+          `${o} jab steps, ${d} shifts — ${o} steps all the way back to the three-point line and elevates.`,
+        ]);
+        break;
+      case 'POST_FADE':
+        attack = _pick([
+          `${o} catches deep in the post, feels ${d} on his back, and spins baseline.`,
+          `${o} seals ${d}, spins middle and goes up strong.`,
+          `Quick spin — ${d} loses track for just a second. That's all ${o} needed.`,
+          `${o} leans into ${d}, fades away toward the baseline and releases.`,
+        ]);
+        break;
+      default:
+        attack = _pick([
+          `${o} creates off the dribble and fires.`,
+          `${o} works ${d} off the bounce and elevates.`,
+        ]);
+    }
+  } else if (action === 'DRIVE') {
+    switch (shot) {
+      case 'DRIVE_LAYUP':
+        attack = _pick([
+          `${o} gets into the lane. ${d} is backpedaling now.`,
+          `Strong drive — ${o} absorbs contact from ${d} and finishes.`,
+          `${o} attacks inside, right through ${d}.`,
+          `${o} uses the euro step to dance around ${d} in the lane.`,
+        ]);
+        break;
+      case 'MID_RANGE':
+        attack = _pick([
+          `${o} stops and pulls up in the mid-range. ${d} was too deep.`,
+          `${o} gets to the elbow, rises up over ${d}'s closeout.`,
+        ]);
+        break;
+      case 'PULL_UP_3':
+        attack = _pick([
+          `${o} curls off the screen, ${d} trails — ${o} rises up for three.`,
+          `${o} uses the dribble hand-off and rises up from deep. ${d} was a step late.`,
+        ]);
+        break;
+      default:
+        attack = _pick([
+          `${o} attacks the paint and finishes.`,
+          `${o} drives hard to the basket.`,
+        ]);
+    }
+  } else {
+    // POST_UP
+    attack = _pick([
+      `${o} catches deep in the post, feels ${d} on his back, and spins baseline.`,
+      `${o} seals ${d}, spins middle and goes up strong.`,
+      `Quick spin — ${d} loses track for just a second. That's all ${o} needed.`,
+      `${o} leans into ${d}, fades away toward the baseline and releases.`,
+      `${o} backs ${d} down, fades to his right — high off the glass attempt.`,
+      `Back to the basket, ${o} turns over his left shoulder and fires over ${d}.`,
+      `${o} catches at the elbow and turns. ${d} is a step slow.`,
+      `${o} pivots. ${d} contests — but ${o}'s release is too quick.`,
+    ]);
+  }
+
+  // ── LINE 3: RESULT ──────────────────────────────────────────────────────────
+  let result: string;
+  switch (poss.result) {
+    case 'MADE':
+      result = (shot === 'PULL_UP_3' || (action === 'ISO' && adv >= 5))
+        ? _pick([
+            `BANG! Right in ${d}'s face.`,
+            `Cold-blooded. ${o} drains it over ${d}.`,
+            `Splash. ${d} contests but it's too late.`,
+            `GOOD. ${d} had no answer.`,
+          ])
+        : _pick([
+            `GOOD.`,
+            `It falls. ${o} converts.`,
+            `Splash. Nothing but net.`,
+            `He got it! ${o} converts.`,
+            `${d} had good position but ${o} is just better right there.`,
+            `Good for two.`,
+            `Drains it.`,
+          ]);
+      break;
+    case 'MISSED':
+      result = (adv <= -5)
+        ? _pick([
+            `${d} stays with him — no good. ${d} wins this round.`,
+            `${d} had great position and it shows. Missed.`,
+            `Off the back iron. ${d} held his ground.`,
+            `Not tonight — ${d} contests and ${o} can't finish.`,
+          ])
+        : _pick([
+            `${d} stays with him — no good.`,
+            `Off the back iron. ${d} hangs tough.`,
+            `${o} couldn't convert. ${d} with a great stop.`,
+            `Not tonight — no good.`,
+            `Rattles out. ${d} lives to fight another possession.`,
+          ]);
+      break;
+    case 'STEAL':
+      result = _pick([
+        `${d} anticipates the move — STEAL! ${o} is stripped clean.`,
+        `${d} pokes it free from ${o}'s grasp. Turnover.`,
+        `${d} reads it perfectly. Intercepts the ball. Huge stop.`,
+      ]);
+      break;
+    case 'FOUL_DRAWN':
+      result = _pick([
+        `AND ONE! ${o} converts through contact! He's going to the line!`,
+        `Foul on ${d}! ${o} gets the bucket and a free throw.`,
+        `Bucket AND the foul on ${d}! ${o} is heading to the stripe.`,
+        `${o} draws the foul on ${d}. Free throws coming.`,
+      ]);
+      break;
+    default:
+      result = _pick([
+        `${o} picks up his dribble — ${d} forces the jump ball. Turnover.`,
+        `Lost ball! ${d} pokes it free from ${o}'s grasp.`,
+        `${o} turns it over. Good defense by ${d}.`,
+      ]);
+  }
+
+  return { setup, attack, result };
 };
 
 // ─── Quarter PBP Generator ────────────────────────────────────────────────────
@@ -803,7 +1052,18 @@ const generateQuarterPBP = (
       }
     }
 
-    events.push({ time, text: finalPbpText, type: evType, quarter });
+    const cinematic = !isGarbageTime
+      && poss.shotType !== 'CATCH_AND_SHOOT_3'
+      && !requiresAssist
+      ? generateCinematicLines(poss, handler, streak)
+      : null;
+    if (cinematic) {
+      events.push({ time, text: cinematic.setup,  type: 'info',  quarter });
+      events.push({ time, text: cinematic.attack, type: 'info',  quarter });
+      events.push({ time, text: cinematic.result, type: evType,  quarter });
+    } else {
+      events.push({ time, text: finalPbpText, type: evType, quarter });
+    }
 
     // ── BUG 2 & 3 FIX: Putback sequence — missed shot MUST precede putback ──
     // After any missed field goal: roll for offensive rebound.
