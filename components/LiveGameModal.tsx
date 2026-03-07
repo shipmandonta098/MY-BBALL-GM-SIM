@@ -544,6 +544,71 @@ const LiveGameModal: React.FC<LiveGameModalProps> = ({
       tryTech(isHomePossession);
     } else { // Normal shot attempt
       const isThree = Math.random() < threePtRate; // Offensive Architect: 38% → 43%
+
+      // ── Cinematic ISO / Drive / Post-Up pre-event (non-3pt, ~50% chance) ──────
+      if (!isThree && Math.random() < 0.50) {
+        const tendOff  = shooterTend?.offensiveTendencies;
+        const isoW     = tendOff?.isoHeavy       ?? 50;
+        const driveW   = tendOff?.driveToBasket  ?? 50;
+        const postW    = tendOff?.postUp          ?? 50;
+        const totalW   = isoW + driveW + postW;
+        const roll2    = Math.random() * totalW;
+        const action   = roll2 < isoW ? 'ISO' : roll2 < isoW + driveW ? 'DRIVE' : 'POST_UP';
+        const n = abbrev(shooter.name);
+        const d = abbrev(defender.name);
+        let setup = '';
+        let attack = '';
+        if (action === 'ISO') {
+          const setups  = [
+            `${n} calls for the isolation.`,
+            `${n} waves teammates away — this is one-on-one.`,
+            `${n} sizes up ${d} at the top of the arc.`,
+            `${n} demands the ball and clears out the paint.`,
+          ];
+          const attacks = [
+            `${n} attacks off the dribble, probing ${d}'s stance.`,
+            `${n} crosses over and drives hard to his spot.`,
+            `${n} creates separation with a hesitation move.`,
+            `${n} makes his move — ${d} has to stay in front.`,
+          ];
+          setup  = setups[Math.floor(Math.random()  * setups.length)];
+          attack = attacks[Math.floor(Math.random() * attacks.length)];
+        } else if (action === 'DRIVE') {
+          const setups  = [
+            `${n} surveys the floor at the wing.`,
+            `${n} receives off the screen and sizes up the lane.`,
+            `${n} dribbles towards the paint, looking to attack.`,
+            `${n} reads the defense and probes the interior.`,
+          ];
+          const attacks = [
+            `${n} explodes to the rim — ${d} scrambles to cut him off!`,
+            `${n} splits the defense in the paint!`,
+            `${n} drives baseline, shoulder down, into contact!`,
+            `${n} goes full speed into the lane!`,
+          ];
+          setup  = setups[Math.floor(Math.random()  * setups.length)];
+          attack = attacks[Math.floor(Math.random() * attacks.length)];
+        } else { // POST_UP
+          const setups  = [
+            `${n} catches on the block and backs down ${d}.`,
+            `${n} establishes deep position in the post.`,
+            `${n} seals off ${d} on the low block.`,
+            `${n} sets up in the mid-post, calling for the entry pass.`,
+          ];
+          const attacks = [
+            `${n} turns over the shoulder, looking for his move.`,
+            `${n} pump-fakes ${d} off his feet, then rises!`,
+            `${n} drops his shoulder on the drive from the block.`,
+            `${n} spins baseline off the post!`,
+          ];
+          setup  = setups[Math.floor(Math.random()  * setups.length)];
+          attack = attacks[Math.floor(Math.random() * attacks.length)];
+        }
+        batchEvents.push(makeEvent(setup,  'info', offTeam.id, possessionBefore, possessionBefore));
+        batchEvents.push(makeEvent(attack, 'info', offTeam.id, possessionBefore, possessionBefore));
+      }
+      // ── End cinematic pre-event ─────────────────────────────────────────────
+
       // Base attribute + all badge modifiers layered on
       const baseAttr = isThree
         ? (shooter.attributes?.shooting3pt ?? 50)
@@ -632,6 +697,11 @@ const LiveGameModal: React.FC<LiveGameModalProps> = ({
         updatePlayerStat(rebIsHome, rebber.id, isOffReb ? 'offReb' : 'defReb', 1);
         // OFF reb → possession stays; DEF reb → possession switches
         if (!isOffReb) possessionAfter = defTeam.id;
+      }
+      // ── Flush result into batchEvents when cinematic pre-events are present ──
+      if (batchEvents.length > 0 && eventText) {
+        batchEvents.push(makeEvent(eventText, eventType, overrideTeamId ?? offTeam.id, possessionBefore, possessionAfter));
+        eventText = '';
       }
     }
 
