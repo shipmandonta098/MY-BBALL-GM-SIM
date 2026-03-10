@@ -196,6 +196,100 @@ export function getLayupPercentage(attr: number, position?: string): number {
   return Math.max(0.43, Math.min(0.80, base + positionalTweak));
 }
 
+// ─── Dunk Percentage ──────────────────────────────────────────────────────────
+/**
+ * Maps a player's Dunks attribute (0–100) to a base uncontested slam-dunk FG%.
+ * Calibrated to 2025-26 NBA data: tracked dunks succeed at ~93% league-wide
+ * (higher than at-rim average because dunks are pre-selected high-% attempts).
+ *
+ * Piecewise curve (base, before position/synergy adjustments):
+ *   0–50  → 80–86 %  (can dunk but awkward/timid; low-attribute guys miss more)
+ *   51–69 → 86–90 %  (decent athlete, but rim protection hurts heavily)
+ *   70–79 → 90–93 %  (solid pro-level — routine slams on straight drives)
+ *   80–89 → 93–95.5 %(plus dunker, hammers it home with authority)
+ *   90–94 → 95.5–96.5%(elite: Zion / KD / LeBron tier — almost automatic)
+ *   95–100→ 96.5–98 % (god-mode: Shaq/Giannis/Wemby — unstoppable at the rim)
+ *
+ * Positional tweaks (applied on top):
+ *   C / PF  → +1.5 %  (leverage, length, and direct path to the rim)
+ *   PG / SG → −1.0 %  (face more active rim protection rotations)
+ *   SF      → neutral
+ *
+ * Jumping synergy bonus:
+ *   If (dunks + jumping) > 180, the player has rare explosive finishing ability.
+ *   Bonus scales linearly from 0 % at 180 → +1.5 % at 220+.
+ *   Captures combinations like 90-dunk / 95-jump that produce poster-dunk athletes.
+ *
+ * Hard clamp: [0.75, 0.99] — even the worst dunkers make most uncontested slams;
+ *                             defense (getRimProtectionMod SLAM_DUNK context) then
+ *                             applies an additive penalty on top.
+ *
+ * Calibration target: unweighted league avg should land ~92–93 % (dunks are
+ * pre-selected high-% plays; defense brings the effective sim average down toward
+ * the real-world 93% figure when applied through the full possession pipeline).
+ *
+ * Output table (base before position/synergy):
+ *   attr  50 → ~83.0 %  |  vs avg-D (interiorDef 50) → ~83.0 %  |  vs elite-D (90) → ~65 %
+ *   attr  65 → ~88.2 %  |  vs avg-D → ~88.2 %                   |  vs elite-D → ~70 %
+ *   attr  75 → ~91.0 %  |  vs avg-D → ~91.0 %                   |  vs elite-D → ~73 %
+ *   attr  85 → ~94.3 %  |  vs avg-D → ~94.3 %                   |  vs elite-D → ~76 %
+ *   attr  95 → ~96.5 %  |  vs avg-D → ~96.5 %                   |  vs elite-D → ~79 %
+ *   attr 100 → ~97.7 %  |  vs avg-D → ~97.7 %                   |  vs elite-D → ~80 %
+ *   (elite-D = SLAM_DUNK down=0.225 × normalized(90)=0.80 ≈ −18 %; separate block roll excluded)
+ *
+ * Tunables:
+ *   • Shift segment breakpoints to move the average up/down.
+ *   • Adjust positionalTweak values to widen/narrow the big-vs-guard gap.
+ *   • Change synergyThreshold / synergyMax for more/less jumping impact.
+ *   • Target overall sim dunk success ~93–95 % (most dunks are good looks);
+ *     top rim-protection teams should drag opponent dunk % down to ~88–90 %.
+ */
+export function getDunkPercentage(
+  attr: number,
+  position?: string,
+  jumping?: number,
+): number {
+  const a = Math.max(0, Math.min(100, attr));
+
+  let base: number;
+  if (a <= 50) {
+    // Low-attr: can dunk but awkward angle / weak grip — 80 % at 0 → 86 % at 50
+    base = 0.80 + (a / 50) * 0.06;
+  } else if (a <= 69) {
+    // Below-avg dunker: 86 % at 51 → 90 % at 69
+    base = 0.86 + ((a - 50) / 19) * 0.04;
+  } else if (a <= 79) {
+    // Solid pro-level: 90 % at 70 → 93 % at 79
+    base = 0.90 + ((a - 70) / 9) * 0.03;
+  } else if (a <= 89) {
+    // Plus dunker: 93 % at 80 → 95.5 % at 89  (diminishing returns begin)
+    base = 0.93 + ((a - 80) / 9) * 0.025;
+  } else if (a <= 94) {
+    // Elite: 95.5 % at 90 → 96.5 % at 94
+    base = 0.955 + ((a - 90) / 4) * 0.010;
+  } else {
+    // God-mode: 96.5 % at 95 → 98 % at 100
+    base = 0.965 + ((a - 95) / 5) * 0.015;
+  }
+
+  // Positional: bigs have natural leverage at the rim; guards face more rotations
+  const positionalTweak =
+    position === 'C'  || position === 'PF' ? +0.015 :
+    position === 'PG' || position === 'SG' ? -0.010 :
+    0; // SF neutral
+
+  // Jumping synergy: explosive dunkers with elite athleticism get a small bonus
+  // (e.g. dunks=90 + jumping=95 = 185 → bonus ≈ +0.4 %)
+  const synergyThreshold = 180;
+  const synergyMax       = 0.015;  // max +1.5 % at combined 220+
+  const synergyBonus =
+    jumping !== undefined && (a + jumping) > synergyThreshold
+      ? Math.min(synergyMax, ((a + jumping - synergyThreshold) / 40) * synergyMax)
+      : 0;
+
+  return Math.max(0.75, Math.min(0.99, base + positionalTweak + synergyBonus));
+}
+
 // ─── Rim Protection Modifier ──────────────────────────────────────────────────
 /**
  * Maps a defender's interiorDef attribute (0–100) to a per-possession
@@ -222,7 +316,7 @@ export function getLayupPercentage(attr: number, position?: string): number {
  * Tuning: increase DRIVE_LAYUP.down to make elite rim protectors more punishing
  * on individual drives; increase TEAM_BOX_SCORE.down to tighten league-wide D.
  */
-export type RimContext = 'DRIVE_LAYUP' | 'POST_FADE' | 'TEAM_BOX_SCORE';
+export type RimContext = 'DRIVE_LAYUP' | 'POST_FADE' | 'TEAM_BOX_SCORE' | 'SLAM_DUNK';
 
 export function getRimProtectionMod(
   interiorDefAttr: number,
@@ -236,6 +330,10 @@ export function getRimProtectionMod(
     DRIVE_LAYUP:    { down: 0.120, up: 0.040 }, // elite protector: up to −12 % per drive
     POST_FADE:      { down: 0.080, up: 0.025 }, // post-up: less direct rim contest
     TEAM_BOX_SCORE: { down: 0.060, up: 0.040 }, // team game average — larger up for porous Ds
+    // Slam dunks are telegraphed — elite shot-blockers time the challenge better than on layups.
+    // However, porous interior D barely changes dunk % (no one to contest → dunker just finishes).
+    // Effective range: elite rim protector (attr 90) → up to −18 %; weak D → +1.5 % at most.
+    SLAM_DUNK:      { down: 0.225, up: 0.015 },
   };
 
   const { down, up } = RANGES[context];
@@ -559,6 +657,10 @@ const simulatePossession = (
   }
 
   // ── Step 4: Base probability + tendency modifier ──────────────────────────
+  // Tracks whether the DRIVE_LAYUP resolved into a slam-dunk attempt rather than
+  // a standard layup.  Set inside the DRIVE_LAYUP case and read again in Step 5
+  // so defense applies the correct rim context (SLAM_DUNK vs DRIVE_LAYUP).
+  let isDunkAttempt = false;
   let baseProb     = 0.46;
   let shotModifier = 0;
   let tendencyUsed = '';
@@ -594,20 +696,50 @@ const simulatePossession = (
       break;
     }
     case 'DRIVE_LAYUP': {
-      // Attribute-driven curve replacing the old linear formula; accounts for
-      // dunks as a 20% blend (athletic finishers convert drives into dunks too).
-      const layupBase = getLayupPercentage(offHandler.attributes.layups, offHandler.position);
-      const dunkBlend = getLayupPercentage(offHandler.attributes.dunks,  offHandler.position);
-      baseProb      = layupBase * 0.80 + dunkBlend * 0.20;
+      const dunkAttr  = offHandler.attributes.dunks;
+      const jumpAttr  = offHandler.attributes.jumping;
+      const layupAttr = offHandler.attributes.layups;
+
+      // Probabilistic dunk detection: athletic finishers convert a portion of
+      // drives into slam attempts.  Chance rises with the dunks attribute so
+      // high-dunk bigs slam often while low-attr guards rarely attempt it.
+      // Range: ~0 % at attr 40 → ~40 % at attr 80 → ~70 % at attr 100.
+      const rawDunkChance = Math.max(0, (dunkAttr - 40) / 85);   // 0 → ~0.71
+      const dunkChance    = Math.min(0.70, rawDunkChance);
+
+      isDunkAttempt = dunkAttr >= 50 && Math.random() < dunkChance;
+
+      if (isDunkAttempt) {
+        // ── Slam dunk attempt ──────────────────────────────────────────────
+        // Use the dedicated dunk curve (higher base % than layups).
+        // Defense will apply SLAM_DUNK rim context in Step 5.
+        baseProb = getDunkPercentage(dunkAttr, offHandler.position, jumpAttr);
+        pbpBase  = isTransition && transHunter >= 70
+          ? `${ln} catches it in transition and throws it down!`
+          : dunkAttr >= 90
+            ? `${ln} rises up and POSTERIZES him — windmill, one-hand, raw POWER!`
+            : dunkAttr >= 80
+              ? `${ln} attacks and throws it down!`
+              : `${ln} goes up strong for the dunk...`;
+      } else {
+        // ── Standard layup / finger-roll ──────────────────────────────────
+        // Blend layup finishing quality with a dunk-athleticism weight so high-dunk
+        // players who do lay it up still benefit from their superior touch/body control.
+        const layupBase  = getLayupPercentage(layupAttr, offHandler.position);
+        const dunkBase   = getDunkPercentage(dunkAttr,  offHandler.position, jumpAttr);
+        const dunkWeight = Math.min(0.35, dunkAttr / 100 * 0.35);
+        baseProb = layupBase * (1 - dunkWeight) + dunkBase * dunkWeight;
+        pbpBase  = isTransition && transHunter >= 70
+          ? `${ln} pushes the pace immediately — gets out before the defense sets...`
+          : tendencyScore >= 86 ? `${ln} attacks the rim relentlessly...`
+            : tendencyScore >= 70 ? `${ln} attacks the rim hard...`
+              : `${ln} drives the lane...`;
+      }
+
       tendencyUsed  = 'driveToBasket';
       tendencyScore = ot?.driveToBasket ?? 50;
       const m       = (tendencyScore / 100) * 0.10;
       shotModifier  = tendencyScore >= 70 ? +m : tendencyScore < 30 ? -m : 0;
-      pbpBase = isTransition && transHunter >= 70
-        ? `${ln} pushes the pace immediately — gets out before the defense sets...`
-        : tendencyScore >= 86 ? `${ln} attacks the rim relentlessly...`
-          : tendencyScore >= 70 ? `${ln} attacks the rim hard...`
-            : `${ln} drives the lane...`;
       break;
     }
     case 'POST_FADE': {
@@ -738,22 +870,62 @@ const simulatePossession = (
       pbpBase += ` ${defLn} bodied up hard.`;
     }
 
-    // Interior Defense attribute — rim-protection quality for layup/post shots.
+    // Interior Defense attribute — rim-protection quality for layup/post/dunk attempts.
     // Captures length, timing, and shot-contest caliber independent of tendency
     // habits (helpDefender, physicality above already cover behavioral consistency).
-    // Average rim defender (attr≈50) → 0 adjustment; elite → up to −12%; weak → up to +4%.
+    //   • DRIVE_LAYUP:  avg → 0; elite → up to −12 %; weak → up to +4 %
+    //   • SLAM_DUNK:    avg → 0; elite → up to −18 %; weak → up to +1.5 %
+    //     (dunks are telegraphed — elite shot-blockers time the challenge better)
     if (shotType === 'DRIVE_LAYUP' || shotType === 'POST_FADE') {
-      const intDef     = defender?.attributes.interiorDef ?? 50;
-      const rimCtx     = shotType as RimContext;
+      const intDef        = defender?.attributes.interiorDef ?? 50;
+      const rimCtx: RimContext = isDunkAttempt ? 'SLAM_DUNK' : shotType as RimContext;
       const rimContestMod = getRimProtectionMod(intDef, rimCtx);
       defenseModifier += rimContestMod;
-      if (intDef >= 80 && rimContestMod <= -0.06) {
-        if (!defTendencyUsed) defTendencyUsed = 'interiorDef';
-        pbpDefPrefix = pbpDefPrefix || `${defLn} meets him at the rim — massive contest — `;
-      } else if (intDef >= 90 && rimContestMod <= -0.09) {
-        pbpBase += ` ${defLn} is a wall at the rim!`;
-      } else if (intDef <= 30 && shotType === 'DRIVE_LAYUP') {
-        pbpDefPrefix = pbpDefPrefix || `${defLn} has no chance — nobody in the paint — `;
+
+      if (isDunkAttempt) {
+        // ── Separate block-chance for slam dunks ────────────────────────────
+        // Elite shot-blockers (high interiorDef + blocks) can flat-out reject dunks.
+        // Probability: near-zero for avg defenders; up to ~14 % for elite rim protectors.
+        // Scales on normalized interiorDef × blocks attribute.
+        const blockRating = defender?.attributes.blocks ?? 50;
+        const intNorm     = Math.max(0, (intDef - 40) / 60);   // 0 at attr 40 → 1.0 at attr 100
+        const blockChance = intNorm * (blockRating / 100) * 0.22;
+        if (Math.random() < blockChance) {
+          const blockLine = intDef >= 90
+            ? `${defLn} SWATS IT INTO THE STANDS! Emphatic rejection!`
+            : intDef >= 80
+              ? `${defLn} rises and blocks the dunk attempt! Huge stop!`
+              : `${defLn} gets a piece of it — dunk blocked!`;
+          return {
+            ballHandlerName: offHandler.name, ballHandlerId: offHandler.id,
+            tendencyUsed: tendencyUsed || offAction, actionTaken: offAction,
+            tendencyScore, shotModifier, conflictFired: false,
+            defenderTendency: 'interiorDef', defenseModifier,
+            finalShotProbability: 0, result: 'MISSED',
+            isTransition, defenderRef: defender,
+            pbpText: blockLine,
+          };
+        }
+        // PBP flavour for contested-but-not-blocked dunk challenges
+        if (intDef >= 90 && rimContestMod <= -0.12) {
+          pbpDefPrefix = pbpDefPrefix || `${defLn} challenges the dunk with elite timing — `;
+          if (!defTendencyUsed) defTendencyUsed = 'interiorDef';
+        } else if (intDef >= 80 && rimContestMod <= -0.08) {
+          if (!defTendencyUsed) defTendencyUsed = 'interiorDef';
+          pbpBase += ` ${defLn} rises to meet him at the rim!`;
+        } else if (intDef <= 30) {
+          pbpDefPrefix = pbpDefPrefix || `${defLn} has no answer — clear path to the rim — `;
+        }
+      } else {
+        // Standard layup / post-fade PBP flavour (unchanged behaviour)
+        if (intDef >= 80 && rimContestMod <= -0.06) {
+          if (!defTendencyUsed) defTendencyUsed = 'interiorDef';
+          pbpDefPrefix = pbpDefPrefix || `${defLn} meets him at the rim — massive contest — `;
+        } else if (intDef >= 90 && rimContestMod <= -0.09) {
+          pbpBase += ` ${defLn} is a wall at the rim!`;
+        } else if (intDef <= 30 && shotType === 'DRIVE_LAYUP') {
+          pbpDefPrefix = pbpDefPrefix || `${defLn} has no chance — nobody in the paint — `;
+        }
       }
     }
 
@@ -869,18 +1041,28 @@ const simulatePossession = (
 
   let fullText = pbpDefPrefix + pbpBase;
   if (posResult === 'MADE') {
-    if (shotType === 'POST_FADE' && (ot?.postUp ?? 0) >= 75)
+    if (isDunkAttempt) {
+      const dunkAttr = offHandler.attributes.dunks;
+      fullText += dunkAttr >= 90
+        ? ` — SLAMS IT HOME! Emphatic!`
+        : dunkAttr >= 80
+          ? ` — puts it down hard! Two points the easy way.`
+          : ` — finishes the dunk!`;
+    } else if (shotType === 'POST_FADE' && (ot?.postUp ?? 0) >= 75) {
       fullText += ` — drops his shoulder and hits the post fade!`;
-    else if (shotType === 'PULL_UP_3' && (ot?.pullUpThree ?? 0) >= 71)
+    } else if (shotType === 'PULL_UP_3' && (ot?.pullUpThree ?? 0) >= 71) {
       fullText += ` — BANG! Right in his wheelhouse.`;
-    else if (offHandler.personalityTraits.includes('Streaky') && hotStreak >= 2)
+    } else if (offHandler.personalityTraits.includes('Streaky') && hotStreak >= 2) {
       fullText += ` — Good. ${ln} is feeling it right now...`;
-    else
+    } else {
       fullText += ` — Good.`;
+    }
   } else {
-    fullText += offHandler.personalityTraits.includes('Streaky') && hotStreak <= -2
-      ? ` — No good. ${ln} is struggling to find his shot...`
-      : ` — No good.`;
+    fullText += isDunkAttempt
+      ? ` — rattles out! Missed the dunk.`
+      : offHandler.personalityTraits.includes('Streaky') && hotStreak <= -2
+        ? ` — No good. ${ln} is struggling to find his shot...`
+        : ` — No good.`;
   }
   if (conflictFired && conflictText) fullText += ` (${conflictText})`;
 
@@ -1459,11 +1641,12 @@ const simulatePlayerGameLine = (
   const fgPct3   = getThreePointPercentage(player.attributes.shooting3pt);
   const fgPctMid = player.attributes.shootingMid / 100 * 0.42 + 0.26;
 
-  // Inside FG%: attribute-driven curve (replaces old linear blend).
-  // 80% layup finishing quality + 20% dunk athleticism; weight adjusts for
-  // high-dunk players who convert more drives to slams (naturally higher %).
+  // Inside FG%: weighted blend of layup quality and dunk success rate.
+  // getDunkPercentage gives the proper high-base dunk curve (92-98% uncontested)
+  // rather than re-using the lower layup curve.  Dynamic weight means high-dunk
+  // players (who attempt more slams) pull the blended FG% up toward the dunk band.
   const layupBase   = getLayupPercentage(player.attributes.layups, player.position);
-  const dunkBase    = getLayupPercentage(player.attributes.dunks,  player.position);
+  const dunkBase    = getDunkPercentage(player.attributes.dunks, player.position, player.attributes.jumping);
   const dunkWeight  = Math.min(0.35, player.attributes.dunks / 100 * 0.35);
   const fgPctIns    = layupBase * (1 - dunkWeight) + dunkBase * dunkWeight;
 
