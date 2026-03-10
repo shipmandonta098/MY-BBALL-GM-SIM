@@ -140,6 +140,110 @@ export function get3PTContestMod(
     : -normalized * up;
 }
 
+// ─── Layup / At-Rim Finishing Percentage ─────────────────────────────────────
+/**
+ * Maps a player's Layups attribute (0–100) to an at-rim FG% with diminishing
+ * returns at the top end, calibrated to real 2025-26 NBA at-rim data.
+ *
+ * Band targets (pre-positional adjustment):
+ *   attr   0–50 →  45–55 %  (glass-jaw finisher, floater merchant, blocked often)
+ *   attr  51–69 →  55–60 %  (below-avg, contests go badly)
+ *   attr  70–79 →  60–65 %  (league avg; solid drives, good reads)
+ *   attr  80–89 →  65–70 %  (plus finisher; draws fouls, tough contact)
+ *   attr  90–94 →  70–74 %  (elite; near-unblockable, high success on drives)
+ *   attr  95–100 → 74–78 %  (god-mode; Giannis/Shaq-tier, near-automatic)
+ *
+ * Positional adjustment (applied after piecewise):
+ *   C / PF  → +2 %  (length, leverage, and proximity to the rim)
+ *   PG / SG → -1 %  (face more help-side rim protection)
+ *   SF      → no change
+ *
+ * Hard clamp: [0.43, 0.80] — prevents absurd extremes even after defense mods.
+ *
+ * Tuning: shift segment endpoints or `positionalTweak` to recalibrate the
+ * league-wide sim average.  Target: ~63–65 % at-rim across all players.
+ */
+export function getLayupPercentage(attr: number, position?: string): number {
+  const a = Math.max(0, Math.min(100, attr));
+
+  let base: number;
+  if (a <= 50) {
+    // Trash / non-finisher floor: 45 % at 0 → 55 % at 50
+    base = 0.45 + (a / 50) * 0.10;
+  } else if (a <= 69) {
+    // Below-avg: 55 % at 51 → 60 % at 69  (slow ramp — most bad finishers bunch here)
+    base = 0.55 + ((a - 50) / 19) * 0.05;
+  } else if (a <= 79) {
+    // League-avg: 60 % at 70 → 65 % at 79
+    base = 0.60 + ((a - 70) / 9) * 0.05;
+  } else if (a <= 89) {
+    // Plus finisher: 65 % at 80 → 70 % at 89  (contact-seeker, elite burst)
+    base = 0.65 + ((a - 80) / 9) * 0.05;
+  } else if (a <= 94) {
+    // Elite: 70 % at 90 → 74 % at 94  (diminishing returns kick in hard)
+    base = 0.70 + ((a - 90) / 4) * 0.04;
+  } else {
+    // God-mode: 74 % at 95 → 78 % at 100  (Shaq/Giannis-tier — near automatic)
+    base = 0.74 + ((a - 95) / 5) * 0.04;
+  }
+
+  // Positional adjustment — bigs have natural rim advantages; guards face more help-D
+  const positionalTweak =
+    position === 'C' || position === 'PF' ? +0.02 :
+    position === 'PG' || position === 'SG' ? -0.01 :
+    0; // SF neutral
+
+  return Math.max(0.43, Math.min(0.80, base + positionalTweak));
+}
+
+// ─── Rim Protection Modifier ──────────────────────────────────────────────────
+/**
+ * Maps a defender's interiorDef attribute (0–100) to a per-possession
+ * additive at-rim modifier, parallel in structure to get3PTContestMod.
+ *
+ * Calibrated to 2025-26 at-rim suppression data:
+ *   • Average rim defender (attr ≈ 50) → 0 adjustment.
+ *   • Elite rim protectors (Wembanyama, Gobert tier, attr 85–95):
+ *       DRIVE_LAYUP  → −8 to −12 %  (individual possession — very punishing)
+ *       TEAM_BOX_SCORE → −3 to −5 %  (team avg over full game)
+ *   • Weak interior defense (attr ≤ 30):
+ *       DRIVE_LAYUP  → +2 to +4 %  (highway to the rim)
+ *       TEAM_BOX_SCORE → +1 to +2 %
+ *
+ * Note: this stacks with tendency modifiers (helpDefender, physicality) already
+ * in simulatePossession.  Tendency = behavioral habit; attribute = physical
+ * ceiling (timing, length, athleticism).
+ *
+ * Expected team-level outcomes (TEAM_BOX_SCORE):
+ *   avg interiorDef 80 → ~−3.6 %  (solid shot-blocking team, e.g. ~61 % at rim)
+ *   avg interiorDef 85 → ~−4.2 %  (elite: holds opp. to ~59–60 %)
+ *   avg interiorDef 20 → ~+1.4 %  (porous: opponents feast, ~66–67 %)
+ *
+ * Tuning: increase DRIVE_LAYUP.down to make elite rim protectors more punishing
+ * on individual drives; increase TEAM_BOX_SCORE.down to tighten league-wide D.
+ */
+export type RimContext = 'DRIVE_LAYUP' | 'POST_FADE' | 'TEAM_BOX_SCORE';
+
+export function getRimProtectionMod(
+  interiorDefAttr: number,
+  context: RimContext = 'DRIVE_LAYUP',
+): number {
+  const attr       = Math.max(0, Math.min(100, interiorDefAttr));
+  const normalized = (attr - 50) / 50; // −1 (worst) … 0 (avg) … +1 (best)
+
+  // (down = how much elite D suppresses; up = how much poor D rewards shooter)
+  const RANGES: Record<RimContext, { down: number; up: number }> = {
+    DRIVE_LAYUP:    { down: 0.120, up: 0.040 }, // elite protector: up to −12 % per drive
+    POST_FADE:      { down: 0.080, up: 0.025 }, // post-up: less direct rim contest
+    TEAM_BOX_SCORE: { down: 0.060, up: 0.040 }, // team game average — larger up for porous Ds
+  };
+
+  const { down, up } = RANGES[context];
+  return normalized >= 0
+    ? -normalized * down   // elite rim D: 0 → −down
+    : -normalized * up;    // poor rim D:  0 → +up
+}
+
 /** Look up total per-team possessions from a pace rating (adds random variance). */
 const paceToTotalPossessions = (pace: number): number => {
   const tier = PACE_TABLE.find(t => pace >= t.lo && pace <= t.hi) ?? PACE_TABLE[3];
@@ -490,7 +594,11 @@ const simulatePossession = (
       break;
     }
     case 'DRIVE_LAYUP': {
-      baseProb      = offHandler.attributes.layups / 100 * 0.40 + 0.38;
+      // Attribute-driven curve replacing the old linear formula; accounts for
+      // dunks as a 20% blend (athletic finishers convert drives into dunks too).
+      const layupBase = getLayupPercentage(offHandler.attributes.layups, offHandler.position);
+      const dunkBlend = getLayupPercentage(offHandler.attributes.dunks,  offHandler.position);
+      baseProb      = layupBase * 0.80 + dunkBlend * 0.20;
       tendencyUsed  = 'driveToBasket';
       tendencyScore = ot?.driveToBasket ?? 50;
       const m       = (tendencyScore / 100) * 0.10;
@@ -628,6 +736,25 @@ const simulatePossession = (
     } else if (physicality >= 70) {
       defenseModifier -= 0.03;
       pbpBase += ` ${defLn} bodied up hard.`;
+    }
+
+    // Interior Defense attribute — rim-protection quality for layup/post shots.
+    // Captures length, timing, and shot-contest caliber independent of tendency
+    // habits (helpDefender, physicality above already cover behavioral consistency).
+    // Average rim defender (attr≈50) → 0 adjustment; elite → up to −12%; weak → up to +4%.
+    if (shotType === 'DRIVE_LAYUP' || shotType === 'POST_FADE') {
+      const intDef     = defender?.attributes.interiorDef ?? 50;
+      const rimCtx     = shotType as RimContext;
+      const rimContestMod = getRimProtectionMod(intDef, rimCtx);
+      defenseModifier += rimContestMod;
+      if (intDef >= 80 && rimContestMod <= -0.06) {
+        if (!defTendencyUsed) defTendencyUsed = 'interiorDef';
+        pbpDefPrefix = pbpDefPrefix || `${defLn} meets him at the rim — massive contest — `;
+      } else if (intDef >= 90 && rimContestMod <= -0.09) {
+        pbpBase += ` ${defLn} is a wall at the rim!`;
+      } else if (intDef <= 30 && shotType === 'DRIVE_LAYUP') {
+        pbpDefPrefix = pbpDefPrefix || `${defLn} has no chance — nobody in the paint — `;
+      }
     }
 
     // Face-up guard
@@ -1306,9 +1433,10 @@ const simulatePlayerGameLine = (
   teamAst: number,
   minutes: number,
   usageShare: number,
-  varRoll = 0,            // game-level variance from tip-off roll (±15–25)
-  ftBonus = 0,            // home court FT advantage (+0.03)
-  opponentPerimDefMod = 0, // team-level 3PT defensive suppression from get3PTContestMod
+  varRoll = 0,               // game-level variance from tip-off roll (±15–25)
+  ftBonus = 0,               // home court FT advantage (+0.03)
+  opponentPerimDefMod  = 0,  // team-level 3PT defensive suppression (get3PTContestMod)
+  opponentInteriorDefMod = 0, // team-level at-rim defensive suppression (getRimProtectionMod)
 ): GamePlayerLine => {
   const fgPctBoost = varRoll / 100 * 0.4; // variance → small FG% delta
   const tm     = computeTendencyModifiers(player);
@@ -1328,14 +1456,23 @@ const simulatePlayerGameLine = (
   const insFga  = Math.round(fga * insideShare);
   const midFga  = Math.max(0, fga - threepa - insFga);
 
-  const fgPct3  = getThreePointPercentage(player.attributes.shooting3pt);
-  const fgPctMid= player.attributes.shootingMid    / 100 * 0.42 + 0.26;
-  const fgPctIns= ((player.attributes.layups + player.attributes.dunks) / 2 / 100 * 0.40 + player.attributes.postScoring / 100 * 0.38) / 2 + 0.30;
+  const fgPct3   = getThreePointPercentage(player.attributes.shooting3pt);
+  const fgPctMid = player.attributes.shootingMid / 100 * 0.42 + 0.26;
+
+  // Inside FG%: attribute-driven curve (replaces old linear blend).
+  // 80% layup finishing quality + 20% dunk athleticism; weight adjusts for
+  // high-dunk players who convert more drives to slams (naturally higher %).
+  const layupBase   = getLayupPercentage(player.attributes.layups, player.position);
+  const dunkBase    = getLayupPercentage(player.attributes.dunks,  player.position);
+  const dunkWeight  = Math.min(0.35, player.attributes.dunks / 100 * 0.35);
+  const fgPctIns    = layupBase * (1 - dunkWeight) + dunkBase * dunkWeight;
 
   const threepm = Math.min(threepa, Math.round(threepa * Math.max(0.05,
     fgPct3 + fgPctBoost + opponentPerimDefMod + (Math.random() * 0.06 - 0.03))));
-  const midFgm  = Math.min(midFga,  Math.round(midFga  * Math.max(0.05, fgPctMid + fgPctBoost + (Math.random() * 0.06 - 0.03))));
-  const insFgm  = Math.min(insFga,  Math.round(insFga  * Math.max(0.05, fgPctIns + fgPctBoost + (Math.random() * 0.06 - 0.03))));
+  const midFgm  = Math.min(midFga,  Math.round(midFga  * Math.max(0.05,
+    fgPctMid + fgPctBoost + (Math.random() * 0.06 - 0.03))));
+  const insFgm  = Math.min(insFga,  Math.round(insFga  * Math.max(0.35,
+    fgPctIns + fgPctBoost + opponentInteriorDefMod + (Math.random() * 0.06 - 0.03))));
   const fgm     = threepm + midFgm + insFgm;
 
   const fta = Math.round((player.attributes.strength / 100) * 5 * minFac + Math.random() * 2);
@@ -1631,14 +1768,19 @@ export const simulateGame = (
     const teamReb     = Math.round(statPace * 0.44);
     const teamAst     = Math.round((totalPts / 2.2) * 0.6);
 
-    // Opponent's perimeter defense: top-8 rotation average, computed once per team.
-    // Produces a team-level 3PT suppression factor fed into each player's box score.
-    // avg perimDef 75 → ~-1.5 %  |  avg 85 → ~-2.1 %  |  avg 25 → ~+0.7 %
-    const oppRoster       = isHome ? away.roster : home.roster;
-    const oppTopN         = oppRoster.slice(0, 8);
-    const oppAvgPerimDef  = oppTopN.reduce((s, op) => s + (op.attributes.perimeterDef ?? 50), 0)
-                            / Math.max(1, oppTopN.length);
-    const oppPerimDefMod  = get3PTContestMod(oppAvgPerimDef, 'TEAM_BOX_SCORE');
+    // Opponent defensive averages — computed once per team, applied to every player's box score.
+    // Uses top-8 rotation players as the sample (starters + primary bench).
+    const oppRoster      = isHome ? away.roster : home.roster;
+    const oppTopN        = oppRoster.slice(0, 8);
+    const oppCount       = Math.max(1, oppTopN.length);
+
+    // 3PT suppression: avg perimDef 75 → ~−1.5 %  |  85 → ~−2.1 %  |  25 → ~+0.7 %
+    const oppAvgPerimDef   = oppTopN.reduce((s, op) => s + (op.attributes.perimeterDef ?? 50), 0) / oppCount;
+    const oppPerimDefMod   = get3PTContestMod(oppAvgPerimDef, 'TEAM_BOX_SCORE');
+
+    // At-rim suppression: avg interiorDef 80 → ~−3.6 %  |  85 → ~−4.2 %  |  20 → ~+1.4 %
+    const oppAvgInteriorDef    = oppTopN.reduce((s, op) => s + (op.attributes.interiorDef ?? 50), 0) / oppCount;
+    const oppInteriorDefMod    = getRimProtectionMod(oppAvgInteriorDef, 'TEAM_BOX_SCORE');
 
     return roster.map((p, i) => {
       let mins = 0;
@@ -1656,7 +1798,7 @@ export const simulateGame = (
       const ftBonus    = isHome ? 0.03 : 0;
       const varRoll    = playerVariance.get(p.id) ?? 0;
       const usageShare = p.rating / totalRating;
-      const line = simulatePlayerGameLine(p, totalPts, teamFga, teamReb, teamAst, mins, usageShare, varRoll, ftBonus, oppPerimDefMod);
+      const line = simulatePlayerGameLine(p, totalPts, teamFga, teamReb, teamAst, mins, usageShare, varRoll, ftBonus, oppPerimDefMod, oppInteriorDefMod);
       return { ...line, techs: 0, flagrants: 0, ejected: false };
     });
   };
