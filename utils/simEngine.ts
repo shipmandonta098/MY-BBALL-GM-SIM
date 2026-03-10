@@ -499,7 +499,173 @@ export function getRimProtectionMod(
     : -normalized * up;    // poor rim D:  0 → +up
 }
 
-/** Look up total per-team possessions from a pace rating (adds random variance). */
+// ─── Free Throw Percentage ────────────────────────────────────────────────────
+/**
+ * Maps a player's freeThrow attribute (0–100) to a base FT%, calibrated to
+ * 2025-26 NBA data (league avg ≈ 78.3 %; team range 75–83.2 %).
+ *
+ * Piecewise curve (base before position/situational adjustments):
+ *   0–59  → 60–72 %  (hack-a viable; bigs who can't shoot, scared rookies)
+ *   60–69 → 72–76 %  (below-avg; shaky but playable — not worth intentional fouling)
+ *   70–79 → 76–80 %  (league-avg range — most rotation players live here)
+ *   80–89 → 80–86 %  (plus; clutch-reliable, teams can draw fouls without fear)
+ *   90–94 → 86–90 %  (elite: Kawhi / SGA tier — high volume AND high %)
+ *   95–100→ 90–94 %  (god-tier: Steph Curry .931 — nearly automatic)
+ *
+ * Diminishing returns design: each segment's slope narrows at the top so the
+ * model never implies "100 attr = 100%" — even Steph misses ~7 % of FTs.
+ *
+ * Positional adjustment:
+ *   PG / SG / SF → +1.0 %  (guards drill the mechanics; better form from reps)
+ *   C  / PF      → −1.5 %  (bigs with good attr still face slight mechanical cap)
+ *
+ * Hard clamp: [0.55, 0.96]
+ *   Floor: even the worst FT shooter makes more than half.
+ *   Ceiling: no one is historically above 96 % on real volume.
+ *
+ * Calibration target: unweighted league sim avg ≈ 78 %.
+ *   Top individual players at 85–90 attr land in the 82–87 % band.
+ *
+ * Output table (base, guard position):
+ *   attr  50 → 67.0 %
+ *   attr  65 → 74.5 %
+ *   attr  75 → 78.0 %
+ *   attr  88 → 84.4 %
+ *   attr  95 → 89.0 %
+ *   attr 100 → 92.0 %
+ *
+ * Tunables:
+ *   • Shift breakpoint values to raise/lower league-wide avg.
+ *   • Widen positionalTweak gap for more position-driven spread.
+ *   • Pair with getFreeThrowSituationalMod() for in-game pressure effects.
+ */
+export function getFreeThrowPercentage(attr: number, position?: string): number {
+  const a = Math.max(0, Math.min(100, attr));
+
+  let base: number;
+  if (a <= 59) {
+    // Hack-a tier: 60 % at 0 → 72 % at 59  (slow climb — these guys just can't shoot)
+    base = 0.60 + (a / 59) * 0.12;
+  } else if (a <= 69) {
+    // Below-avg: 72 % at 60 → 76 % at 69
+    base = 0.72 + ((a - 60) / 9) * 0.04;
+  } else if (a <= 79) {
+    // League-avg: 76 % at 70 → 80 % at 79
+    base = 0.76 + ((a - 70) / 9) * 0.04;
+  } else if (a <= 89) {
+    // Plus shooter: 80 % at 80 → 86 % at 89  (slope steepens — these reps add up)
+    base = 0.80 + ((a - 80) / 9) * 0.06;
+  } else if (a <= 94) {
+    // Elite: 86 % at 90 → 90 % at 94  (diminishing returns kick in hard)
+    base = 0.86 + ((a - 90) / 4) * 0.04;
+  } else {
+    // God-tier: 90 % at 95 → 94 % at 100  (Curry / prime Nash territory)
+    base = 0.90 + ((a - 95) / 5) * 0.04;
+  }
+
+  // Positional: guards repeat the motion thousands more times; bigs have
+  // mechanical ceilings even when the attribute is strong.
+  const positionalTweak =
+    position === 'PG' || position === 'SG' || position === 'SF' ? +0.010 :
+    position === 'C'  || position === 'PF'                      ? -0.015 :
+    0;
+
+  return Math.max(0.55, Math.min(0.96, base + positionalTweak));
+}
+
+// ─── Free Throw Situational Modifier ─────────────────────────────────────────
+/**
+ * Returns an additive modifier to apply on top of getFreeThrowPercentage()
+ * to capture fatigue, pressure, home-court, and personality effects.
+ *
+ * Applied per-player when simulating FT attempts.  No defense component —
+ * FTs are unguarded; only internal player/context factors matter.
+ *
+ * Modifiers (additive, applied in order; all small by design):
+ *
+ *  1. Stamina fatigue (−0 to −5 %):
+ *     Attribute ≥ 70 → no penalty.
+ *     Attribute 40–69 → small fatigue on late-game attempts (−1 to −3 %).
+ *     Attribute < 40 → noticeable drop in mechanics late (up to −5 %).
+ *     Scale multiplied by minute load (minFac = mins/48): a player who plays
+ *     5 minutes doesn't accumulate the same fatigue as a 38-minute workhorse.
+ *
+ *  2. Clutch pressure (−3 to +3 %):
+ *     isClutch flag = Q4/OT with score within 5 pts.
+ *     Base pressure penalty: −2 % (even good players tighten slightly).
+ *     'Clutch' personality trait: negates penalty, adds +1 % (net +1 %).
+ *     'Tough/Alpha' trait: halves the penalty (net −1 %).
+ *     'Hot Head' trait: doubles the penalty (net −4 %).
+ *     clutchShotTaker tendency: (tendency − 50) / 100 × 0.04 added on top.
+ *
+ *  3. Home crowd (−1 to +1 %):
+ *     Home shooter: +0.01 % (familiar shooting background, crowd energy).
+ *     Away shooter: −0.01 % (visitor crowd noise on crucial FTs).
+ *
+ *  4. 'Streaky' trait variance (not an additive mod — handled separately):
+ *     Callers should widen their noise window (±0.05 instead of ±0.03)
+ *     when the player has the 'Streaky' trait.  See `getStreakiness()`.
+ *
+ * Tunables:
+ *   • fatigueScale: raise to make stamina matter more for FT%.
+ *   • pressurePenalty: raise for more dramatic clutch-time swings.
+ *   • homeAdv: raise for larger home-court FT effect.
+ */
+export interface FreeThrowContext {
+  /** Minutes played this game (used to weight fatigue). */
+  minutesPlayed: number;
+  /** Whether this attempt is in a clutch situation (Q4/OT, score ≤ 5 pts). */
+  isClutch: boolean;
+  /** Whether the shooter is the home team. */
+  isHome: boolean;
+  /** Player's stamina attribute (0–100). */
+  stamina: number;
+  /** Player's personalityTraits array. */
+  personalityTraits: string[];
+  /** clutchShotTaker tendency value (0–100, default 50). */
+  clutchTendency?: number;
+}
+
+export function getFreeThrowSituationalMod(ctx: FreeThrowContext): number {
+  let mod = 0;
+
+  // 1. Stamina / fatigue — heavier minute load amplifies the penalty
+  const minFac      = Math.min(1, ctx.minutesPlayed / 40); // full penalty at 40+ mins
+  const fatigueScale =
+    ctx.stamina < 40 ? 0.050 :
+    ctx.stamina < 55 ? 0.030 :
+    ctx.stamina < 70 ? 0.015 :
+    0;                          // ≥ 70 stamina: no meaningful fatigue
+  mod -= fatigueScale * minFac;
+
+  // 2. Clutch pressure
+  if (ctx.isClutch) {
+    const pressurePenalty = -0.02; // base: everyone tightens up a little
+    const traitMod =
+      ctx.personalityTraits.includes('Clutch')      ? +0.03 : // negates + bonus
+      ctx.personalityTraits.includes('Tough/Alpha') ? +0.01 : // halves penalty
+      ctx.personalityTraits.includes('Hot Head')    ? -0.02 : // doubles penalty
+      0;
+    const tendencyMod = ((ctx.clutchTendency ?? 50) - 50) / 100 * 0.04;
+    mod += pressurePenalty + traitMod + tendencyMod;
+  }
+
+  // 3. Home / away
+  mod += ctx.isHome ? +0.010 : -0.010;
+
+  return mod;
+}
+
+/**
+ * Returns the noise half-width for a FT attempt roll.
+ * 'Streaky' players have wider variance (± 5 %); all others ± 3 %.
+ * Callers: Math.random() * 2 * width - width to get a uniform noise value.
+ */
+export function getFreeThrowNoiseWidth(personalityTraits: string[]): number {
+  return personalityTraits.includes('Streaky') ? 0.050 : 0.030;
+}
+
+
 const paceToTotalPossessions = (pace: number): number => {
   const tier = PACE_TABLE.find(t => pace >= t.lo && pace <= t.hi) ?? PACE_TABLE[3];
   return Math.round(tier.possLo + Math.random() * (tier.possHi - tier.possLo));
@@ -1857,7 +2023,24 @@ const simulatePlayerGameLine = (
   const fgm     = threepm + midFgm + insFgm;
 
   const fta = Math.round((player.attributes.strength / 100) * 5 * minFac + Math.random() * 2);
-  const ftm = Math.round(fta * Math.min(0.98, player.attributes.freeThrow / 100 + ftBonus));
+
+  // FT%: piecewise curve + positional tweak + situational modifiers.
+  // ftBonus carries the home-court advantage from the call site; we also
+  // fold in stamina fatigue and personality pressure effects so FTM/FTA
+  // in the box score reflects real player variance across 82 games.
+  const ftBasePct = getFreeThrowPercentage(player.attributes.freeThrow, player.position);
+  const ftSitMod  = getFreeThrowSituationalMod({
+    minutesPlayed:     minutes,
+    isClutch:          false,     // box-score path aggregates full game; no single-moment clutch flag
+    isHome:            ftBonus > 0,
+    stamina:           player.attributes.stamina,
+    personalityTraits: player.personalityTraits,
+    clutchTendency:    player.tendencies?.situationalTendencies?.clutchShotTaker,
+  });
+  const ftNoise   = getFreeThrowNoiseWidth(player.personalityTraits);
+  const ftPct     = Math.max(0.50, Math.min(0.98,
+    ftBasePct + ftSitMod + (Math.random() * 2 * ftNoise - ftNoise)));
+  const ftm = Math.min(fta, Math.round(fta * ftPct));
   const pts = midFgm * 2 + insFgm * 2 + threepm * 3 + ftm;
 
   const totalReb = Math.max(0, Math.round(teamReb * (player.attributes.rebounding / 100) * adjUsage * 2.5));
