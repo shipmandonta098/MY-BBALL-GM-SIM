@@ -47,7 +47,7 @@ const PlayerModal: React.FC<PlayerModalProps> = ({
 
   const defaultAttributes = {
     shooting: 50, defense: 50, rebounding: 50, playmaking: 50, athleticism: 50,
-    shootingInside: 50, shootingMid: 50, shooting3pt: 50, freeThrow: 70,
+    layups: 50, dunks: 50, shootingMid: 50, shooting3pt: 50, freeThrow: 70,
     speed: 60, strength: 55, jumping: 55, stamina: 75,
     perimeterDef: 50, interiorDef: 50, steals: 50, blocks: 50,
     defensiveIQ: 50, ballHandling: 50, passing: 50, offensiveIQ: 50,
@@ -783,7 +783,8 @@ const PlayerModal: React.FC<PlayerModalProps> = ({
                 <h4 className="text-[10px] font-black text-slate-500 uppercase tracking-widest pb-2 border-b border-slate-800/50">Scoring & Shooting</h4>
                 <div className="space-y-4">
                   <AttributeRow label="Overall Shooting" value={player.attributes.shooting} />
-                  <AttributeRow label="Inside Scoring" value={player.attributes.shootingInside} />
+                  <AttributeRow label="Layups" value={player.attributes.layups} />
+                  <AttributeRow label="Dunks" value={player.attributes.dunks} />
                   <AttributeRow label="Mid-Range" value={player.attributes.shootingMid} />
                   <AttributeRow label="3PT Shooting" value={player.attributes.shooting3pt} />
                   <AttributeRow label="Free Throw" value={player.attributes.freeThrow} />

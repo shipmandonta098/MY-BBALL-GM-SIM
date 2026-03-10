@@ -280,7 +280,8 @@ const Players: React.FC<PlayersProps> = ({ league, onViewPlayer }) => {
                     <Th k="age"      label="Age" />
                     <Th k="rating"   label="OVR" />
                     <Th k="shooting"      label="SHT" title="Shooting" />
-                    <Th k="shootingInside" label="INS" title="Inside Scoring" />
+                    <Th k="layups" label="LAY" title="Layups" />
+                    <Th k="dunks" label="DNK" title="Dunks" />
                     <Th k="shootingMid"   label="MID" title="Mid-Range" />
                     <Th k="shooting3pt"   label="3PT" title="3-Point" />
                     <Th k="freeThrow"     label="FT"  title="Free Throw" />
@@ -381,7 +382,7 @@ const Players: React.FC<PlayersProps> = ({ league, onViewPlayer }) => {
                         {/* OVR */}
                         <td className={`px-1 py-2.5 text-center text-sm font-display font-bold ${attrColor(p.rating)}`}>{p.rating}</td>
                         {/* Scoring & Shooting */}
-                        {(['shooting','shootingInside','shootingMid','shooting3pt','freeThrow','postScoring'] as const).map(k => (
+                        {(['shooting','layups','dunks','shootingMid','shooting3pt','freeThrow','postScoring'] as const).map(k => (
                           <td key={k} className={`px-1 py-2.5 text-center text-xs font-mono ${attrColor(p.attributes[k])}`}>
                             {p.attributes[k]}
                           </td>
