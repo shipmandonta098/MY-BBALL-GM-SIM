@@ -75,6 +75,7 @@ const Stats: React.FC<StatsProps> = ({ league, onViewRoster, onManageTeam, onVie
       });
       const mov = games > 0 ? (ptsScored - ptsAllowed) / games : 0;
       
+      const gp = Math.max(1, games);
       return {
         id: t.id,
         name: t.name,
@@ -84,27 +85,27 @@ const Stats: React.FC<StatsProps> = ({ league, onViewRoster, onManageTeam, onVie
         losses: t.losses,
         winPct,
         avgAge,
-        fgm,
-        fga,
+        fgm: fgm / gp,
+        fga: fga / gp,
         fgPct: fga > 0 ? fgm / fga : 0,
-        threepm,
-        threepa,
+        threepm: threepm / gp,
+        threepa: threepa / gp,
         threePct: threepa > 0 ? threepm / threepa : 0,
-        twopm,
-        twopa,
+        twopm: twopm / gp,
+        twopa: twopa / gp,
         twoPct: twopa > 0 ? twopm / twopa : 0,
-        ftm,
-        fta,
+        ftm: ftm / gp,
+        fta: fta / gp,
         ftPct: fta > 0 ? ftm / fta : 0,
-        orb,
-        drb,
-        trb,
-        ast,
-        stl,
-        blk,
-        tov,
-        pf,
-        pts,
+        orb: orb / gp,
+        drb: drb / gp,
+        trb: trb / gp,
+        ast: ast / gp,
+        stl: stl / gp,
+        blk: blk / gp,
+        tov: tov / gp,
+        pf: pf / gp,
+        pts: pts / gp,
         mov
       };
     });
@@ -731,27 +732,27 @@ const Stats: React.FC<StatsProps> = ({ league, onViewRoster, onManageTeam, onVie
                   <td className="px-2 py-4 text-center font-mono text-xs text-rose-400">{t.losses}</td>
                   <td className="px-2 py-4 text-center font-mono text-xs">{(t.winPct * 100).toFixed(1)}%</td>
                   <td className="px-2 py-4 text-center font-mono text-xs">{t.avgAge.toFixed(1)}</td>
-                  <td className="px-2 py-4 text-center font-mono text-xs">{t.fgm}</td>
-                  <td className="px-2 py-4 text-center font-mono text-xs">{t.fga}</td>
+                  <td className="px-2 py-4 text-center font-mono text-xs">{t.fgm.toFixed(1)}</td>
+                  <td className="px-2 py-4 text-center font-mono text-xs">{t.fga.toFixed(1)}</td>
                   <td className={`px-2 py-4 text-center font-mono text-xs font-bold ${t.fgPct > 0.48 ? 'text-emerald-400' : 'text-rose-400'}`}>{(t.fgPct * 100).toFixed(1)}%</td>
-                  <td className="px-2 py-4 text-center font-mono text-xs">{t.threepm}</td>
-                  <td className="px-2 py-4 text-center font-mono text-xs">{t.threepa}</td>
+                  <td className="px-2 py-4 text-center font-mono text-xs">{t.threepm.toFixed(1)}</td>
+                  <td className="px-2 py-4 text-center font-mono text-xs">{t.threepa.toFixed(1)}</td>
                   <td className={`px-2 py-4 text-center font-mono text-xs font-bold ${t.threePct > 0.38 ? 'text-emerald-400' : 'text-rose-400'}`}>{(t.threePct * 100).toFixed(1)}%</td>
-                  <td className="px-2 py-4 text-center font-mono text-xs">{t.twopm}</td>
-                  <td className="px-2 py-4 text-center font-mono text-xs">{t.twopa}</td>
+                  <td className="px-2 py-4 text-center font-mono text-xs">{t.twopm.toFixed(1)}</td>
+                  <td className="px-2 py-4 text-center font-mono text-xs">{t.twopa.toFixed(1)}</td>
                   <td className={`px-2 py-4 text-center font-mono text-xs font-bold ${t.twoPct > 0.52 ? 'text-emerald-400' : 'text-rose-400'}`}>{(t.twoPct * 100).toFixed(1)}%</td>
-                  <td className="px-2 py-4 text-center font-mono text-xs">{t.ftm}</td>
-                  <td className="px-2 py-4 text-center font-mono text-xs">{t.fta}</td>
+                  <td className="px-2 py-4 text-center font-mono text-xs">{t.ftm.toFixed(1)}</td>
+                  <td className="px-2 py-4 text-center font-mono text-xs">{t.fta.toFixed(1)}</td>
                   <td className={`px-2 py-4 text-center font-mono text-xs font-bold ${t.ftPct > 0.8 ? 'text-emerald-400' : 'text-rose-400'}`}>{(t.ftPct * 100).toFixed(1)}%</td>
-                  <td className="px-2 py-4 text-center font-mono text-xs">{t.orb}</td>
-                  <td className="px-2 py-4 text-center font-mono text-xs">{t.drb}</td>
-                  <td className="px-2 py-4 text-center font-mono text-xs">{t.trb}</td>
-                  <td className="px-2 py-4 text-center font-mono text-xs">{t.ast}</td>
-                  <td className={`px-2 py-4 text-center font-mono text-xs font-bold ${t.tov < 12 * t.games ? 'text-emerald-400' : 'text-rose-400'}`}>{t.tov}</td>
-                  <td className="px-2 py-4 text-center font-mono text-xs">{t.stl}</td>
-                  <td className="px-2 py-4 text-center font-mono text-xs">{t.blk}</td>
-                  <td className="px-2 py-4 text-center font-mono text-xs">{t.pf}</td>
-                  <td className={`px-2 py-4 text-center font-mono text-xs font-bold ${t.pts / (t.games || 1) > 110 ? 'text-emerald-400' : 'text-rose-400'}`}>{t.pts}</td>
+                  <td className="px-2 py-4 text-center font-mono text-xs">{t.orb.toFixed(1)}</td>
+                  <td className="px-2 py-4 text-center font-mono text-xs">{t.drb.toFixed(1)}</td>
+                  <td className="px-2 py-4 text-center font-mono text-xs">{t.trb.toFixed(1)}</td>
+                  <td className="px-2 py-4 text-center font-mono text-xs">{t.ast.toFixed(1)}</td>
+                  <td className={`px-2 py-4 text-center font-mono text-xs font-bold ${t.tov < 12 ? 'text-emerald-400' : 'text-rose-400'}`}>{t.tov.toFixed(1)}</td>
+                  <td className="px-2 py-4 text-center font-mono text-xs">{t.stl.toFixed(1)}</td>
+                  <td className="px-2 py-4 text-center font-mono text-xs">{t.blk.toFixed(1)}</td>
+                  <td className="px-2 py-4 text-center font-mono text-xs">{t.pf.toFixed(1)}</td>
+                  <td className={`px-2 py-4 text-center font-mono text-xs font-bold ${t.pts > 110 ? 'text-emerald-400' : 'text-rose-400'}`}>{t.pts.toFixed(1)}</td>
                   <td className={`px-2 py-4 text-center font-mono text-xs font-bold ${t.mov > 0 ? 'text-emerald-400' : 'text-rose-400'}`}>{t.mov.toFixed(1)}</td>
                 </tr>
               ))}
