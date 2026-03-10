@@ -282,7 +282,8 @@ export interface Player {
     rebounding: number;
     playmaking: number;
     athleticism: number;
-    shootingInside: number;
+    layups: number;
+    dunks: number;
     shootingMid: number;
     shooting3pt: number;
     freeThrow: number;

@@ -377,7 +377,7 @@ const simulatePossession = (
       break;
     }
     case 'DRIVE_LAYUP': {
-      baseProb      = offHandler.attributes.shootingInside / 100 * 0.40 + 0.38;
+      baseProb      = offHandler.attributes.layups / 100 * 0.40 + 0.38;
       tendencyUsed  = 'driveToBasket';
       tendencyScore = ot?.driveToBasket ?? 50;
       const m       = (tendencyScore / 100) * 0.10;
@@ -424,7 +424,7 @@ const simulatePossession = (
         pbpBase       = `${ln} sees the close-out and immediately attacks off the dribble...`;
         tendencyUsed  = 'attackCloseOuts';
         tendencyScore = atk;
-        baseProb      = offHandler.attributes.shootingInside / 100 * 0.40 + 0.38;
+        baseProb      = offHandler.attributes.layups / 100 * 0.40 + 0.38;
         shotModifier  = atk >= 70 ? (atk / 100) * 0.10 : 0;
       }
     }
@@ -1071,9 +1071,9 @@ const generateQuarterPBP = (
     // The rebounder and putback scorer are the same player.
     // Putback does NOT earn an assist. It IS an offensive rebound.
     if (poss.result === 'MISSED' && Math.random() < 0.12) {
-      // Prefer big men (high offReb + shootingInside); exclude the original missed shooter.
+      // Prefer big men (high offReb + layups); exclude the original missed shooter.
       const rebCandidates = rotation.filter(p =>
-        p.id !== handler.id && (p.attributes.shootingInside ?? 40) >= 40);
+        p.id !== handler.id && (p.attributes.layups ?? 40) >= 40);
       const pool = rebCandidates.length > 0
         ? rebCandidates
         : rotation.filter(p => p.id !== handler.id);
@@ -1088,10 +1088,10 @@ const generateQuarterPBP = (
         // Step 2: Offensive Rebound event (BUG 3: counts as OReb, same possession)
         events.push({ time, text: `${rebLn} Offensive Rebound.`, type: 'info', quarter });
 
-        // Step 3: Putback attempt — success rate = (offReb × 0.4 + shootingInside × 0.6) / 100
+        // Step 3: Putback attempt — success rate = (offReb × 0.4 + layups × 0.6) / 100
         const putbackChance = (
           (rebounder.attributes.offReb ?? 50) * 0.4 +
-          (rebounder.attributes.shootingInside ?? 50) * 0.6
+          (rebounder.attributes.layups ?? 50) * 0.6
         ) / 100;
         const putbackMade = Math.random() < putbackChance;
         if (putbackMade) {
@@ -1188,13 +1188,13 @@ const simulatePlayerGameLine = (
 
   // Inside / mid split
   const insideShare = Math.max(0, Math.min(0.70,
-    (player.attributes.shootingInside / 100) * 0.3 + tm.insideBoost));
+    ((player.attributes.layups + player.attributes.dunks) / 2 / 100) * 0.3 + tm.insideBoost));
   const insFga  = Math.round(fga * insideShare);
   const midFga  = Math.max(0, fga - threepa - insFga);
 
   const fgPct3  = player.attributes.shooting3pt    / 100 * 0.36 + 0.16;
   const fgPctMid= player.attributes.shootingMid    / 100 * 0.42 + 0.26;
-  const fgPctIns= (player.attributes.shootingInside / 100 * 0.40 + player.attributes.postScoring / 100 * 0.38) / 2 + 0.30;
+  const fgPctIns= ((player.attributes.layups + player.attributes.dunks) / 2 / 100 * 0.40 + player.attributes.postScoring / 100 * 0.38) / 2 + 0.30;
 
   const threepm = Math.min(threepa, Math.round(threepa * Math.max(0.05, fgPct3   + fgPctBoost + (Math.random() * 0.06 - 0.03))));
   const midFgm  = Math.min(midFga,  Math.round(midFga  * Math.max(0.05, fgPctMid + fgPctBoost + (Math.random() * 0.06 - 0.03))));
