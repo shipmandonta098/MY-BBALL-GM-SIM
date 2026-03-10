@@ -665,6 +665,150 @@ export function getFreeThrowNoiseWidth(personalityTraits: string[]): number {
   return personalityTraits.includes('Streaky') ? 0.050 : 0.030;
 }
 
+// ─── Post Scoring Percentage ──────────────────────────────────────────────────
+/**
+ * Maps a player's postScoring attribute (0–100) to a base post-up FG%
+ * (hooks, drop-steps, fades, shoulder-drop finishes — back-to-basket work).
+ * Calibrated to 2025-26 NBA post-up data:
+ *   • League post-up PPP ≈ 103.9 (vs. 99.0 overall half-court) — genuinely efficient.
+ *   • Inferred FG% for qualified post scorers: ~48–55 % (bigs on hooks → high end;
+ *     contested guards/wings → low end).
+ *   • Elite post threat (Jokic / prime Embiid tier): 55–62 %.
+ *   • Average rotation big: 47–52 %.
+ *   • Non-post player forced into the paint: 38–45 % (bricks or live-ball turnovers).
+ *
+ * Piecewise curve (base before position/synergy adjustments):
+ *   0–59  → 38–45 %  (non-post player; predictable footwork, easy to clamp)
+ *   60–69 → 45–48 %  (below-avg; can score in spots but gets locked up often)
+ *   70–79 → 48–52 %  (league-avg big; reliable one-dribble shoulder-drop)
+ *   80–89 → 52–56 %  (plus post scorer; counter moves, elite contact finishes)
+ *   90–94 → 56–59 %  (elite: unguardable late-clock fades and hooks)
+ *   95–100→ 59–63 %  (god-tier: Jokic / prime Embiid — footwork too good to stop)
+ *
+ * Positional adjustment:
+ *   C / PF       → +2.0 %  (better angles, natural paint presence)
+ *   PG / SG / SF → −1.5 %  (size disadvantage; defender has leverage)
+ *
+ * Offensive synergy (applied last; each capped independently):
+ *   strength:    physical bigs generate better angles and draw fouls.
+ *                Bonus: (strength − 50) / 100 × 4 %, capped at ±2.0 %.
+ *   offensiveIQ: reads help rotations, picks the right counter move.
+ *                Bonus: (offIQ − 50) / 100 × 3 %, capped at ±1.5 %.
+ *   Combined cap: +2.5 % max, −2.0 % min (prevents stat-stacking).
+ *
+ * Hard clamp: [0.35, 0.65]
+ *
+ * Calibration target: sim avg ~48–52 % before getPostDefenseMod.
+ *   Top D teams hold to ~42–45 %; porous D give up ~55 %+.
+ *
+ * Output table (base, C/PF position, no synergy):
+ *   attr  50 → 43.3 %  │  vs avg post-D → 43.3 %  │  vs elite post-D (intDef 90) → ~31 %
+ *   attr  65 → 48.5 %  │  vs avg → 48.5 %           │  vs elite → ~36 %
+ *   attr  75 → 52.0 %  │  vs avg → 52.0 %           │  vs elite → ~40 %
+ *   attr  85 → 56.0 %  │  vs avg → 56.0 %           │  vs elite → ~44 %
+ *   attr  95 → 60.5 %  │  vs avg → 60.5 %           │  vs elite → ~48 %
+ *   attr 100 → 63.0 %  │  vs avg → 63.0 %           │  vs elite → ~51 %
+ *   (elite-D = POST_BACK effectivePostDef≈87 → normalized≈0.74 → mod≈−13.7 %)
+ */
+export function getPostScoringPercentage(
+  attr: number,
+  position?: string,
+  strength?: number,
+  offensiveIQ?: number,
+): number {
+  const a = Math.max(0, Math.min(100, attr));
+
+  let base: number;
+  if (a <= 59) {
+    // Non-post player: 38 % at 0 → 45 % at 59  (slow ramp — bricks and forced pivots)
+    base = 0.38 + (a / 59) * 0.07;
+  } else if (a <= 69) {
+    // Below-avg: 45 % at 60 → 48 % at 69
+    base = 0.45 + ((a - 60) / 9) * 0.03;
+  } else if (a <= 79) {
+    // League-avg big: 48 % at 70 → 52 % at 79
+    base = 0.48 + ((a - 70) / 9) * 0.04;
+  } else if (a <= 89) {
+    // Plus post scorer: 52 % at 80 → 56 % at 89
+    base = 0.52 + ((a - 80) / 9) * 0.04;
+  } else if (a <= 94) {
+    // Elite: 56 % at 90 → 59 % at 94  (diminishing returns kick in hard)
+    base = 0.56 + ((a - 90) / 4) * 0.03;
+  } else {
+    // God-tier: 59 % at 95 → 63 % at 100  (Jokic / prime Embiid footwork)
+    base = 0.59 + ((a - 95) / 5) * 0.04;
+  }
+
+  // Positional: bigs operate from natural paint leverage; guards fight uphill
+  const positionalTweak =
+    position === 'C'  || position === 'PF'                      ? +0.020 :
+    position === 'PG' || position === 'SG' || position === 'SF' ? -0.015 :
+    0;
+
+  // Synergy: strength generates better seals and contact finishes;
+  // high IQ reads the help rotation and selects the right counter move.
+  const strBonus = strength    !== undefined
+    ? Math.max(-0.020, Math.min(+0.020, (strength    - 50) / 100 * 0.04))
+    : 0;
+  const iqBonus  = offensiveIQ !== undefined
+    ? Math.max(-0.015, Math.min(+0.015, (offensiveIQ - 50) / 100 * 0.03))
+    : 0;
+  const synergyBonus = Math.max(-0.020, Math.min(+0.025, strBonus + iqBonus));
+
+  return Math.max(0.35, Math.min(0.65, base + positionalTweak + synergyBonus));
+}
+
+// ─── Post Defense Modifier ────────────────────────────────────────────────────
+/**
+ * Maps a defender's post-defense capability to an additive FG% penalty on
+ * post-up attempts.  Differs from getRimProtectionMod in two ways:
+ *   1. Composite rating: 70 % interiorDef + 30 % defenderStrength.
+ *      Post defense is as much about body positioning as shot-blocking.
+ *   2. Calibrated for post-contest range (up to −18 % for elite defenders);
+ *      POST_FADE_MID is less punishing since high-release hooks/fades are
+ *      harder to body-contest than a direct seal-and-drop-step.
+ *
+ * Average post defender (effectivePostDef ≈ 50) → 0 adjustment.
+ *
+ * Output table (interiorDef 90, strength 80 → effectivePostDef ≈ 87):
+ *   Context             │  normalized ≈ 0.74  │  mod
+ *   POST_BACK           │                     │  −0.74 × 0.185 ≈ −13.7 %
+ *   POST_FADE_MID       │                     │  −0.74 × 0.130 ≈  −9.6 %
+ *   TEAM_BOX_SCORE_POST │                     │  −0.74 × 0.075 ≈  −5.6 %
+ *
+ * Tunables:
+ *   • Adjust `down` per context for more/less post suppression.
+ *   • Adjust strWeight to make strength matter more/less relative to interior D.
+ *   • Target: top post-D teams hold opponents to ~42–45 % post FG%.
+ */
+export type PostDefContext = 'POST_BACK' | 'POST_FADE_MID' | 'TEAM_BOX_SCORE_POST';
+
+export function getPostDefenseMod(
+  interiorDefAttr: number,
+  defenderStrength: number,
+  context: PostDefContext = 'POST_BACK',
+): number {
+  // Effective post defense = weighted blend of rim-protection caliber and
+  // raw body strength (prevents the scorer from getting their spot).
+  const strWeight        = 0.30;
+  const effectivePostDef = interiorDefAttr * (1 - strWeight) + defenderStrength * strWeight;
+  const eff              = Math.max(0, Math.min(100, effectivePostDef));
+  const normalized       = (eff - 50) / 50; // −1 (worst) … 0 (avg) … +1 (best)
+
+  const RANGES: Record<PostDefContext, { down: number; up: number }> = {
+    // Direct shoulder-to-shoulder: body positioning decides everything
+    POST_BACK:           { down: 0.185, up: 0.050 },
+    // Hook / fade / short turnaround: harder to fully contest with body pressure
+    POST_FADE_MID:       { down: 0.130, up: 0.030 },
+    // Per-game team average — many post possessions smoothed out
+    TEAM_BOX_SCORE_POST: { down: 0.075, up: 0.025 },
+  };
+
+  const { down, up } = RANGES[context];
+  return normalized >= 0
+    ? -normalized * down   // elite post D: 0 → −down
+    : -normalized * up;    // poor post D:  0 → +up
+}
 
 const paceToTotalPossessions = (pace: number): number => {
   const tier = PACE_TABLE.find(t => pace >= t.lo && pace <= t.hi) ?? PACE_TABLE[3];
@@ -1079,14 +1223,27 @@ const simulatePossession = (
       break;
     }
     case 'POST_FADE': {
-      baseProb      = offHandler.attributes.postScoring / 100 * 0.38 + 0.26;
+      // Attribute-driven piecewise curve; strength + offIQ synergy baked in.
+      // Defense applies getPostDefenseMod in Step 5 (interiorDef + defStrength composite).
+      baseProb = getPostScoringPercentage(
+        offHandler.attributes.postScoring,
+        offHandler.position,
+        offHandler.attributes.strength,
+        offHandler.attributes.offensiveIQ,
+      );
       tendencyUsed  = 'postUp';
       tendencyScore = ot?.postUp ?? 50;
-      const m       = (tendencyScore / 100) * 0.13;
-      shotModifier  = tendencyScore >= 70 ? +m : tendencyScore < 30 ? -m : 0;
-      pbpBase = tendencyScore >= 75
-        ? `${ln} backs down his defender in the post, drops his shoulder and goes to work...`
-        : `${ln} goes to work in the post...`;
+      // High tendency = practiced footwork; specialist bonus lifts accuracy;
+      // low tendency = uncomfortable / reluctant — sloppy mechanics.
+      const m = (tendencyScore / 100) * 0.13;
+      shotModifier = tendencyScore >= 70 ? +m : tendencyScore < 30 ? -m : 0;
+      pbpBase = tendencyScore >= 85
+        ? `${ln} seals deep, drops the shoulder, and goes to his bag...`
+        : tendencyScore >= 75
+          ? `${ln} backs down his defender in the post, drops his shoulder and goes to work...`
+          : tendencyScore < 35
+            ? `${ln} is forced into an uncomfortable post-up...`
+            : `${ln} goes to work in the post...`;
       break;
     }
     case 'CATCH_AND_SHOOT_3': {
@@ -1206,15 +1363,12 @@ const simulatePossession = (
       pbpBase += ` ${defLn} bodied up hard.`;
     }
 
-    // Interior Defense attribute — rim-protection quality for layup/post/dunk attempts.
-    // Captures length, timing, and shot-contest caliber independent of tendency
-    // habits (helpDefender, physicality above already cover behavioral consistency).
-    //   • DRIVE_LAYUP:  avg → 0; elite → up to −12 %; weak → up to +4 %
-    //   • SLAM_DUNK:    avg → 0; elite → up to −18 %; weak → up to +1.5 %
-    //     (dunks are telegraphed — elite shot-blockers time the challenge better)
-    if (shotType === 'DRIVE_LAYUP' || shotType === 'POST_FADE') {
+    // Interior Defense — rim-protection for drives/dunks; post defense for post-ups.
+    // Two separate pathways: DRIVE_LAYUP uses getRimProtectionMod (length/timing at rim);
+    // POST_FADE uses getPostDefenseMod (body composite: interiorDef + defenderStrength).
+    if (shotType === 'DRIVE_LAYUP') {
       const intDef        = defender?.attributes.interiorDef ?? 50;
-      const rimCtx: RimContext = isDunkAttempt ? 'SLAM_DUNK' : shotType as RimContext;
+      const rimCtx: RimContext = isDunkAttempt ? 'SLAM_DUNK' : 'DRIVE_LAYUP';
       const rimContestMod = getRimProtectionMod(intDef, rimCtx);
       defenseModifier += rimContestMod;
 
@@ -1222,9 +1376,8 @@ const simulatePossession = (
         // ── Separate block-chance for slam dunks ────────────────────────────
         // Elite shot-blockers (high interiorDef + blocks) can flat-out reject dunks.
         // Probability: near-zero for avg defenders; up to ~14 % for elite rim protectors.
-        // Scales on normalized interiorDef × blocks attribute.
         const blockRating = defender?.attributes.blocks ?? 50;
-        const intNorm     = Math.max(0, (intDef - 40) / 60);   // 0 at attr 40 → 1.0 at attr 100
+        const intNorm     = Math.max(0, (intDef - 40) / 60);
         const blockChance = intNorm * (blockRating / 100) * 0.22;
         if (Math.random() < blockChance) {
           const blockLine = intDef >= 90
@@ -1253,15 +1406,35 @@ const simulatePossession = (
           pbpDefPrefix = pbpDefPrefix || `${defLn} has no answer — clear path to the rim — `;
         }
       } else {
-        // Standard layup / post-fade PBP flavour (unchanged behaviour)
+        // Standard layup PBP flavour
         if (intDef >= 80 && rimContestMod <= -0.06) {
           if (!defTendencyUsed) defTendencyUsed = 'interiorDef';
           pbpDefPrefix = pbpDefPrefix || `${defLn} meets him at the rim — massive contest — `;
         } else if (intDef >= 90 && rimContestMod <= -0.09) {
           pbpBase += ` ${defLn} is a wall at the rim!`;
-        } else if (intDef <= 30 && shotType === 'DRIVE_LAYUP') {
+        } else if (intDef <= 30) {
           pbpDefPrefix = pbpDefPrefix || `${defLn} has no chance — nobody in the paint — `;
         }
+      }
+    }
+
+    if (shotType === 'POST_FADE') {
+      // Post defense: composite of interiorDef (positioning/length) + defender strength
+      // (body-locking; prevents the scorer from getting a clean spot).
+      // Direct back-to-basket → POST_BACK; catch-and-face-up → POST_FADE_MID.
+      const intDef      = defender?.attributes.interiorDef  ?? 50;
+      const defStr      = defender?.attributes.strength     ?? 50;
+      const postCtx: PostDefContext = offAction === 'POST_UP' ? 'POST_BACK' : 'POST_FADE_MID';
+      const postDefMod  = getPostDefenseMod(intDef, defStr, postCtx);
+      defenseModifier  += postDefMod;
+
+      if (intDef >= 85 && postDefMod <= -0.10) {
+        if (!defTendencyUsed) defTendencyUsed = 'interiorDef';
+        pbpDefPrefix = pbpDefPrefix || `${defLn} body-locks him — no room to operate — `;
+      } else if (intDef >= 90 && postDefMod <= -0.13) {
+        pbpBase += ` ${defLn} shuts it down with elite post positioning!`;
+      } else if (intDef <= 30) {
+        pbpDefPrefix = pbpDefPrefix || `${defLn} has no answer — free reign in the post — `;
       }
     }
 
@@ -1975,6 +2148,7 @@ const simulatePlayerGameLine = (
   opponentPerimDefMod  = 0,   // team-level 3PT defensive suppression (get3PTContestMod)
   opponentInteriorDefMod = 0,  // team-level at-rim defensive suppression (getRimProtectionMod)
   opponentMidDefMod = 0,       // team-level mid-range suppression (getMidRangeContestMod)
+  opponentPostDefMod = 0,      // team-level post suppression (getPostDefenseMod)
 ): GamePlayerLine => {
   const fgPctBoost = varRoll / 100 * 0.4; // variance → small FG% delta
   const tm     = computeTendencyModifiers(player);
@@ -2005,21 +2179,34 @@ const simulatePlayerGameLine = (
     player.attributes.ballHandling,
   );
 
-  // Inside FG%: weighted blend of layup quality and dunk success rate.
-  // getDunkPercentage gives the proper high-base dunk curve (92-98% uncontested)
-  // rather than re-using the lower layup curve.  Dynamic weight means high-dunk
-  // players (who attempt more slams) pull the blended FG% up toward the dunk band.
+  // Inside FG%: three-way blend of layup, dunk, and post-scoring quality.
+  // getDunkPercentage: proper high-base curve (92-98% uncontested).
+  // getPostScoringPercentage: hook/drop-step range (48-63% calibrated).
+  // Weights are dynamic so specialist post scorers and dunkers each pull the
+  // blended inside FG% toward their own high-efficiency band.
   const layupBase   = getLayupPercentage(player.attributes.layups, player.position);
   const dunkBase    = getDunkPercentage(player.attributes.dunks, player.position, player.attributes.jumping);
-  const dunkWeight  = Math.min(0.35, player.attributes.dunks / 100 * 0.35);
-  const fgPctIns    = layupBase * (1 - dunkWeight) + dunkBase * dunkWeight;
+  const postBase    = getPostScoringPercentage(
+    player.attributes.postScoring, player.position,
+    player.attributes.strength, player.attributes.offensiveIQ,
+  );
+  const dunkWeight  = Math.min(0.30, player.attributes.dunks       / 100 * 0.30);
+  const postWeight  = Math.min(0.25, player.attributes.postScoring / 100 * 0.25);
+  const layupWeight = Math.max(0,    1 - dunkWeight - postWeight);
+  const fgPctIns    = layupBase * layupWeight + dunkBase * dunkWeight + postBase * postWeight;
 
   const threepm = Math.min(threepa, Math.round(threepa * Math.max(0.05,
     fgPct3 + fgPctBoost + opponentPerimDefMod + (Math.random() * 0.06 - 0.03))));
   const midFgm  = Math.min(midFga,  Math.round(midFga  * Math.max(0.05,
     fgPctMid + fgPctBoost + opponentMidDefMod + (Math.random() * 0.06 - 0.03))));
+  // Inside FGM: interior + post defense mods both apply (weighted by post share).
+  // opponentInteriorDefMod suppresses drives/dunks; opponentPostDefMod suppresses
+  // post-ups.  Blend them proportionally to postWeight so a non-post player
+  // (postWeight≈0) is barely affected by post defense, and a pure post scorer
+  // (postWeight≈0.25) feels the full post-defense penalty.
+  const blendedInsideMod = opponentInteriorDefMod * (1 - postWeight) + opponentPostDefMod * postWeight;
   const insFgm  = Math.min(insFga,  Math.round(insFga  * Math.max(0.35,
-    fgPctIns + fgPctBoost + opponentInteriorDefMod + (Math.random() * 0.06 - 0.03))));
+    fgPctIns + fgPctBoost + blendedInsideMod + (Math.random() * 0.06 - 0.03))));
   const fgm     = threepm + midFgm + insFgm;
 
   const fta = Math.round((player.attributes.strength / 100) * 5 * minFac + Math.random() * 2);
@@ -2349,6 +2536,10 @@ export const simulateGame = (
     // Mid-range suppression: avg perimDef 75 → ~−2.0 %  |  85 → ~−2.8 %  |  25 → ~+0.9 %
     const oppMidDefMod = getMidRangeContestMod(oppAvgPerimDef, 'TEAM_BOX_SCORE_MID');
 
+    // Post suppression: composite interiorDef + strength; avg intDef 80/str 70 → ~−5 %
+    const oppAvgInteriorStr = oppTopN.reduce((s, op) => s + (op.attributes.strength ?? 50), 0) / oppCount;
+    const oppPostDefMod     = getPostDefenseMod(oppAvgInteriorDef, oppAvgInteriorStr, 'TEAM_BOX_SCORE_POST');
+
     return roster.map((p, i) => {
       let mins = 0;
       if (team.rotation && team.rotation.minutes[p.id] !== undefined) {
@@ -2365,7 +2556,7 @@ export const simulateGame = (
       const ftBonus    = isHome ? 0.03 : 0;
       const varRoll    = playerVariance.get(p.id) ?? 0;
       const usageShare = p.rating / totalRating;
-      const line = simulatePlayerGameLine(p, totalPts, teamFga, teamReb, teamAst, mins, usageShare, varRoll, ftBonus, oppPerimDefMod, oppInteriorDefMod, oppMidDefMod);
+      const line = simulatePlayerGameLine(p, totalPts, teamFga, teamReb, teamAst, mins, usageShare, varRoll, ftBonus, oppPerimDefMod, oppInteriorDefMod, oppMidDefMod, oppPostDefMod);
       return { ...line, techs: 0, flagrants: 0, ejected: false };
     });
   };
