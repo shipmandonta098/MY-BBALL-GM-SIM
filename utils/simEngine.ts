@@ -28,6 +28,60 @@ const SCHEME_DEFAULT_PACE: Record<CoachScheme, number> = {
   'Showtime':       91,
 };
 
+// ─── Attribute → Expected 3P% ─────────────────────────────────────────────────
+/**
+ * Maps a shooting3pt attribute (0–100) to an expected per-shot 3P% (decimal).
+ *
+ * Calibrated to NBA 2025-26 season: league average 3P% ≈ 35.8 % → attr 75.
+ * Uses piecewise-linear segments so each tier is independently tunable.
+ *
+ * Expected output table:
+ *   attr  │  3P%
+ *   ──────┼──────
+ *     0   │ 25.0 %   (big who never shoots)
+ *    30   │ 28.6 %
+ *    50   │ 30.9 %   (non-shooter)
+ *    60   │ 32.0 %   (below avg)
+ *    65   │ 33.4 %
+ *    70   │ 34.7 %
+ *    75   │ 35.8 %   ← league average
+ *    80   │ 37.7 %   (solid starter)
+ *    85   │ 39.5 %   (plus shooter)
+ *    90   │ 41.0 %   (elite)
+ *    94   │ 44.0 %   (elite ceiling)
+ *    95   │ 44.0 %   (god-tier floor)
+ *   100   │ 47.0 %   (historic peak, very rare)
+ *
+ * Tuning guide:
+ *   - Raise/lower the segment endpoints (0.25, 0.32, 0.358, 0.41, 0.44, 0.47)
+ *     to shift the whole curve or individual tiers.
+ *   - Move the breakpoints (59, 74, 89, 94) to widen/narrow each band.
+ *   - The hard clamp [0.20, 0.50] is a last-resort safety net; keep it wide.
+ */
+export function getThreePointPercentage(attr: number): number {
+  const a = Math.max(0, Math.min(100, attr));
+
+  let base: number;
+  if (a <= 59) {
+    // Non-shooters / big men: 25 % at 0 → 32 % at 59
+    base = 0.25 + (a / 59) * 0.07;
+  } else if (a <= 74) {
+    // Below-avg to league-avg: 32 % at 60 → 35.8 % at 74
+    base = 0.32 + ((a - 60) / 14) * 0.038;
+  } else if (a <= 89) {
+    // Solid starter to plus shooter: 35.8 % at 75 → 41 % at 89
+    base = 0.358 + ((a - 75) / 14) * 0.052;
+  } else if (a <= 94) {
+    // Elite: 41 % at 90 → 44 % at 94
+    base = 0.41 + ((a - 90) / 4) * 0.03;
+  } else {
+    // God-tier: 44 % at 95 → 47 % at 100  (historically rare)
+    base = 0.44 + ((a - 95) / 5) * 0.03;
+  }
+
+  return Math.max(0.20, Math.min(0.50, base));
+}
+
 /** Look up total per-team possessions from a pace rating (adds random variance). */
 const paceToTotalPossessions = (pace: number): number => {
   const tier = PACE_TABLE.find(t => pace >= t.lo && pace <= t.hi) ?? PACE_TABLE[3];
@@ -351,7 +405,8 @@ const simulatePossession = (
 
   switch (shotType) {
     case 'PULL_UP_3': {
-      baseProb      = offHandler.attributes.shooting3pt / 100 * 0.37 + 0.18;
+      // Pull-up 3s are harder than avg: apply a -0.03 difficulty penalty vs. the base expected %
+      baseProb      = getThreePointPercentage(offHandler.attributes.shooting3pt) - 0.03;
       tendencyUsed  = 'pullUpThree';
       tendencyScore = ot?.pullUpThree ?? 50;
       const m       = (tendencyScore / 100) * 0.15;
@@ -401,7 +456,8 @@ const simulatePossession = (
       break;
     }
     case 'CATCH_AND_SHOOT_3': {
-      baseProb      = offHandler.attributes.shooting3pt / 100 * 0.38 + 0.20;
+      // Catch-and-shoot is a quality look; base is the expected %, tendency/spot-up modifiers lift it further
+      baseProb      = getThreePointPercentage(offHandler.attributes.shooting3pt);
       tendencyUsed  = 'kickOutPasser';
       tendencyScore = ot?.kickOutPasser ?? 50;
       shotModifier  = +0.04;
@@ -1192,7 +1248,7 @@ const simulatePlayerGameLine = (
   const insFga  = Math.round(fga * insideShare);
   const midFga  = Math.max(0, fga - threepa - insFga);
 
-  const fgPct3  = player.attributes.shooting3pt    / 100 * 0.36 + 0.16;
+  const fgPct3  = getThreePointPercentage(player.attributes.shooting3pt);
   const fgPctMid= player.attributes.shootingMid    / 100 * 0.42 + 0.26;
   const fgPctIns= ((player.attributes.layups + player.attributes.dunks) / 2 / 100 * 0.40 + player.attributes.postScoring / 100 * 0.38) / 2 + 0.30;
 
