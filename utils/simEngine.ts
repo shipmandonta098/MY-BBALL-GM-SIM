@@ -140,6 +140,163 @@ export function get3PTContestMod(
     : -normalized * up;
 }
 
+// ─── Mid-Range Percentage ─────────────────────────────────────────────────────
+/**
+ * Maps a player's shootingMid attribute (0–100) to a base mid-range FG%
+ * (pull-up jumpers, step-backs, elbow fades, floaters — roughly 10–19 ft).
+ * Calibrated to 2025-26 NBA mid-range data:
+ *   • League avg mid-range FG% ≈ 43–45 % (fewer attempts; heavily contested).
+ *   • Elite pull-up kings (Shai 53.2 %, KD 49.7 %): captured at top attr bands.
+ *   • Below-avg starters (attr 60–69): 40–43 % — still playable in certain spots.
+ *   • Non-shooters (attr < 60): 35–40 % — bricks under pressure.
+ *
+ * Piecewise curve (base before position/synergy adjustments):
+ *   0–59  → 35–40 %  (no mid-range game; forced shots)
+ *   60–69 → 40–43 %  (below-avg; occasional pull-up)
+ *   70–79 → 43–46 %  (league-avg to solid; reliable pull-up game)
+ *   80–89 → 46–49 %  (plus threat; iso/elbow staple)
+ *   90–94 → 49–51 %  (elite: prime Melo / KD tier)
+ *   95–100→ 51–54 %  (god-tier: step-back wizard, unguardable)
+ *
+ * Positional adjustment:
+ *   PG / SG / SF → +1.0 %  (natural off-dribble creation advantage)
+ *   C  / PF      → −1.5 %  (slower release; harder to get full separation)
+ *
+ * Offensive synergy bonus (applied last, capped at +2.5 %):
+ *   High offensiveIQ creates better looks (pump-fake reads, timing).
+ *   High ballHandling improves pull-up creation and separation quality.
+ *   Formula: ((offIQ − 50) + (ballHandling − 50)) / 200 × 0.05
+ *   e.g. offIQ=85, ballHandling=80: bonus ≈ +1.75 %
+ *   e.g. offIQ=50, ballHandling=50: bonus = 0 (no change to average players)
+ *
+ * Hard clamp: [0.32, 0.56] — floor prevents sim absurdities;
+ *             ceiling prevents unrealistic >56 % on "unguardable" shots.
+ *
+ * Calibration target: unweighted sim avg should land ~43–45 % before defensive
+ * modifiers.  getMidRangeContestMod then applies the contest-level penalty.
+ *
+ * Output table (base + C/PF position, no synergy):
+ *   attr  50 → 37.9 %  │  vs avg contest (perimDef 50) → 37.9 %  │  vs elite (85) → 33.1 %
+ *   attr  65 → 41.5 %  │  vs avg contest → 41.5 %                │  vs elite → 36.7 %
+ *   attr  77 → 44.8 %  │  vs avg contest → 44.8 %                │  vs elite → 40.0 %
+ *   attr  85 → 47.0 %  │  vs avg contest → 47.0 %                │  vs elite → 42.2 %
+ *   attr  95 → 50.5 %  │  vs avg contest → 50.5 %                │  vs elite → 45.7 %
+ *   attr 100 → 53.0 %  │  vs avg contest → 53.0 %                │  vs elite → 48.2 %
+ *   (elite-D = getMidRangeContestMod PULL_UP_MID down=0.060 × normalized(85)=0.70 ≈ −4.8 %)
+ *
+ * Tunables:
+ *   • Shift segment endpoints to raise/lower the league-wide avg.
+ *   • Adjust positionalTweak to widen/narrow the big-vs-guard gap.
+ *   • Adjust synergyScale to make IQ/handling more/less impactful.
+ *   • Target: sim mid-range avg ~43–45 %; top-D teams hold to ~40–42 %;
+ *     poor-D teams give up ~47 %+.
+ */
+export function getMidRangePercentage(
+  attr: number,
+  position?: string,
+  offensiveIQ?: number,
+  ballHandling?: number,
+): number {
+  const a = Math.max(0, Math.min(100, attr));
+
+  let base: number;
+  if (a <= 59) {
+    // Non-shooter / forced: 35 % at 0 → 40 % at 59  (slow ramp)
+    base = 0.35 + (a / 59) * 0.05;
+  } else if (a <= 69) {
+    // Below-avg: 40 % at 60 → 43 % at 69
+    base = 0.40 + ((a - 60) / 9) * 0.03;
+  } else if (a <= 79) {
+    // League-avg to solid: 43 % at 70 → 46 % at 79
+    base = 0.43 + ((a - 70) / 9) * 0.03;
+  } else if (a <= 89) {
+    // Plus mid-range threat: 46 % at 80 → 49 % at 89
+    base = 0.46 + ((a - 80) / 9) * 0.03;
+  } else if (a <= 94) {
+    // Elite: 49 % at 90 → 51 % at 94  (diminishing returns kick in)
+    base = 0.49 + ((a - 90) / 4) * 0.02;
+  } else {
+    // God-tier: 51 % at 95 → 54 % at 100  (Shai / KD step-back wizardry)
+    base = 0.51 + ((a - 95) / 5) * 0.03;
+  }
+
+  // Positional: guards/wings generate better separation off the dribble;
+  // bigs have slower release and face more help-side contests.
+  const positionalTweak =
+    position === 'PG' || position === 'SG' || position === 'SF' ? +0.010 :
+    position === 'C'  || position === 'PF'                      ? -0.015 :
+    0;
+
+  // Offensive synergy: high IQ + ball-handling creates better looks.
+  // Each attribute point above 50 contributes a small additive bonus.
+  // Combined cap of +2.5 % prevents stacking from becoming OP.
+  const iqBonus = offensiveIQ  !== undefined ? (offensiveIQ  - 50) / 200 * 0.05 : 0;
+  const bhBonus = ballHandling !== undefined ? (ballHandling - 50) / 200 * 0.05 : 0;
+  const synergyBonus = Math.min(0.025, Math.max(-0.010, iqBonus + bhBonus));
+
+  return Math.max(0.32, Math.min(0.56, base + positionalTweak + synergyBonus));
+}
+
+// ─── Mid-Range Contest Modifier ───────────────────────────────────────────────
+/**
+ * Maps a defender's perimeterDef attribute (0–100) to a per-possession
+ * additive mid-range modifier, parallel in structure to get3PTContestMod.
+ *
+ * Mid-range shots are contested differently than 3s:
+ *   • Closeouts are shorter (defender is already in the paint); contest speed
+ *     matters more than raw length — hence the asymmetry toward pull-up shots.
+ *   • ISO/step-back mid-range is self-created; defender can't fully take away
+ *     a clean look from an elite shot-creator (smaller down range for PULL_UP_MID).
+ *   • ELBOW_FADE: catch-and-face-up at the elbow — easiest to contest fully.
+ *   • TEAM_BOX_SCORE: per-game average over many possessions.
+ *
+ * Average defender (attr ≈ 50) → 0 adjustment.
+ * Design is asymmetric: elite defense suppresses more than poor defense rewards
+ * (poor defenders still close out eventually; elite ones contest cleanly every time).
+ *
+ * Output table:
+ *   perimDef │ PULL_UP_MID │ ELBOW_FADE │ Team BS
+ *   ─────────┼─────────────┼────────────┼────────
+ *     20     │  +2.2 %     │  +2.8 %    │  +1.2 %
+ *     35     │  +1.3 %     │  +1.7 %    │  +0.7 %
+ *     50     │   0.0 %     │   0.0 %    │   0.0 %
+ *     65     │  −2.1 %     │  −2.7 %    │  −1.2 %
+ *     75     │  −3.5 %     │  −4.5 %    │  −2.0 %
+ *     85     │  −4.9 %     │  −6.3 %    │  −2.8 %
+ *     95     │  −6.3 %     │  −8.1 %    │  −3.6 %
+ *    100     │  −7.0 %     │  −9.0 %    │  −4.0 %
+ *
+ * Team-level impact (TEAM_BOX_SCORE, avg top-8 roster):
+ *   avg perimDef 75 → ~−2.0 % → strong D team holds opponents to ~41–43 %
+ *   avg perimDef 85 → ~−2.8 % → elite: ~40–42 % opponent mid-range FG%
+ *   avg perimDef 25 → ~+0.9 % → porous: opponents feast, ~45–47 %
+ *
+ * Tunables: adjust `down` / `up` per context to widen or narrow suppression bands.
+ */
+export type MidRangeContext = 'PULL_UP_MID' | 'ELBOW_FADE' | 'TEAM_BOX_SCORE_MID';
+
+export function getMidRangeContestMod(
+  perimDefAttr: number,
+  context: MidRangeContext = 'PULL_UP_MID',
+): number {
+  const attr       = Math.max(0, Math.min(100, perimDefAttr));
+  const normalized = (attr - 50) / 50; // −1 (worst) … 0 (avg) … +1 (best)
+
+  const RANGES: Record<MidRangeContext, { down: number; up: number }> = {
+    // Pull-up iso / step-back: self-created, harder to fully contest
+    PULL_UP_MID:          { down: 0.070, up: 0.022 },
+    // Elbow face-up / catch-and-shoot mid: defender is closer; easier to get a hand up
+    ELBOW_FADE:           { down: 0.090, up: 0.028 },
+    // Per-game team average — smoothed across many possessions
+    TEAM_BOX_SCORE_MID:   { down: 0.040, up: 0.012 },
+  };
+
+  const { down, up } = RANGES[context];
+  return normalized >= 0
+    ? -normalized * down   // elite D: 0 → −down
+    : -normalized * up;    // poor D:  0 → +up
+}
+
 // ─── Layup / At-Rim Finishing Percentage ─────────────────────────────────────
 /**
  * Maps a player's Layups attribute (0–100) to an at-rim FG% with diminishing
@@ -685,14 +842,27 @@ const simulatePossession = (
       break;
     }
     case 'MID_RANGE': {
-      baseProb      = offHandler.attributes.shootingMid / 100 * 0.42 + 0.28;
+      // Attribute-driven piecewise curve; synergy from offIQ + ballHandling baked in.
+      // Defense will apply getMidRangeContestMod in Step 5 (perimeterDef attribute).
+      baseProb = getMidRangePercentage(
+        offHandler.attributes.shootingMid,
+        offHandler.position,
+        offHandler.attributes.offensiveIQ,
+        offHandler.attributes.ballHandling,
+      );
       tendencyUsed  = 'midRangeJumper';
       tendencyScore = ot?.midRangeJumper ?? 50;
-      const m       = (tendencyScore / 100) * 0.12;
-      shotModifier  = tendencyScore >= 70 ? +m : tendencyScore < 30 ? -m : 0;
-      pbpBase = tendencyScore >= 70
-        ? `${ln} rises up from the elbow — that's his spot...`
-        : `${ln} settles for the mid-range...`;
+      // High tendency = specialist: comfort in their spots earns a small bonus;
+      // low tendency = reluctant shooter: hesitation costs them accuracy.
+      const m = (tendencyScore / 100) * 0.12;
+      shotModifier = tendencyScore >= 70 ? +m : tendencyScore < 30 ? -m : 0;
+      pbpBase = tendencyScore >= 86
+        ? `${ln} gets to his spot at the elbow — money every time...`
+        : tendencyScore >= 70
+          ? `${ln} rises up from the elbow — that's his spot...`
+          : tendencyScore < 30
+            ? `${ln} settles for a tough mid-range...`
+            : `${ln} pulls up for the mid-range jumper...`;
       break;
     }
     case 'DRIVE_LAYUP': {
@@ -957,6 +1127,25 @@ const simulatePossession = (
           pbpDefPrefix = pbpDefPrefix || `${defLn} stays attached through the screen — `;
       } else if (perimDef <= 30 && shotType === 'CATCH_AND_SHOOT_3') {
         pbpDefPrefix = pbpDefPrefix || `${defLn} is caught flat-footed — wide open look — `;
+      }
+    }
+
+    // Perimeter Defense attribute — contest quality for mid-range shots.
+    // Pull-up/step-back mid-range uses PULL_UP_MID context (self-created; harder to fully contest).
+    // Average defender → 0; elite (attr 85) → up to −4.9 %; poor (attr 20) → up to +2.2 %.
+    if (shotType === 'MID_RANGE') {
+      const perimDef   = defender?.attributes.perimeterDef ?? 50;
+      // Distinguish ISO/step-back (PULL_UP_MID) vs elbow catch-and-face-up (ELBOW_FADE)
+      const midCtx: MidRangeContext = (offAction === 'ISO' || offAction === 'TRANSITION')
+        ? 'PULL_UP_MID'
+        : 'ELBOW_FADE';
+      const contestMod = getMidRangeContestMod(perimDef, midCtx);
+      defenseModifier += contestMod;
+      if (perimDef >= 85 && contestMod <= -0.04) {
+        if (!defTendencyUsed) defTendencyUsed = 'perimeterDef';
+        pbpDefPrefix = pbpDefPrefix || `${defLn} closes out hard — no clean look — `;
+      } else if (perimDef <= 30) {
+        pbpDefPrefix = pbpDefPrefix || `${defLn} is a step slow — wide open pull-up — `;
       }
     }
 
@@ -1615,10 +1804,11 @@ const simulatePlayerGameLine = (
   teamAst: number,
   minutes: number,
   usageShare: number,
-  varRoll = 0,               // game-level variance from tip-off roll (±15–25)
-  ftBonus = 0,               // home court FT advantage (+0.03)
-  opponentPerimDefMod  = 0,  // team-level 3PT defensive suppression (get3PTContestMod)
-  opponentInteriorDefMod = 0, // team-level at-rim defensive suppression (getRimProtectionMod)
+  varRoll = 0,                 // game-level variance from tip-off roll (±15–25)
+  ftBonus = 0,                 // home court FT advantage (+0.03)
+  opponentPerimDefMod  = 0,   // team-level 3PT defensive suppression (get3PTContestMod)
+  opponentInteriorDefMod = 0,  // team-level at-rim defensive suppression (getRimProtectionMod)
+  opponentMidDefMod = 0,       // team-level mid-range suppression (getMidRangeContestMod)
 ): GamePlayerLine => {
   const fgPctBoost = varRoll / 100 * 0.4; // variance → small FG% delta
   const tm     = computeTendencyModifiers(player);
@@ -1639,7 +1829,15 @@ const simulatePlayerGameLine = (
   const midFga  = Math.max(0, fga - threepa - insFga);
 
   const fgPct3   = getThreePointPercentage(player.attributes.shooting3pt);
-  const fgPctMid = player.attributes.shootingMid / 100 * 0.42 + 0.26;
+  // Mid-range FG%: attribute-driven piecewise curve with offIQ + ballHandling synergy.
+  // Replaces the old linear formula (shootingMid/100 * 0.42 + 0.26) which over-rewarded
+  // high attributes linearly and ignored creation skill.
+  const fgPctMid = getMidRangePercentage(
+    player.attributes.shootingMid,
+    player.position,
+    player.attributes.offensiveIQ,
+    player.attributes.ballHandling,
+  );
 
   // Inside FG%: weighted blend of layup quality and dunk success rate.
   // getDunkPercentage gives the proper high-base dunk curve (92-98% uncontested)
@@ -1653,7 +1851,7 @@ const simulatePlayerGameLine = (
   const threepm = Math.min(threepa, Math.round(threepa * Math.max(0.05,
     fgPct3 + fgPctBoost + opponentPerimDefMod + (Math.random() * 0.06 - 0.03))));
   const midFgm  = Math.min(midFga,  Math.round(midFga  * Math.max(0.05,
-    fgPctMid + fgPctBoost + (Math.random() * 0.06 - 0.03))));
+    fgPctMid + fgPctBoost + opponentMidDefMod + (Math.random() * 0.06 - 0.03))));
   const insFgm  = Math.min(insFga,  Math.round(insFga  * Math.max(0.35,
     fgPctIns + fgPctBoost + opponentInteriorDefMod + (Math.random() * 0.06 - 0.03))));
   const fgm     = threepm + midFgm + insFgm;
@@ -1965,6 +2163,9 @@ export const simulateGame = (
     const oppAvgInteriorDef    = oppTopN.reduce((s, op) => s + (op.attributes.interiorDef ?? 50), 0) / oppCount;
     const oppInteriorDefMod    = getRimProtectionMod(oppAvgInteriorDef, 'TEAM_BOX_SCORE');
 
+    // Mid-range suppression: avg perimDef 75 → ~−2.0 %  |  85 → ~−2.8 %  |  25 → ~+0.9 %
+    const oppMidDefMod = getMidRangeContestMod(oppAvgPerimDef, 'TEAM_BOX_SCORE_MID');
+
     return roster.map((p, i) => {
       let mins = 0;
       if (team.rotation && team.rotation.minutes[p.id] !== undefined) {
@@ -1981,7 +2182,7 @@ export const simulateGame = (
       const ftBonus    = isHome ? 0.03 : 0;
       const varRoll    = playerVariance.get(p.id) ?? 0;
       const usageShare = p.rating / totalRating;
-      const line = simulatePlayerGameLine(p, totalPts, teamFga, teamReb, teamAst, mins, usageShare, varRoll, ftBonus, oppPerimDefMod, oppInteriorDefMod);
+      const line = simulatePlayerGameLine(p, totalPts, teamFga, teamReb, teamAst, mins, usageShare, varRoll, ftBonus, oppPerimDefMod, oppInteriorDefMod, oppMidDefMod);
       return { ...line, techs: 0, flagrants: 0, ejected: false };
     });
   };
