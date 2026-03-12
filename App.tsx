@@ -711,6 +711,35 @@ const App: React.FC = () => {
     const rookieMultiplier = rookieSetting === 'Slow' ? 0.7 : rookieSetting === 'Fast' ? 1.3 : 1.0;
     const vetRate = (tempState.settings.vetDeclineRate || 100) / 100;
 
+    // Collect expired-contract players BEFORE updating rosters
+    const expiredPlayers: Player[] = [];
+    tempState.teams.forEach(t => {
+      t.roster.forEach(p => {
+        if (p.contractYears <= 1) {
+          // Player enters free agency
+          const desiredBase = Math.round((p.rating * 160_000 + 500_000) / 250_000) * 250_000;
+          const desiredYears = p.rating >= 80 ? 4 : p.rating >= 70 ? 3 : p.age >= 33 ? 1 : 2;
+          // Interest in user's team: based on wins + market size
+          const userWins = tempState.teams.find(t2 => t2.id === tempState.userTeamId)?.wins ?? 0;
+          const teamQuality = Math.min(100, userWins * 1.2 + 30);
+          expiredPlayers.push({
+            ...p,
+            isFreeAgent: true,
+            lastTeamId: t.id,
+            contractYears: 0,
+            salary: 0,
+            desiredContract: {
+              years: desiredYears,
+              salary: desiredBase,
+            },
+            interestScore: Math.round(
+              Math.min(95, Math.max(10, teamQuality * 0.5 + (p.morale ?? 75) * 0.3 + Math.random() * 20))
+            ),
+          });
+        }
+      });
+    });
+
     tempState.teams = tempState.teams.map(t => {
       const devMultiplier = (t.staff.assistantDev?.ratingDevelopment || 60) / 75;
       const POS_DEV_KEYS: Record<string, (keyof Player['attributes'])[]> = {
@@ -737,11 +766,19 @@ const App: React.FC = () => {
         });
         return enforcePositionalBounds({ ...p, attributes: newAttrs as Player['attributes'] });
       });
-      return { ...t, roster: rosterWithProg.map(p => ({ ...p, contractYears: Math.max(0, p.contractYears - 1) })), prevSeasonWins: t.wins, wins: 0, losses: 0, lastTen: [] };
+      // Remove expired contracts from roster (they become free agents)
+      const retained = rosterWithProg.filter(p => p.contractYears > 1);
+      return { ...t, roster: retained.map(p => ({ ...p, contractYears: p.contractYears - 1 })), prevSeasonWins: t.wins, wins: 0, losses: 0, lastTen: [] };
     });
-    
-    // Free agents are generated but FA tab will be restricted until draft is done
-    tempState.freeAgents = [...generateFreeAgentPool(15, tempState.season, tempState.settings.playerGenderRatio)];
+
+    // Merge generated FA pool + expired-contract players (deduplicated by id)
+    const generatedFAs = generateFreeAgentPool(30, tempState.season, tempState.settings.playerGenderRatio);
+    const expiredIds = new Set(expiredPlayers.map(p => p.id));
+    const mergedFAs = [
+      ...expiredPlayers,
+      ...generatedFAs.filter(p => !expiredIds.has(p.id)),
+    ].sort((a, b) => b.rating - a.rating);
+    tempState.freeAgents = mergedFAs;
     tempState.coachPool = [...generateCoachPool(20, tempState.settings.coachGenderRatio)];
     tempState.season += 1;
 
