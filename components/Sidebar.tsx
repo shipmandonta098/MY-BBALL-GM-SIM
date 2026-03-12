@@ -1,6 +1,6 @@
 
 import React, { useState } from 'react';
-import { Team } from '../types';
+import { Team, SeasonPhase } from '../types';
 
 interface SidebarProps {
   activeTab: string;
@@ -9,9 +9,32 @@ interface SidebarProps {
   onQuit: () => void;
   isOffseason?: boolean;
   isExpansionActive?: boolean;
+  seasonPhase?: SeasonPhase;
+  currentDay?: number;
+  totalDays?: number;
 }
 
-const Sidebar: React.FC<SidebarProps> = ({ activeTab, setActiveTab, team, onQuit, isOffseason, isExpansionActive }) => {
+const PHASE_ORDER: SeasonPhase[] = ['Preseason', 'Regular Season', 'Trade Deadline', 'All-Star Weekend', 'Playoffs', 'Offseason'];
+
+const PHASE_COLORS: Record<SeasonPhase, string> = {
+  'Preseason': '#64748b',
+  'Regular Season': '#22c55e',
+  'Trade Deadline': '#ef4444',
+  'All-Star Weekend': '#f97316',
+  'Playoffs': '#a855f7',
+  'Offseason': '#eab308',
+};
+
+const PHASE_ICONS: Record<SeasonPhase, string> = {
+  'Preseason': '🏋️',
+  'Regular Season': '🏀',
+  'Trade Deadline': '⏰',
+  'All-Star Weekend': '⭐',
+  'Playoffs': '🏆',
+  'Offseason': '📋',
+};
+
+const Sidebar: React.FC<SidebarProps> = ({ activeTab, setActiveTab, team, onQuit, isOffseason, isExpansionActive, seasonPhase, currentDay, totalDays }) => {
   const [isCollapsed, setIsCollapsed] = useState(false);
 
   const menuItems = [
@@ -24,6 +47,7 @@ const Sidebar: React.FC<SidebarProps> = ({ activeTab, setActiveTab, team, onQuit
     { id: 'schedule', label: 'Schedule', icon: 'M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z' },
     { id: 'standings', label: 'Standings', icon: 'M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z' },
     { id: 'power_rankings', label: 'Power Rankings', icon: 'M13 7h8m0 0v8m0-8l-8 8-4-4-6 6' },
+    { id: 'allstar', label: 'All-Star Weekend', icon: 'M11.049 2.927c.3-.921 1.603-.921 1.902 0l1.519 4.674a1 1 0 00.95.69h4.915c.969 0 1.371 1.24.588 1.81l-3.976 2.888a1 1 0 00-.363 1.118l1.518 4.674c.3.922-.755 1.688-1.538 1.118l-3.976-2.888a1 1 0 00-1.176 0l-3.976 2.888c-.783.57-1.838-.197-1.538-1.118l1.518-4.674a1 1 0 00-.363-1.118l-3.976-2.888c-.784-.57-.382-1.81.588-1.81h4.914a1 1 0 00.951-.69l1.519-4.674z', notification: seasonPhase === 'All-Star Weekend', visible: seasonPhase === 'All-Star Weekend' || activeTab === 'allstar' },
     { id: 'playoffs', label: 'Playoffs', icon: 'M13 10V3L4 14h7v7l9-11h-7z' },
     { id: 'awards', label: 'Trophies', icon: 'M5 3v4M3 5h4M6 17v4m-2-2h4m5-16l2.286 6.857L21 12l-7.714 2.143L11 21l-2.286-6.857L1 12l7.714-2.143L11 3z' },
     { id: 'finances', label: 'Finances', icon: 'M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z' },
@@ -58,7 +82,7 @@ const Sidebar: React.FC<SidebarProps> = ({ activeTab, setActiveTab, team, onQuit
         )}
       </div>
 
-      <button 
+      <button
         onClick={() => setIsCollapsed(!isCollapsed)}
         className="absolute -right-3 top-20 w-6 h-6 bg-slate-800 border border-slate-700 rounded-full flex items-center justify-center text-slate-400 hover:text-white transition-colors z-50"
       >
@@ -66,7 +90,49 @@ const Sidebar: React.FC<SidebarProps> = ({ activeTab, setActiveTab, team, onQuit
           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15 19l-7-7 7-7" />
         </svg>
       </button>
-      
+
+      {/* Season Phase Indicator */}
+      {seasonPhase && !isCollapsed && (
+        <div className="px-4 py-3 border-b border-slate-800 space-y-2 overflow-hidden">
+          <div className="flex items-center gap-2">
+            <span className="text-base">{PHASE_ICONS[seasonPhase]}</span>
+            <span className="font-bold text-xs uppercase tracking-wider" style={{ color: PHASE_COLORS[seasonPhase] }}>
+              {seasonPhase}
+            </span>
+          </div>
+          {/* Progress dots */}
+          <div className="flex items-center gap-1">
+            {PHASE_ORDER.map((phase, idx) => {
+              const currentIdx = PHASE_ORDER.indexOf(seasonPhase);
+              const isPast = idx < currentIdx;
+              const isCurrent = idx === currentIdx;
+              return (
+                <div
+                  key={phase}
+                  title={phase}
+                  className={`h-1.5 flex-1 rounded-full transition-all ${isCurrent ? 'scale-y-150' : ''}`}
+                  style={{
+                    backgroundColor: isCurrent
+                      ? PHASE_COLORS[seasonPhase]
+                      : isPast
+                        ? '#374151'
+                        : '#1e293b',
+                  }}
+                />
+              );
+            })}
+          </div>
+          {currentDay != null && totalDays != null && totalDays > 0 && (
+            <div className="text-xs text-slate-500">Day {currentDay} of {totalDays}</div>
+          )}
+        </div>
+      )}
+      {seasonPhase && isCollapsed && (
+        <div className="px-2 py-2 border-b border-slate-800 flex justify-center" title={seasonPhase}>
+          <span className="text-lg">{PHASE_ICONS[seasonPhase]}</span>
+        </div>
+      )}
+
       <nav className="flex-1 p-4 space-y-2 overflow-y-auto scrollbar-none overflow-x-hidden">
         {menuItems.map(item => {
           if (item.visible === false) return null;

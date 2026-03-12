@@ -1,6 +1,6 @@
 
 import React, { useState, useEffect, useCallback } from 'react';
-import { LeagueState, Player, Team, GameResult, PlayerStatus, ScheduleGame, BulkSimSummary, Prospect, Coach, TradeProposal, Position, NewsItem, NewsCategory, LeagueSettings, SeasonAwards, PlayoffBracket, PlayoffSeries, Transaction, TransactionType, PowerRankingSnapshot, PowerRankingEntry, GMProfile, GMMilestone, RivalryStats, InjuryType } from './types';
+import { LeagueState, Player, Team, GameResult, PlayerStatus, ScheduleGame, BulkSimSummary, Prospect, Coach, TradeProposal, Position, NewsItem, NewsCategory, LeagueSettings, SeasonAwards, PlayoffBracket, PlayoffSeries, Transaction, TransactionType, PowerRankingSnapshot, PowerRankingEntry, GMProfile, GMMilestone, RivalryStats, InjuryType, SeasonPhase, AllStarWeekendData } from './types';
 import { generateLeagueTeams, generateSeasonSchedule, generateProspects, generateFreeAgentPool, generateCoachPool, EXPANSION_TEAM_POOL, generateCoach, enforcePositionalBounds } from './constants';
 import { simulateGame, normalizeLeagueOVRs } from './utils/simEngine';
 import { generateGameRecap, generateScoutingReport, generateSeasonNarrative, generateCoachScoutingReport, generateNewsHeadline } from './services/geminiService';
@@ -41,6 +41,7 @@ import FranchiseHistory from './components/FranchiseHistory';
 import Rotations from './components/Rotations';
 import TeamManagement from './components/TeamManagement';
 import Players from './components/Players';
+import AllStar from './components/AllStar';
 
 const SETTINGS_KEY = 'HOOPS_DYNASTY_SETTINGS_V1';
 
@@ -49,7 +50,7 @@ type AppStatus = 'title' | 'config' | 'setup' | 'game';
 const App: React.FC = () => {
   const [status, setStatus] = useState<AppStatus>('title');
   const [league, setLeague] = useState<LeagueState | null>(null);
-  const [activeTab, setActiveTab] = useState<'dashboard' | 'news' | 'roster' | 'rotations' | 'free_agency' | 'results' | 'standings' | 'schedule' | 'draft' | 'coaching' | 'stats' | 'finances' | 'trade' | 'expansion' | 'settings' | 'coach_market' | 'awards' | 'playoffs' | 'transactions' | 'power_rankings' | 'gm_profile' | 'team_management' | 'players'>('dashboard');
+  const [activeTab, setActiveTab] = useState<'dashboard' | 'news' | 'roster' | 'rotations' | 'free_agency' | 'results' | 'standings' | 'schedule' | 'draft' | 'coaching' | 'stats' | 'finances' | 'trade' | 'expansion' | 'settings' | 'coach_market' | 'awards' | 'playoffs' | 'transactions' | 'power_rankings' | 'gm_profile' | 'team_management' | 'players' | 'allstar'>('dashboard');
   const [rosterTeamId, setRosterTeamId] = useState<string>('');
   const [teamManagementId, setTeamManagementId] = useState<string>('');
   const [loading, setLoading] = useState(false);
@@ -95,6 +96,62 @@ const App: React.FC = () => {
       value
     };
     return [newTransaction, ...(state.transactions || [])].slice(0, 1000);
+  };
+
+  /** Compute the current season phase from state */
+  const computeSeasonPhase = (state: LeagueState): SeasonPhase => {
+    if (state.isOffseason) return 'Offseason';
+    if (state.playoffBracket) return 'Playoffs';
+    if (state.allStarWeekend && !state.allStarWeekend.completed) return 'All-Star Weekend';
+    if (state.tradeDeadlinePassed) {
+      // After trade deadline, before All-Star or after completed All-Star, still in regular season
+      return 'Regular Season';
+    }
+    const totalGames = state.schedule.length;
+    const playedGames = state.schedule.filter(g => g.played).length;
+    if (totalGames === 0) return 'Preseason';
+    const pct = playedGames / totalGames;
+    if (pct === 0) return 'Preseason';
+    return 'Regular Season';
+  };
+
+  /** Select All-Star rosters: top 12 players per conference by rating */
+  const buildAllStarWeekend = (state: LeagueState): AllStarWeekendData => {
+    const selectConf = (conf: 'Eastern' | 'Western') => {
+      const players = state.teams
+        .filter(t => t.conference === conf)
+        .flatMap(t => t.roster.filter(p => p.status !== 'Injured'))
+        .sort((a, b) => b.rating - a.rating)
+        .slice(0, 12);
+      return players.map(p => p.id);
+    };
+    const eastIds = selectConf('Eastern');
+    const westIds = selectConf('Western');
+    // Starters: top 5 per conference (1 per position group: G,G,F,F,C)
+    const pickStarters = (conf: 'Eastern' | 'Western', ids: string[]) => {
+      const starters: string[] = [];
+      const positions: Array<'PG' | 'SG' | 'SF' | 'PF' | 'C'> = ['PG', 'SG', 'SF', 'PF', 'C'];
+      for (const pos of positions) {
+        const cand = ids.find(id => {
+          const p = state.teams.flatMap(t => t.roster).find(pl => pl.id === id);
+          return p?.position === pos && !starters.includes(id);
+        });
+        if (cand) starters.push(cand);
+        else if (ids.find(id => !starters.includes(id))) {
+          starters.push(ids.find(id => !starters.includes(id))!);
+        }
+      }
+      return starters.slice(0, 5);
+    };
+    return {
+      year: state.season,
+      day: state.currentDay,
+      eastRoster: eastIds,
+      westRoster: westIds,
+      eastStarters: pickStarters('Eastern', eastIds),
+      westStarters: pickStarters('Western', westIds),
+      completed: false,
+    };
   };
 
   const calculatePowerRankings = (state: LeagueState): PowerRankingSnapshot => {
@@ -173,7 +230,7 @@ const App: React.FC = () => {
       gmProfile: initialGMProfile, teams: teamsWithAI, schedule: freshSchedule, isOffseason: false, offseasonDay: 0,
       draftPhase: 'scouting', prospects: freshProspects, freeAgents: initialFAs, coachPool, history: [],
       savedTrades: [], newsFeed: [], awardHistory: [], championshipHistory: [], transactions: [], settings: finalSettings,
-      draftPicks: []
+      draftPicks: [], seasonPhase: 'Preseason' as SeasonPhase, tradeDeadlinePassed: false
     };
 
     setLeague(newLeague);
@@ -642,7 +699,75 @@ const App: React.FC = () => {
       summary.news.push(narrative);
       setBulkSummary(summary);
     }
-    
+
+    // ── Season Phase Milestones ─────────────────────────────────────────────
+    // Only check if we're still in the regular season (no playoff bracket yet)
+    if (!tempState.isOffseason && !tempState.playoffBracket) {
+      const totalGames = tempState.schedule.length;
+      const playedGames = tempState.schedule.filter(g => g.played).length;
+      const pct = totalGames > 0 ? playedGames / totalGames : 0;
+
+      // Trade Deadline: triggers once at ~49% games played (≈game 40 of 82)
+      if (!tempState.tradeDeadlinePassed && pct >= 0.49 && pct < 0.75) {
+        tempState = { ...tempState, tradeDeadlinePassed: true, seasonPhase: 'Trade Deadline' as SeasonPhase };
+        // AI GMs make trade deadline moves
+        try {
+          const aiDeadlineResult = aiGMTradeDeadlineAction(tempState);
+          tempState = aiDeadlineResult.updatedState;
+          if (aiDeadlineResult.newsItems?.length > 0) {
+            tempState = { ...tempState, newsFeed: [...aiDeadlineResult.newsItems, ...(tempState.newsFeed || [])].slice(0, 100) };
+          }
+        } catch (_e) {}
+        tempState.newsFeed = [{
+          id: `trade-deadline-${tempState.season}`,
+          category: 'transaction' as NewsCategory,
+          headline: 'TRADE DEADLINE',
+          content: `The trade deadline has passed! No more trades can be made until next season. Teams must go with the rosters they have for the playoff push.`,
+          timestamp: tempState.currentDay,
+          realTimestamp: Date.now(),
+          isBreaking: true,
+        }, ...(tempState.newsFeed || [])];
+        setActiveTab('news');
+      }
+
+      // All-Star Weekend: triggers once at ~52% games played (right after trade deadline)
+      if (tempState.tradeDeadlinePassed && !tempState.allStarWeekend && pct >= 0.52 && pct < 0.75) {
+        const asd = buildAllStarWeekend(tempState);
+        tempState = { ...tempState, allStarWeekend: asd, seasonPhase: 'All-Star Weekend' as SeasonPhase };
+        // Build roster announcement news
+        const eastStarters = asd.eastStarters.map(id => {
+          for (const t of tempState.teams) { const p = t.roster.find(pl => pl.id === id); if (p) return p.name; }
+          return id;
+        });
+        const westStarters = asd.westStarters.map(id => {
+          for (const t of tempState.teams) { const p = t.roster.find(pl => pl.id === id); if (p) return p.name; }
+          return id;
+        });
+        tempState.newsFeed = [{
+          id: `allstar-reveal-${tempState.season}`,
+          category: 'milestone' as NewsCategory,
+          headline: 'ALL-STAR ROSTERS REVEALED',
+          content: `This season's All-Star starters have been announced! East starters: ${eastStarters.join(', ')}. West starters: ${westStarters.join(', ')}. All-Star Weekend is here!`,
+          timestamp: tempState.currentDay,
+          realTimestamp: Date.now(),
+          isBreaking: true,
+        }, ...(tempState.newsFeed || [])];
+        setActiveTab('allstar');
+      }
+
+      // Update phase to Regular Season once trade deadline / All-Star events are resolved
+      if (tempState.allStarWeekend?.completed && tempState.seasonPhase === 'All-Star Weekend') {
+        tempState = { ...tempState, seasonPhase: 'Regular Season' as SeasonPhase };
+      }
+      // Keep phase as Regular Season during normal play
+      if (!tempState.tradeDeadlinePassed && pct > 0 && pct < 0.49) {
+        tempState = { ...tempState, seasonPhase: 'Regular Season' as SeasonPhase };
+      }
+      if (pct === 0) {
+        tempState = { ...tempState, seasonPhase: 'Preseason' as SeasonPhase };
+      }
+    }
+
     if (!tempState.schedule.some(g => !g.played) && !tempState.playoffBracket) {
       const seasonAwards = await generateAwards(tempState.teams, tempState.season);
       
@@ -678,6 +803,7 @@ const App: React.FC = () => {
         return { year: season, series: initialSeries, currentRound: 1, isCompleted: false };
       };
       tempState.playoffBracket = generateInitialBracket(tempState.teams, tempState.season);
+      tempState.seasonPhase = 'Playoffs' as SeasonPhase;
       setActiveTab('playoffs');
       tempState = await addNewsItem(tempState, 'playoffs', { detail: `The Regular Season has concluded. Playoff seeds are locked!` }, true);
     }
@@ -704,6 +830,9 @@ const App: React.FC = () => {
     tempState.gmProfile.totalSeasons += 1;
     tempState.playoffBracket = undefined;
     tempState.isOffseason = true;
+    tempState.seasonPhase = 'Offseason' as SeasonPhase;
+    tempState.tradeDeadlinePassed = false;
+    tempState.allStarWeekend = undefined;
     tempState.draftPhase = 'lottery';
     tempState.offseasonDay = 0;
     
@@ -920,7 +1049,7 @@ const App: React.FC = () => {
 
   return (
     <div className="flex h-screen overflow-hidden bg-slate-950 text-slate-50 relative">
-      <Sidebar activeTab={activeTab} setActiveTab={setActiveTab} team={userTeam} onQuit={() => setStatus('title')} isOffseason={league.isOffseason} isExpansionActive={league.expansionDraft?.active} />
+      <Sidebar activeTab={activeTab} setActiveTab={setActiveTab} team={userTeam} onQuit={() => setStatus('title')} isOffseason={league.isOffseason} isExpansionActive={league.expansionDraft?.active} seasonPhase={league.seasonPhase ?? (league.isOffseason ? 'Offseason' : 'Regular Season')} currentDay={league.currentDay} totalDays={league.schedule.length > 0 ? Math.max(...league.schedule.map(g => g.day)) : undefined} />
       <main className="flex-1 overflow-y-auto p-6 md:p-10 space-y-8 pb-32 transition-all duration-300 ease-in-out">
         <div key={activeTab} className="animate-in fade-in slide-in-from-bottom-2 duration-500">
           {activeTab === 'dashboard' && <Dashboard league={league} news={news} onSimulate={handleSimulate} onScout={handleViewPlayer} scoutingReport={scoutingReport} setActiveTab={setActiveTab} onViewRoster={handleViewRoster} onManageTeam={handleManageTeam} />}
@@ -946,6 +1075,20 @@ const App: React.FC = () => {
             const newState = await addNewsItem(league, cat, data, breaking);
             updateLeagueState(newState);
           }} />}
+          {activeTab === 'allstar' && (
+            <AllStar
+              league={league}
+              updateLeague={updateLeagueState}
+              onAdvancePhase={() => {
+                updateLeagueState(prev => ({
+                  ...prev,
+                  seasonPhase: 'Regular Season' as SeasonPhase,
+                  allStarWeekend: prev.allStarWeekend ? { ...prev.allStarWeekend, completed: true } : prev.allStarWeekend,
+                }));
+                setActiveTab('dashboard');
+              }}
+            />
+          )}
           {activeTab === 'results' && (
             viewingFranchiseId ? (
               <FranchiseHistory 
