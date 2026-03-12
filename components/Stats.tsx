@@ -285,20 +285,38 @@ const Stats: React.FC<StatsProps> = ({ league, onViewRoster, onManageTeam, onVie
           const fta = p.stats.fta;
           const pm  = p.stats.plusMinus;
 
-          const ppg = pts / gp;
-          const rpg = reb / gp;
-          const apg = ast / gp;
-          const spg = stl / gp;
-          const bpg = blk / gp;
-          const tpg = tov / gp;
-          const mpg = min / gp;
+          const gs  = p.stats.gamesStarted ?? 0;
+          const orb = p.stats.offReb ?? 0;
+          const drb = p.stats.defReb ?? 0;
+          const pf  = p.stats.pf ?? 0;
+
+          const ppg  = pts / gp;
+          const rpg  = reb / gp;
+          const apg  = ast / gp;
+          const spg  = stl / gp;
+          const bpg  = blk / gp;
+          const tpg  = tov / gp;
+          const mpg  = min / gp;
+          const orbPg = orb / gp;
+          const drbPg = drb / gp;
+          const pfPg  = pf  / gp;
+          const fgmPg = fgm / gp;
+          const fgaPg = fga / gp;
+          const tpmPg = tpm / gp;
+          const tpaPg = tpa / gp;
+          const ftmPg = ftm / gp;
+          const ftaPg = fta / gp;
           const fgPct  = fga > 0 ? fgm / fga : 0;
           const tpPct  = tpa > 0 ? tpm / tpa : 0;
           const ftPct  = fta > 0 ? ftm / fta : 0;
           // 2-pt (mid + post) derived
-          const twom = fgm - tpm;
-          const twoa = fga - tpa;
+          const twom   = fgm - tpm;
+          const twoa   = fga - tpa;
           const twoPct = twoa > 0 ? twom / twoa : 0;
+          const twomPg = twom / gp;
+          const twoaPg = twoa / gp;
+          // EFG%: credits 3-pointers as 1.5x a 2-pointer
+          const efg = fga > 0 ? (fgm + 0.5 * tpm) / fga : 0;
           // Advanced
           const per = min > 0
             ? (pts + reb + ast + stl + blk - (fga - fgm) - (fta - ftm) - tov) / min * 30
@@ -319,9 +337,11 @@ const Stats: React.FC<StatsProps> = ({ league, onViewRoster, onManageTeam, onVie
             teamName: team.name,
             team,
             pos: p.position,
-            gp, mpg, ppg, rpg, apg, spg, bpg, tpg,
+            gp, gs, mpg, ppg, rpg, apg, spg, bpg, tpg,
+            orbPg, drbPg, pfPg,
             fgm, fga, fgPct, tpm, tpa, tpPct, ftm, fta, ftPct,
-            twom, twoa, twoPct,
+            fgmPg, fgaPg, tpmPg, tpaPg, ftmPg, ftaPg,
+            twom, twoa, twoPct, twomPg, twoaPg, efg,
             per, ts, usg, bpm, vorp, pmPg,
             p36pts: p36(pts), p36reb: p36(reb), p36ast: p36(ast),
             p36stl: p36(stl), p36blk: p36(blk), p36tov: p36(tov),
@@ -440,13 +460,17 @@ const Stats: React.FC<StatsProps> = ({ league, onViewRoster, onManageTeam, onVie
                   <th className="px-2 py-3 text-slate-500 text-center">Pos</th>
                   <Th k="gp"  label="GP" />
                   {playerSubTab === 'traditional' && (<>
+                    <Th k="gs"  label="GS" />
                     <Th k="mpg" label="MPG" />
                     <Th k="ppg" label="PPG" />
+                    <Th k="orbPg" label="ORB" />
+                    <Th k="drbPg" label="DRB" />
                     <Th k="rpg" label="RPG" />
                     <Th k="apg" label="APG" />
                     <Th k="spg" label="SPG" />
                     <Th k="bpg" label="BPG" />
                     <Th k="tpg" label="TPG" />
+                    <Th k="pfPg" label="PF" />
                     <Th k="fgPct" label="FG%" />
                     <Th k="tpPct" label="3P%" />
                     <Th k="ftPct" label="FT%" />
@@ -472,14 +496,19 @@ const Stats: React.FC<StatsProps> = ({ league, onViewRoster, onManageTeam, onVie
                     <Th k="p36ftPct" label="FT%" />
                   </>)}
                   {playerSubTab === 'shooting' && (<>
-                    <Th k="fga"    label="FGA" />
+                    <Th k="fgmPg"  label="FGM" />
+                    <Th k="fgaPg"  label="FGA" />
                     <Th k="fgPct"  label="FG%" />
-                    <Th k="tpa"    label="3PA" />
+                    <Th k="efg"    label="EFG%" />
+                    <Th k="tpmPg"  label="3PM" />
+                    <Th k="tpaPg"  label="3PA" />
                     <Th k="tpPct"  label="3P%" />
-                    <Th k="fta"    label="FTA" />
-                    <Th k="ftPct"  label="FT%" />
-                    <Th k="twoa"   label="2PA" />
+                    <Th k="twomPg" label="2PM" />
+                    <Th k="twoaPg" label="2PA" />
                     <Th k="twoPct" label="2P%" />
+                    <Th k="ftmPg"  label="FTM" />
+                    <Th k="ftaPg"  label="FTA" />
+                    <Th k="ftPct"  label="FT%" />
                   </>)}
                 </tr>
               </thead>
@@ -504,13 +533,17 @@ const Stats: React.FC<StatsProps> = ({ league, onViewRoster, onManageTeam, onVie
                       <td className="px-2 py-3 text-center text-slate-400 font-black text-[10px] uppercase">{r.pos}</td>
                       <td className="px-2 py-3 text-center font-mono">{r.gp}</td>
                       {playerSubTab === 'traditional' && (<>
+                        <td className="px-2 py-3 text-center font-mono text-slate-400">{r.gs}</td>
                         <td className="px-2 py-3 text-center font-mono">{fix1(r.mpg)}</td>
                         <td className="px-2 py-3 text-center font-mono font-bold text-amber-400">{fix1(r.ppg)}</td>
+                        <td className="px-2 py-3 text-center font-mono">{fix1(r.orbPg)}</td>
+                        <td className="px-2 py-3 text-center font-mono">{fix1(r.drbPg)}</td>
                         <td className="px-2 py-3 text-center font-mono">{fix1(r.rpg)}</td>
                         <td className="px-2 py-3 text-center font-mono">{fix1(r.apg)}</td>
                         <td className="px-2 py-3 text-center font-mono">{fix1(r.spg)}</td>
                         <td className="px-2 py-3 text-center font-mono">{fix1(r.bpg)}</td>
                         <td className="px-2 py-3 text-center font-mono text-rose-400/70">{fix1(r.tpg)}</td>
+                        <td className="px-2 py-3 text-center font-mono text-slate-400">{fix1(r.pfPg)}</td>
                         <td className="px-2 py-3 text-center font-mono">{pct(r.fgPct)}</td>
                         <td className="px-2 py-3 text-center font-mono">{r.tpa > 0 ? pct(r.tpPct) : '—'}</td>
                         <td className="px-2 py-3 text-center font-mono">{r.fta > 0 ? pct(r.ftPct) : '—'}</td>
@@ -536,14 +569,19 @@ const Stats: React.FC<StatsProps> = ({ league, onViewRoster, onManageTeam, onVie
                         <td className="px-2 py-3 text-center font-mono">{r.fta > 0 ? pct(r.p36ftPct) : '—'}</td>
                       </>)}
                       {playerSubTab === 'shooting' && (<>
-                        <td className="px-2 py-3 text-center font-mono">{r.fga}</td>
+                        <td className="px-2 py-3 text-center font-mono">{fix1(r.fgmPg)}</td>
+                        <td className="px-2 py-3 text-center font-mono">{fix1(r.fgaPg)}</td>
                         <td className="px-2 py-3 text-center font-mono font-bold">{pct(r.fgPct)}</td>
-                        <td className="px-2 py-3 text-center font-mono">{r.tpa}</td>
+                        <td className="px-2 py-3 text-center font-mono font-bold text-sky-400">{r.fga > 0 ? pct(r.efg) : '—'}</td>
+                        <td className="px-2 py-3 text-center font-mono">{fix1(r.tpmPg)}</td>
+                        <td className="px-2 py-3 text-center font-mono">{fix1(r.tpaPg)}</td>
                         <td className="px-2 py-3 text-center font-mono">{r.tpa > 0 ? pct(r.tpPct) : '—'}</td>
-                        <td className="px-2 py-3 text-center font-mono">{r.fta}</td>
-                        <td className="px-2 py-3 text-center font-mono">{r.fta > 0 ? pct(r.ftPct) : '—'}</td>
-                        <td className="px-2 py-3 text-center font-mono">{r.twoa}</td>
+                        <td className="px-2 py-3 text-center font-mono">{fix1(r.twomPg)}</td>
+                        <td className="px-2 py-3 text-center font-mono">{fix1(r.twoaPg)}</td>
                         <td className="px-2 py-3 text-center font-mono font-bold">{r.twoa > 0 ? pct(r.twoPct) : '—'}</td>
+                        <td className="px-2 py-3 text-center font-mono">{fix1(r.ftmPg)}</td>
+                        <td className="px-2 py-3 text-center font-mono">{fix1(r.ftaPg)}</td>
+                        <td className="px-2 py-3 text-center font-mono">{r.fta > 0 ? pct(r.ftPct) : '—'}</td>
                       </>)}
                     </tr>
                   );
