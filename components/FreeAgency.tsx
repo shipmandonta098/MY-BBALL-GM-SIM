@@ -1,317 +1,893 @@
-import React, { useState, useMemo } from 'react';
-import { LeagueState, Team, Player, ContractOffer, Transaction } from '../types';
-import { generateAgentReport } from '../services/geminiService';
+import React, { useState, useMemo, useCallback } from 'react';
+import { LeagueState, Player, ContractOffer, Transaction, Position } from '../types';
+import { getFlag } from '../constants';
+
+// ── Constants ──────────────────────────────────────────────────────────────
+const MORATORIUM_DAYS = 3; // signing window opens after day 3
+const AI_SIGNINGS_PER_DAY = 3;
 
 interface FreeAgencyProps {
   league: LeagueState;
   updateLeague: (updated: Partial<LeagueState>) => void;
   onScout: (player: Player) => void;
-  recordTransaction: (state: LeagueState, type: any, teamIds: string[], description: string, playerIds?: string[], value?: number) => Transaction[];
+  recordTransaction: (
+    state: LeagueState,
+    type: any,
+    teamIds: string[],
+    description: string,
+    playerIds?: string[],
+    value?: number
+  ) => Transaction[];
 }
 
-const FreeAgency: React.FC<FreeAgencyProps> = ({ league, updateLeague, onScout, recordTransaction }) => {
-  const [searchTerm, setSearchTerm] = useState('');
+// ── Helpers ─────────────────────────────────────────────────────────────────
+const fmt = (val: number) => `$${(val / 1_000_000).toFixed(1)}M`;
+const fmtFull = (val: number) => `$${(val / 1_000_000).toFixed(2)}M`;
+
+/** Compute a reasonable desired salary for a player if one isn't set */
+const computeDesiredSalary = (rating: number): number =>
+  Math.round((rating * 160_000 + 500_000) / 250_000) * 250_000;
+
+const computeDesiredYears = (age: number, rating: number): number => {
+  if (rating >= 80) return 4;
+  if (rating >= 70) return 3;
+  if (age >= 33) return 1;
+  return 2;
+};
+
+/** Get canonical desired contract, falling back to computed values */
+const getDesired = (p: Player) => ({
+  salary: p.desiredContract?.salary || computeDesiredSalary(p.rating),
+  years: p.desiredContract?.years || computeDesiredYears(p.age, p.rating),
+});
+
+const interestLabel = (score: number) => {
+  if (score >= 70) return { text: 'High', color: 'text-emerald-400', bar: 'bg-emerald-500', bg: 'bg-emerald-500/10 border-emerald-500/30' };
+  if (score >= 40) return { text: 'Med', color: 'text-amber-400', bar: 'bg-amber-500', bg: 'bg-amber-500/10 border-amber-500/30' };
+  return { text: 'Low', color: 'text-rose-400', bar: 'bg-rose-500', bg: 'bg-rose-500/10 border-rose-500/30' };
+};
+
+const ratingColor = (r: number) => {
+  if (r >= 85) return 'text-amber-400';
+  if (r >= 75) return 'text-emerald-400';
+  if (r >= 65) return 'text-blue-400';
+  return 'text-slate-400';
+};
+
+type SortKey = 'rating' | 'age' | 'interest' | 'salary' | 'name';
+type NegotiationResult = 'accepted' | 'declined' | 'counter' | null;
+
+// ── Component ────────────────────────────────────────────────────────────────
+const FreeAgency: React.FC<FreeAgencyProps> = ({
+  league,
+  updateLeague,
+  onScout,
+  recordTransaction,
+}) => {
+  // ── Filter state ──
+  const [search, setSearch] = useState('');
+  const [posFilter, setPosFilter] = useState<Position | 'ALL'>('ALL');
+  const [interestFilter, setInterestFilter] = useState<'ALL' | 'High' | 'Med' | 'Low'>('ALL');
+  const [sortKey, setSortKey] = useState<SortKey>('rating');
+  const [sortAsc, setSortAsc] = useState(false);
+
+  // ── Negotiation state ──
   const [negotiatingPlayer, setNegotiatingPlayer] = useState<Player | null>(null);
-  const [offer, setOffer] = useState<ContractOffer>({ years: 1, salary: 0, hasPlayerOption: false, hasNoTradeClause: false });
-  const [agentFeedback, setAgentFeedback] = useState<string>('');
+  const [offer, setOffer] = useState<ContractOffer>({
+    years: 2,
+    salary: 5_000_000,
+    hasPlayerOption: false,
+    hasNoTradeClause: false,
+  });
+  const [negotiationResult, setNegotiationResult] = useState<NegotiationResult>(null);
+  const [agentMessage, setAgentMessage] = useState('');
+  const [counterOffer, setCounterOffer] = useState<{ years: number; salary: number } | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
+  // ── Cap math ──
+  const salaryCap = league.settings.salaryCap || 140_000_000;
+  const luxuryTax = league.settings.luxuryTaxLine || 170_000_000;
   const userTeam = league.teams.find(t => t.id === league.userTeamId)!;
-  const currentSalary = userTeam.roster.reduce((sum, p) => sum + p.salary, 0);
-  const capSpace = userTeam.budget - currentSalary;
+  const currentSalary = userTeam.roster.reduce((sum, p) => sum + (p.salary || 0), 0);
+  const capSpace = salaryCap - currentSalary;
+  const isOverCap = capSpace < 0;
+  const isOverLux = currentSalary > luxuryTax;
 
+  const moratoriumActive =
+    league.draftPhase !== 'completed' || league.offseasonDay < MORATORIUM_DAYS;
+  const daysUntilOpen = league.draftPhase !== 'completed'
+    ? null
+    : Math.max(0, MORATORIUM_DAYS - league.offseasonDay);
+
+  // ── Filtered + sorted FA list ──
   const filteredFAs = useMemo(() => {
-    return league.freeAgents.filter(p => 
-      p.name.toLowerCase().includes(searchTerm.toLowerCase())
-    ).sort((a, b) => b.rating - a.rating);
-  }, [league.freeAgents, searchTerm]);
+    let list = league.freeAgents.filter(p => {
+      if (search && !p.name.toLowerCase().includes(search.toLowerCase())) return false;
+      if (posFilter !== 'ALL' && p.position !== posFilter) return false;
+      if (interestFilter !== 'ALL') {
+        const score = p.interestScore ?? 50;
+        if (interestFilter === 'High' && score < 70) return false;
+        if (interestFilter === 'Med' && (score < 40 || score >= 70)) return false;
+        if (interestFilter === 'Low' && score >= 40) return false;
+      }
+      return true;
+    });
 
-  const handleOpenNegotiation = (player: Player) => {
+    list.sort((a, b) => {
+      let av = 0, bv = 0;
+      if (sortKey === 'rating') { av = a.rating; bv = b.rating; }
+      else if (sortKey === 'age') { av = a.age; bv = b.age; }
+      else if (sortKey === 'interest') { av = a.interestScore ?? 50; bv = b.interestScore ?? 50; }
+      else if (sortKey === 'salary') { av = getDesired(a).salary; bv = getDesired(b).salary; }
+      else if (sortKey === 'name') { av = 0; bv = a.name < b.name ? 1 : -1; }
+      return sortAsc ? av - bv : bv - av;
+    });
+
+    return list;
+  }, [league.freeAgents, search, posFilter, interestFilter, sortKey, sortAsc]);
+
+  // ── Open negotiation ──
+  const openNegotiation = (player: Player) => {
+    const desired = getDesired(player);
     setNegotiatingPlayer(player);
     setOffer({
-      years: player.desiredContract?.years || 1,
-      salary: player.desiredContract?.salary || 5000000,
+      years: desired.years,
+      salary: desired.salary,
       hasPlayerOption: false,
-      hasNoTradeClause: false
+      hasNoTradeClause: false,
     });
-    setAgentFeedback('');
+    setNegotiationResult(null);
+    setAgentMessage('');
+    setCounterOffer(null);
   };
 
-  const submitOffer = async () => {
+  // ── Submit offer logic ──
+  const submitOffer = useCallback(async () => {
     if (!negotiatingPlayer) return;
     setIsSubmitting(true);
-    
-    // Simulate Gemini Agent response
-    const feedback = await generateAgentReport(negotiatingPlayer, userTeam, offer);
-    setAgentFeedback(feedback);
+    setNegotiationResult(null);
 
-    // Realistic Logic for Acceptance
-    const desiredSalary = negotiatingPlayer.desiredContract?.salary || 0;
-    const salaryDiff = offer.salary / (desiredSalary || 1);
-    
-    // Thresholds: High interest helps. 
-    // Score based on salary ratio and team strength.
-    let acceptChance = (salaryDiff * 60) + (negotiatingPlayer.interestScore || 50) / 2;
-    if (offer.years > 3) acceptChance += 10;
-    
-    if (acceptChance > 85) {
-      setTimeout(() => {
-        const signedPlayer: Player = {
-          ...negotiatingPlayer,
-          isFreeAgent: false,
-          salary: offer.salary,
-          contractYears: offer.years,
-          morale: Math.min(100, (negotiatingPlayer.morale || 80) + 10)
-        };
+    const desired = getDesired(negotiatingPlayer);
+    const interest = negotiatingPlayer.interestScore ?? 50;
+    const salaryRatio = offer.salary / desired.salary;
+    const yearDelta = offer.years - desired.years;
 
-        const updatedTeams = league.teams.map(t => 
-          t.id === userTeam.id ? { ...t, roster: [...t.roster, signedPlayer] } : t
-        );
-        const updatedFAs = league.freeAgents.filter(p => p.id !== negotiatingPlayer.id);
+    // Acceptance probability model
+    let acceptChance =
+      (salaryRatio - 1) * 80 +       // +80% pts per extra 100% above ask
+      interest * 0.35 +               // interest baseline (max ~35)
+      yearDelta * 8 +                 // extra years help
+      (offer.hasPlayerOption ? 6 : 0) +
+      (offer.hasNoTradeClause ? 4 : 0);
 
-        const updatedTransactions = recordTransaction(league, 'signing', [userTeam.id], `${userTeam.name} signed ${signedPlayer.name} to a ${offer.years}y/${formatMoney(offer.salary)} contract.`, [signedPlayer.id], offer.salary * offer.years);
+    // Personality trait adjustments
+    if (negotiatingPlayer.personalityTraits?.includes('Money Hungry')) acceptChance += salaryRatio >= 1.1 ? 15 : -15;
+    if (negotiatingPlayer.personalityTraits?.includes('Loyal')) acceptChance += 10;
+    if (negotiatingPlayer.personalityTraits?.includes('Diva/Star')) acceptChance -= 5;
 
-        updateLeague({ teams: updatedTeams, freeAgents: updatedFAs, transactions: updatedTransactions });
-        setNegotiatingPlayer(null);
-        alert(`${negotiatingPlayer.name} has signed with the ${userTeam.name}!`);
-      }, 2000);
+    const accepted = Math.random() * 100 < Math.min(92, Math.max(5, acceptChance));
+
+    // Simulate slight delay for UX
+    await new Promise(r => setTimeout(r, 900));
+
+    if (accepted) {
+      const signedPlayer: Player = {
+        ...negotiatingPlayer,
+        isFreeAgent: false,
+        salary: offer.salary,
+        contractYears: offer.years,
+        morale: Math.min(100, (negotiatingPlayer.morale || 80) + 10),
+      };
+
+      const updatedTeams = league.teams.map(t =>
+        t.id === userTeam.id ? { ...t, roster: [...t.roster, signedPlayer] } : t
+      );
+      const updatedFAs = league.freeAgents.filter(p => p.id !== negotiatingPlayer.id);
+      const updatedTxs = recordTransaction(
+        league, 'signing', [userTeam.id],
+        `${userTeam.name} signed ${signedPlayer.name} to a ${offer.years}y/${fmt(offer.salary)} contract.`,
+        [signedPlayer.id], offer.salary * offer.years
+      );
+
+      const newsItem = {
+        id: `fa-sign-${Date.now()}`,
+        category: 'transaction' as const,
+        headline: `✍️ SIGNED: ${negotiatingPlayer.name}`,
+        content: `The ${userTeam.name} have agreed to terms with ${negotiatingPlayer.name} on a ${offer.years}-year, ${fmt(offer.salary)}/yr deal.`,
+        timestamp: league.currentDay,
+        realTimestamp: Date.now(),
+        isBreaking: false,
+      };
+
+      updateLeague({
+        teams: updatedTeams,
+        freeAgents: updatedFAs,
+        transactions: updatedTxs,
+        newsFeed: [newsItem, ...league.newsFeed],
+      });
+
+      setNegotiationResult('accepted');
+      setAgentMessage(`We're thrilled to join the ${userTeam.name}. This is the right fit for us.`);
+    } else if (salaryRatio < 0.75 || (salaryRatio < 0.9 && interest < 45)) {
+      // Flat decline
+      setNegotiationResult('declined');
+      const msgs = [
+        `My client has better offers on the table. We'll have to pass.`,
+        `The numbers don't work for us. Thanks for your interest.`,
+        `We expected more from an organization like yours. We'll explore other options.`,
+      ];
+      setAgentMessage(msgs[Math.floor(Math.random() * msgs.length)]);
+    } else {
+      // Counter-offer
+      const cYears = salaryRatio < 0.9 ? desired.years : offer.years;
+      const cSalary = Math.round((desired.salary * (0.95 + Math.random() * 0.1)) / 250_000) * 250_000;
+      setCounterOffer({ years: cYears, salary: cSalary });
+      setNegotiationResult('counter');
+      setAgentMessage(
+        `We appreciate the offer, but my client is looking for ${cYears}y at ${fmt(cSalary)}/yr. Can you meet us there?`
+      );
     }
-    
+
     setIsSubmitting(false);
+  }, [negotiatingPlayer, offer, league, userTeam, recordTransaction, updateLeague]);
+
+  // ── Accept counter-offer ──
+  const acceptCounter = () => {
+    if (!negotiatingPlayer || !counterOffer) return;
+    const acceptedOffer: ContractOffer = {
+      ...offer,
+      years: counterOffer.years,
+      salary: counterOffer.salary,
+    };
+
+    const signedPlayer: Player = {
+      ...negotiatingPlayer,
+      isFreeAgent: false,
+      salary: acceptedOffer.salary,
+      contractYears: acceptedOffer.years,
+      morale: Math.min(100, (negotiatingPlayer.morale || 80) + 5),
+    };
+
+    const updatedTeams = league.teams.map(t =>
+      t.id === userTeam.id ? { ...t, roster: [...t.roster, signedPlayer] } : t
+    );
+    const updatedFAs = league.freeAgents.filter(p => p.id !== negotiatingPlayer.id);
+    const updatedTxs = recordTransaction(
+      league, 'signing', [userTeam.id],
+      `${userTeam.name} signed ${signedPlayer.name} to a ${acceptedOffer.years}y/${fmt(acceptedOffer.salary)} contract.`,
+      [signedPlayer.id], acceptedOffer.salary * acceptedOffer.years
+    );
+
+    const newsItem = {
+      id: `fa-sign-${Date.now()}`,
+      category: 'transaction' as const,
+      headline: `✍️ SIGNED: ${negotiatingPlayer.name}`,
+      content: `The ${userTeam.name} agreed to a counter-offer from ${negotiatingPlayer.name}: ${acceptedOffer.years}yr/${fmt(acceptedOffer.salary)}/yr.`,
+      timestamp: league.currentDay,
+      realTimestamp: Date.now(),
+      isBreaking: false,
+    };
+
+    updateLeague({
+      teams: updatedTeams,
+      freeAgents: updatedFAs,
+      transactions: updatedTxs,
+      newsFeed: [newsItem, ...league.newsFeed],
+    });
+
+    setNegotiationResult('accepted');
+    setAgentMessage(`Deal done. We look forward to winning with the ${userTeam.name}.`);
+    setCounterOffer(null);
   };
 
+  // ── Advance Day / AI signings ──
   const advanceDay = () => {
-    if (league.draftPhase !== 'completed') {
-      alert("Free Agency is currently in moratorium. Complete the NBA Draft first!");
-      return;
-    }
-    // Logic for other teams signing players
-    const updatedFAs = [...league.freeAgents];
-    const newTransactions: Transaction[] = [];
+    if (league.draftPhase !== 'completed') return;
 
-    // Simulate 5 signings by other teams
-    for (let i = 0; i < 5; i++) {
+    let updatedFAs = [...league.freeAgents];
+    const newNews: typeof league.newsFeed = [];
+    const newTxs: Transaction[] = [];
+    const aiTeams = league.teams.filter(t => t.id !== league.userTeamId);
+
+    const signingsCount = Math.min(AI_SIGNINGS_PER_DAY + Math.floor(Math.random() * 3), updatedFAs.length);
+
+    for (let i = 0; i < signingsCount; i++) {
       if (updatedFAs.length === 0) break;
-      const targetIdx = Math.floor(Math.random() * Math.min(10, updatedFAs.length));
-      const p = updatedFAs.splice(targetIdx, 1)[0];
-      const randomTeam = league.teams.filter(t => t.id !== userTeam.id)[Math.floor(Math.random() * (league.teams.length - 1))];
-      
-      const years = 1 + Math.floor(Math.random() * 3);
-      const sal = p.desiredContract?.salary || 5000000;
-      
+      // Weight toward better players early in FA
+      const maxIdx = Math.min(Math.floor(updatedFAs.length * 0.4) + 3, updatedFAs.length - 1);
+      const idx = Math.floor(Math.random() * (maxIdx + 1));
+      const player = updatedFAs.splice(idx, 1)[0];
+      const team = aiTeams[Math.floor(Math.random() * aiTeams.length)];
+      if (!team) continue;
+
+      const desired = getDesired(player);
+      const years = desired.years + (Math.random() < 0.3 ? 1 : 0);
+      const salaryMult = 0.85 + Math.random() * 0.3;
+      const salary = Math.round((desired.salary * salaryMult) / 250_000) * 250_000;
+
       const tx: Transaction = {
         id: `tx-ai-${Date.now()}-${i}`,
         type: 'signing',
         timestamp: league.currentDay,
-        realTimestamp: Date.now(),
-        teamIds: [randomTeam.id],
-        playerIds: [p.id],
-        description: `${randomTeam.name} signed ${p.name} to a ${years}y/${formatMoney(sal)} contract.`,
-        value: sal * years
+        realTimestamp: Date.now() + i,
+        teamIds: [team.id],
+        playerIds: [player.id],
+        description: `${team.name} signed ${player.name} to a ${years}y/${fmt(salary)} contract.`,
+        value: salary * years,
       };
-      newTransactions.push(tx);
+      newTxs.push(tx);
+
+      newNews.push({
+        id: `fa-ai-${Date.now()}-${i}`,
+        category: 'transaction',
+        headline: `${player.name} signs with ${team.name}`,
+        content: `${player.name} (${player.position}, ${player.rating} OVR) agreed to a ${years}-year deal with the ${team.name} worth ${fmt(salary)}/yr.`,
+        timestamp: league.currentDay,
+        realTimestamp: Date.now() + i,
+        teamId: team.id,
+        playerId: player.id,
+        isBreaking: false,
+      });
     }
 
-    updateLeague({ 
-      freeAgents: updatedFAs, 
+    updateLeague({
+      freeAgents: updatedFAs,
       offseasonDay: league.offseasonDay + 1,
-      transactions: [...newTransactions, ...(league.transactions || [])].slice(0, 1000)
+      newsFeed: [...newNews, ...league.newsFeed],
+      transactions: [...newTxs, ...(league.transactions || [])].slice(0, 1000),
     });
   };
 
-  const formatMoney = (val: number) => `$${(val / 1000000).toFixed(1)}M`;
+  // ── Sort toggle ──
+  const toggleSort = (key: SortKey) => {
+    if (sortKey === key) setSortAsc(a => !a);
+    else { setSortKey(key); setSortAsc(false); }
+  };
 
+  const SortBtn: React.FC<{ k: SortKey; label: string }> = ({ k, label }) => (
+    <button
+      onClick={() => toggleSort(k)}
+      className={`text-[10px] font-black uppercase px-2 py-1 rounded transition-colors ${
+        sortKey === k ? 'text-amber-500' : 'text-slate-600 hover:text-slate-400'
+      }`}
+    >
+      {label} {sortKey === k ? (sortAsc ? '↑' : '↓') : ''}
+    </button>
+  );
+
+  const positions: Position[] = ['PG', 'SG', 'SF', 'PF', 'C'];
+
+  // ── Render ──────────────────────────────────────────────────────────────────
   return (
-    <div className="space-y-8 animate-in fade-in duration-500 pb-40">
-      {league.draftPhase !== 'completed' && (
-        <div className="bg-amber-500/10 border border-amber-500/20 rounded-[2rem] p-8 text-center">
-          <h3 className="text-2xl font-display font-bold text-amber-500 uppercase mb-2">Moratorium in Effect</h3>
-          <p className="text-slate-400 text-sm font-medium">Free Agency will officially open once the NBA Draft has concluded. Scout the market and prepare your offers.</p>
-        </div>
-      )}
-      <header className="bg-slate-900 border border-slate-800 rounded-[2.5rem] p-8 shadow-2xl relative overflow-hidden">
-        <div className="absolute top-0 right-0 w-80 h-80 bg-emerald-500/5 blur-[100px] rounded-full -mr-40 -mt-40"></div>
-        <div className="relative z-10 flex flex-col md:flex-row items-center justify-between gap-6">
+    <div className="space-y-6 animate-in fade-in duration-500 pb-40">
+
+      {/* ── Moratorium Banner ── */}
+      {moratoriumActive && (
+        <div className="bg-amber-500/10 border border-amber-500/30 rounded-[2rem] p-6 flex flex-col sm:flex-row items-center justify-between gap-4">
           <div>
-            <h2 className="text-4xl font-display font-bold uppercase tracking-tight text-white mb-2">Free Agency Hub</h2>
-            <p className="text-slate-500 text-sm font-bold uppercase tracking-widest">
-              Moratorium Period: <span className="text-amber-500">Day {league.offseasonDay}</span>
+            <p className="text-[10px] font-black uppercase tracking-[0.4em] text-amber-500 mb-1">
+              {league.draftPhase !== 'completed' ? '⏳ Draft in Progress' : '🔒 Moratorium in Effect'}
+            </p>
+            <h3 className="text-xl font-display font-bold text-white uppercase">
+              {league.draftPhase !== 'completed'
+                ? 'Complete the Draft to begin Free Agency'
+                : daysUntilOpen! > 0
+                  ? `Signings open in ${daysUntilOpen} day${daysUntilOpen !== 1 ? 's' : ''}`
+                  : 'Free Agency is open'}
+            </h3>
+            <p className="text-slate-500 text-xs mt-1">
+              {league.draftPhase !== 'completed'
+                ? 'Scout the market and plan your offers.'
+                : 'Teams may negotiate but cannot officially sign players yet. Use Advance Day to progress.'}
             </p>
           </div>
-          <div className="flex gap-4">
-             <div className="bg-slate-950/50 px-6 py-3 rounded-2xl border border-slate-800 text-center">
-                <p className="text-[10px] text-slate-500 uppercase font-bold mb-1">Cap Space</p>
-                <p className={`text-2xl font-display font-bold ${capSpace > 0 ? 'text-emerald-400' : 'text-rose-500'}`}>
-                  {formatMoney(capSpace)}
+          {league.draftPhase === 'completed' && (
+            <div className="shrink-0 text-center">
+              <p className="text-[10px] text-slate-500 uppercase font-bold mb-1">Moratorium Day</p>
+              <p className="text-4xl font-display font-black text-amber-500">
+                {league.offseasonDay}<span className="text-slate-600 text-xl">/{MORATORIUM_DAYS}</span>
+              </p>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* ── Header ── */}
+      <header className="bg-slate-900 border border-slate-800 rounded-[2.5rem] p-8 shadow-2xl relative overflow-hidden">
+        <div className="absolute top-0 right-0 w-80 h-80 bg-emerald-500/5 blur-[100px] rounded-full -mr-40 -mt-40" />
+        <div className="relative z-10 flex flex-col md:flex-row items-center justify-between gap-6">
+          <div>
+            <h2 className="text-4xl font-display font-bold uppercase tracking-tight text-white mb-1">
+              Free Agency <span className="text-emerald-400">Hub</span>
+            </h2>
+            <p className="text-slate-500 text-sm font-bold uppercase tracking-widest">
+              {moratoriumActive
+                ? <span className="text-amber-500">Moratorium Active</span>
+                : <span className="text-emerald-400">🟢 Signings Open — Day {league.offseasonDay}</span>
+              }
+              <span className="ml-3 text-slate-700">·</span>
+              <span className="ml-3 text-slate-500">{filteredFAs.length} players available</span>
+            </p>
+          </div>
+
+          <div className="flex items-center gap-3 flex-wrap justify-end">
+            {/* Cap Space */}
+            <div className={`px-5 py-3 rounded-2xl border text-center min-w-[110px] ${
+              isOverCap ? 'bg-rose-900/20 border-rose-500/30' : 'bg-slate-950/50 border-slate-800'
+            }`}>
+              <p className="text-[10px] text-slate-500 uppercase font-bold mb-0.5">Cap Space</p>
+              <p className={`text-xl font-display font-bold ${isOverCap ? 'text-rose-400' : 'text-emerald-400'}`}>
+                {isOverCap ? '-' : ''}{fmt(Math.abs(capSpace))}
+              </p>
+            </div>
+
+            {/* Luxury tax indicator */}
+            {currentSalary > salaryCap * 0.9 && (
+              <div className={`px-5 py-3 rounded-2xl border text-center min-w-[110px] ${
+                isOverLux ? 'bg-rose-900/20 border-rose-500/30' : 'bg-amber-900/20 border-amber-500/30'
+              }`}>
+                <p className="text-[10px] text-slate-500 uppercase font-bold mb-0.5">
+                  {isOverLux ? 'Luxury Tax' : 'Lux. Line'}
                 </p>
-             </div>
-             <button 
-              onClick={advanceDay}
-              className="px-8 py-4 bg-amber-500 hover:bg-amber-400 text-slate-950 font-display font-bold uppercase rounded-xl transition-all shadow-xl shadow-amber-500/20 active:scale-95"
-             >
-               Advance Day
-             </button>
+                <p className={`text-xl font-display font-bold ${isOverLux ? 'text-rose-400' : 'text-amber-400'}`}>
+                  {isOverLux ? '+' : ''}{fmt(Math.abs(currentSalary - luxuryTax))}
+                </p>
+              </div>
+            )}
+
+            {/* Current payroll */}
+            <div className="bg-slate-950/50 px-5 py-3 rounded-2xl border border-slate-800 text-center min-w-[110px]">
+              <p className="text-[10px] text-slate-500 uppercase font-bold mb-0.5">Payroll</p>
+              <p className="text-xl font-display font-bold text-slate-300">{fmt(currentSalary)}</p>
+            </div>
+
+            {/* Advance Day */}
+            {league.draftPhase === 'completed' && (
+              <button
+                onClick={advanceDay}
+                className="px-7 py-4 bg-amber-500 hover:bg-amber-400 text-slate-950 font-display font-bold uppercase rounded-xl transition-all shadow-xl shadow-amber-500/20 active:scale-95"
+              >
+                Advance Day →
+              </button>
+            )}
+          </div>
+        </div>
+
+        {/* Payroll bar */}
+        <div className="relative z-10 mt-5">
+          <div className="flex justify-between text-[10px] text-slate-600 font-bold uppercase mb-1">
+            <span>Payroll</span>
+            <span className={isOverCap ? 'text-rose-400' : 'text-slate-500'}>
+              {fmt(currentSalary)} / {fmt(salaryCap)} cap · Lux: {fmt(luxuryTax)}
+            </span>
+          </div>
+          <div className="h-2 bg-slate-800 rounded-full overflow-hidden">
+            <div
+              className={`h-full rounded-full transition-all duration-700 ${
+                isOverLux ? 'bg-rose-500' : isOverCap ? 'bg-orange-500' : 'bg-emerald-500'
+              }`}
+              style={{ width: `${Math.min(100, (currentSalary / luxuryTax) * 100)}%` }}
+            />
+          </div>
+          {/* Cap & lux tick marks */}
+          <div className="relative h-0">
+            <div
+              className="absolute top-0 w-0.5 h-3 bg-amber-500/60 -translate-y-2"
+              style={{ left: `${Math.min(100, (salaryCap / luxuryTax) * 100)}%` }}
+            />
           </div>
         </div>
       </header>
 
-      <div className="grid grid-cols-1 gap-8">
-        <div className="bg-slate-900 border border-slate-800 rounded-3xl overflow-hidden shadow-2xl">
-          <div className="p-6 border-b border-slate-800 flex items-center justify-between gap-4">
-             <div className="relative flex-1">
-                <input 
-                  type="text" 
-                  placeholder="Search free agents..."
-                  className="w-full bg-slate-950 border border-slate-800 rounded-xl px-6 py-3 text-white focus:outline-none focus:border-amber-500/50"
-                  value={searchTerm}
-                  onChange={(e) => setSearchTerm(e.target.value)}
-                />
-             </div>
+      {/* ── Filters ── */}
+      <div className="bg-slate-900 border border-slate-800 rounded-3xl p-4 shadow-xl">
+        <div className="flex flex-wrap items-center gap-3">
+          {/* Search */}
+          <div className="relative flex-1 min-w-[180px]">
+            <svg className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+            </svg>
+            <input
+              type="text"
+              placeholder="Search players…"
+              value={search}
+              onChange={e => setSearch(e.target.value)}
+              className="w-full bg-slate-950 border border-slate-800 rounded-xl pl-9 pr-4 py-2.5 text-white text-sm focus:outline-none focus:border-amber-500/50 transition-colors"
+            />
           </div>
-          <div className="overflow-x-auto">
-             <table className="w-full text-left text-xs">
-                <thead>
-                  <tr className="bg-slate-950/50 border-b border-slate-800 text-[10px] font-black uppercase text-slate-500 tracking-widest">
-                    <th className="px-6 py-4">Player</th>
-                    <th className="px-6 py-4">Age</th>
-                    <th className="px-6 py-4 text-center">OVR/POT</th>
-                    <th className="px-6 py-4">Interest</th>
-                    <th className="px-6 py-4">Desired</th>
-                    <th className="px-6 py-4 text-right">Action</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-800/40">
-                  {filteredFAs.map(p => (
-                    <tr key={p.id} className="group hover:bg-slate-800/30 transition-all">
-                      <td className="px-6 py-5" onClick={() => onScout(p)}>
-                         <p className="font-bold text-slate-200 uppercase tracking-tight cursor-pointer hover:text-amber-500">{p.name}</p>
-                         <p className="text-[10px] text-slate-600 font-bold uppercase">{p.position} • {league.teams.find(t => t.id === p.lastTeamId)?.name || 'FA'}</p>
-                      </td>
-                      <td className="px-6 py-5 text-slate-400 font-bold">{p.age}</td>
-                      <td className="px-6 py-5 text-center">
-                         <span className="text-amber-500 font-black text-sm">{p.rating}</span>
-                         <span className="text-slate-700 mx-1">/</span>
-                         <span className="text-slate-500 font-bold">{p.potential}</span>
-                      </td>
-                      <td className="px-6 py-5">
-                         <div className="flex items-center gap-2">
-                            <div className="flex-1 h-1.5 bg-slate-950 rounded-full overflow-hidden">
-                               <div className="h-full bg-emerald-500" style={{ width: `${p.interestScore}%` }}></div>
-                            </div>
-                            <span className="text-[10px] text-slate-500 font-black uppercase">
-                               {p.interestScore! > 70 ? 'High' : p.interestScore! > 40 ? 'Med' : 'Low'}
-                            </span>
-                         </div>
-                      </td>
-                      <td className="px-6 py-5 font-mono text-slate-300">
-                         {p.desiredContract?.years}Y @ {formatMoney(p.desiredContract?.salary || 0)}
-                      </td>
-                      <td className="px-6 py-5 text-right">
-                         <button 
-                           onClick={() => handleOpenNegotiation(p)}
-                           disabled={league.draftPhase !== 'completed'}
-                           className={`px-4 py-2 ${league.draftPhase !== 'completed' ? 'bg-slate-800 text-slate-600 cursor-not-allowed' : 'bg-slate-800 hover:bg-amber-500 text-slate-400 hover:text-slate-950'} text-[10px] font-black uppercase rounded-lg transition-all`}
-                         >
-                           Negotiate
-                         </button>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-             </table>
+
+          {/* Position */}
+          <select
+            value={posFilter}
+            onChange={e => setPosFilter(e.target.value as Position | 'ALL')}
+            className="bg-slate-950 border border-slate-800 text-slate-300 rounded-xl px-3 py-2.5 text-sm focus:border-amber-500 focus:outline-none"
+          >
+            <option value="ALL">All Positions</option>
+            {positions.map(p => <option key={p} value={p}>{p}</option>)}
+          </select>
+
+          {/* Interest */}
+          <select
+            value={interestFilter}
+            onChange={e => setInterestFilter(e.target.value as any)}
+            className="bg-slate-950 border border-slate-800 text-slate-300 rounded-xl px-3 py-2.5 text-sm focus:border-amber-500 focus:outline-none"
+          >
+            <option value="ALL">All Interest</option>
+            <option value="High">High Interest</option>
+            <option value="Med">Medium Interest</option>
+            <option value="Low">Low Interest</option>
+          </select>
+
+          {/* Sort pills */}
+          <div className="flex items-center gap-1 bg-slate-950/60 rounded-xl border border-slate-800 px-2 py-1">
+            <span className="text-[10px] text-slate-600 font-bold uppercase mr-1">Sort:</span>
+            <SortBtn k="rating" label="OVR" />
+            <SortBtn k="age" label="Age" />
+            <SortBtn k="interest" label="Interest" />
+            <SortBtn k="salary" label="$" />
           </div>
         </div>
       </div>
 
+      {/* ── FA Table ── */}
+      <div className="bg-slate-900 border border-slate-800 rounded-3xl overflow-hidden shadow-2xl">
+        <div className="p-5 border-b border-slate-800 flex items-center justify-between">
+          <h3 className="text-sm font-black uppercase tracking-widest text-white">
+            Available Players
+          </h3>
+          <span className="text-[10px] text-slate-600 font-bold uppercase">
+            {filteredFAs.length} of {league.freeAgents.length}
+          </span>
+        </div>
+
+        {filteredFAs.length === 0 ? (
+          <div className="p-12 text-center text-slate-600 text-sm italic">
+            No players match your filters.
+          </div>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full text-left text-xs">
+              <thead>
+                <tr className="bg-slate-950/50 border-b border-slate-800 text-[10px] font-black uppercase text-slate-500 tracking-widest">
+                  <th className="px-5 py-4">Player</th>
+                  <th className="px-4 py-4 text-center">OVR</th>
+                  <th className="px-4 py-4 text-center">Age</th>
+                  <th className="px-5 py-4">Interest</th>
+                  <th className="px-5 py-4">Asking</th>
+                  <th className="px-5 py-4 text-right">Action</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-800/40">
+                {filteredFAs.map(p => {
+                  const interest = interestLabel(p.interestScore ?? 50);
+                  const desired = getDesired(p);
+                  const canSign = !moratoriumActive && capSpace >= desired.salary * 0.7;
+                  return (
+                    <tr
+                      key={p.id}
+                      className="group hover:bg-slate-800/30 transition-all cursor-pointer"
+                      onClick={() => onScout(p)}
+                    >
+                      <td className="px-5 py-4" onClick={e => e.stopPropagation()}>
+                        <button
+                          onClick={() => onScout(p)}
+                          className="text-left"
+                        >
+                          <p className="font-bold text-slate-200 uppercase tracking-tight hover:text-amber-500 transition-colors">
+                            {p.name}
+                          </p>
+                          <p className="text-[10px] text-slate-600 font-bold uppercase mt-0.5">
+                            {p.position} · {getFlag(p.country)}{p.hometown}
+                            {p.lastTeamId
+                              ? ` · ${league.teams.find(t => t.id === p.lastTeamId)?.name ?? 'FA'}`
+                              : ' · Free Agent'}
+                          </p>
+                        </button>
+                      </td>
+
+                      <td className="px-4 py-4 text-center" onClick={e => e.stopPropagation()}>
+                        <span className={`font-black text-sm ${ratingColor(p.rating)}`}>{p.rating}</span>
+                        <span className="text-slate-700 text-[10px] mx-0.5">/</span>
+                        <span className="text-slate-600 text-[10px] font-bold">{p.potential}</span>
+                      </td>
+
+                      <td className="px-4 py-4 text-center text-slate-400 font-bold">
+                        {p.age}
+                      </td>
+
+                      <td className="px-5 py-4" onClick={e => e.stopPropagation()}>
+                        <div className="flex items-center gap-2 w-28">
+                          <div className="flex-1 h-1.5 bg-slate-950 rounded-full overflow-hidden">
+                            <div
+                              className={`h-full rounded-full ${interest.bar}`}
+                              style={{ width: `${p.interestScore ?? 50}%` }}
+                            />
+                          </div>
+                          <span className={`text-[10px] font-black uppercase w-7 ${interest.color}`}>
+                            {interest.text}
+                          </span>
+                        </div>
+                      </td>
+
+                      <td className="px-5 py-4 font-mono text-slate-300">
+                        <span className="font-bold">{desired.years}yr</span>
+                        <span className="text-slate-600 mx-1">@</span>
+                        <span className={desired.salary > capSpace ? 'text-rose-400' : 'text-slate-300'}>
+                          {fmt(desired.salary)}
+                        </span>
+                      </td>
+
+                      <td className="px-5 py-4 text-right" onClick={e => e.stopPropagation()}>
+                        <button
+                          onClick={() => openNegotiation(p)}
+                          disabled={moratoriumActive}
+                          className={`px-4 py-2 text-[10px] font-black uppercase rounded-lg transition-all ${
+                            moratoriumActive
+                              ? 'bg-slate-800 text-slate-700 cursor-not-allowed'
+                              : canSign
+                                ? 'bg-slate-800 hover:bg-emerald-500 text-slate-400 hover:text-slate-950'
+                                : 'bg-slate-800 hover:bg-amber-500/20 border border-slate-700 hover:border-amber-500/40 text-slate-500 hover:text-amber-400'
+                          }`}
+                        >
+                          {moratoriumActive ? 'Locked' : 'Negotiate'}
+                        </button>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+
+      {/* ── Negotiation Modal ── */}
       {negotiatingPlayer && (
-        <div className="fixed inset-0 z-[2000] bg-slate-950/95 backdrop-blur-xl flex items-center justify-center p-6 animate-in fade-in zoom-in duration-300">
-           <div className="bg-slate-900 border border-slate-800 rounded-[3rem] w-full max-w-4xl p-10 shadow-2xl flex flex-col md:flex-row gap-12 relative overflow-hidden">
-              <div className="absolute top-0 right-0 p-8 opacity-5">
-                 <svg className="w-64 h-64" fill="currentColor" viewBox="0 0 24 24"><path d="M12 2L4.5 20.29l.71.71L12 18l6.79 3 .71-.71z"/></svg>
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4"
+          onClick={e => { if (e.target === e.currentTarget && !isSubmitting) setNegotiatingPlayer(null); }}
+        >
+          <div className="bg-slate-900 border border-slate-700 rounded-3xl w-full max-w-2xl shadow-2xl animate-in zoom-in-95 duration-300 overflow-hidden">
+
+            {/* Modal Header */}
+            <div className="p-6 border-b border-slate-800 flex items-start justify-between gap-4">
+              <div>
+                <p className="text-[10px] font-black uppercase tracking-[0.4em] text-amber-500 mb-1">Negotiating With</p>
+                <h2 className="text-2xl font-display font-black uppercase text-white">{negotiatingPlayer.name}</h2>
+                <p className="text-sm text-slate-400 mt-1">
+                  <span className="text-amber-500 font-bold">{negotiatingPlayer.position}</span>
+                  {' · '}{negotiatingPlayer.age} yrs · {negotiatingPlayer.rating} OVR
+                  {' · '}{interestLabel(negotiatingPlayer.interestScore ?? 50).text} Interest
+                </p>
               </div>
+              {!isSubmitting && (
+                <button
+                  onClick={() => setNegotiatingPlayer(null)}
+                  className="w-9 h-9 rounded-full bg-slate-800 hover:bg-slate-700 flex items-center justify-center text-slate-400 hover:text-white transition-all shrink-0"
+                >
+                  ✕
+                </button>
+              )}
+            </div>
 
-              <div className="flex-1 space-y-8 relative z-10">
-                 <div>
-                    <h3 className="text-xs font-black uppercase tracking-[0.4em] text-amber-500 mb-2">Negotiating With</h3>
-                    <h2 className="text-5xl font-display font-bold text-white uppercase">{negotiatingPlayer.name}</h2>
-                 </div>
+            <div className="p-6 space-y-5">
+              {/* Result banner */}
+              {negotiationResult === 'accepted' && (
+                <div className="bg-emerald-500/10 border border-emerald-500/40 rounded-2xl p-4 text-center animate-in zoom-in-95">
+                  <p className="text-2xl mb-1">🤝</p>
+                  <p className="text-emerald-400 font-black uppercase text-sm">Deal Agreed!</p>
+                  <p className="text-slate-400 text-xs mt-1 italic">"{agentMessage}"</p>
+                  <button
+                    onClick={() => setNegotiatingPlayer(null)}
+                    className="mt-4 px-6 py-2 bg-emerald-500 text-slate-950 font-black uppercase text-sm rounded-xl"
+                  >
+                    Done
+                  </button>
+                </div>
+              )}
 
-                 <div className="grid grid-cols-2 gap-4">
-                    <div className="space-y-2">
-                       <label className="text-[10px] font-black uppercase text-slate-500">Contract Length</label>
-                       <select 
-                         value={offer.years} 
-                         onChange={(e) => setOffer({...offer, years: parseInt(e.target.value)})}
-                         className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-3 text-white focus:outline-none"
-                       >
-                          <option value={1}>1 Year</option>
-                          <option value={2}>2 Years</option>
-                          <option value={3}>3 Years</option>
-                          <option value={4}>4 Years</option>
-                       </select>
-                    </div>
-                    <div className="space-y-2">
-                       <label className="text-[10px] font-black uppercase text-slate-500">Annual Salary</label>
-                       <div className="flex items-center bg-slate-950 border border-slate-800 rounded-xl px-4 py-3">
-                          <span className="text-slate-500 font-bold mr-2">$</span>
-                          <input 
-                            type="number" 
-                            value={offer.salary} 
-                            onChange={(e) => setOffer({...offer, salary: parseInt(e.target.value)})}
-                            className="bg-transparent text-white w-full focus:outline-none font-mono"
-                          />
-                       </div>
-                    </div>
-                 </div>
+              {negotiationResult === 'declined' && (
+                <div className="bg-rose-500/10 border border-rose-500/40 rounded-2xl p-4 text-center animate-in zoom-in-95">
+                  <p className="text-2xl mb-1">❌</p>
+                  <p className="text-rose-400 font-black uppercase text-sm">Offer Declined</p>
+                  <p className="text-slate-400 text-xs mt-1 italic">"{agentMessage}"</p>
+                </div>
+              )}
 
-                 <div className="space-y-4">
-                    <div className="flex items-center justify-between bg-slate-950/50 p-4 rounded-2xl border border-slate-800">
-                       <span className="text-xs font-bold text-slate-300">Player Option</span>
-                       <input type="checkbox" checked={offer.hasPlayerOption} onChange={(e) => setOffer({...offer, hasPlayerOption: e.target.checked})} className="w-5 h-5 accent-amber-500" />
+              {negotiationResult === 'counter' && counterOffer && (
+                <div className="bg-amber-500/10 border border-amber-500/40 rounded-2xl p-4 animate-in zoom-in-95">
+                  <p className="text-[10px] font-black uppercase text-amber-500 mb-2 tracking-widest">Counter-Offer</p>
+                  <p className="text-slate-300 text-sm italic mb-3">"{agentMessage}"</p>
+                  <div className="flex items-center gap-4">
+                    <div className="bg-slate-900 border border-slate-800 rounded-xl p-3 text-center flex-1">
+                      <p className="text-[10px] text-slate-500 uppercase font-bold">Years</p>
+                      <p className="text-xl font-bold text-white">{counterOffer.years}</p>
                     </div>
-                    <div className="flex items-center justify-between bg-slate-950/50 p-4 rounded-2xl border border-slate-800">
-                       <span className="text-xs font-bold text-slate-300">No Trade Clause</span>
-                       <input type="checkbox" checked={offer.hasNoTradeClause} onChange={(e) => setOffer({...offer, hasNoTradeClause: e.target.checked})} className="w-5 h-5 accent-amber-500" />
+                    <div className="bg-slate-900 border border-slate-800 rounded-xl p-3 text-center flex-1">
+                      <p className="text-[10px] text-slate-500 uppercase font-bold">Per Year</p>
+                      <p className="text-xl font-bold text-amber-400">{fmt(counterOffer.salary)}</p>
                     </div>
-                 </div>
-
-                 <div className="pt-4 flex gap-4">
-                    <button 
-                      onClick={submitOffer}
-                      disabled={isSubmitting}
-                      className="flex-1 py-4 bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-display font-bold uppercase rounded-2xl shadow-xl transition-all active:scale-95"
+                    <div className="bg-slate-900 border border-slate-800 rounded-xl p-3 text-center flex-1">
+                      <p className="text-[10px] text-slate-500 uppercase font-bold">Total</p>
+                      <p className="text-xl font-bold text-slate-300">{fmt(counterOffer.salary * counterOffer.years)}</p>
+                    </div>
+                  </div>
+                  <div className="flex gap-3 mt-4">
+                    <button
+                      onClick={acceptCounter}
+                      className="flex-1 py-3 bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-black uppercase text-sm rounded-xl transition-all"
                     >
-                      {isSubmitting ? 'Consulting Agent...' : 'Send Offer'}
+                      Accept Counter
                     </button>
-                    <button 
-                      onClick={() => setNegotiatingPlayer(null)}
-                      className="px-8 py-4 bg-slate-800 hover:bg-slate-700 text-slate-400 font-display font-bold uppercase rounded-2xl transition-all"
+                    <button
+                      onClick={() => { setNegotiationResult(null); setCounterOffer(null); }}
+                      className="px-5 py-3 bg-slate-800 hover:bg-slate-700 text-slate-400 font-bold uppercase text-sm rounded-xl transition-all"
                     >
-                      Back
+                      Decline
                     </button>
-                 </div>
-              </div>
+                  </div>
+                </div>
+              )}
 
-              <div className="w-full md:w-80 bg-slate-950/50 rounded-[2rem] p-8 border border-slate-800 flex flex-col justify-between">
-                 <div className="space-y-6">
-                    <h4 className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-500">Agent Feedback</h4>
-                    {agentFeedback ? (
-                      <p className="text-lg italic text-slate-200 leading-relaxed">"{agentFeedback}"</p>
-                    ) : (
-                      <div className="space-y-4 opacity-30">
-                         <div className="h-4 bg-slate-800 rounded w-full"></div>
-                         <div className="h-4 bg-slate-800 rounded w-3/4"></div>
+              {/* Offer form — shown when no final result yet */}
+              {negotiationResult !== 'accepted' && (
+                <div className="space-y-4">
+                  {/* Player's ask */}
+                  <div className="flex items-center justify-between bg-slate-950/60 border border-slate-800 rounded-2xl p-4">
+                    <div>
+                      <p className="text-[10px] text-slate-500 uppercase font-bold">Player's Ask</p>
+                      <p className="text-base font-bold text-slate-300 mt-0.5">
+                        {getDesired(negotiatingPlayer).years}yr · {fmt(getDesired(negotiatingPlayer).salary)}/yr
+                      </p>
+                    </div>
+                    <div className="text-right">
+                      <p className="text-[10px] text-slate-500 uppercase font-bold">Total Value</p>
+                      <p className="text-base font-bold text-amber-500 mt-0.5">
+                        {fmt(getDesired(negotiatingPlayer).salary * getDesired(negotiatingPlayer).years)}
+                      </p>
+                    </div>
+                  </div>
+
+                  {/* Offer inputs */}
+                  <div className="grid grid-cols-2 gap-4">
+                    <div>
+                      <label className="text-[10px] font-black uppercase text-slate-500 block mb-2">
+                        Contract Length
+                      </label>
+                      <select
+                        value={offer.years}
+                        onChange={e => setOffer({ ...offer, years: parseInt(e.target.value) })}
+                        className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-3 text-white text-sm focus:outline-none focus:border-amber-500 transition-colors"
+                      >
+                        {[1, 2, 3, 4, 5].map(y => (
+                          <option key={y} value={y}>{y} Year{y > 1 ? 's' : ''}</option>
+                        ))}
+                      </select>
+                    </div>
+                    <div>
+                      <label className="text-[10px] font-black uppercase text-slate-500 block mb-2">
+                        Annual Salary
+                      </label>
+                      <div className="flex items-center bg-slate-950 border border-slate-800 rounded-xl px-4 py-3 focus-within:border-amber-500 transition-colors">
+                        <span className="text-slate-500 font-bold mr-2 text-sm">$</span>
+                        <input
+                          type="number"
+                          min={500_000}
+                          step={250_000}
+                          value={offer.salary}
+                          onChange={e => setOffer({ ...offer, salary: Math.max(0, parseInt(e.target.value) || 0) })}
+                          className="bg-transparent text-white w-full focus:outline-none font-mono text-sm"
+                        />
                       </div>
-                    )}
-                 </div>
-                 
-                 <div className="mt-8 pt-8 border-t border-slate-800">
-                    <p className="text-[10px] text-slate-600 font-black uppercase mb-1">Market Analysis</p>
-                    <p className="text-sm text-slate-400">Team Cap Space: {formatMoney(capSpace)}</p>
-                    <p className="text-sm text-slate-400">Projected Offer Rank: <span className="text-amber-500">Tier 2</span></p>
-                 </div>
+                      <p className="text-[10px] text-slate-600 mt-1">{fmtFull(offer.salary)}/yr · Total: {fmt(offer.salary * offer.years)}</p>
+                    </div>
+                  </div>
+
+                  {/* Salary quick-set buttons */}
+                  <div className="flex gap-2 flex-wrap">
+                    {[0.8, 0.9, 1.0, 1.1, 1.2].map(mult => {
+                      const s = Math.round((getDesired(negotiatingPlayer).salary * mult) / 250_000) * 250_000;
+                      return (
+                        <button
+                          key={mult}
+                          onClick={() => setOffer({ ...offer, salary: s })}
+                          className={`px-3 py-1.5 text-[10px] font-black uppercase rounded-lg border transition-all ${
+                            offer.salary === s
+                              ? 'bg-amber-500/20 border-amber-500/40 text-amber-400'
+                              : 'bg-slate-950/50 border-slate-800 text-slate-500 hover:border-slate-600'
+                          }`}
+                        >
+                          {mult === 1.0 ? 'Ask' : `${mult > 1 ? '+' : ''}${Math.round((mult - 1) * 100)}%`} · {fmt(s)}
+                        </button>
+                      );
+                    })}
+                  </div>
+
+                  {/* Options */}
+                  <div className="grid grid-cols-2 gap-3">
+                    <button
+                      onClick={() => setOffer(o => ({ ...o, hasPlayerOption: !o.hasPlayerOption }))}
+                      className={`flex items-center justify-between p-3 rounded-xl border transition-all ${
+                        offer.hasPlayerOption
+                          ? 'bg-amber-500/10 border-amber-500/30 text-amber-400'
+                          : 'bg-slate-950/50 border-slate-800 text-slate-500 hover:border-slate-600'
+                      }`}
+                    >
+                      <span className="text-[11px] font-bold">Player Option</span>
+                      <span>{offer.hasPlayerOption ? '✓' : '+'}</span>
+                    </button>
+                    <button
+                      onClick={() => setOffer(o => ({ ...o, hasNoTradeClause: !o.hasNoTradeClause }))}
+                      className={`flex items-center justify-between p-3 rounded-xl border transition-all ${
+                        offer.hasNoTradeClause
+                          ? 'bg-amber-500/10 border-amber-500/30 text-amber-400'
+                          : 'bg-slate-950/50 border-slate-800 text-slate-500 hover:border-slate-600'
+                      }`}
+                    >
+                      <span className="text-[11px] font-bold">No-Trade Clause</span>
+                      <span>{offer.hasNoTradeClause ? '✓' : '+'}</span>
+                    </button>
+                  </div>
+
+                  {/* Cap warning */}
+                  {offer.salary > capSpace && !isOverCap && (
+                    <div className="flex items-center gap-2 bg-amber-500/10 border border-amber-500/20 rounded-xl p-3">
+                      <span className="text-amber-400">⚠</span>
+                      <p className="text-[11px] text-amber-400 font-bold">
+                        This salary exceeds your cap space ({fmt(capSpace)} remaining). You'd need to cut players first.
+                      </p>
+                    </div>
+                  )}
+                  {isOverCap && (
+                    <div className="flex items-center gap-2 bg-rose-500/10 border border-rose-500/20 rounded-xl p-3">
+                      <span className="text-rose-400">🚫</span>
+                      <p className="text-[11px] text-rose-400 font-bold">
+                        You are over the salary cap. Use mid-level or bi-annual exceptions to sign.
+                      </p>
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+
+            {/* Footer */}
+            {negotiationResult !== 'accepted' && (
+              <div className="p-4 border-t border-slate-800 flex gap-3">
+                <button
+                  onClick={() => setNegotiatingPlayer(null)}
+                  disabled={isSubmitting}
+                  className="px-6 py-3 bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold uppercase text-sm rounded-xl transition-all"
+                >
+                  Cancel
+                </button>
+                {negotiationResult !== 'declined' && (
+                  <button
+                    onClick={submitOffer}
+                    disabled={isSubmitting || offer.salary <= 0}
+                    className="flex-1 py-3 bg-emerald-500 hover:bg-emerald-400 disabled:opacity-50 disabled:cursor-not-allowed text-slate-950 font-display font-black uppercase text-sm rounded-xl transition-all active:scale-95 shadow-lg shadow-emerald-500/20"
+                  >
+                    {isSubmitting ? (
+                      <span className="flex items-center justify-center gap-2">
+                        <svg className="animate-spin w-4 h-4" viewBox="0 0 24 24" fill="none">
+                          <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/>
+                          <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"/>
+                        </svg>
+                        Consulting Agent…
+                      </span>
+                    ) : 'Send Offer'}
+                  </button>
+                )}
+                {negotiationResult === 'declined' && (
+                  <button
+                    onClick={() => setNegotiationResult(null)}
+                    className="flex-1 py-3 bg-amber-500 hover:bg-amber-400 text-slate-950 font-display font-black uppercase text-sm rounded-xl transition-all active:scale-95"
+                  >
+                    Revise Offer
+                  </button>
+                )}
               </div>
-           </div>
+            )}
+          </div>
         </div>
       )}
     </div>
