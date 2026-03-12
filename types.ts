@@ -697,6 +697,9 @@ export interface LeagueState {
   };
   /** Populated when the human roster OVR ranks top-3 at season start (advisory only). */
   humanOvrAlert?: string;
+  seasonPhase?: SeasonPhase;
+  tradeDeadlinePassed?: boolean;
+  allStarWeekend?: AllStarWeekendData;
   liveGame?: {
     gameId: string;
     homeScore: number;
@@ -712,3 +715,35 @@ export interface LeagueState {
 }
 
 export type TransactionType = 'trade' | 'signing' | 'release' | 'hiring' | 'firing' | 'injury' | 'waiver' | 'draft';
+
+export type SeasonPhase = 'Preseason' | 'Regular Season' | 'Trade Deadline' | 'All-Star Weekend' | 'Playoffs' | 'Offseason';
+
+export interface AllStarContestResult {
+  eventName: 'Skills Challenge' | '3-Point Contest' | 'Dunk Contest';
+  winner: { playerId: string; playerName: string; teamId: string; teamName: string };
+  runnerUp?: { playerId: string; playerName: string; teamId: string; teamName: string };
+  highlights: string[];
+}
+
+export interface AllStarGameResult {
+  eastScore: number;
+  westScore: number;
+  mvp: { playerId: string; playerName: string; teamId: string; teamName: string; statLine: string };
+  eastRoster: string[];
+  westRoster: string[];
+  highlights: string[];
+}
+
+export interface AllStarWeekendData {
+  year: number;
+  day: number;
+  eastRoster: string[];
+  westRoster: string[];
+  eastStarters: string[];
+  westStarters: string[];
+  skillsChallenge?: AllStarContestResult;
+  threePtContest?: AllStarContestResult;
+  dunkContest?: AllStarContestResult;
+  allStarGame?: AllStarGameResult;
+  completed: boolean;
+}
