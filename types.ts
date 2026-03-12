@@ -718,10 +718,19 @@ export type TransactionType = 'trade' | 'signing' | 'release' | 'hiring' | 'firi
 
 export type SeasonPhase = 'Preseason' | 'Regular Season' | 'Trade Deadline' | 'All-Star Weekend' | 'Playoffs' | 'Offseason';
 
+export interface AllStarVoteEntry {
+  playerId: string;
+  fanScore: number;      // 0-100 weighted fan vote
+  mediaScore: number;    // 0-100 weighted player/media/coach vote
+  totalScore: number;    // combined
+  selectionType: 'starter-fan' | 'starter-media' | 'reserve-coach' | 'injury-replacement';
+}
+
 export interface AllStarContestResult {
   eventName: 'Skills Challenge' | '3-Point Contest' | 'Dunk Contest';
-  winner: { playerId: string; playerName: string; teamId: string; teamName: string };
-  runnerUp?: { playerId: string; playerName: string; teamId: string; teamName: string };
+  participants: string[];  // player IDs who competed
+  winner: { playerId: string; playerName: string; teamId: string; teamName: string; score?: string };
+  runnerUp?: { playerId: string; playerName: string; teamId: string; teamName: string; score?: string };
   highlights: string[];
 }
 
@@ -732,15 +741,28 @@ export interface AllStarGameResult {
   eastRoster: string[];
   westRoster: string[];
   highlights: string[];
+  quarterScores?: { east: number[]; west: number[] };
 }
 
 export interface AllStarWeekendData {
   year: number;
   day: number;
-  eastRoster: string[];
-  westRoster: string[];
-  eastStarters: string[];
+  // Full rosters (starters + reserves)
+  eastRoster: string[];        // 12 total (5 starters + 7 reserves)
+  westRoster: string[];        // 12 total
+  eastStarters: string[];      // 5: 2 guards + 3 frontcourt
   westStarters: string[];
+  eastReserves: string[];      // 7 coach picks
+  westReserves: string[];
+  // Injury replacements
+  injuryReplacements?: Array<{ originalId: string; replacementId: string; conf: 'Eastern' | 'Western' }>;
+  // Vote breakdown per player
+  voteEntries?: AllStarVoteEntry[];
+  // Event participants (qualified pool, not just allstar roster)
+  skillsParticipants: string[];     // 4-6 guards/wings age<27
+  threePtParticipants: string[];    // 8 sharpshooters
+  dunkParticipants: string[];       // 4-6 athletes age<30
+  // Results
   skillsChallenge?: AllStarContestResult;
   threePtContest?: AllStarContestResult;
   dunkContest?: AllStarContestResult;
