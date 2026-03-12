@@ -388,33 +388,67 @@ const Playoffs: React.FC<PlayoffsProps> = ({ league, updateLeague, onStartOffsea
                   </button>
                 </>
              ) : (
-                <button 
-                  onClick={onStartOffseason}
-                  className="px-8 py-4 bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-display font-bold uppercase rounded-xl transition-all shadow-xl shadow-emerald-500/20 active:scale-95"
-                >
-                  Begin Offseason
-                </button>
+                <div className="px-6 py-3 bg-emerald-500/10 border border-emerald-500/20 rounded-xl text-center">
+                  <p className="text-[10px] font-black uppercase tracking-widest text-emerald-400">Season Complete</p>
+                  <p className="text-xs text-slate-400 mt-0.5">Scroll down to begin offseason</p>
+                </div>
              )}
           </div>
         </div>
       </header>
 
       {bracket.isCompleted && (
-        <div className="bg-gradient-to-br from-amber-500 to-amber-700 rounded-[3rem] p-12 text-center shadow-[0_0_100px_rgba(245,158,11,0.3)] animate-in zoom-in duration-1000 relative overflow-hidden">
-           <div className="absolute inset-0 bg-[url('https://www.transparenttextures.com/patterns/carbon-fibre.png')] opacity-20"></div>
-           <div className="relative z-10 space-y-8">
+        <div className="space-y-6">
+          {/* Champion Banner */}
+          <div className="bg-gradient-to-br from-amber-500 to-amber-700 rounded-[3rem] p-12 text-center shadow-[0_0_100px_rgba(245,158,11,0.3)] animate-in zoom-in duration-1000 relative overflow-hidden">
+            <div className="absolute inset-0 bg-[url('https://www.transparenttextures.com/patterns/carbon-fibre.png')] opacity-20"></div>
+            <div className="relative z-10 space-y-8">
               <div className="text-9xl mb-4">🏆</div>
               <h2 className="text-7xl md:text-9xl font-display font-black text-white uppercase tracking-tighter drop-shadow-2xl">
-                 {league.teams.find(t => t.id === bracket.championId)?.name}
+                {league.teams.find(t => t.id === bracket.championId)?.name}
               </h2>
               <p className="text-3xl font-display font-bold text-amber-100 uppercase tracking-widest italic">World Champions</p>
-              
+
               <div className="max-w-xl mx-auto bg-slate-950/40 backdrop-blur-md rounded-3xl p-8 border border-white/20">
-                 <h4 className="text-[10px] font-black uppercase tracking-[0.4em] text-amber-200 mb-4">Finals MVP</h4>
-                 <p className="text-4xl font-display font-bold text-white uppercase mb-2">{bracket.finalsMvp?.name}</p>
-                 <p className="text-lg font-mono text-amber-300">{bracket.finalsMvp?.statsLabel}</p>
+                <h4 className="text-[10px] font-black uppercase tracking-[0.4em] text-amber-200 mb-4">Finals MVP</h4>
+                <p className="text-4xl font-display font-bold text-white uppercase mb-2">{bracket.finalsMvp?.name}</p>
+                <p className="text-lg font-mono text-amber-300">{bracket.finalsMvp?.statsLabel}</p>
               </div>
-           </div>
+            </div>
+          </div>
+
+          {/* Offseason Transition Banner */}
+          <div className="bg-slate-900 border border-slate-700 rounded-3xl p-8 flex flex-col md:flex-row items-center justify-between gap-6 shadow-2xl animate-in slide-in-from-bottom-4 duration-700">
+            <div className="flex items-center gap-5">
+              <div className="w-14 h-14 rounded-2xl bg-amber-500/10 border border-amber-500/20 flex items-center justify-center shrink-0">
+                <span className="text-2xl">🎱</span>
+              </div>
+              <div>
+                <p className="text-[10px] font-black uppercase tracking-[0.4em] text-amber-500 mb-1">Finals Ended</p>
+                <h3 className="text-xl font-display font-bold uppercase text-white tracking-tight">
+                  Draft Lottery Is Next
+                </h3>
+                <p className="text-sm text-slate-400 mt-0.5">
+                  Advance to the offseason — run the lottery, hold the draft, then open free agency.
+                </p>
+              </div>
+            </div>
+            <div className="flex flex-col items-center gap-2 shrink-0">
+              <button
+                onClick={onStartOffseason}
+                className="px-8 py-4 bg-amber-500 hover:bg-amber-400 text-slate-950 font-display font-bold uppercase rounded-xl transition-all shadow-xl shadow-amber-500/20 active:scale-95 whitespace-nowrap text-sm"
+              >
+                Begin Offseason →
+              </button>
+              <div className="flex items-center gap-3 text-[10px] font-bold uppercase text-slate-600">
+                <span className="flex items-center gap-1"><span className="w-1.5 h-1.5 rounded-full bg-amber-500 inline-block"></span> Lottery</span>
+                <span>→</span>
+                <span>Draft</span>
+                <span>→</span>
+                <span>Free Agency</span>
+              </div>
+            </div>
+          </div>
         </div>
       )}
 

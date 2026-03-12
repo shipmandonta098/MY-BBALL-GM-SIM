@@ -745,6 +745,12 @@ const App: React.FC = () => {
     tempState.coachPool = [...generateCoachPool(20, tempState.settings.coachGenderRatio)];
     tempState.season += 1;
 
+    // Generate fresh draft class for the new season
+    const classSize = tempState.settings.draftClassSize === 'Small' ? 60
+      : tempState.settings.draftClassSize === 'Large' ? 120 : 90;
+    tempState.prospects = generateProspects(tempState.season, classSize, tempState.settings.playerGenderRatio);
+    tempState.draftPicks = []; // Clear old picks; lottery will populate
+
     // ── Run AI GM offseason decisions ───────────────────────
     const aiResult = runAIGMOffseason(tempState, tempState.settings.difficulty);
     tempState = aiResult.updatedState;
@@ -793,6 +799,7 @@ const App: React.FC = () => {
     });
 
     setLeague(tempState);
+    setActiveTab('draft');
     setLoading(false);
   };
 
@@ -920,7 +927,7 @@ const App: React.FC = () => {
 
   return (
     <div className="flex h-screen overflow-hidden bg-slate-950 text-slate-50 relative">
-      <Sidebar activeTab={activeTab} setActiveTab={setActiveTab} team={userTeam} onQuit={() => setStatus('title')} isOffseason={league.isOffseason} isExpansionActive={league.expansionDraft?.active} />
+      <Sidebar activeTab={activeTab} setActiveTab={setActiveTab} team={userTeam} onQuit={() => setStatus('title')} isOffseason={league.isOffseason} isExpansionActive={league.expansionDraft?.active} draftPhase={league.draftPhase} />
       <main className="flex-1 overflow-y-auto p-6 md:p-10 space-y-8 pb-32 transition-all duration-300 ease-in-out">
         <div key={activeTab} className="animate-in fade-in slide-in-from-bottom-2 duration-500">
           {activeTab === 'dashboard' && <Dashboard league={league} news={news} onSimulate={handleSimulate} onScout={handleViewPlayer} scoutingReport={scoutingReport} setActiveTab={setActiveTab} onViewRoster={handleViewRoster} onManageTeam={handleManageTeam} />}
@@ -965,7 +972,7 @@ const App: React.FC = () => {
           )}
           {activeTab === 'standings' && <Standings teams={league.teams} userTeamId={league.userTeamId} onViewRoster={handleViewRoster} onManageTeam={handleManageTeam} />}
           {activeTab === 'schedule' && <Schedule league={league} onSimulate={handleSimulate} onScout={handleViewPlayer} onWatchLive={handleWatchLive} onViewBoxScore={(res, home, away) => setViewingBoxScore({ result: res, home, away })} onManageTeam={handleManageTeam} />}
-          {activeTab === 'draft' && <Draft league={league} updateLeague={updateLeagueState} onScout={handleScoutPlayer} scoutingReport={scoutingReport} />}
+          {activeTab === 'draft' && <Draft league={league} updateLeague={updateLeagueState} onScout={handleScoutPlayer} scoutingReport={scoutingReport} onNavigateToFreeAgency={() => setActiveTab('free_agency')} />}
           {activeTab === 'coaching' && <Coaching league={league} updateLeague={updateLeagueState} />}
           {activeTab === 'stats' && <Stats league={league} onViewRoster={handleViewRoster} onManageTeam={handleManageTeam} onViewPlayer={p => setSelectedPlayer(p)} />}
           {activeTab === 'players' && <Players league={league} onViewPlayer={p => setSelectedPlayer(p)} />}

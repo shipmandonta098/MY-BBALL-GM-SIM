@@ -9,10 +9,18 @@ interface SidebarProps {
   onQuit: () => void;
   isOffseason?: boolean;
   isExpansionActive?: boolean;
+  draftPhase?: string;
 }
 
-const Sidebar: React.FC<SidebarProps> = ({ activeTab, setActiveTab, team, onQuit, isOffseason, isExpansionActive }) => {
+const Sidebar: React.FC<SidebarProps> = ({ activeTab, setActiveTab, team, onQuit, isOffseason, isExpansionActive, draftPhase }) => {
   const [isCollapsed, setIsCollapsed] = useState(false);
+
+  // Offseason phase label for the Draft Hub item
+  const offseasonPhaseLabel =
+    isOffseason && draftPhase === 'lottery' ? 'Lottery'
+    : isOffseason && draftPhase === 'draft' ? 'Draft'
+    : isOffseason && draftPhase === 'completed' ? 'Done'
+    : null;
 
   const menuItems = [
     { id: 'dashboard', label: 'Dashboard', icon: 'M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6' },
@@ -29,8 +37,8 @@ const Sidebar: React.FC<SidebarProps> = ({ activeTab, setActiveTab, team, onQuit
     { id: 'finances', label: 'Finances', icon: 'M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z' },
     { id: 'trade', label: 'Trade Machine', icon: 'M8 7h12m0 0l-4-4m4 4l-4 4m0 6H4m0 0l4-4m-4 4l4 4' },
     { id: 'stats', label: 'League Stats', icon: 'M16 8v8m-4-5v5m-4-2v2m-2 4h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z' },
-    { id: 'draft', label: 'Draft Hub', icon: 'M11.049 2.927c.3-.921 1.603-.921 1.902 0l1.519 4.674a1 1 0 00.95.69h4.915c.969 0 1.371 1.24.588 1.81l-3.976 2.888a1 1 0 00-.363 1.118l1.518 4.674c.3.922-.755 1.688-1.538 1.118l-3.976-2.888a1 1 0 00-1.176 0l-3.976 2.888c-.783.57-1.838-.197-1.538-1.118l1.518-4.674a1 1 0 00-.363-1.118l-3.976-2.888c-.784-.57-.382-1.81.588-1.81h4.914a1 1 0 00.951-.69l1.519-4.674z', notification: isOffseason },
-    { id: 'free_agency', label: 'FA Market', icon: 'M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z', notification: isOffseason && activeTab === 'free_agency' },
+    { id: 'draft', label: offseasonPhaseLabel ? `Draft Hub · ${offseasonPhaseLabel}` : 'Draft Hub', icon: 'M11.049 2.927c.3-.921 1.603-.921 1.902 0l1.519 4.674a1 1 0 00.95.69h4.915c.969 0 1.371 1.24.588 1.81l-3.976 2.888a1 1 0 00-.363 1.118l1.518 4.674c.3.922-.755 1.688-1.538 1.118l-3.976-2.888a1 1 0 00-1.176 0l-3.976 2.888c-.783.57-1.838-.197-1.538-1.118l1.518-4.674a1 1 0 00-.363-1.118l-3.976-2.888c-.784-.57-.382-1.81.588-1.81h4.914a1 1 0 00.951-.69l1.519-4.674z', notification: isOffseason && draftPhase !== 'completed' },
+    { id: 'free_agency', label: 'FA Market', icon: 'M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z', notification: isOffseason && draftPhase === 'completed' },
     { id: 'coach_market', label: 'Coach Market', icon: 'M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z' },
     { id: 'coaching', label: 'Coaching', icon: 'M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197M13 7a4 4 0 11-8 0 4 4 0 018 0z' },
     { id: 'rotations', label: 'Rotations', icon: 'M12 6V4m0 2a2 2 0 100 4m0-4a2 2 0 110 4m-6 8a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4m6 6v10m6-2a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4' },
@@ -67,6 +75,34 @@ const Sidebar: React.FC<SidebarProps> = ({ activeTab, setActiveTab, team, onQuit
         </svg>
       </button>
       
+      {/* Offseason phase indicator strip */}
+      {isOffseason && !isCollapsed && (
+        <div className="px-4 py-3 border-b border-slate-800 bg-slate-950/40">
+          <p className="text-[9px] font-black uppercase tracking-[0.3em] text-slate-600 mb-2">Offseason Phase</p>
+          <div className="flex items-center gap-1.5">
+            {(['lottery', 'draft', 'completed'] as const).map((phase, i) => {
+              const labels = ['Lottery', 'Draft', 'Free Agency'];
+              const isActive = draftPhase === phase || (phase === 'completed' && draftPhase === 'completed');
+              const isPast =
+                (phase === 'lottery' && (draftPhase === 'draft' || draftPhase === 'completed')) ||
+                (phase === 'draft' && draftPhase === 'completed');
+              return (
+                <React.Fragment key={phase}>
+                  {i > 0 && <span className="text-slate-700 text-[8px]">›</span>}
+                  <span
+                    className={`text-[9px] font-black uppercase tracking-widest ${
+                      isActive ? 'text-amber-500' : isPast ? 'text-emerald-600' : 'text-slate-700'
+                    }`}
+                  >
+                    {labels[i]}
+                  </span>
+                </React.Fragment>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
       <nav className="flex-1 p-4 space-y-2 overflow-y-auto scrollbar-none overflow-x-hidden">
         {menuItems.map(item => {
           if (item.visible === false) return null;
