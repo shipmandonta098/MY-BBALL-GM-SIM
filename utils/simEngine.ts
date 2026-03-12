@@ -2515,7 +2515,7 @@ export const simulateGame = (
   const distributeToPlayers = (team: Team, totalPts: number, isHome: boolean, isGT: boolean) => {
     const roster      = team.roster;
     const totalRating = roster.reduce((acc, p) => acc + p.rating, 0);
-    const teamFga     = Math.round(statPace * 0.88);
+    const teamFga     = Math.round(statPace * 1.10);
     const teamReb     = Math.round(statPace * 0.44);
     const teamAst     = Math.round((totalPts / 2.2) * 0.6);
 
@@ -2540,14 +2540,31 @@ export const simulateGame = (
     const oppAvgInteriorStr = oppTopN.reduce((s, op) => s + (op.attributes.strength ?? 50), 0) / oppCount;
     const oppPostDefMod     = getPostDefenseMod(oppAvgInteriorDef, oppAvgInteriorStr, 'TEAM_BOX_SCORE_POST');
 
+    // Power-curve usage: (rating/avg)^2.5 so stars get disproportionately more FGA
+    const avgRating     = totalRating / Math.max(1, roster.length);
+    const rawUsageArr   = roster.map(p => Math.pow(Math.max(1, p.rating) / avgRating, 2.5));
+    const totalRawUsage = rawUsageArr.reduce((s, u) => s + u, 0);
+    const usageShares   = rawUsageArr.map(u => u / Math.max(1, totalRawUsage));
+
+    // Rating rank (0 = best player on roster) for star-minutes differentiation
+    const sortedByRating = roster
+      .map((p, idx) => ({ id: p.id, rating: p.rating, idx }))
+      .sort((a, b) => b.rating - a.rating);
+    const ratingRank = new Map(sortedByRating.map(({ id }, rank) => [id, rank]));
+
     return roster.map((p, i) => {
       let mins = 0;
       if (team.rotation && team.rotation.minutes[p.id] !== undefined) {
         mins = team.rotation.minutes[p.id];
       } else {
-        if (i < 5) mins = 30 + Math.floor(Math.random() * 8);
-        else if (i < 9) mins = 14 + Math.floor(Math.random() * 10);
-        else if (i < 12) mins = Math.floor(Math.random() * 6);
+        const rank = ratingRank.get(p.id) ?? i;
+        if (i < 5) {
+          if (rank === 0)      mins = 34 + Math.floor(Math.random() * 5);  // 34–38 (star)
+          else if (rank === 1) mins = 31 + Math.floor(Math.random() * 5);  // 31–35 (co-star)
+          else if (rank === 2) mins = 28 + Math.floor(Math.random() * 5);  // 28–32
+          else                 mins = 26 + Math.floor(Math.random() * 6);  // 26–31
+        } else if (i < 9) mins = 14 + Math.floor(Math.random() * 10);
+        else if (i < 12)  mins = Math.floor(Math.random() * 6);
       }
       if (isGT) {
         if (i < 5) mins = Math.max(20, mins - 10);
@@ -2555,7 +2572,7 @@ export const simulateGame = (
       }
       const ftBonus    = isHome ? 0.03 : 0;
       const varRoll    = playerVariance.get(p.id) ?? 0;
-      const usageShare = p.rating / totalRating;
+      const usageShare = usageShares[i];
       const line = simulatePlayerGameLine(p, totalPts, teamFga, teamReb, teamAst, mins, usageShare, varRoll, ftBonus, oppPerimDefMod, oppInteriorDefMod, oppMidDefMod, oppPostDefMod);
       return { ...line, techs: 0, flagrants: 0, ejected: false };
     });
