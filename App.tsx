@@ -840,6 +840,35 @@ const App: React.FC = () => {
     const rookieMultiplier = rookieSetting === 'Slow' ? 0.7 : rookieSetting === 'Fast' ? 1.3 : 1.0;
     const vetRate = (tempState.settings.vetDeclineRate || 100) / 100;
 
+    // Collect expired-contract players BEFORE updating rosters
+    const expiredPlayers: Player[] = [];
+    tempState.teams.forEach(t => {
+      t.roster.forEach(p => {
+        if (p.contractYears <= 1) {
+          // Player enters free agency
+          const desiredBase = Math.round((p.rating * 160_000 + 500_000) / 250_000) * 250_000;
+          const desiredYears = p.rating >= 80 ? 4 : p.rating >= 70 ? 3 : p.age >= 33 ? 1 : 2;
+          // Interest in user's team: based on wins + market size
+          const userWins = tempState.teams.find(t2 => t2.id === tempState.userTeamId)?.wins ?? 0;
+          const teamQuality = Math.min(100, userWins * 1.2 + 30);
+          expiredPlayers.push({
+            ...p,
+            isFreeAgent: true,
+            lastTeamId: t.id,
+            contractYears: 0,
+            salary: 0,
+            desiredContract: {
+              years: desiredYears,
+              salary: desiredBase,
+            },
+            interestScore: Math.round(
+              Math.min(95, Math.max(10, teamQuality * 0.5 + (p.morale ?? 75) * 0.3 + Math.random() * 20))
+            ),
+          });
+        }
+      });
+    });
+
     tempState.teams = tempState.teams.map(t => {
       const devMultiplier = (t.staff.assistantDev?.ratingDevelopment || 60) / 75;
       const POS_DEV_KEYS: Record<string, (keyof Player['attributes'])[]> = {
@@ -866,13 +895,27 @@ const App: React.FC = () => {
         });
         return enforcePositionalBounds({ ...p, attributes: newAttrs as Player['attributes'] });
       });
-      return { ...t, roster: rosterWithProg.map(p => ({ ...p, contractYears: Math.max(0, p.contractYears - 1) })), prevSeasonWins: t.wins, wins: 0, losses: 0, lastTen: [] };
+      // Remove expired contracts from roster (they become free agents)
+      const retained = rosterWithProg.filter(p => p.contractYears > 1);
+      return { ...t, roster: retained.map(p => ({ ...p, contractYears: p.contractYears - 1 })), prevSeasonWins: t.wins, wins: 0, losses: 0, lastTen: [] };
     });
-    
-    // Free agents are generated but FA tab will be restricted until draft is done
-    tempState.freeAgents = [...generateFreeAgentPool(15, tempState.season, tempState.settings.playerGenderRatio)];
+
+    // Merge generated FA pool + expired-contract players (deduplicated by id)
+    const generatedFAs = generateFreeAgentPool(30, tempState.season, tempState.settings.playerGenderRatio);
+    const expiredIds = new Set(expiredPlayers.map(p => p.id));
+    const mergedFAs = [
+      ...expiredPlayers,
+      ...generatedFAs.filter(p => !expiredIds.has(p.id)),
+    ].sort((a, b) => b.rating - a.rating);
+    tempState.freeAgents = mergedFAs;
     tempState.coachPool = [...generateCoachPool(20, tempState.settings.coachGenderRatio)];
     tempState.season += 1;
+
+    // Generate fresh draft class for the new season
+    const classSize = tempState.settings.draftClassSize === 'Small' ? 60
+      : tempState.settings.draftClassSize === 'Large' ? 120 : 90;
+    tempState.prospects = generateProspects(tempState.season, classSize, tempState.settings.playerGenderRatio);
+    tempState.draftPicks = []; // Clear old picks; lottery will populate
 
     // ── Run AI GM offseason decisions ───────────────────────
     const aiResult = runAIGMOffseason(tempState, tempState.settings.difficulty);
@@ -922,6 +965,7 @@ const App: React.FC = () => {
     });
 
     setLeague(tempState);
+    setActiveTab('draft');
     setLoading(false);
   };
 
@@ -1049,7 +1093,7 @@ const App: React.FC = () => {
 
   return (
     <div className="flex h-screen overflow-hidden bg-slate-950 text-slate-50 relative">
-      <Sidebar activeTab={activeTab} setActiveTab={setActiveTab} team={userTeam} onQuit={() => setStatus('title')} isOffseason={league.isOffseason} isExpansionActive={league.expansionDraft?.active} seasonPhase={league.seasonPhase ?? (league.isOffseason ? 'Offseason' : 'Regular Season')} currentDay={league.currentDay} totalDays={league.schedule.length > 0 ? Math.max(...league.schedule.map(g => g.day)) : undefined} />
+      <Sidebar activeTab={activeTab} setActiveTab={setActiveTab} team={userTeam} onQuit={() => setStatus('title')} isOffseason={league.isOffseason} isExpansionActive={league.expansionDraft?.active} seasonPhase={league.seasonPhase ?? (league.isOffseason ? 'Offseason' : 'Regular Season')} currentDay={league.currentDay} totalDays={league.schedule.length > 0 ? Math.max(...league.schedule.map(g => g.day)) : undefined} draftPhase={league.draftPhase} />
       <main className="flex-1 overflow-y-auto p-6 md:p-10 space-y-8 pb-32 transition-all duration-300 ease-in-out">
         <div key={activeTab} className="animate-in fade-in slide-in-from-bottom-2 duration-500">
           {activeTab === 'dashboard' && <Dashboard league={league} news={news} onSimulate={handleSimulate} onScout={handleViewPlayer} scoutingReport={scoutingReport} setActiveTab={setActiveTab} onViewRoster={handleViewRoster} onManageTeam={handleManageTeam} />}
@@ -1108,7 +1152,7 @@ const App: React.FC = () => {
           )}
           {activeTab === 'standings' && <Standings teams={league.teams} userTeamId={league.userTeamId} onViewRoster={handleViewRoster} onManageTeam={handleManageTeam} />}
           {activeTab === 'schedule' && <Schedule league={league} onSimulate={handleSimulate} onScout={handleViewPlayer} onWatchLive={handleWatchLive} onViewBoxScore={(res, home, away) => setViewingBoxScore({ result: res, home, away })} onManageTeam={handleManageTeam} />}
-          {activeTab === 'draft' && <Draft league={league} updateLeague={updateLeagueState} onScout={handleScoutPlayer} scoutingReport={scoutingReport} />}
+          {activeTab === 'draft' && <Draft league={league} updateLeague={updateLeagueState} onScout={handleScoutPlayer} scoutingReport={scoutingReport} onNavigateToFreeAgency={() => setActiveTab('free_agency')} />}
           {activeTab === 'coaching' && <Coaching league={league} updateLeague={updateLeagueState} />}
           {activeTab === 'stats' && <Stats league={league} onViewRoster={handleViewRoster} onManageTeam={handleManageTeam} onViewPlayer={p => setSelectedPlayer(p)} />}
           {activeTab === 'players' && <Players league={league} onViewPlayer={p => setSelectedPlayer(p)} />}
