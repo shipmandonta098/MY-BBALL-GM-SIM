@@ -3,6 +3,8 @@ import { LeagueState, Team, Prospect, DraftPick, Player } from '../types';
 import { getFlag } from '../constants';
 import { aiGMDraftPick } from '../utils/aiGMEngine';
 import DraftLottery from './DraftLottery';
+import ProspectProfile from './ProspectProfile';
+import DraftPickTrade from './DraftPickTrade';
 
 interface DraftProps {
   league: LeagueState;
@@ -15,15 +17,32 @@ interface DraftProps {
 const Draft: React.FC<DraftProps> = ({ league, updateLeague, onScout, scoutingReport, onNavigateToFreeAgency }) => {
   const [scoutPoints, setScoutPoints] = useState(100);
   const [isDrafting, setIsDrafting] = useState(false);
+  const [isSimming, setIsSimming] = useState(false);
   const [draftLog, setDraftLog] = useState<string[]>([]);
-  const currentPickIndex = league.currentDraftPickIndex || 0;
 
+  // Prospect profile modal
+  const [selectedProspect, setSelectedProspect] = useState<Prospect | null>(null);
+
+  // Pick trade modal
+  const [showTradeModal, setShowTradeModal] = useState(false);
+  const [pickToTrade, setPickToTrade] = useState<DraftPick | undefined>(undefined);
+
+  const currentPickIndex = league.currentDraftPickIndex || 0;
   const userTeam = league.teams.find(t => t.id === league.userTeamId)!;
 
   // ─── Draft Execution ───────────────────────────────────────────────────────
   const startDraftSim = () => {
     setIsDrafting(true);
+    setIsSimming(false);
     setDraftLog(['🏀 The NBA Draft is now underway!']);
+  };
+
+  const startSimToMyPick = () => {
+    if (!isDrafting) {
+      setIsDrafting(true);
+      setDraftLog(['🏀 The NBA Draft is now underway!']);
+    }
+    setIsSimming(true);
   };
 
   const makePick = (teamId: string, prospect: Prospect) => {
@@ -60,8 +79,8 @@ const Draft: React.FC<DraftProps> = ({ league, updateLeague, onScout, scoutingRe
     const picks = league.draftPicks || [];
     if (!isDrafting || currentPickIndex >= picks.length) {
       if (isDrafting) {
-        // Draft finished
         setIsDrafting(false);
+        setIsSimming(false);
         const newsItem = {
           id: `draft-complete-${Date.now()}`,
           category: 'playoffs' as const,
@@ -91,11 +110,21 @@ const Draft: React.FC<DraftProps> = ({ league, updateLeague, onScout, scoutingRe
   };
 
   useEffect(() => {
-    if (isDrafting) {
-      const timer = setTimeout(executeAIPick, 900);
-      return () => clearTimeout(timer);
+    if (!isDrafting) return;
+
+    const picks = league.draftPicks || [];
+    const cp = picks[currentPickIndex];
+
+    // Stop simming when it's the user's turn
+    if (cp?.currentTeamId === league.userTeamId) {
+      if (isSimming) setIsSimming(false);
+      return;
     }
-  }, [isDrafting, currentPickIndex]);
+
+    const delay = isSimming ? 80 : 900;
+    const timer = setTimeout(executeAIPick, delay);
+    return () => clearTimeout(timer);
+  }, [isDrafting, currentPickIndex, isSimming]);
 
   const availableProspects = useMemo(() => {
     const draftedIds = new Set(league.teams.flatMap(t => t.roster.map(p => p.id)));
@@ -134,7 +163,6 @@ const Draft: React.FC<DraftProps> = ({ league, updateLeague, onScout, scoutingRe
           )}
         </div>
 
-        {/* Draft Log Summary */}
         {draftLog.length > 0 && (
           <div className="bg-slate-900 border border-slate-800 rounded-3xl p-6">
             <h3 className="text-xs font-black uppercase tracking-[0.4em] text-slate-500 mb-4">Draft Recap</h3>
@@ -152,6 +180,28 @@ const Draft: React.FC<DraftProps> = ({ league, updateLeague, onScout, scoutingRe
   // ─── ACTIVE DRAFT PHASE ───────────────────────────────────────────────────
   return (
     <div className="space-y-8 animate-in fade-in duration-500 pb-40">
+      {/* Modals */}
+      {selectedProspect && (
+        <ProspectProfile
+          prospect={selectedProspect}
+          isUserTurn={isUserTurn}
+          onDraft={isUserTurn ? () => makePick(league.userTeamId, selectedProspect) : undefined}
+          onClose={() => setSelectedProspect(null)}
+          scoutingReport={
+            scoutingReport?.playerId === selectedProspect.id ? scoutingReport.report : undefined
+          }
+        />
+      )}
+
+      {showTradeModal && (
+        <DraftPickTrade
+          league={league}
+          updateLeague={updateLeague}
+          onClose={() => { setShowTradeModal(false); setPickToTrade(undefined); }}
+          preselectedUserPick={pickToTrade}
+        />
+      )}
+
       {/* Header */}
       <header className="bg-slate-900 border border-slate-800 rounded-[2.5rem] p-8 shadow-2xl relative overflow-hidden">
         <div className="absolute top-0 right-0 w-80 h-80 bg-amber-500/5 blur-[100px] rounded-full -mr-40 -mt-40" />
@@ -167,9 +217,12 @@ const Draft: React.FC<DraftProps> = ({ league, updateLeague, onScout, scoutingRe
                   Pick {currentPickIndex + 1} of {totalPicks} ({draftProgress}%)
                 </span>
               )}
+              {isSimming && (
+                <span className="ml-3 text-blue-400 animate-pulse">⚡ Fast-forwarding…</span>
+              )}
             </p>
           </div>
-          <div className="flex items-center gap-4">
+          <div className="flex items-center gap-3 flex-wrap justify-end">
             {league.draftPhase === 'scouting' && (
               <div className="bg-slate-950/50 px-6 py-3 rounded-2xl border border-slate-800 text-center">
                 <p className="text-[10px] text-slate-500 uppercase font-bold mb-1">Scout Points</p>
@@ -177,11 +230,35 @@ const Draft: React.FC<DraftProps> = ({ league, updateLeague, onScout, scoutingRe
               </div>
             )}
             {!isDrafting && (
+              <>
+                <button
+                  onClick={startDraftSim}
+                  className="px-8 py-4 bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-display font-bold uppercase rounded-xl transition-all shadow-xl shadow-emerald-500/20 active:scale-95"
+                >
+                  Start Live Draft
+                </button>
+                <button
+                  onClick={startSimToMyPick}
+                  className="px-6 py-4 bg-blue-600 hover:bg-blue-500 text-white font-display font-bold uppercase rounded-xl transition-all shadow-xl shadow-blue-500/20 active:scale-95 text-sm"
+                >
+                  ⚡ Sim to My Pick
+                </button>
+              </>
+            )}
+            {isDrafting && !isSimming && !isUserTurn && (
               <button
-                onClick={startDraftSim}
-                className="px-8 py-4 bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-display font-bold uppercase rounded-xl transition-all shadow-xl shadow-emerald-500/20 active:scale-95"
+                onClick={() => setIsSimming(true)}
+                className="px-6 py-3 bg-blue-600 hover:bg-blue-500 text-white font-display font-bold uppercase rounded-xl transition-all text-sm active:scale-95"
               >
-                Start Live Draft
+                ⚡ Sim to My Pick
+              </button>
+            )}
+            {isSimming && (
+              <button
+                onClick={() => setIsSimming(false)}
+                className="px-6 py-3 bg-slate-700 hover:bg-slate-600 text-white font-bold uppercase rounded-xl transition-all text-sm active:scale-95"
+              >
+                ⏸ Pause
               </button>
             )}
           </div>
@@ -205,10 +282,11 @@ const Draft: React.FC<DraftProps> = ({ league, updateLeague, onScout, scoutingRe
         <div className="bg-amber-500/10 border border-amber-500 rounded-3xl p-6 flex items-center gap-4 shadow-xl shadow-amber-500/10 animate-in zoom-in-95 duration-300">
           <div className="w-12 h-12 rounded-full bg-amber-500 flex items-center justify-center shrink-0">
             <svg className="w-6 h-6 text-slate-950" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2"
+                d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
             </svg>
           </div>
-          <div>
+          <div className="flex-1">
             <p className="text-[10px] font-black uppercase tracking-[0.4em] text-amber-500 mb-1">You Are On The Clock</p>
             <p className="text-lg font-display font-bold text-white uppercase">
               {currentPick?.round === 2 ? 'Round 2' : 'Round 1'}, Pick #{currentPickIndex + 1} — Select a prospect below
@@ -239,12 +317,16 @@ const Draft: React.FC<DraftProps> = ({ league, updateLeague, onScout, scoutingRe
                 </thead>
                 <tbody className="divide-y divide-slate-800/40">
                   {availableProspects.slice(0, 60).map(p => (
-                    <tr key={p.id} className={`group hover:bg-slate-800/30 transition-all ${isUserTurn ? 'cursor-pointer' : ''}`}>
+                    <tr
+                      key={p.id}
+                      className="group hover:bg-slate-800/30 transition-all cursor-pointer"
+                      onClick={() => setSelectedProspect(p)}
+                    >
                       <td className="px-6 py-5">
                         <span className="font-display font-bold text-slate-500 group-hover:text-amber-500">#{p.mockRank}</span>
                       </td>
                       <td className="px-6 py-5">
-                        <p className="font-bold text-slate-200 uppercase tracking-tight">{p.name}</p>
+                        <p className="font-bold text-slate-200 uppercase tracking-tight group-hover:text-white">{p.name}</p>
                       </td>
                       <td className="px-6 py-5">
                         <span className="text-amber-500 font-black">{p.position}</span>
@@ -257,17 +339,25 @@ const Draft: React.FC<DraftProps> = ({ league, updateLeague, onScout, scoutingRe
                           ))}
                         </div>
                       </td>
-                      <td className="px-6 py-5 text-right">
+                      <td className="px-6 py-5 text-right" onClick={e => e.stopPropagation()}>
                         {isUserTurn ? (
-                          <button
-                            onClick={() => makePick(league.userTeamId, p)}
-                            className="px-4 py-2 bg-emerald-500 text-slate-950 text-[10px] font-black uppercase rounded-lg hover:scale-105 active:scale-95 transition-all shadow-lg shadow-emerald-500/20"
-                          >
-                            Draft
-                          </button>
+                          <div className="flex items-center justify-end gap-2">
+                            <button
+                              onClick={() => setSelectedProspect(p)}
+                              className="px-3 py-2 bg-slate-800 text-slate-400 text-[10px] font-black uppercase rounded-lg hover:bg-slate-700 transition-all"
+                            >
+                              Info
+                            </button>
+                            <button
+                              onClick={() => makePick(league.userTeamId, p)}
+                              className="px-4 py-2 bg-emerald-500 text-slate-950 text-[10px] font-black uppercase rounded-lg hover:scale-105 active:scale-95 transition-all shadow-lg shadow-emerald-500/20"
+                            >
+                              Draft
+                            </button>
+                          </div>
                         ) : (
                           <button
-                            onClick={() => onScout(p)}
+                            onClick={() => { onScout(p); setSelectedProspect(p); }}
                             className="px-4 py-2 bg-slate-800 text-slate-400 text-[10px] font-black uppercase rounded-lg hover:bg-amber-500 hover:text-slate-950 transition-all"
                           >
                             Profile
@@ -282,7 +372,7 @@ const Draft: React.FC<DraftProps> = ({ league, updateLeague, onScout, scoutingRe
           </div>
         </div>
 
-        {/* Right: Draft Feed */}
+        {/* Right: Draft Feed + Your Picks */}
         <div className="space-y-6">
           {isDrafting ? (
             <div className="bg-slate-900 border border-slate-800 rounded-3xl p-6 shadow-2xl h-[600px] flex flex-col">
@@ -320,7 +410,11 @@ const Draft: React.FC<DraftProps> = ({ league, updateLeague, onScout, scoutingRe
               </h3>
               <div className="space-y-4">
                 {league.prospects.slice(0, 5).map(p => (
-                  <div key={p.id} className="flex items-center justify-between border-b border-slate-800/50 pb-3">
+                  <button
+                    key={p.id}
+                    onClick={() => setSelectedProspect(p)}
+                    className="w-full flex items-center justify-between border-b border-slate-800/50 pb-3 text-left hover:opacity-80 transition-opacity"
+                  >
                     <div className="flex items-center gap-3">
                       <span className="font-display font-bold text-amber-500 w-6">#{p.mockRank}</span>
                       <div>
@@ -329,16 +423,16 @@ const Draft: React.FC<DraftProps> = ({ league, updateLeague, onScout, scoutingRe
                       </div>
                     </div>
                     <span className="text-[10px] text-slate-600 font-black uppercase">{p.school} {getFlag(p.country)}</span>
-                  </div>
+                  </button>
                 ))}
               </div>
               <p className="mt-4 text-[10px] text-slate-600 italic text-center">
-                Click "Start Live Draft" when ready
+                Click a prospect to view profile · Click "Start Live Draft" when ready
               </p>
             </div>
           )}
 
-          {/* Your picks this draft */}
+          {/* Your Draft Picks */}
           {(league.draftPicks?.filter(p => p.currentTeamId === league.userTeamId) ?? []).length > 0 && (
             <div className="bg-slate-900 border border-slate-800 rounded-3xl p-6 shadow-2xl">
               <h3 className="text-xs font-black uppercase tracking-[0.2em] text-amber-500 mb-4 pb-2 border-b border-slate-800">
@@ -347,11 +441,14 @@ const Draft: React.FC<DraftProps> = ({ league, updateLeague, onScout, scoutingRe
               <div className="space-y-2">
                 {league.draftPicks!.filter(p => p.currentTeamId === league.userTeamId).map(pick => {
                   const made = pick.pick <= currentPickIndex;
-                  const rookie = league.teams.find(t => t.id === league.userTeamId)?.roster.find(p =>
-                    p.draftInfo?.pick === pick.pick && p.draftInfo?.round === pick.round
+                  const rookie = league.teams.find(t => t.id === league.userTeamId)?.roster.find(r =>
+                    r.draftInfo?.pick === pick.pick && r.draftInfo?.round === pick.round
                   );
+                  const canTrade = !made && !isDrafting;
                   return (
-                    <div key={`${pick.round}-${pick.pick}`} className={`flex items-center justify-between p-3 rounded-xl border ${made ? 'border-emerald-800/40 bg-emerald-900/10' : 'border-slate-800 bg-slate-950/40'}`}>
+                    <div key={`${pick.round}-${pick.pick}`}
+                      className={`flex items-center justify-between p-3 rounded-xl border ${made ? 'border-emerald-800/40 bg-emerald-900/10' : 'border-slate-800 bg-slate-950/40'}`}
+                    >
                       <div>
                         <p className="text-[10px] font-black uppercase text-slate-500">
                           R{pick.round} · #{pick.round === 1 ? pick.pick : pick.pick - 30}
@@ -360,11 +457,21 @@ const Draft: React.FC<DraftProps> = ({ league, updateLeague, onScout, scoutingRe
                           <p className="text-xs font-bold text-emerald-400">{rookie.name}</p>
                         )}
                       </div>
-                      {made ? (
-                        <span className="text-[10px] font-black text-emerald-400 uppercase">✓ Used</span>
-                      ) : (
-                        <span className="text-[10px] font-black text-amber-500 uppercase animate-pulse">Upcoming</span>
-                      )}
+                      <div className="flex items-center gap-2">
+                        {canTrade && (
+                          <button
+                            onClick={() => { setPickToTrade(pick); setShowTradeModal(true); }}
+                            className="px-3 py-1.5 bg-slate-800 hover:bg-amber-500/20 border border-slate-700 hover:border-amber-500/40 text-slate-400 hover:text-amber-400 text-[10px] font-black uppercase rounded-lg transition-all"
+                          >
+                            Trade
+                          </button>
+                        )}
+                        {made ? (
+                          <span className="text-[10px] font-black text-emerald-400 uppercase">✓ Used</span>
+                        ) : (
+                          <span className="text-[10px] font-black text-amber-500 uppercase animate-pulse">Upcoming</span>
+                        )}
+                      </div>
                     </div>
                   );
                 })}
@@ -372,7 +479,7 @@ const Draft: React.FC<DraftProps> = ({ league, updateLeague, onScout, scoutingRe
             </div>
           )}
 
-          {scoutingReport && (
+          {scoutingReport && !selectedProspect && (
             <div className="bg-amber-500 border border-amber-400 rounded-3xl p-6 shadow-2xl animate-in zoom-in-95 duration-300">
               <h3 className="text-[10px] font-black uppercase tracking-[0.4em] text-slate-950 mb-4">Scout Analysis</h3>
               <div className="text-slate-950 text-sm italic font-medium leading-relaxed whitespace-pre-line">
