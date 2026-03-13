@@ -1365,6 +1365,14 @@ const weightedRandom = <T>(pool: { value: T; weight: number }[]): T => {
 
 const lastName = (p: Player) => p.name.split(' ').at(-1) ?? p.name;
 
+/** Returns gender-appropriate pronouns for a player. Non-binary and unknown → they/them. */
+const pronouns = (p: Player | undefined): { he: string; He: string; him: string; his: string; His: string; himself: string } => {
+  const g = p?.gender;
+  if (g === 'Female')     return { he: 'she',  He: 'She',  him: 'her',  his: 'her',   His: 'Her',   himself: 'herself' };
+  if (g === 'Non-binary') return { he: 'they', He: 'They', him: 'them', his: 'their', His: 'Their', himself: 'themselves' };
+  return                         { he: 'he',   He: 'He',   him: 'him',  his: 'his',   His: 'His',   himself: 'himself'  };
+};
+
 // ─── Possession Types ─────────────────────────────────────────────────────────
 type OffAction  = 'ISO' | 'POST_UP' | 'DRIVE' | 'PASS_FIRST' | 'TRANSITION' | 'SPOT_UP' | 'CUT';
 type ShotType   = 'PULL_UP_3' | 'MID_RANGE' | 'DRIVE_LAYUP' | 'POST_FADE' | 'CATCH_AND_SHOOT_3';
@@ -1406,6 +1414,8 @@ const simulatePossession = (
   const defender = defense.roster[defIdx];
   const dt       = defender?.tendencies?.defensiveTendencies;
   const defLn    = defender ? lastName(defender) : 'Defender';
+  const oP       = pronouns(offHandler);   // offender pronouns
+  const dP       = pronouns(defender);     // defender pronouns
 
   // ── Step 1: Transition? ───────────────────────────────────────────────────
   const transHunter = ot?.transitionHunter ?? 50;
@@ -1564,9 +1574,9 @@ const simulatePossession = (
       const m = (tendencyScore / 100) * 0.12;
       shotModifier = tendencyScore >= 70 ? +m : tendencyScore < 30 ? -m : 0;
       pbpBase = tendencyScore >= 86
-        ? `${ln} gets to his spot at the elbow — money every time...`
+        ? `${ln} gets to ${oP.his} spot at the elbow — money every time...`
         : tendencyScore >= 70
-          ? `${ln} rises up from the elbow — that's his spot...`
+          ? `${ln} rises up from the elbow — that's ${oP.his} spot...`
           : tendencyScore < 30
             ? `${ln} settles for a tough mid-range...`
             : `${ln} pulls up for the mid-range jumper...`;
@@ -1594,7 +1604,7 @@ const simulatePossession = (
         pbpBase  = isTransition && transHunter >= 70
           ? `${ln} catches it in transition and throws it down!`
           : dunkAttr >= 90
-            ? `${ln} rises up and POSTERIZES him — windmill, one-hand, raw POWER!`
+            ? `${ln} rises up and POSTERIZES ${dP.him} — windmill, one-hand, raw POWER!`
             : dunkAttr >= 80
               ? `${ln} attacks and throws it down!`
               : `${ln} goes up strong for the dunk...`;
@@ -1648,9 +1658,9 @@ const simulatePossession = (
       const m = (tendencyScore / 100) * 0.13;
       shotModifier = tendencyScore >= 70 ? +m : tendencyScore < 30 ? -m : 0;
       pbpBase = tendencyScore >= 85
-        ? `${ln} seals deep, drops the shoulder, and goes to his bag...`
+        ? `${ln} seals deep, drops the shoulder, and goes to ${oP.his} bag...`
         : tendencyScore >= 75
-          ? `${ln} backs down his defender in the post, drops his shoulder and goes to work...`
+          ? `${ln} backs down ${oP.his} defender in the post, drops ${oP.his} shoulder and goes to work...`
           : tendencyScore < 35
             ? `${ln} is forced into an uncomfortable post-up...`
             : `${ln} goes to work in the post...`;
@@ -1667,7 +1677,7 @@ const simulatePossession = (
         shotModifier  = +0.04 + ((tendencyScore - 50) / 100) * 0.10;
         shotModifier += ((ot?.offScreen ?? 50) - 50) / 100 * 0.04;
         pbpBase = tendencyScore >= 80
-          ? `${ln} sets his feet in the corner — pure shooter's stroke incoming...`
+          ? `${ln} sets ${oP.his} feet in the corner — pure shooter's stroke incoming...`
           : tendencyScore >= 60
             ? `${ln} spots up and catches in rhythm...`
             : `${ln} catches on the wing and fires...`;
@@ -1769,7 +1779,7 @@ const simulatePossession = (
       const stealChance = 0.20 + stealAttr * 0.18 + helpBonus;
       if (Math.random() < stealChance) {
         const stealLine = stealAttr >= 0.82
-          ? `${defLn} gambles for the steal — quick hands pick his pocket! Turnover.`
+          ? `${defLn} gambles for the steal — quick hands pick ${oP.his} pocket! Turnover.`
           : `${defLn} reaches in and knocks it loose — turnover!`;
         return {
           ballHandlerName: offHandler.name, ballHandlerId: offHandler.id,
@@ -1845,7 +1855,7 @@ const simulatePossession = (
     if (physicality >= 85) {
       defenseModifier -= 0.06;
       if (!defTendencyUsed) defTendencyUsed = 'physicality';
-      pbpBase += ` ${defLn} met him at the rim with contact.`;
+      pbpBase += ` ${defLn} met ${oP.him} at the rim with contact.`;
       if ((offHandler.attributes.strength ?? 60) < 55 &&
           (shotType === 'DRIVE_LAYUP' || shotType === 'POST_FADE')) defenseModifier -= 0.04;
     } else if (physicality >= 70) {
@@ -1922,7 +1932,7 @@ const simulatePossession = (
           if (!defTendencyUsed) defTendencyUsed = 'interiorDef';
         } else if (intDef >= 80 && rimContestMod <= -0.08) {
           if (!defTendencyUsed) defTendencyUsed = 'interiorDef';
-          pbpBase += ` ${defLn} rises to meet him at the rim!`;
+          pbpBase += ` ${defLn} rises to meet ${oP.him} at the rim!`;
         } else if (intDef <= 30) {
           pbpDefPrefix = pbpDefPrefix || `${defLn} has no answer — clear path to the rim — `;
         }
@@ -1930,7 +1940,7 @@ const simulatePossession = (
         // Standard layup PBP flavour
         if (intDef >= 80 && rimContestMod <= -0.06) {
           if (!defTendencyUsed) defTendencyUsed = 'interiorDef';
-          pbpDefPrefix = pbpDefPrefix || `${defLn} meets him at the rim — massive contest — `;
+          pbpDefPrefix = pbpDefPrefix || `${defLn} meets ${oP.him} at the rim — massive contest — `;
         } else if (intDef >= 90 && rimContestMod <= -0.09) {
           pbpBase += ` ${defLn} is a wall at the rim!`;
         } else if (intDef <= 30) {
@@ -1951,7 +1961,7 @@ const simulatePossession = (
 
       if (intDef >= 85 && postDefMod <= -0.10) {
         if (!defTendencyUsed) defTendencyUsed = 'interiorDef';
-        pbpDefPrefix = pbpDefPrefix || `${defLn} body-locks him — no room to operate — `;
+        pbpDefPrefix = pbpDefPrefix || `${defLn} body-locks ${oP.him} — no room to operate — `;
       } else if (intDef >= 90 && postDefMod <= -0.13) {
         pbpBase += ` ${defLn} shuts it down with elite post positioning!`;
       } else if (intDef <= 30) {
@@ -2014,7 +2024,7 @@ const simulatePossession = (
     if (onBallPest >= 70 && (offAction === 'ISO' || offAction === 'DRIVE') && !isTransition) {
       defenseModifier -= 0.05;
       if (!defTendencyUsed) defTendencyUsed = 'onBallPest';
-      pbpBase += ` ${defLn} gets right in his face.`;
+      pbpBase += ` ${defLn} gets right in ${oP.his} face.`;
       if (onBallPest >= 82 && Math.random() < 0.07) {
         return {
           ballHandlerName: offHandler.name, ballHandlerId: offHandler.id,
@@ -2098,9 +2108,9 @@ const simulatePossession = (
           ? ` — puts it down hard! Two points the easy way.`
           : ` — finishes the dunk!`;
     } else if (shotType === 'POST_FADE' && (ot?.postUp ?? 0) >= 75) {
-      fullText += ` — drops his shoulder and hits the post fade!`;
+      fullText += ` — drops ${oP.his} shoulder and hits the post fade!`;
     } else if (shotType === 'PULL_UP_3' && (ot?.pullUpThree ?? 0) >= 71) {
-      fullText += ` — BANG! Right in his wheelhouse.`;
+      fullText += ` — BANG! Right in ${oP.his} wheelhouse.`;
     } else if (offHandler.personalityTraits.includes('Streaky') && hotStreak >= 2) {
       fullText += ` — Good. ${ln} is feeling it right now...`;
     } else {
@@ -2110,7 +2120,7 @@ const simulatePossession = (
     fullText += isDunkAttempt
       ? ` — rattles out! Missed the dunk.`
       : offHandler.personalityTraits.includes('Streaky') && hotStreak <= -2
-        ? ` — No good. ${ln} is struggling to find his shot...`
+        ? ` — No good. ${ln} is struggling to find ${oP.his} shot...`
         : ` — No good.`;
   }
   if (conflictFired && conflictText) fullText += ` (${conflictText})`;
@@ -2263,13 +2273,15 @@ const generateCinematicLines = (
   const adv = (offHandler.rating ?? 70) - (def?.rating ?? 70);
   const oTr = offHandler.personalityTraits ?? [];
   const dTr = def?.personalityTraits ?? [];
+  const oP  = pronouns(offHandler);
+  const dP  = pronouns(def);
 
   // ── LINE 1: MATCHUP SETUP ───────────────────────────────────────────────────
   let setup: string;
   if (action === 'ISO') {
     if (oTr.includes('Diva/Star')) {
       setup = _pick([
-        `${o} is calling his own number here. ISO.`,
+        `${o} is calling ${oP.his} own number here. ISO.`,
         `Nobody is getting this ball. ${o} wants the ISO.`,
       ]);
     } else if (adv >= 8) {
@@ -2278,41 +2290,41 @@ const generateCinematicLines = (
         `The bench is pointing — ${o} has ${d} isolated. Everyone in the building knows it.`,
         `They're going right at ${d}. ${o} dribbles over and sets up.`,
         `ISO. ${o} on ${d}. This is a problem.`,
-        `${o} calls for the ball at the top and waves teammates off. ${d} is all that stands between him and the basket.`,
+        `${o} calls for the ball at the top and waves teammates off. ${d} is all that stands between ${oP.him} and the basket.`,
       ]);
     } else if (adv <= -8) {
       setup = dTr.includes('Workhorse')
         ? _pick([
             `${o} takes the challenge anyway. ${d} has been locked in all game.`,
-            `${d} doesn't take plays off. ${o} goes right at him anyway.`,
+            `${d} doesn't take plays off. ${o} goes right at ${dP.him} anyway.`,
           ])
         : dTr.includes('Hot Head')
         ? _pick([
-            `Watch ${d} here — he's been chippy. ${o} attacks anyway.`,
+            `Watch ${d} here — ${dP.he}'s been chippy. ${o} attacks anyway.`,
             `${d} is fired up. ${o} takes the challenge.`,
           ])
         : _pick([
             `${o} takes the challenge anyway.`,
-            `${d} locks in — he's been dominant tonight.`,
+            `${d} locks in — ${dP.he}'s been dominant tonight.`,
             `${o} dribbles into ${d}'s territory. Bold move.`,
           ]);
     } else {
       setup = dTr.includes('Workhorse')
         ? _pick([
             `Good luck — ${d} doesn't take plays off.`,
-            `${d} has been locked in all game. ${o} isolates on him anyway.`,
+            `${d} has been locked in all game. ${o} isolates on ${dP.him} anyway.`,
             `${o} and ${d} have been going at it all night. Here we go again.`,
           ])
         : _pick([
             `This is a battle — ${o} vs ${d}, one on one.`,
-            `${d} slides over. He's ready for this.`,
+            `${d} slides over. ${dP.He}'s ready for this.`,
             `${o} and ${d} have been going at it all night. Here we go again.`,
             `${o} calls for the ISO. ${d} steps up.`,
             `${o} isolates on ${d} at the top of the arc.`,
             `${o} sizes up ${d} at the elbow.`,
-            `${o} waves off the play — he's got ${d}.`,
-            `${o} catches on the wing. ${d} crouches into his defensive stance.`,
-            `${o} pounds the ball at the top. ${d} is all that stands between him and the basket.`,
+            `${o} waves off the play — ${oP.he}'s got ${d}.`,
+            `${o} catches on the wing. ${d} crouches into ${dP.his} defensive stance.`,
+            `${o} pounds the ball at the top. ${d} is all that stands between ${oP.him} and the basket.`,
           ]);
     }
     if (oTr.includes('Professional')) {
@@ -2320,14 +2332,14 @@ const generateCinematicLines = (
     }
     if (streak >= 2) {
       setup += oTr.includes('Hot Head')
-        ? ` ${o} is locked in — don't foul him.`
-        : ` ${o} is in a zone right now. Nobody is stopping him in ISO.`;
+        ? ` ${o} is locked in — don't foul ${oP.him}.`
+        : ` ${o} is in a zone right now. Nobody is stopping ${oP.him} in ISO.`;
     } else if (streak <= -2) {
       setup += ` ${o} keeps going back to the well.`;
     }
   } else if (action === 'DRIVE') {
     setup = _pick([
-      `${o} puts his head down and attacks ${d} off the dribble.`,
+      `${o} puts ${oP.his} head down and attacks ${d} off the dribble.`,
       `${o} surveys the floor, sees the lane, and goes.`,
       `${o} gets a head of steam — ${d} retreats to protect the rim.`,
       `${o} attacks ${d} off the dribble, looking to get to the paint.`,
@@ -2336,8 +2348,8 @@ const generateCinematicLines = (
     setup = _pick([
       `${o} seals ${d} in the post. Ball goes in.`,
       `${o} backs ${d} down into the paint.`,
-      `${o} catches at the block. ${d} is trying to front him.`,
-      `${o} calls for the ball on the low block. ${d} sets up behind him.`,
+      `${o} catches at the block. ${d} is trying to front ${oP.him}.`,
+      `${o} calls for the ball on the low block. ${d} sets up behind ${oP.him}.`,
     ]);
   }
 
@@ -2349,11 +2361,11 @@ const generateCinematicLines = (
     switch (shot) {
       case 'DRIVE_LAYUP':
         attack = _pick([
-          `${o} hits ${d} with a crossover, blows past him to the left.`,
+          `${o} hits ${d} with a crossover, blows past ${dP.him} to the left.`,
           `${o} crosses over twice — ${d} bites — and attacks the lane.`,
           `One hard crossover and ${o} is gone. ${d} is a step behind.`,
           `${o} plants and goes — euro step leaves ${d} frozen at the arc.`,
-          `${o} changes direction so fast ${d} nearly loses his footing. He's at the rim.`,
+          `${o} changes direction so fast ${d} nearly loses ${dP.his} footing. ${oP.He}'s at the rim.`,
         ]);
         break;
       case 'MID_RANGE':
@@ -2368,14 +2380,14 @@ const generateCinematicLines = (
       case 'PULL_UP_3':
         attack = _pick([
           `${o} pulls up in ${d}'s face from well beyond the arc.`,
-          `${o} stops and pops — ${d} had position but ${o} got his shot off.`,
-          `Mid-dribble, ${o} elevates. ${d} jumps but he's a fraction late.`,
+          `${o} stops and pops — ${d} had position but ${o} got ${oP.his} shot off.`,
+          `Mid-dribble, ${o} elevates. ${d} jumps but ${dP.he}'s a fraction late.`,
           `${o} jab steps, ${d} shifts — ${o} steps all the way back to the three-point line and elevates.`,
         ]);
         break;
       case 'POST_FADE':
         attack = _pick([
-          `${o} catches deep in the post, feels ${d} on his back, and spins baseline.`,
+          `${o} catches deep in the post, feels ${d} on ${oP.his} back, and spins baseline.`,
           `${o} seals ${d}, spins middle and goes up strong.`,
           `Quick spin — ${d} loses track for just a second. That's all ${o} needed.`,
           `${o} leans into ${d}, fades away toward the baseline and releases.`,
@@ -2418,12 +2430,12 @@ const generateCinematicLines = (
   } else {
     // POST_UP
     attack = _pick([
-      `${o} catches deep in the post, feels ${d} on his back, and spins baseline.`,
+      `${o} catches deep in the post, feels ${d} on ${oP.his} back, and spins baseline.`,
       `${o} seals ${d}, spins middle and goes up strong.`,
       `Quick spin — ${d} loses track for just a second. That's all ${o} needed.`,
       `${o} leans into ${d}, fades away toward the baseline and releases.`,
-      `${o} backs ${d} down, fades to his right — high off the glass attempt.`,
-      `Back to the basket, ${o} turns over his left shoulder and fires over ${d}.`,
+      `${o} backs ${d} down, fades to ${oP.his} right — high off the glass attempt.`,
+      `Back to the basket, ${o} turns over ${oP.his} left shoulder and fires over ${d}.`,
       `${o} catches at the elbow and turns. ${d} is a step slow.`,
       `${o} pivots. ${d} contests — but ${o}'s release is too quick.`,
     ]);
@@ -2444,7 +2456,7 @@ const generateCinematicLines = (
             `GOOD.`,
             `It falls. ${o} converts.`,
             `Splash. Nothing but net.`,
-            `He got it! ${o} converts.`,
+            `${oP.He} got it! ${o} converts.`,
             `${d} had good position but ${o} is just better right there.`,
             `Good for two.`,
             `Drains it.`,
@@ -2453,13 +2465,13 @@ const generateCinematicLines = (
     case 'MISSED':
       result = (adv <= -5)
         ? _pick([
-            `${d} stays with him — no good. ${d} wins this round.`,
+            `${d} stays with ${oP.him} — no good. ${d} wins this round.`,
             `${d} had great position and it shows. Missed.`,
-            `Off the back iron. ${d} held his ground.`,
+            `Off the back iron. ${d} held ${dP.his} ground.`,
             `Not tonight — ${d} contests and ${o} can't finish.`,
           ])
         : _pick([
-            `${d} stays with him — no good.`,
+            `${d} stays with ${oP.him} — no good.`,
             `Off the back iron. ${d} hangs tough.`,
             `${o} couldn't convert. ${d} with a great stop.`,
             `Not tonight — no good.`,
@@ -2475,7 +2487,7 @@ const generateCinematicLines = (
       break;
     case 'FOUL_DRAWN':
       result = _pick([
-        `AND ONE! ${o} converts through contact! He's going to the line!`,
+        `AND ONE! ${o} converts through contact! ${oP.He}'s going to the line!`,
         `Foul on ${d}! ${o} gets the bucket and a free throw.`,
         `Bucket AND the foul on ${d}! ${o} is heading to the stripe.`,
         `${o} draws the foul on ${d}. Free throws coming.`,
@@ -2483,7 +2495,7 @@ const generateCinematicLines = (
       break;
     default:
       result = _pick([
-        `${o} picks up his dribble — ${d} forces the jump ball. Turnover.`,
+        `${o} picks up ${oP.his} dribble — ${d} forces the jump ball. Turnover.`,
         `Lost ball! ${d} pokes it free from ${o}'s grasp.`,
         `${o} turns it over. Good defense by ${d}.`,
       ]);
