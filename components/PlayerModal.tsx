@@ -196,7 +196,7 @@ const PlayerModal: React.FC<PlayerModalProps> = ({
     'Hot Head', 'Workhorse', 'Streaky'
   ];
   const positions: Position[] = ['PG', 'SG', 'SF', 'PF', 'C'];
-  const archetypes = ['Hybrid Star', '3&D', 'Pure Scorer', 'Playmaker', 'Lockdown Defender', 'Rim Protector', 'Stretch Big', 'Glass Cleaner', 'Floor General', 'Slasher'];
+  const archetypes = ['Hybrid Star', '3&D Wing', 'Pure Scorer', 'Lockdown Defender', 'Stretch Big', 'Rim Protector', 'Playmaking Guard', 'Two-Way Forward', 'Bench Spark', 'Role Player'];
 
   if (isEditing) {
     return (
@@ -694,7 +694,7 @@ const PlayerModal: React.FC<PlayerModalProps> = ({
              <div className="space-y-4">
                 <div className="flex items-center gap-4">
                    <span className="text-[10px] text-slate-500 font-black uppercase tracking-[0.2em] w-24">Archetype</span>
-                   <span className="text-amber-500 text-base font-bold uppercase tracking-widest">{player.archetype || 'Hybrid Star'}</span>
+                   <span className="text-amber-500 text-base font-bold uppercase tracking-widest">{player.archetype || 'Role Player'}</span>
                 </div>
                 <div className="flex items-center gap-4">
                    <span className="text-[10px] text-slate-500 font-black uppercase tracking-[0.2em] w-24">
