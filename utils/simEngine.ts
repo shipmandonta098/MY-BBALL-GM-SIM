@@ -1149,23 +1149,32 @@ const simulatePossession = (
     const physicality= dt.physicality  ?? 50;
     const faceUp     = dt.faceUpGuard  ?? 50;
 
-    // Gambles / steal attempt
+    // ── Gambles / steal attempt ───────────────────────────────────────────────
+    // Attempt frequency: gambles tendency scales reach probability.
+    //   tendency 50  → 12.5 % chance to trigger a reach attempt per possession
+    //   tendency 47  → 11.8 % (moderate gambler — tries now and then)
+    //   tendency 80  → 20 % (high-risk; often lunges for loose balls)
+    //   tendency 20  → 5  % (disciplined; rarely gambles)
+    //
+    // On a triggered attempt the defender either strips the ball cleanly,
+    // commits a foul (reach-in / illegal contact), or misses but disturbs the play.
     if (Math.random() < gambles / 400) {
-      if (Math.random() < 0.32) {
-        return {
-          ballHandlerName: offHandler.name, ballHandlerId: offHandler.id,
-          tendencyUsed: tendencyUsed || offAction, actionTaken: offAction,
-          tendencyScore, shotModifier: 0, conflictFired: false,
-          defenderTendency: 'gambles', defenseModifier: 0,
-          finalShotProbability: 0, result: 'STEAL',
-          stolenBy: defender?.name, isTransition, defenderRef: defender,
-          pbpText: `${defLn} gambles for the steal — picks his pocket! Turnover.`,
-        };
-      }
-      defenseModifier += 0.15;
-      defTendencyUsed  = 'gambles';
-      pbpDefPrefix     = `${defLn} reaches — out of position. `;
-      if (gambles >= 75 && (defender?.attributes.defensiveIQ ?? 65) < 65 && Math.random() < 0.10) {
+      // ── Foul roll first: reckless reach can draw a foul before any steal ────
+      // calculateFoulChance for this player (Gambles 47, Phys 87, Disc 69, IQ 83):
+      //   base 0.05 + gambles (0.071) + phys (0.104) − disc (0.055) → 0.170 × 0.834 ≈ 14.2%
+      // For comparison: high-gambler (Gambles 80, Phys 85, IQ 60) ≈ 20–22%
+      const foulCtx: FoulContext = {
+        isHelpSituation: false, // reaching on-ball for steal, not rotating help
+        isOnBall: true,
+      };
+      const foulChance = calculateFoulChance(defender as Player, 'steal', foulCtx);
+      if (defender && Math.random() < foulChance) {
+        // PBP flavour scales with how reckless the reach looks
+        const foulLine = gambles >= 75
+          ? `${defLn} reaches in recklessly — foul called on the play!`
+          : gambles >= 55
+            ? `${defLn} gambles for the strip but makes contact — reach-in foul!`
+            : `${defLn} pokes for the ball — unfortunate illegal contact, foul called.`;
         return {
           ballHandlerName: offHandler.name, ballHandlerId: offHandler.id,
           tendencyUsed: tendencyUsed || offAction, actionTaken: offAction,
@@ -1173,18 +1182,81 @@ const simulatePossession = (
           defenderTendency: 'gambles', defenseModifier: 0,
           finalShotProbability: 0, result: 'FOUL_DRAWN',
           foulsOn: defender?.name, isTransition, defenderRef: defender,
-          pbpText: `${defLn} reaches in recklessly — foul called on the play!`,
+          pbpText: foulLine,
         };
       }
+
+      // ── Clean steal: attributes.steals drives success rate ───────────────────
+      // Base steal rate (84 attr) ≈ 28–32 %; boosted slightly by helpDefender
+      // for defenders who are active in passing lanes.
+      const stealAttr   = (defender?.attributes.steals ?? 50) / 100;
+      const helpBonus   = (helpDef >= 70) ? (helpDef / 100) * 0.06 : 0;
+      const stealChance = 0.20 + stealAttr * 0.18 + helpBonus;
+      if (Math.random() < stealChance) {
+        const stealLine = stealAttr >= 0.82
+          ? `${defLn} gambles for the steal — quick hands pick his pocket! Turnover.`
+          : `${defLn} reaches in and knocks it loose — turnover!`;
+        return {
+          ballHandlerName: offHandler.name, ballHandlerId: offHandler.id,
+          tendencyUsed: tendencyUsed || offAction, actionTaken: offAction,
+          tendencyScore, shotModifier: 0, conflictFired: false,
+          defenderTendency: 'gambles', defenseModifier: 0,
+          finalShotProbability: 0, result: 'STEAL',
+          stolenBy: defender?.name, isTransition, defenderRef: defender,
+          pbpText: stealLine,
+        };
+      }
+
+      // ── Miss: defender out of position, offense gets a cleaner look ──────────
+      defenseModifier += 0.15;
+      defTendencyUsed  = 'gambles';
+      pbpDefPrefix     = `${defLn} reaches — out of position. `;
     }
 
-    // Help defender
+    // ── Help defender ─────────────────────────────────────────────────────────
+    // Help rotations give elite help-defenders two chances:
+    //   (a) a help-side steal if the offense telegraphs the pass/drive entry
+    //   (b) a contested block/denial that suppresses shot quality
+    // Both carry foul risk because the help defender arrives at speed with
+    // less body control than the primary on-ball defender.
     if (shotType === 'DRIVE_LAYUP' || shotType === 'POST_FADE') {
       if (helpDef >= 70) {
+        // ── (a) Help steal opportunity (passing-lane read on drive entry) ───────
+        // Fires when helpDef is elite (≥80) and the driver telegraphs the pass.
+        // Probability: helpDef 80 → ~6 %; helpDef 90 → ~9 %
+        if (helpDef >= 80 && Math.random() < (helpDef - 70) / 100 * 0.60) {
+          // Foul check first: help rotations at speed risk body contact
+          const helpFoulCtx: FoulContext = { isHelpSituation: true, isOnBall: false };
+          const helpFoulChance = calculateFoulChance(defender as Player, 'steal', helpFoulCtx);
+          if (defender && Math.random() < helpFoulChance) {
+            return {
+              ballHandlerName: offHandler.name, ballHandlerId: offHandler.id,
+              tendencyUsed: tendencyUsed || offAction, actionTaken: offAction,
+              tendencyScore, shotModifier: 0, conflictFired: false,
+              defenderTendency: 'helpDefender', defenseModifier: 0,
+              finalShotProbability: 0, result: 'FOUL_DRAWN',
+              foulsOn: defender?.name, isTransition, defenderRef: defender,
+              pbpText: `${defLn} rotates hard from help side — arrives with contact, foul called!`,
+            };
+          }
+          // Clean help steal
+          return {
+            ballHandlerName: offHandler.name, ballHandlerId: offHandler.id,
+            tendencyUsed: tendencyUsed || offAction, actionTaken: offAction,
+            tendencyScore, shotModifier: 0, conflictFired: false,
+            defenderTendency: 'helpDefender', defenseModifier: 0,
+            finalShotProbability: 0, result: 'STEAL',
+            stolenBy: defender?.name, isTransition, defenderRef: defender,
+            pbpText: `${defLn} sneaks in from the weak side and deflects the entry pass — turnover!`,
+          };
+        }
+
+        // ── (b) Quality help contest suppresses shot quality ─────────────────
         defenseModifier -= 0.08;
         defTendencyUsed  = 'helpDefender';
         pbpDefPrefix     = `${defLn} rotates over from the weak side. `;
         if ((defender?.attributes.defensiveIQ ?? 70) < 55) {
+          // Low-IQ help defender over-rotates — offensive kick-out reads the rotation
           defenseModifier += 0.10;
           pbpDefPrefix = `${defLn} over-rotates — kick-out leads to an open look. `;
         }
@@ -1226,6 +1298,38 @@ const simulatePossession = (
         const blockRating = defender?.attributes.blocks ?? 50;
         const intNorm     = Math.max(0, (intDef - 40) / 60);   // 0 at attr 40 → 1.0 at attr 100
         const blockChance = intNorm * (blockRating / 100) * 0.22;
+
+        // ── Foul check: aggressive rim protection carries blocking/goaltending risk ──
+        // Physical defenders (high physicality) and help-side rotators risk
+        // making contact with the shooter's arm or body during dunk attempts.
+        // calculateFoulChance for this player (Blocks 88, Phys 87, Disc 69, IQ 83):
+        //   base(block) ≈ 15–17 % depending on help context
+        // This generates realistic shooting fouls on block attempts without
+        // over-penalising disciplined shot-blockers (Disc + IQ reduce the risk).
+        if (defender) {
+          const blockFoulCtx: FoulContext = {
+            isHelpSituation: helpDef >= 70, // likely rotating from weak side
+            isOnBall: false,
+          };
+          const blockFoulChance = calculateFoulChance(defender, 'block', blockFoulCtx);
+          // Scale down slightly: only a subset of block attempts result in fouls
+          // (many are clean rejections). We use 40 % of raw foul probability.
+          if (Math.random() < blockFoulChance * 0.40) {
+            const foulLine = (defender.attributes.physicality ?? physicality) >= 85
+              ? `${defLn} goes up strong but catches the shooter on the way up — shooting foul!`
+              : `${defLn} contests the dunk but makes contact — foul called!`;
+            return {
+              ballHandlerName: offHandler.name, ballHandlerId: offHandler.id,
+              tendencyUsed: tendencyUsed || offAction, actionTaken: offAction,
+              tendencyScore, shotModifier: 0, conflictFired: false,
+              defenderTendency: 'physicality', defenseModifier: 0,
+              finalShotProbability: 0, result: 'FOUL_DRAWN',
+              foulsOn: defender?.name, isTransition, defenderRef: defender,
+              pbpText: foulLine,
+            };
+          }
+        }
+
         if (Math.random() < blockChance) {
           const blockLine = intDef >= 90
             ? `${defLn} SWATS IT INTO THE STANDS! Emphatic rejection!`
@@ -1431,6 +1535,78 @@ const simulatePossession = (
   };
 };
 
+// ─── Defensive foul-chance model ──────────────────────────────────────────────
+//
+// Returns the probability (0.02–0.25) that a defensive action (steal attempt or
+// shot contest/block) results in the defender committing a foul rather than
+// making a clean play.
+//
+// Tuning targets (league-realistic per 36-min benchmarks):
+//   • Average defender (all attrs/tendencies ≈ 50, IQ 65)  → ~8–10 % per attempt
+//   • Aggressive gambler (Gambles 80, Phys 85, IQ 60)       → ~18–22 % per attempt
+//   • Disciplined stopper (Gambles 30, Disc 80, IQ 85)      → ~3–6  % per attempt
+//   • This player (Gambles 47, Phys 87, Disc 69, IQ 83)     → ~13–15 % steal / ~15–17 % block
+//
+// Simulated PF totals using these per-attempt rates:
+//   Aggressive (Phys 87): ~3.5–4.5 PF/game   ✓ realistic for physical wings/bigs
+//   Disciplined (Disc 80, IQ 85): ~1.5–2.5 PF/game ✓ smart stopper profile
+//
+type DefensiveActionType = 'steal' | 'block';
+interface FoulContext {
+  /** Defender arriving from help side (less body control, more foul risk) */
+  isHelpSituation: boolean;
+  /** Defender actively pressuring ball handler on-ball */
+  isOnBall: boolean;
+}
+
+const calculateFoulChance = (
+  defender: Player,
+  actionType: DefensiveActionType,
+  context: FoulContext,
+): number => {
+  const dt  = defender.tendencies?.defensiveTendencies;
+  const gambles           = dt?.gambles              ?? 50;
+  const physicality       = dt?.physicality          ?? 50;
+  const contestDiscipline = dt?.shotContestDiscipline ?? 50;
+  const helpDefender      = dt?.helpDefender         ?? 50;
+  const defensiveIQ       = defender.attributes.defensiveIQ ?? 65;
+
+  // ── Base risk: every aggressive defensive action carries some foul risk ──────
+  let foulChance = 0.05;
+
+  // Gambles (reach-ins, gambling for loose balls):
+  //   tendency 50 → +7.5 %; 47 → +7.1 %; 80 → +12 %; 20 → +3 %
+  //   High-gambler who misses the steal risks an illegal contact call.
+  foulChance += (gambles / 100) * 0.15;
+
+  // Physicality (body contact, strength plays):
+  //   tendency 50 → +6 %; 87 → +10.4 %; 30 → +3.6 %
+  //   Physical defenders bump shooters, post players, and drive-finishers.
+  foulChance += (physicality / 100) * 0.12;
+
+  // Shot Contest Discipline (clean hands-up vs. bite/hack):
+  //   tendency 50 → −4 %; 69 → −5.5 %; 90 → −7.2 %
+  //   Disciplined contestants keep arms up and avoid swiping.
+  foulChance -= (contestDiscipline / 100) * 0.08;
+
+  // Help rotations: arriving late = less balance = extra contact risk
+  if (context.isHelpSituation) {
+    // tendency 50 → +3 %; 78 → +4.7 %; 90 → +5.4 %
+    foulChance += (helpDefender / 100) * 0.06;
+  }
+
+  // Defensive IQ: smart defenders read the play and choose safer angles
+  //   IQ 50 → ×1.0 (no change); IQ 83 → ×0.834 (−16.6 %); IQ 95 → ×0.81
+  foulChance *= (1 - (defensiveIQ / 100) * 0.20);
+
+  // Block-specific: shot contests carry slightly more foul risk than steals
+  // because the body/arm is in motion during the shot and contact is harder to avoid.
+  if (actionType === 'block') foulChance *= 1.15;
+
+  // Clamp: 2 % floor (freak accidents) — 25 % ceiling (even worst gambler rarely fouls every play)
+  return Math.max(0.02, Math.min(0.25, foulChance));
+};
+
 // ─── Tendency → stat-line modifiers ──────────────────────────────────────────
 interface TendencyModifiers {
   threepaBoost: number;
@@ -1438,11 +1614,14 @@ interface TendencyModifiers {
   usageBoost:   number;
   astBoost:     number;
   stlBoost:     number;
+  /** NEW: tendency-driven boost to per-game block totals in box score */
+  blkBoost:     number;
   foulRisk:     number;
 }
 const computeTendencyModifiers = (p: Player): TendencyModifiers => {
   const ot = p.tendencies?.offensiveTendencies;
   const dt = p.tendencies?.defensiveTendencies;
+  const diq = p.attributes.defensiveIQ ?? 65;
   return {
     threepaBoost: (( ot?.pullUpThree    ?? 50) - 50) / 100 * 0.40,
     insideBoost:  (( ot?.driveToBasket  ?? 50) - 50) / 100 * 0.30
@@ -1452,12 +1631,26 @@ const computeTendencyModifiers = (p: Player): TendencyModifiers => {
                 + ((ot?.drawFoul        ?? 50) - 50) / 100 * 0.06,
     astBoost:     (( ot?.kickOutPasser  ?? 50) - 50) / 100 * 0.35
                 + ((ot?.spotUp          ?? 50) - 50) / 100 * 0.08,
+
+    // stlBoost: gambles (reach frequency) + denyThePass (passing-lane reads)
+    //           + helpDefender (rotation intercepts from weak side)
     stlBoost:     (( dt?.gambles        ?? 50) - 50) / 100 * 0.30
-                + ((dt?.denyThePass     ?? 50) - 50) / 100 * 0.10,
-    foulRisk:     (( dt?.physicality    ?? 50) - 50) / 100 * 0.25
-                + ((dt?.gambles         ?? 50) - 50) / 100 * 0.15
-                + ((dt?.onBallPest      ?? 50) - 50) / 100 * 0.10
-                - ((dt?.shotContestDiscipline ?? 50) - 50) / 100 * 0.12,
+                + ((dt?.denyThePass     ?? 50) - 50) / 100 * 0.10
+                + ((dt?.helpDefender    ?? 50) - 50) / 100 * 0.08,
+
+    // blkBoost: help rotations generate most blocks; physicality adds contested
+    //           rejection power; disciplined contests rarely get pump-faked.
+    blkBoost:     (( dt?.helpDefender   ?? 50) - 50) / 100 * 0.25
+                + ((dt?.physicality     ?? 50) - 50) / 100 * 0.10
+                + ((dt?.shotContestDiscipline ?? 50) - 50) / 100 * 0.05,
+
+    // foulRisk: tendency-driven raw risk.  Now also reduced by Defensive IQ
+    //   so smart defenders who are physical still commit fewer dumb fouls.
+    foulRisk:     (( dt?.physicality             ?? 50) - 50) / 100 * 0.25
+                + ((dt?.gambles                  ?? 50) - 50) / 100 * 0.15
+                + ((dt?.onBallPest               ?? 50) - 50) / 100 * 0.10
+                - ((dt?.shotContestDiscipline    ?? 50) - 50) / 100 * 0.12
+                - ((diq - 50) / 100) * 0.18,
   };
 };
 
@@ -2051,7 +2244,9 @@ const simulatePlayerGameLine = (
   const ast = Math.max(0, Math.round(teamAst * adjAstShare));
 
   const stl = Math.floor((player.attributes.steals / 100) * 2 * minFac * (1 + tm.stlBoost) + Math.random() * 1);
-  const blk = Math.floor((player.attributes.blocks  / 100) * 2 * minFac + Math.random() * 1);
+  // blkBoost: helpDefender tendency generates most blocks (rim protection from rotations);
+  // physicality adds contested-rejection power; disciplined contests rarely get pump-faked.
+  const blk = Math.floor((player.attributes.blocks  / 100) * 2 * minFac * (1 + tm.blkBoost) + Math.random() * 1);
   const pf  = Math.min(6, Math.round((Math.floor(Math.random() * 4 * minFac + 1)) * (1 + tm.foulRisk)));
 
   return {

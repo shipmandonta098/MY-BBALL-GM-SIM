@@ -1,21 +1,39 @@
-
 import React, { useState } from 'react';
-import { Team } from '../types';
+import { Team, LeagueState } from '../types';
+import { getSeasonPhase, PHASE_LABELS, PHASE_ORDER, SeasonPhase } from '../utils/seasonPhase';
 
 interface SidebarProps {
   activeTab: string;
   setActiveTab: (tab: any) => void;
   team: Team;
   onQuit: () => void;
-  isOffseason?: boolean;
+  league: LeagueState;
   isExpansionActive?: boolean;
-  draftPhase?: string;
 }
 
-const Sidebar: React.FC<SidebarProps> = ({ activeTab, setActiveTab, team, onQuit, isOffseason, isExpansionActive, draftPhase }) => {
+const PHASE_ICONS: Record<string, string> = {
+  preseason: '🏋️',
+  regular: '🏀',
+  allstar: '⭐',
+  playoffs: '🏆',
+  offseason: '🎯',
+};
+
+const Sidebar: React.FC<SidebarProps> = ({
+  activeTab,
+  setActiveTab,
+  team,
+  onQuit,
+  league,
+  isExpansionActive,
+}) => {
   const [isCollapsed, setIsCollapsed] = useState(false);
 
-  // Offseason phase label for the Draft Hub item
+  const isOffseason = league.isOffseason;
+  const draftPhase = league.draftPhase;
+  const currentPhase = getSeasonPhase(league);
+
+  // Offseason sub-phase label for Draft Hub
   const offseasonPhaseLabel =
     isOffseason && draftPhase === 'lottery' ? 'Lottery'
     : isOffseason && draftPhase === 'draft' ? 'Draft'
@@ -33,6 +51,7 @@ const Sidebar: React.FC<SidebarProps> = ({ activeTab, setActiveTab, team, onQuit
     { id: 'standings', label: 'Standings', icon: 'M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z' },
     { id: 'power_rankings', label: 'Power Rankings', icon: 'M13 7h8m0 0v8m0-8l-8 8-4-4-6 6' },
     { id: 'playoffs', label: 'Playoffs', icon: 'M13 10V3L4 14h7v7l9-11h-7z' },
+    { id: 'allstar', label: 'All-Star Weekend', icon: 'M11.049 2.927c.3-.921 1.603-.921 1.902 0l1.519 4.674a1 1 0 00.95.69h4.915c.969 0 1.371 1.24.588 1.81l-3.976 2.888a1 1 0 00-.363 1.118l1.518 4.674c.3.922-.755 1.688-1.538 1.118l-3.976-2.888a1 1 0 00-1.176 0l-3.976 2.888c-.783.57-1.838-.197-1.538-1.118l1.518-4.674a1 1 0 00-.363-1.118l-3.976-2.888c-.784-.57-.382-1.81.588-1.81h4.914a1 1 0 00.951-.69l1.519-4.674z', notification: currentPhase === 'allstar', visible: !!league.allStarWeekend },
     { id: 'awards', label: 'Trophies', icon: 'M5 3v4M3 5h4M6 17v4m-2-2h4m5-16l2.286 6.857L21 12l-7.714 2.143L11 21l-2.286-6.857L1 12l7.714-2.143L11 3z' },
     { id: 'finances', label: 'Finances', icon: 'M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z' },
     { id: 'trade', label: 'Trade Machine', icon: 'M8 7h12m0 0l-4-4m4 4l-4 4m0 6H4m0 0l4-4m-4 4l4 4' },
@@ -48,12 +67,21 @@ const Sidebar: React.FC<SidebarProps> = ({ activeTab, setActiveTab, team, onQuit
     { id: 'settings', label: 'Settings', icon: 'M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z' },
   ];
 
+  // Compute season progress for the progress bar
+  const totalGames = league.schedule.length;
+  const playedGames = league.schedule.filter(g => g.played).length;
+  const seasonPct = totalGames > 0 ? playedGames / totalGames : 0;
+
+  // Phase step index for breadcrumb coloring
+  const phaseIdx = PHASE_ORDER.indexOf(currentPhase);
+
   return (
-    <div 
+    <div
       className={`bg-slate-900 border-r border-slate-800 flex flex-col h-full shrink-0 relative transition-all duration-300 ease-in-out ${isCollapsed ? 'w-20' : 'w-64'}`}
     >
+      {/* ── Logo / Team ── */}
       <div className="p-6 border-b border-slate-800 flex items-center gap-3 overflow-hidden">
-        <div 
+        <div
           className="w-10 h-10 rounded-lg flex items-center justify-center font-bold text-slate-950 font-display text-xl shrink-0"
           style={{ backgroundColor: team.primaryColor }}
         >
@@ -66,7 +94,8 @@ const Sidebar: React.FC<SidebarProps> = ({ activeTab, setActiveTab, team, onQuit
         )}
       </div>
 
-      <button 
+      {/* ── Collapse toggle ── */}
+      <button
         onClick={() => setIsCollapsed(!isCollapsed)}
         className="absolute -right-3 top-20 w-6 h-6 bg-slate-800 border border-slate-700 rounded-full flex items-center justify-center text-slate-400 hover:text-white transition-colors z-50"
       >
@@ -74,35 +103,94 @@ const Sidebar: React.FC<SidebarProps> = ({ activeTab, setActiveTab, team, onQuit
           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15 19l-7-7 7-7" />
         </svg>
       </button>
-      
-      {/* Offseason phase indicator strip */}
-      {isOffseason && !isCollapsed && (
+
+      {/* ── Season Phase Strip ── */}
+      {!isCollapsed && (
         <div className="px-4 py-3 border-b border-slate-800 bg-slate-950/40">
-          <p className="text-[9px] font-black uppercase tracking-[0.3em] text-slate-600 mb-2">Offseason Phase</p>
+          {/* Current phase badge */}
+          <div className="flex items-center justify-between mb-2">
+            <p className="text-[9px] font-black uppercase tracking-[0.3em] text-slate-600">
+              Season Phase
+            </p>
+            <span className="text-[9px] font-black uppercase text-amber-500">
+              {PHASE_ICONS[currentPhase]} {PHASE_LABELS[currentPhase]}
+            </span>
+          </div>
+
+          {/* Phase breadcrumb dots */}
           <div className="flex items-center gap-1.5">
-            {(['lottery', 'draft', 'completed'] as const).map((phase, i) => {
-              const labels = ['Lottery', 'Draft', 'Free Agency'];
-              const isActive = draftPhase === phase || (phase === 'completed' && draftPhase === 'completed');
-              const isPast =
-                (phase === 'lottery' && (draftPhase === 'draft' || draftPhase === 'completed')) ||
-                (phase === 'draft' && draftPhase === 'completed');
+            {PHASE_ORDER.map((phase, i) => {
+              const isPast = i < phaseIdx;
+              const isActive = i === phaseIdx;
               return (
                 <React.Fragment key={phase}>
-                  {i > 0 && <span className="text-slate-700 text-[8px]">›</span>}
-                  <span
-                    className={`text-[9px] font-black uppercase tracking-widest ${
-                      isActive ? 'text-amber-500' : isPast ? 'text-emerald-600' : 'text-slate-700'
+                  {i > 0 && (
+                    <div className={`flex-1 h-px ${isPast || isActive ? 'bg-amber-500/40' : 'bg-slate-800'}`} />
+                  )}
+                  <button
+                    onClick={() => {
+                      if (phase === 'allstar' && league.allStarWeekend) setActiveTab('allstar');
+                      else if (phase === 'playoffs' && league.playoffBracket) setActiveTab('playoffs');
+                      else if (phase === 'offseason' && league.isOffseason) setActiveTab('draft');
+                    }}
+                    title={PHASE_LABELS[phase]}
+                    className={`w-2 h-2 rounded-full shrink-0 transition-all ${
+                      isActive
+                        ? 'bg-amber-500 shadow-[0_0_6px_rgba(245,158,11,0.8)] scale-125'
+                        : isPast
+                          ? 'bg-emerald-600'
+                          : 'bg-slate-700'
                     }`}
-                  >
-                    {labels[i]}
-                  </span>
+                  />
                 </React.Fragment>
               );
             })}
           </div>
+
+          {/* Progress bar (only during regular season) */}
+          {!isOffseason && !league.playoffBracket && totalGames > 0 && (
+            <div className="mt-2">
+              <div className="flex justify-between text-[9px] text-slate-700 mb-1">
+                <span>{playedGames} gms</span>
+                <span>{Math.round(seasonPct * 100)}%</span>
+              </div>
+              <div className="h-1 bg-slate-800 rounded-full overflow-hidden">
+                <div
+                  className="h-full bg-amber-500/70 rounded-full transition-all duration-500"
+                  style={{ width: `${seasonPct * 100}%` }}
+                />
+              </div>
+            </div>
+          )}
+
+          {/* Offseason sub-phases */}
+          {isOffseason && (
+            <div className="flex items-center gap-1 mt-2">
+              {(['lottery', 'draft', 'completed'] as const).map((phase, i) => {
+                const labels = ['Lottery', 'Draft', 'FA'];
+                const isActive = draftPhase === phase;
+                const isPast =
+                  (phase === 'lottery' && (draftPhase === 'draft' || draftPhase === 'completed')) ||
+                  (phase === 'draft' && draftPhase === 'completed');
+                return (
+                  <React.Fragment key={phase}>
+                    {i > 0 && <span className="text-slate-700 text-[8px]">›</span>}
+                    <span
+                      className={`text-[9px] font-black uppercase tracking-widest ${
+                        isActive ? 'text-amber-500' : isPast ? 'text-emerald-600' : 'text-slate-700'
+                      }`}
+                    >
+                      {labels[i]}
+                    </span>
+                  </React.Fragment>
+                );
+              })}
+            </div>
+          )}
         </div>
       )}
 
+      {/* ── Navigation ── */}
       <nav className="flex-1 p-4 space-y-2 overflow-y-auto scrollbar-none overflow-x-hidden">
         {menuItems.map(item => {
           if (item.visible === false) return null;
@@ -111,7 +199,9 @@ const Sidebar: React.FC<SidebarProps> = ({ activeTab, setActiveTab, team, onQuit
             <button
               key={item.id}
               onClick={() => setActiveTab(item.id)}
-              className={`w-full flex items-center gap-3 p-3 rounded-lg transition-all group relative ${isActive ? 'text-slate-950 shadow-lg' : 'text-slate-400 hover:text-white hover:bg-slate-800/50'}`}
+              className={`w-full flex items-center gap-3 p-3 rounded-lg transition-all group relative ${
+                isActive ? 'text-slate-950 shadow-lg' : 'text-slate-400 hover:text-white hover:bg-slate-800/50'
+              }`}
               style={isActive ? { backgroundColor: team.primaryColor } : {}}
               title={isCollapsed ? item.label : ''}
             >
@@ -126,22 +216,25 @@ const Sidebar: React.FC<SidebarProps> = ({ activeTab, setActiveTab, team, onQuit
                 </span>
               )}
               {item.notification && (
-                <span className={`absolute ${isCollapsed ? 'top-1 right-1' : 'top-2 right-2'} w-2 h-2 bg-amber-500 rounded-full animate-pulse shadow-[0_0_8px_rgba(245,158,11,0.5)]`}></span>
+                <span
+                  className={`absolute ${isCollapsed ? 'top-1 right-1' : 'top-2 right-2'} w-2 h-2 bg-amber-500 rounded-full animate-pulse shadow-[0_0_8px_rgba(245,158,11,0.5)]`}
+                />
               )}
             </button>
           );
         })}
       </nav>
 
+      {/* ── Quit ── */}
       <div className="p-4 border-t border-slate-800 overflow-hidden">
-        <button 
+        <button
           onClick={onQuit}
           className="w-full flex items-center gap-3 p-3 rounded-lg text-slate-500 hover:text-rose-500 hover:bg-rose-500/5 transition-all group"
           title={isCollapsed ? 'Quit Career' : ''}
         >
           <div className="shrink-0">
             <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3-3h4a3 3 0 013 3v1" />
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" />
             </svg>
           </div>
           {!isCollapsed && (

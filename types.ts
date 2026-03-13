@@ -659,6 +659,26 @@ export interface RivalryStats {
   badBloodScore: number; // For trades/suspensions
 }
 
+export type SeasonPhase = 'preseason' | 'regular' | 'allstar' | 'playoffs' | 'offseason';
+
+export interface AllStarEventResult {
+  name: string;
+  winnerId?: string;
+  winnerName: string;
+  highlights: string[];
+}
+
+export interface AllStarWeekend {
+  year: number;
+  eastIds: string[];
+  westIds: string[];
+  events: AllStarEventResult[];
+  gameMvpId?: string;
+  gameEastScore?: number;
+  gameWestScore?: number;
+  completed: boolean;
+}
+
 export interface LeagueState {
   id: string;
   lastUpdated: number;
@@ -688,6 +708,7 @@ export interface LeagueState {
   currentDraftPickIndex?: number;
   championshipHistory?: ChampionshipRecord[];
   rivalryHistory?: RivalryStats[];
+  allStarWeekend?: AllStarWeekend;
   expansionDraft?: {
     active: boolean;
     phase: 'protection' | 'draft' | 'completed';

@@ -41,6 +41,7 @@ import FranchiseHistory from './components/FranchiseHistory';
 import Rotations from './components/Rotations';
 import TeamManagement from './components/TeamManagement';
 import Players from './components/Players';
+import AllStar, { selectAllStarRosters } from './components/AllStar';
 
 const SETTINGS_KEY = 'HOOPS_DYNASTY_SETTINGS_V1';
 
@@ -643,6 +644,36 @@ const App: React.FC = () => {
       setBulkSummary(summary);
     }
     
+    // ── All-Star Weekend trigger ─────────────────────────────────────────────
+    // Fire once the average team has played ~41 games (season midpoint).
+    // Only triggers if: regular season in progress, no allStarWeekend yet, no playoffs yet.
+    if (!tempState.isOffseason && !tempState.playoffBracket && !tempState.allStarWeekend) {
+      const totalPlayed = tempState.schedule.filter(g => g.played).length;
+      const teamCount   = tempState.teams.length;
+      const halfTeams   = teamCount / 2;
+      const avgTeamGames = halfTeams > 0 ? totalPlayed / halfTeams : 0;
+      const midpoint = Math.floor((tempState.settings.seasonLength ?? 82) / 2);
+      if (avgTeamGames >= midpoint) {
+        const { eastIds, westIds } = selectAllStarRosters(tempState);
+        const allStarNewsId = `allstar-announce-${Date.now()}`;
+        const allStarNews: NewsItem = {
+          id: allStarNewsId,
+          category: 'award',
+          headline: '⭐ ALL-STAR ROSTERS ANNOUNCED',
+          content: `The ${tempState.season} All-Star rosters have been revealed! 12 players from each conference will compete in the mid-season showcase — Skills Challenge, 3-Point Contest, Slam Dunk Contest, and the All-Star Game.`,
+          timestamp: tempState.currentDay,
+          realTimestamp: Date.now(),
+          isBreaking: true,
+        };
+        tempState = {
+          ...tempState,
+          allStarWeekend: { year: tempState.season, eastIds, westIds, events: [], completed: false },
+          newsFeed: [allStarNews, ...tempState.newsFeed],
+        };
+        setActiveTab('allstar');
+      }
+    }
+
     if (!tempState.schedule.some(g => !g.played) && !tempState.playoffBracket) {
       const seasonAwards = await generateAwards(tempState.teams, tempState.season);
       
@@ -964,7 +995,7 @@ const App: React.FC = () => {
 
   return (
     <div className="flex h-screen overflow-hidden bg-slate-950 text-slate-50 relative">
-      <Sidebar activeTab={activeTab} setActiveTab={setActiveTab} team={userTeam} onQuit={() => setStatus('title')} isOffseason={league.isOffseason} isExpansionActive={league.expansionDraft?.active} draftPhase={league.draftPhase} />
+      <Sidebar activeTab={activeTab} setActiveTab={setActiveTab} team={userTeam} onQuit={() => setStatus('title')} league={league} isExpansionActive={league.expansionDraft?.active} />
       <main className="flex-1 overflow-y-auto p-6 md:p-10 space-y-8 pb-32 transition-all duration-300 ease-in-out">
         <div key={activeTab} className="animate-in fade-in slide-in-from-bottom-2 duration-500">
           {activeTab === 'dashboard' && <Dashboard league={league} news={news} onSimulate={handleSimulate} onScout={handleViewPlayer} scoutingReport={scoutingReport} setActiveTab={setActiveTab} onViewRoster={handleViewRoster} onManageTeam={handleManageTeam} />}
@@ -1016,6 +1047,13 @@ const App: React.FC = () => {
           {activeTab === 'finances' && <Finances league={league} updateLeague={updateLeagueState} />}
           {activeTab === 'trade' && <Trade league={league} updateLeague={updateLeagueState} recordTransaction={recordTransaction} />}
           {activeTab === 'settings' && <Settings league={league} updateLeague={updateLeagueState} />}
+          {activeTab === 'allstar' && league.allStarWeekend && (
+            <AllStar
+              league={league}
+              updateLeague={updateLeagueState}
+              onComplete={() => setActiveTab('schedule')}
+            />
+          )}
         </div>
       </main>
       {selectedPlayer && (
