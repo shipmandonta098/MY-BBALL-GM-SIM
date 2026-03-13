@@ -1,4 +1,4 @@
-import React, { useEffect } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Player, PlayerStatus, PersonalityTrait, Position, PlayerTendencies } from '../types';
 import { getFlag, POS_ATTR_RANGES, PosAttrRangeKey, enforcePositionalBounds } from '../constants';
 
@@ -44,6 +44,7 @@ const PlayerModal: React.FC<PlayerModalProps> = ({
   onUpdatePlayer
 }) => {
   const [isEditing, setIsEditing] = React.useState(false);
+  const [statsTab, setStatsTab] = useState<'season' | 'career'>('season');
 
   const defaultAttributes = {
     shooting: 50, defense: 50, rebounding: 50, playmaking: 50, athleticism: 50,
@@ -914,6 +915,198 @@ const PlayerModal: React.FC<PlayerModalProps> = ({
             </div>
           </section>
           )}
+
+          {/* ── Player Stats ──────────────────────────────────────────────── */}
+          {(() => {
+            const s   = player.stats;
+            const gp  = Math.max(1, s.gamesPlayed);
+            const mpg = s.minutes  > 0 ? s.minutes  / gp : 0;
+            const ppg = s.points   > 0 ? s.points   / gp : 0;
+            const rpg = s.rebounds > 0 ? s.rebounds / gp : 0;
+            const apg = s.assists  > 0 ? s.assists  / gp : 0;
+            const spg = s.steals   > 0 ? s.steals   / gp : 0;
+            const bpg = s.blocks   > 0 ? s.blocks   / gp : 0;
+            const tpg = s.tov      > 0 ? s.tov      / gp : 0;
+            const fgp = s.fga  > 0 ? s.fgm  / s.fga  : 0;
+            const tpp = s.threepa > 0 ? s.threepm / s.threepa : 0;
+            const ftp = s.fta  > 0 ? s.ftm  / s.fta  : 0;
+            const eFG = s.fga  > 0 ? (s.fgm + 0.5 * s.threepm) / s.fga : 0;
+            const ts  = (s.fga + 0.44 * s.fta) > 0
+              ? s.points / (2 * (s.fga + 0.44 * s.fta)) : 0;
+            const per = s.minutes > 0
+              ? (s.points + s.rebounds + s.assists + s.steals + s.blocks
+                  - (s.fga - s.fgm) - (s.fta - s.ftm) - s.tov)
+                / s.minutes * 30 : 0;
+            const pmPg = s.gamesPlayed > 0 ? s.plusMinus / s.gamesPlayed : 0;
+
+            const hasCareer  = player.careerStats && player.careerStats.length > 0;
+            const hasCurr    = s.gamesPlayed > 0;
+            const hasHighs   = player.careerHighs && (
+              player.careerHighs.points   > 0 ||
+              player.careerHighs.rebounds > 0 ||
+              player.careerHighs.assists  > 0
+            );
+
+            if (!hasCurr && !hasCareer) return null;
+
+            const fmt1   = (v: number) => v.toFixed(1);
+            const fmtPct = (v: number) => (v * 100).toFixed(1) + '%';
+            const fmtPm  = (v: number) => (v >= 0 ? '+' : '') + v.toFixed(1);
+
+            const statCols: { label: string; value: string; hi?: boolean }[] = [
+              { label: 'GP',  value: String(s.gamesPlayed) },
+              { label: 'MIN', value: fmt1(mpg) },
+              { label: 'PTS', value: fmt1(ppg), hi: ppg >= 20 },
+              { label: 'REB', value: fmt1(rpg), hi: rpg >= 8 },
+              { label: 'AST', value: fmt1(apg), hi: apg >= 6 },
+              { label: 'STL', value: fmt1(spg), hi: spg >= 1.5 },
+              { label: 'BLK', value: fmt1(bpg), hi: bpg >= 1.5 },
+              { label: 'TO',  value: fmt1(tpg) },
+              { label: 'FG%', value: fmtPct(fgp), hi: fgp >= 0.5 },
+              { label: '3P%', value: s.threepa > 0 ? fmtPct(tpp) : '—', hi: tpp >= 0.38 },
+              { label: 'FT%', value: s.fta > 0 ? fmtPct(ftp) : '—' },
+            ];
+
+            const advCols: { label: string; value: string }[] = [
+              { label: 'PER',  value: fmt1(per) },
+              { label: 'TS%',  value: fmtPct(ts) },
+              { label: 'eFG%', value: fmtPct(eFG) },
+              { label: '+/-',  value: fmtPm(pmPg) },
+            ];
+
+            return (
+              <section className="space-y-5">
+                {/* Header + tab switcher */}
+                <div className="flex items-center justify-between">
+                  <h3 className="text-[10px] font-black text-amber-500 uppercase tracking-[0.5em]">Statistics</h3>
+                  {hasCareer && (
+                    <div className="flex gap-1 bg-slate-900 border border-slate-800 rounded-full p-0.5">
+                      {(['season', 'career'] as const).map(tab => (
+                        <button
+                          key={tab}
+                          onClick={() => setStatsTab(tab)}
+                          className={`px-4 py-1 text-[10px] font-black uppercase rounded-full transition-all ${
+                            statsTab === tab
+                              ? 'bg-amber-500 text-slate-950'
+                              : 'text-slate-500 hover:text-white'
+                          }`}
+                        >
+                          {tab === 'season' ? 'This Season' : 'Career'}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+
+                {/* ── Season averages ─────────────────────────────────────────── */}
+                {statsTab === 'season' && hasCurr && (
+                  <div className="bg-slate-950/50 border border-slate-800 rounded-3xl overflow-hidden">
+                    <div className="overflow-x-auto">
+                      <table className="w-full text-center">
+                        <thead>
+                          <tr className="border-b border-slate-800">
+                            {statCols.map(c => (
+                              <th key={c.label} className="px-3 py-3 text-[10px] font-black uppercase tracking-widest text-slate-500">
+                                {c.label}
+                              </th>
+                            ))}
+                          </tr>
+                        </thead>
+                        <tbody>
+                          <tr>
+                            {statCols.map(c => (
+                              <td key={c.label} className={`px-3 py-4 font-display font-bold tabular-nums text-sm ${c.hi ? 'text-amber-400' : 'text-slate-200'}`}>
+                                {c.value}
+                              </td>
+                            ))}
+                          </tr>
+                        </tbody>
+                      </table>
+                    </div>
+                    {/* Advanced row */}
+                    <div className="border-t border-slate-800 grid grid-cols-4 divide-x divide-slate-800">
+                      {advCols.map(c => (
+                        <div key={c.label} className="py-3 text-center">
+                          <div className="text-[10px] font-black uppercase tracking-widest text-slate-500">{c.label}</div>
+                          <div className="font-display font-bold text-slate-300 tabular-nums mt-0.5">{c.value}</div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* ── Career stats by season ──────────────────────────────────── */}
+                {statsTab === 'career' && hasCareer && (
+                  <div className="bg-slate-950/50 border border-slate-800 rounded-3xl overflow-hidden">
+                    <div className="overflow-x-auto">
+                      <table className="w-full text-center">
+                        <thead>
+                          <tr className="border-b border-slate-800">
+                            {['Season', 'Team', 'GP', 'MIN', 'PTS', 'REB', 'AST', 'STL', 'BLK', 'FG%', '3P%', 'FT%'].map(h => (
+                              <th key={h} className="px-3 py-3 text-[10px] font-black uppercase tracking-widest text-slate-500 whitespace-nowrap">
+                                {h}
+                              </th>
+                            ))}
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-slate-800/40">
+                          {[...player.careerStats]
+                            .sort((a, b) => b.year - a.year)
+                            .map((cs, i) => {
+                              const cgp  = Math.max(1, cs.gamesPlayed);
+                              const isCurrent = i === 0;
+                              return (
+                                <tr key={`${cs.year}-${cs.teamId}`} className={isCurrent ? 'bg-amber-500/5' : 'hover:bg-slate-800/20 transition-colors'}>
+                                  <td className={`px-3 py-3 text-[11px] font-black tabular-nums whitespace-nowrap ${isCurrent ? 'text-amber-400' : 'text-slate-400'}`}>
+                                    {cs.year}–{String(cs.year + 1).slice(2)}
+                                  </td>
+                                  <td className="px-3 py-3 text-[10px] font-black text-slate-500 uppercase whitespace-nowrap">
+                                    {cs.teamName.length > 10 ? cs.teamName.slice(0, 10) + '…' : cs.teamName}
+                                  </td>
+                                  <td className="px-3 py-3 font-display font-bold text-slate-300 tabular-nums text-sm">{cs.gamesPlayed}</td>
+                                  <td className="px-3 py-3 font-display font-bold text-slate-300 tabular-nums text-sm">{fmt1(cs.minutes / cgp)}</td>
+                                  <td className={`px-3 py-3 font-display font-bold tabular-nums text-sm ${cs.points / cgp >= 20 ? 'text-amber-400' : 'text-slate-200'}`}>{fmt1(cs.points / cgp)}</td>
+                                  <td className="px-3 py-3 font-display font-bold text-slate-200 tabular-nums text-sm">{fmt1(cs.rebounds / cgp)}</td>
+                                  <td className="px-3 py-3 font-display font-bold text-slate-200 tabular-nums text-sm">{fmt1(cs.assists / cgp)}</td>
+                                  <td className="px-3 py-3 font-display font-bold text-slate-300 tabular-nums text-sm">{fmt1(cs.steals / cgp)}</td>
+                                  <td className="px-3 py-3 font-display font-bold text-slate-300 tabular-nums text-sm">{fmt1(cs.blocks / cgp)}</td>
+                                  <td className="px-3 py-3 font-display font-bold text-slate-300 tabular-nums text-sm">{cs.fga > 0 ? fmtPct(cs.fgm / cs.fga) : '—'}</td>
+                                  <td className="px-3 py-3 font-display font-bold text-slate-300 tabular-nums text-sm">{cs.threepa > 0 ? fmtPct(cs.threepm / cs.threepa) : '—'}</td>
+                                  <td className="px-3 py-3 font-display font-bold text-slate-300 tabular-nums text-sm">{cs.fta > 0 ? fmtPct(cs.ftm / cs.fta) : '—'}</td>
+                                </tr>
+                              );
+                            })
+                          }
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                )}
+
+                {/* ── Career highs ────────────────────────────────────────────── */}
+                {hasHighs && (
+                  <div className="space-y-2">
+                    <p className="text-[10px] font-black text-slate-600 uppercase tracking-widest">Career Highs</p>
+                    <div className="grid grid-cols-3 sm:grid-cols-6 gap-2">
+                      {[
+                        { label: 'PTS', value: player.careerHighs.points },
+                        { label: 'REB', value: player.careerHighs.rebounds },
+                        { label: 'AST', value: player.careerHighs.assists },
+                        { label: 'STL', value: player.careerHighs.steals },
+                        { label: 'BLK', value: player.careerHighs.blocks },
+                        { label: '3PM', value: player.careerHighs.threepm },
+                      ].map(h => (
+                        <div key={h.label} className="bg-slate-900 border border-slate-800 rounded-2xl p-3 text-center">
+                          <div className="text-[10px] font-black uppercase tracking-widest text-slate-600">{h.label}</div>
+                          <div className="font-display font-bold text-xl text-amber-400 mt-0.5 tabular-nums">{h.value || '—'}</div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </section>
+            );
+          })()}
 
           <section className="space-y-8">
              <div className="flex items-center justify-between">
