@@ -199,6 +199,131 @@ export function getTeamOrbChance(
   return Math.max(0.20, Math.min(0.38, sum * DECAY));
 }
 
+// ─── Turnover % & Assist Efficiency Functions ────────────────────────────────
+/**
+ * Maps ball handling, passing, and offensive IQ to expected TO% per possession.
+ *
+ * Calibrated to 2025-26 NBA: league avg TO% ≈ 12-13 %.
+ *   • Elite handlers (BH 90+): 8-10 %
+ *   • Avg creator   (BH 70-79): 11-14 %
+ *   • Poor handler  (BH < 60):  15-20 %+
+ *
+ * Piecewise-linear breakpoints (tune each band independently):
+ *   BH    │ base TO% │ + PG  │ + C/PF │ notes
+ *   ──────┼──────────┼───────┼────────┼──────────────────────────────
+ *     0   │  20.0 %  │+1.5 % │ -1.0 % │ never handles the ball
+ *    60   │  15.0 %  │       │        │
+ *    74   │  12.2 %  │       │        │ ← league-avg ball handler
+ *    80   │  11.0 %  │       │        │
+ *    94   │   8.0 %  │       │        │
+ *   100   │   7.0 %  │       │        │ historic ball security
+ *
+ * Passing modifier:
+ *   passing >> ballHandling → overambitious (+up to 2 %)
+ *   balanced (Δ ≤ 10) → slight benefit (−0.5 %)
+ *   conservative big → near-neutral
+ *
+ * Off IQ: centered at 70; each ±10 IQ shifts TO% by ±0.25 %.
+ * Stamina: low-stamina players (<60) add up to +2.5 % late-game fatigue risk.
+ *
+ * Tuning guide:
+ *   • Shift segment floors (0.20, 0.15, 0.11, 0.08, 0.07) to move curve globally.
+ *   • Adjust passMod cap (0.02 / −0.005) to widen/narrow the overambitious risk.
+ *   • Positional deltas (±0.015 / ±0.010) control PG vs. C gap.
+ */
+export function getTurnoverPercentage(
+  ballHandling: number,
+  passing:      number,
+  offIQ:        number,
+  position?:    string,
+  stamina?:     number,
+): number {
+  const bh = Math.max(0, Math.min(100, ballHandling));
+
+  // ── Primary driver: ball handling (inverse — better BH = lower TO%) ───────
+  let base: number;
+  if (bh <= 60) {
+    // Sloppy: 20 % at 0 → 15 % at 60
+    base = 0.20 - (bh / 60) * 0.05;
+  } else if (bh <= 80) {
+    // Average: 15 % at 60 → 11 % at 80
+    base = 0.15 - ((bh - 60) / 20) * 0.04;
+  } else if (bh <= 94) {
+    // Plus → elite: 11 % at 80 → 8 % at 94
+    base = 0.11 - ((bh - 80) / 14) * 0.03;
+  } else {
+    // God-tier: 8 % at 95 → 7 % at 100
+    base = 0.08 - ((bh - 95) / 5) * 0.01;
+  }
+
+  // ── Passing: vision vs. ball-security balance ─────────────────────────────
+  // If passing >> ballHandling the player sees reads they can't execute safely.
+  // If balanced, sharper vision slightly protects the ball.
+  const passDelta = passing - bh;
+  let passMod: number;
+  if (passDelta > 10) {
+    // Overambitious: ramps +0→2 % as the gap widens past 10 pts
+    passMod = Math.min(0.02, (passDelta - 10) / 100 * 0.03);
+  } else if (passDelta >= -10) {
+    // Balanced creator: reads + handles working together
+    passMod = -0.005;
+  } else {
+    // Conservative big: keeps it simple, marginal positive
+    passMod = Math.min(0.005, (-passDelta - 10) / 100 * 0.01);
+  }
+  base += passMod;
+
+  // ── Off IQ: decision quality — cleans up bad reads and risky passes ───────
+  // Neutral at offIQ=70; shifts ±0.75 % per 30-pt IQ swing.
+  base += -(offIQ - 70) / 100 * 0.025;
+
+  // ── Positional pressure: PGs carry under sustained guard pressure ──────────
+  if (position === 'PG') base += 0.015;
+  else if (position === 'C' || position === 'PF') base -= 0.010;
+
+  // ── Fatigue: low-stamina players lose ball security late in games ─────────
+  if (stamina !== undefined) {
+    base += Math.max(0, (60 - stamina) / 100 * 0.025);
+  }
+
+  return Math.max(0.06, Math.min(0.22, base));
+}
+
+/**
+ * Returns an AST-efficiency multiplier that replaces raw (playmaking/100) in
+ * the adjAstShare formula, blending passing vision + playmaking court command.
+ *
+ * Penalises high-TO% passers: a player who forces turnovers on 17 %+ of
+ * possessions converts fewer potential assists (risky threading = more broken
+ * plays, fewer scoring reads completed).
+ *
+ * Output is a multiplier on [0.20, 1.05]:
+ *   Elite playmaker (pass=90, pm=88, iq=85, toRate=0.09)  → ~0.89
+ *   Avg creator     (pass=75, pm=72, iq=70, toRate=0.13)  → ~0.73
+ *   Poor passer     (pass=55, pm=50, iq=60, toRate=0.17)  → ~0.48
+ *
+ * Tuning:
+ *   • Blend weights (0.55 pass / 0.45 playmaking) — shift toward passing for
+ *     pure distributors, toward playmaking for self-created shot creators.
+ *   • iqBonus scale (0.03) and toPenalty ramp (0.08 over toRate 13→20 %)
+ *     control how much IQ and ball security matter independently.
+ */
+export function getAssistEfficiency(
+  passing:    number,
+  playmaking: number,
+  offIQ:      number,
+  toRate:     number,
+): number {
+  // Passing vision (55 %) + playmaking court command (45 %)
+  const blend    = (passing * 0.55 + playmaking * 0.45) / 100;
+  // Sharp readers convert more potential assists than they waste
+  const iqBonus  = (offIQ - 70) / 100 * 0.03;
+  // High-TO passers force broken plays: penalty ramps 0→8 % as toRate > 13 %
+  const toPenalty = Math.max(0, Math.min(0.08, (toRate - 0.13) / 0.07 * 0.08));
+
+  return Math.max(0.20, Math.min(1.05, blend + iqBonus - toPenalty));
+}
+
 // ─── 3PT Defensive Contest Modifier ──────────────────────────────────────────
 /**
  * Maps a defender's perimeterDef attribute (0–100) to a per-possession
@@ -1425,7 +1550,15 @@ const simulatePossession = (
 
     // Gambles / steal attempt
     if (Math.random() < gambles / 400) {
-      if (Math.random() < 0.32) {
+      // Steal success inversely proportional to ball handler's ball security.
+      // Elite handles (BH=90+) are very hard to pilfer even when a defender gambles;
+      // weak handlers (BH<60) are easy targets on aggressive reaches.
+      //   BH=50 → ~25 % steal success  |  BH=75 → 18 %  |  BH=90+ → ~10-13 %
+      const bhAttr = offHandler.attributes.ballHandling ?? 65;
+      const stealSuccessRate = Math.max(0.10, Math.min(0.38,
+        0.18 + (75 - bhAttr) / 100 * 0.30,
+      ));
+      if (Math.random() < stealSuccessRate) {
         return {
           ballHandlerName: offHandler.name, ballHandlerId: offHandler.id,
           tendencyUsed: tendencyUsed || offAction, actionTaken: offAction,
@@ -2284,6 +2417,16 @@ const simulatePlayerGameLine = (
   const adjUsage = Math.max(0.02, usageShare * (1 + tm.usageBoost));
   const fga      = Math.max(0, Math.round(teamFga * adjUsage * (minutes / 32)));
 
+  // TO% computed early: drives both the TOV stat and the AST efficiency penalty.
+  // Uses getTurnoverPercentage() — piecewise curve calibrated to NBA 2025-26.
+  const toRate = getTurnoverPercentage(
+    player.attributes.ballHandling,
+    player.attributes.passing,
+    player.attributes.offensiveIQ,
+    player.position,
+    player.attributes.stamina,
+  );
+
   // 3PA share influenced by pullUpThree tendency
   const threePaShare = Math.max(0, Math.min(0.90,
     (player.attributes.shooting3pt / 100) * 0.5 + tm.threepaBoost));
@@ -2366,18 +2509,26 @@ const simulatePlayerGameLine = (
   const offReb    = Math.round(totalReb * orbRatio);
   const defReb    = totalReb - offReb;
 
-  const adjAstShare = Math.max(0.01, (player.attributes.playmaking / 100) * adjUsage * 3.0 * (1 + tm.astBoost));
+  // AST efficiency blends passing (55 %) + playmaking (45 %), with an IQ bonus
+  // and a penalty for high-TO% passers who force broken plays over scoring reads.
+  const astEff      = getAssistEfficiency(player.attributes.passing, player.attributes.playmaking, player.attributes.offensiveIQ, toRate);
+  const adjAstShare = Math.max(0.01, astEff * adjUsage * 3.0 * (1 + tm.astBoost));
   const ast = Math.max(0, Math.round(teamAst * adjAstShare));
 
   const stl = Math.floor((player.attributes.steals / 100) * 2 * minFac * (1 + tm.stlBoost) + Math.random() * 1);
   const blk = Math.floor((player.attributes.blocks  / 100) * 2 * minFac + Math.random() * 1);
   const pf  = Math.min(6, Math.round((Math.floor(Math.random() * 4 * minFac + 1)) * (1 + tm.foulRisk)));
 
+  // TOV: possession-scaled off actual FGA (proxy for ball touches).
+  // toRate=0.12, fga=13 → ~1.56 base + noise; high-usage stars accumulate more
+  // naturally without a separate multiplier. Noise ±2 % for game-to-game variance.
+  const tovNoise = (Math.random() - 0.5) * 0.04;
+  const tov      = Math.max(0, Math.round((toRate + tovNoise) * fga));
+
   return {
     playerId: player.id, name: player.name, min: minutes,
     pts, reb: totalReb, offReb, defReb, ast, stl, blk, fgm, fga,
-    threepm, threepa, ftm, fta,
-    tov: Math.max(0, Math.floor((100 - player.attributes.ballHandling) / 25 * minFac + Math.random() * 2)),
+    threepm, threepa, ftm, fta, tov,
     plusMinus: 0, pf, techs: 0, flagrants: 0,
   };
 };
