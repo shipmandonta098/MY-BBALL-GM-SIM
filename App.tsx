@@ -818,7 +818,6 @@ const App: React.FC = () => {
     }
 
     // ── Season Phase Milestones ─────────────────────────────────────────────
-    // Only check if we're still in the regular season (no playoff bracket yet)
     if (!tempState.isOffseason && !tempState.playoffBracket) {
       const totalGames = tempState.schedule.length;
       const playedGames = tempState.schedule.filter(g => g.played).length;
@@ -827,7 +826,6 @@ const App: React.FC = () => {
       // Trade Deadline: triggers once at ~49% games played (≈game 40 of 82)
       if (!tempState.tradeDeadlinePassed && pct >= 0.49 && pct < 0.75) {
         tempState = { ...tempState, tradeDeadlinePassed: true, seasonPhase: 'Trade Deadline' as SeasonPhase };
-        // AI GMs make trade deadline moves
         try {
           const aiDeadlineResult = aiGMTradeDeadlineAction(tempState);
           tempState = aiDeadlineResult.updatedState;
@@ -851,7 +849,6 @@ const App: React.FC = () => {
       if (tempState.tradeDeadlinePassed && !tempState.allStarWeekend && pct >= 0.52 && pct < 0.75) {
         const asd = buildAllStarWeekend(tempState);
         tempState = { ...tempState, allStarWeekend: asd, seasonPhase: 'All-Star Weekend' as SeasonPhase };
-        // Build roster announcement news
         const eastStarters = asd.eastStarters.map(id => {
           for (const t of tempState.teams) { const p = t.roster.find(pl => pl.id === id); if (p) return p.name; }
           return id;
@@ -872,11 +869,10 @@ const App: React.FC = () => {
         setActiveTab('allstar');
       }
 
-      // Update phase to Regular Season once trade deadline / All-Star events are resolved
+      // Phase tracking during regular season
       if (tempState.allStarWeekend?.completed && tempState.seasonPhase === 'All-Star Weekend') {
         tempState = { ...tempState, seasonPhase: 'Regular Season' as SeasonPhase };
       }
-      // Keep phase as Regular Season during normal play
       if (!tempState.tradeDeadlinePassed && pct > 0 && pct < 0.49) {
         tempState = { ...tempState, seasonPhase: 'Regular Season' as SeasonPhase };
       }
@@ -1210,7 +1206,7 @@ const App: React.FC = () => {
 
   return (
     <div className="flex h-screen overflow-hidden bg-slate-950 text-slate-50 relative">
-      <Sidebar activeTab={activeTab} setActiveTab={setActiveTab} team={userTeam} onQuit={() => setStatus('title')} isOffseason={league.isOffseason} isExpansionActive={league.expansionDraft?.active} seasonPhase={league.seasonPhase ?? (league.isOffseason ? 'Offseason' : 'Regular Season')} currentDay={league.currentDay} totalDays={league.schedule.length > 0 ? Math.max(...league.schedule.map(g => g.day)) : undefined} draftPhase={league.draftPhase} />
+      <Sidebar activeTab={activeTab} setActiveTab={setActiveTab} team={userTeam} onQuit={() => setStatus('title')} league={league} isExpansionActive={league.expansionDraft?.active} />
       <main className="flex-1 overflow-y-auto p-6 md:p-10 space-y-8 pb-32 transition-all duration-300 ease-in-out">
         <div key={activeTab} className="animate-in fade-in slide-in-from-bottom-2 duration-500">
           {activeTab === 'dashboard' && <Dashboard league={league} news={news} onSimulate={handleSimulate} onScout={handleViewPlayer} scoutingReport={scoutingReport} setActiveTab={setActiveTab} onViewRoster={handleViewRoster} onManageTeam={handleManageTeam} />}
