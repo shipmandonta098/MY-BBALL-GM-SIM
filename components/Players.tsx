@@ -7,7 +7,7 @@ interface PlayersProps {
   onViewPlayer: (player: Player) => void;
 }
 
-type SubTab = 'ratings' | 'bios';
+type SubTab = 'ratings' | 'bios' | 'stats';
 
 // ─── Trait abbreviation map ─────────────────────────────────
 const TRAIT_ABBR: Record<PersonalityTrait, string> = {
@@ -175,10 +175,10 @@ const Players: React.FC<PlayersProps> = ({ league, onViewPlayer }) => {
             </div>
             {/* Sub-tabs */}
             <div className="flex gap-2">
-              {(['ratings', 'bios'] as SubTab[]).map(t => (
+              {(['ratings', 'bios', 'stats'] as SubTab[]).map(t => (
                 <button
                   key={t}
-                  onClick={() => { setSubTab(t); setSortKey(t === 'ratings' ? 'rating' : 'name'); setSortDir(t === 'ratings' ? 'desc' : 'asc'); resetPage(); }}
+                  onClick={() => { setSubTab(t); setSortKey(t === 'ratings' ? 'rating' : t === 'stats' ? 'ppg' : 'name'); setSortDir(t === 'bios' ? 'asc' : 'desc'); resetPage(); }}
                   className={`text-[10px] font-black uppercase tracking-widest px-5 py-2 rounded-full transition-all ${
                     subTab === t ? 'bg-amber-500 text-slate-950' : 'bg-slate-800 text-slate-500 hover:text-white'
                   }`}
@@ -303,6 +303,44 @@ const Players: React.FC<PlayersProps> = ({ league, onViewPlayer }) => {
                     <Th k="stamina"       label="STA" title="Stamina" />
                   </tr>
                 </>
+              ) : subTab === 'stats' ? (
+                <>
+                  <tr className="text-[9px] font-black uppercase tracking-widest bg-slate-950/70 border-b border-slate-800/50">
+                    <th colSpan={6} />
+                    <th colSpan={5} className="px-2 py-1 text-center text-amber-500/60 border-l border-slate-800/40">Field Goals</th>
+                    <th colSpan={3} className="px-2 py-1 text-center text-sky-500/60 border-l border-slate-800/40">3-Pointers</th>
+                    <th colSpan={3} className="px-2 py-1 text-center text-violet-500/60 border-l border-slate-800/40">2-Pointers</th>
+                    <th colSpan={3} className="px-2 py-1 text-center text-emerald-500/60 border-l border-slate-800/40">Free Throws</th>
+                    <th colSpan={5} className="px-2 py-1 text-center text-rose-500/60 border-l border-slate-800/40">Other</th>
+                  </tr>
+                  <tr className="text-slate-500 bg-slate-950/50 border-b border-slate-800">
+                    <th className="w-8 px-2 py-2 text-center text-[9px] font-black text-slate-600">#</th>
+                    <Th k="name"     label="Name" />
+                    <Th k="position" label="Pos" />
+                    <Th k="teamName" label="Team" />
+                    <Th k="gp"       label="GP" title="Games Played" />
+                    <Th k="gs"       label="GS" title="Games Started" />
+                    <Th k="fgmPg"    label="FGM" title="FG Made per game" />
+                    <Th k="fgaPg"    label="FGA" title="FG Attempted per game" />
+                    <Th k="fgPct"    label="FG%" title="Field Goal %" />
+                    <Th k="efg"      label="EFG%" title="Effective FG%" />
+                    <Th k="ppg"      label="PPG" title="Points per game" />
+                    <Th k="tpmPg"    label="3PM" title="3P Made per game" />
+                    <Th k="tpaPg"    label="3PA" title="3P Attempted per game" />
+                    <Th k="tpPct"    label="3P%" title="3-Point %" />
+                    <Th k="twomPg"   label="2PM" title="2P Made per game" />
+                    <Th k="twoaPg"   label="2PA" title="2P Attempted per game" />
+                    <Th k="twoPct"   label="2P%" title="2-Point %" />
+                    <Th k="ftmPg"    label="FTM" title="FT Made per game" />
+                    <Th k="ftaPg"    label="FTA" title="FT Attempted per game" />
+                    <Th k="ftPct"    label="FT%" title="Free Throw %" />
+                    <Th k="orbPg"    label="ORB" title="Offensive Rebounds per game" />
+                    <Th k="drbPg"    label="DRB" title="Defensive Rebounds per game" />
+                    <Th k="rpg"      label="RPG" title="Total Rebounds per game" />
+                    <Th k="apg"      label="APG" title="Assists per game" />
+                    <Th k="pfPg"     label="PF"  title="Personal Fouls per game" />
+                  </tr>
+                </>
               ) : (
                 <tr className="text-slate-500 bg-slate-950/50 border-b border-slate-800">
                   <th className="w-8 px-2 py-2 text-center text-[9px] font-black text-slate-600">#</th>
@@ -368,7 +406,61 @@ const Players: React.FC<PlayersProps> = ({ league, onViewPlayer }) => {
                     {/* Position */}
                     <td className="px-1 py-2.5 text-center text-[10px] font-black text-slate-400 uppercase">{p.position}</td>
 
-                    {subTab === 'ratings' ? (
+                    {subTab === 'stats' ? (() => {
+                        const gp    = Math.max(1, p.stats.gamesPlayed);
+                        const gs    = p.stats.gamesStarted ?? 0;
+                        const fgm   = p.stats.fgm;
+                        const fga   = p.stats.fga;
+                        const tpm   = p.stats.threepm;
+                        const tpa   = p.stats.threepa;
+                        const ftm   = p.stats.ftm;
+                        const fta   = p.stats.fta;
+                        const twom  = fgm - tpm;
+                        const twoa  = fga - tpa;
+                        const f1 = (v: number) => v.toFixed(1);
+                        const pct = (v: number) => (v * 100).toFixed(1) + '%';
+                        const fgPct  = fga > 0 ? fgm / fga : 0;
+                        const tpPct  = tpa > 0 ? tpm / tpa : 0;
+                        const ftPct  = fta > 0 ? ftm / fta : 0;
+                        const twoPct = twoa > 0 ? twom / twoa : 0;
+                        const efg    = fga > 0 ? (fgm + 0.5 * tpm) / fga : 0;
+                        const ppg    = p.stats.points / gp;
+                        const rpg    = p.stats.rebounds / gp;
+                        const apg    = p.stats.assists / gp;
+                        const orbPg  = (p.stats.offReb ?? 0) / gp;
+                        const drbPg  = (p.stats.defReb ?? 0) / gp;
+                        const pfPg   = (p.stats.pf ?? 0) / gp;
+                        return (
+                          <>
+                            <td className="px-2 py-2.5 text-center">
+                              {isFreeAgent
+                                ? <span className="text-[9px] font-black text-amber-500 bg-amber-500/10 px-1.5 py-0.5 rounded">FA</span>
+                                : team ? <TeamBadge team={team} size="xs" /> : null}
+                            </td>
+                            <td className="px-1 py-2.5 text-center text-xs font-mono text-slate-400">{gp}</td>
+                            <td className="px-1 py-2.5 text-center text-xs font-mono text-slate-400">{gs}</td>
+                            <td className="px-1 py-2.5 text-center text-xs font-mono">{f1(fgm / gp)}</td>
+                            <td className="px-1 py-2.5 text-center text-xs font-mono">{f1(fga / gp)}</td>
+                            <td className="px-1 py-2.5 text-center text-xs font-mono font-bold">{fga > 0 ? pct(fgPct) : '—'}</td>
+                            <td className="px-1 py-2.5 text-center text-xs font-mono font-bold text-sky-400">{fga > 0 ? pct(efg) : '—'}</td>
+                            <td className="px-1 py-2.5 text-center text-xs font-mono font-bold text-amber-400">{f1(ppg)}</td>
+                            <td className="px-1 py-2.5 text-center text-xs font-mono">{f1(tpm / gp)}</td>
+                            <td className="px-1 py-2.5 text-center text-xs font-mono">{f1(tpa / gp)}</td>
+                            <td className="px-1 py-2.5 text-center text-xs font-mono font-bold">{tpa > 0 ? pct(tpPct) : '—'}</td>
+                            <td className="px-1 py-2.5 text-center text-xs font-mono">{f1(twom / gp)}</td>
+                            <td className="px-1 py-2.5 text-center text-xs font-mono">{f1(twoa / gp)}</td>
+                            <td className="px-1 py-2.5 text-center text-xs font-mono font-bold">{twoa > 0 ? pct(twoPct) : '—'}</td>
+                            <td className="px-1 py-2.5 text-center text-xs font-mono">{f1(ftm / gp)}</td>
+                            <td className="px-1 py-2.5 text-center text-xs font-mono">{f1(fta / gp)}</td>
+                            <td className="px-1 py-2.5 text-center text-xs font-mono font-bold">{fta > 0 ? pct(ftPct) : '—'}</td>
+                            <td className="px-1 py-2.5 text-center text-xs font-mono">{f1(orbPg)}</td>
+                            <td className="px-1 py-2.5 text-center text-xs font-mono">{f1(drbPg)}</td>
+                            <td className="px-1 py-2.5 text-center text-xs font-mono">{f1(rpg)}</td>
+                            <td className="px-1 py-2.5 text-center text-xs font-mono">{f1(apg)}</td>
+                            <td className="px-1 py-2.5 text-center text-xs font-mono text-slate-400">{f1(pfPg)}</td>
+                          </>
+                        );
+                      })() : subTab === 'ratings' ? (
                       <>
                         {/* Team */}
                         <td className="px-2 py-2.5 text-center">
@@ -557,6 +649,10 @@ function getSortVal(
   team: { id: string; name: string; abbreviation: string } | null,
   league: LeagueState
 ): number | string {
+  const gp = Math.max(1, p.stats.gamesPlayed);
+  const fgm = p.stats.fgm; const fga = p.stats.fga;
+  const tpm = p.stats.threepm; const tpa = p.stats.threepa;
+  const ftm = p.stats.ftm; const fta = p.stats.fta;
   switch (key) {
     case 'name':          return p.name;
     case 'position':      return p.position;
@@ -575,6 +671,28 @@ function getSortVal(
     case 'draftYear':     return p.draftInfo?.year ?? 0;
     case 'draftPick':     return (p.draftInfo?.round ?? 9) * 100 + (p.draftInfo?.pick ?? 99);
     case 'seasonsPro':    return league.season - (p.draftInfo?.year ?? league.season);
+    // ── Per-game stats ─────────────────────────────────────────
+    case 'gp':     return gp;
+    case 'gs':     return p.stats.gamesStarted ?? 0;
+    case 'ppg':    return p.stats.points / gp;
+    case 'rpg':    return p.stats.rebounds / gp;
+    case 'apg':    return p.stats.assists / gp;
+    case 'fgmPg':  return fgm / gp;
+    case 'fgaPg':  return fga / gp;
+    case 'fgPct':  return fga > 0 ? fgm / fga : 0;
+    case 'efg':    return fga > 0 ? (fgm + 0.5 * tpm) / fga : 0;
+    case 'tpmPg':  return tpm / gp;
+    case 'tpaPg':  return tpa / gp;
+    case 'tpPct':  return tpa > 0 ? tpm / tpa : 0;
+    case 'twomPg': return (fgm - tpm) / gp;
+    case 'twoaPg': return (fga - tpa) / gp;
+    case 'twoPct': return (fga - tpa) > 0 ? (fgm - tpm) / (fga - tpa) : 0;
+    case 'ftmPg':  return ftm / gp;
+    case 'ftaPg':  return fta / gp;
+    case 'ftPct':  return fta > 0 ? ftm / fta : 0;
+    case 'orbPg':  return (p.stats.offReb ?? 0) / gp;
+    case 'drbPg':  return (p.stats.defReb ?? 0) / gp;
+    case 'pfPg':   return (p.stats.pf ?? 0) / gp;
     default:
       return (p.attributes as any)[key] ?? 0;
   }
