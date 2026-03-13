@@ -907,19 +907,89 @@ const inchesToStr = (inches: number): string => {
 };
 
 const genPhysical = (pos: string, gender: 'Male'|'Female'): {
-  heightIn: number; heightStr: string; weight: number; archetype?: string;
+  heightIn: number; heightStr: string; weight: number;
 } => {
   const r = HEIGHT_WEIGHT[pos]?.[gender] ?? HEIGHT_WEIGHT['SF'][gender];
   const heightIn = r.minH + Math.floor(Math.random() * (r.maxH - r.minH + 1));
   const weight   = r.minW + Math.floor(Math.random() * (r.maxW - r.minW + 1));
-  const isTallHeavy  = heightIn >= r.avgH + 2 && weight >= r.avgW + 20;
-  const isShortLight = heightIn <= r.avgH - 2 && weight <= r.avgW - 20;
-  return {
-    heightIn,
-    heightStr: inchesToStr(heightIn),
-    weight,
-    archetype: isTallHeavy ? 'Power' : isShortLight ? 'Speedster' : undefined,
-  };
+  return { heightIn, heightStr: inchesToStr(heightIn), weight };
+};
+
+// ─── Archetype assignment ─────────────────────────────────────────────────────
+type Archetype =
+  | 'Hybrid Star' | '3&D Wing' | 'Pure Scorer' | 'Lockdown Defender'
+  | 'Stretch Big' | 'Rim Protector' | 'Playmaking Guard' | 'Two-Way Forward'
+  | 'Bench Spark' | 'Role Player';
+
+const assignArchetype = (pos: Position, attrs: Record<string, number>, rating: number): Archetype => {
+  const sht  = attrs.shooting3pt ?? 50;
+  const def  = attrs.defense ?? 50;
+  const blk  = attrs.blocks ?? 50;
+  const bh   = attrs.ballHandling ?? 50;
+  const pass = attrs.passing ?? 50;
+  const post = attrs.postScoring ?? 50;
+  const ath  = attrs.athleticism ?? 50;
+  const pDef = attrs.perimeterDef ?? 50;
+
+  // Build weighted candidate list based on position + attributes
+  const w: [Archetype, number][] = [];
+
+  if (pos === 'PG') {
+    w.push(['Playmaking Guard', 30 + (bh + pass - 100) * 0.15]);
+    w.push(['Pure Scorer',      20 + (attrs.shooting ?? 50) * 0.10]);
+    w.push(['Lockdown Defender', 8 + (pDef + def - 100) * 0.08]);
+    w.push(['Bench Spark',       8]);
+    w.push(['Role Player',       6]);
+    w.push(['Hybrid Star',       rating >= 82 ? 15 : 3]);
+    w.push(['Two-Way Forward',   5]);
+    w.push(['3&D Wing',          8 + sht * 0.06]);
+  } else if (pos === 'SG') {
+    w.push(['Pure Scorer',      25 + (attrs.shooting ?? 50) * 0.12]);
+    w.push(['3&D Wing',         22 + sht * 0.08]);
+    w.push(['Playmaking Guard', 12 + (bh + pass - 100) * 0.08]);
+    w.push(['Lockdown Defender', 8 + (pDef + def - 100) * 0.08]);
+    w.push(['Bench Spark',       8]);
+    w.push(['Hybrid Star',       rating >= 82 ? 12 : 3]);
+    w.push(['Role Player',       6]);
+    w.push(['Two-Way Forward',   9 + (def + ath - 100) * 0.04]);
+  } else if (pos === 'SF') {
+    w.push(['3&D Wing',          25 + sht * 0.07]);
+    w.push(['Two-Way Forward',   20 + (def + ath - 100) * 0.08]);
+    w.push(['Pure Scorer',       14 + (attrs.shooting ?? 50) * 0.06]);
+    w.push(['Lockdown Defender', 10 + (pDef + def - 100) * 0.08]);
+    w.push(['Hybrid Star',       rating >= 82 ? 12 : 3]);
+    w.push(['Bench Spark',        6]);
+    w.push(['Role Player',        8]);
+    w.push(['Stretch Big',        5 + sht * 0.03]);
+  } else if (pos === 'PF') {
+    w.push(['Stretch Big',       22 + sht * 0.09]);
+    w.push(['Two-Way Forward',   18 + (def + ath - 100) * 0.06]);
+    w.push(['Rim Protector',     15 + (blk + def - 100) * 0.10]);
+    w.push(['Lockdown Defender', 10 + (def - 50) * 0.08]);
+    w.push(['Pure Scorer',        8 + post * 0.05]);
+    w.push(['Hybrid Star',        rating >= 82 ? 10 : 2]);
+    w.push(['Role Player',        8]);
+    w.push(['Bench Spark',        5]);
+  } else { // C
+    w.push(['Rim Protector',     30 + (blk + def - 100) * 0.12]);
+    w.push(['Stretch Big',       18 + sht * 0.08]);
+    w.push(['Two-Way Forward',   12 + (def + ath - 100) * 0.05]);
+    w.push(['Lockdown Defender',  8 + (def - 50) * 0.06]);
+    w.push(['Pure Scorer',        6 + post * 0.06]);
+    w.push(['Role Player',        10]);
+    w.push(['Bench Spark',         6]);
+    w.push(['Hybrid Star',        rating >= 82 ? 8 : 2]);
+  }
+
+  // Clamp weights to ≥1, compute total, pick
+  const clamped = w.map(([a, wt]) => [a, Math.max(1, wt)] as [Archetype, number]);
+  const total   = clamped.reduce((s, [, wt]) => s + wt, 0);
+  let r2        = Math.random() * total;
+  for (const [arch, wt] of clamped) {
+    r2 -= wt;
+    if (r2 <= 0) return arch;
+  }
+  return clamped[clamped.length - 1][0];
 };
 
 type AttrMap = Record<string, number>;
@@ -1062,7 +1132,7 @@ export const generatePlayer = (id: string, ageRange: [number, number] = [19, 38]
     },
     morale: 75 + Math.floor(Math.random() * 20),
     jerseyNumber: Math.floor(Math.random() * 99),
-    height: phys.heightStr, weight: phys.weight, archetype: phys.archetype, status: 'Bench',
+    height: phys.heightStr, weight: phys.weight, archetype: assignArchetype(pos, pAttrs as Record<string, number>, rating), status: 'Bench',
     personalityTraits: playerTraits,
     tendencies: generateTendencies(pos, playerTraits),
     hometown: playerHometown,
@@ -1180,7 +1250,7 @@ export const generateProspects = (year: number, count: number = 100, genderRatio
       mockRank: i + 1,
       attributes: bAttrs,
       jerseyNumber: Math.floor(Math.random() * 99),
-      height: phys.heightStr, weight: phys.weight, archetype: phys.archetype,
+      height: phys.heightStr, weight: phys.weight, archetype: assignArchetype(pos, bAttrs as Record<string, number>, rating),
       personalityTraits: prospectTraits,
       tendencies: generateTendencies(pos, prospectTraits),
       hometown: prospectHometown,
