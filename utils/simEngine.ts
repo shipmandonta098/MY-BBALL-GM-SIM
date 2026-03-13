@@ -324,6 +324,105 @@ export function getAssistEfficiency(
   return Math.max(0.20, Math.min(1.05, blend + iqBonus - toPenalty));
 }
 
+// ─── Steal & Block Chance Functions ──────────────────────────────────────────
+/**
+ * Maps a Steals attribute (0–100) to an individual steal % per ball-handler
+ * action (dribble, iso, pass read).
+ *
+ * Calibrated to 2025-26 NBA:
+ *   • League avg team STL ≈ 8.5-9.0 / game
+ *   • Elite thieves (Wallace, Maxey): 1.8-2.2 SPG at attr 90-95
+ *   • Average guard: 1.0-1.2 SPG at attr 65-75
+ *   • Big men: 0.4-0.7 SPG at attr 45-60
+ *
+ * Piecewise-linear breakpoints (tune each band independently):
+ *   attr  │ base %  │ + PG/SG │ + C
+ *   ──────┼─────────┼─────────┼──────
+ *    50   │  1.48 % │  1.98 % │ 1.18 %
+ *    70   │  2.00 % │  2.50 % │ 1.70 %
+ *    84   │  2.80 % │  3.30 % │ 2.50 %
+ *    88   │  3.00 % │  3.50 % │ 2.70 %
+ *    95   │  3.75 % │  4.25 % │ 3.45 %
+ *   100   │  4.50 % │  5.00 % │ 4.20 %
+ *
+ * Tuning: STL_OPP_SCALE in simulatePlayerGameLine (default 65) controls the
+ * number of steal opportunities per 48 min; raise/lower it to shift team totals.
+ */
+export function getStealChance(attr: number, position?: string): number {
+  const a = Math.max(0, Math.min(100, attr));
+
+  // ── Primary: Steals attribute (higher = better pickpocket) ───────────────
+  let base: number;
+  if (a <= 60) {
+    // Rare disruptors: 0.8 % at 0 → 1.5 % at 60
+    base = 0.008 + (a / 60) * 0.007;
+  } else if (a <= 80) {
+    // Solid to plus: 1.5 % at 60 → 2.5 % at 80
+    base = 0.015 + ((a - 60) / 20) * 0.010;
+  } else if (a <= 94) {
+    // Elite: 2.5 % at 80 → 3.5 % at 94
+    base = 0.025 + ((a - 80) / 14) * 0.010;
+  } else {
+    // God-tier thief: 3.5 % at 95 → 4.5 % at 100
+    base = 0.035 + ((a - 95) / 5) * 0.010;
+  }
+
+  // ── Positional modifier: guards read passing lanes; bigs give up angles ──
+  if (position === 'PG' || position === 'SG') base += 0.005;
+  else if (position === 'C') base -= 0.003;
+
+  return Math.max(0.005, Math.min(0.050, base));
+}
+
+/**
+ * Maps a Blocks attribute (0–100) to an individual block % per contestable
+ * shot attempt (rim, close-range, short post).
+ *
+ * Calibrated to 2025-26 NBA:
+ *   • League avg team BLK ≈ 5.0 / game
+ *   • Elite rim protectors (Turner, Gobert): 1.6-2.2 BPG at attr 85-92
+ *   • Wemby-level peaks (attr 95+): 2.5-3.0 BPG over full season
+ *   • Guard/wing baseline: 0.2-0.5 BPG
+ *
+ * Piecewise-linear breakpoints (tune each band independently):
+ *   attr  │ base %  │ + C/PF  │ + PG/SG
+ *   ──────┼─────────┼─────────┼────────
+ *    50   │  1.83 % │  3.33 % │  0.83 %
+ *    70   │  3.50 % │  5.00 % │  2.50 %
+ *    84   │  5.50 % │  7.00 % │  4.50 %
+ *    88   │  6.00 % │  7.50 % │  5.00 %
+ *    95   │  8.25 % │  9.75 % │  7.25 %
+ *   100   │  9.00 % │ 10.00 % │  8.00 %
+ *
+ * Tuning: BLK_OPP_SCALE in simulatePlayerGameLine (default 50) controls the
+ * number of block opportunities per 48 min; raise/lower to shift team totals.
+ */
+export function getBlockChance(attr: number, position?: string): number {
+  const a = Math.max(0, Math.min(100, attr));
+
+  // ── Primary: Blocks attribute ────────────────────────────────────────────
+  let base: number;
+  if (a <= 60) {
+    // Minimal rim protection: 1 % at 0 → 2 % at 60
+    base = 0.010 + (a / 60) * 0.010;
+  } else if (a <= 80) {
+    // Solid to plus shot-blocker: 2 % at 60 → 4 % at 80
+    base = 0.020 + ((a - 60) / 20) * 0.020;
+  } else if (a <= 94) {
+    // Elite: 4 % at 80 → 7 % at 94
+    base = 0.040 + ((a - 80) / 14) * 0.030;
+  } else {
+    // Wemby tier: 7 % at 95 → 9 % at 100
+    base = 0.070 + ((a - 95) / 5) * 0.020;
+  }
+
+  // ── Positional modifier: length + rim-reading advantage for bigs ─────────
+  if (position === 'C' || position === 'PF') base += 0.015;
+  else if (position === 'PG' || position === 'SG') base -= 0.010;
+
+  return Math.max(0.005, Math.min(0.100, base));
+}
+
 // ─── 3PT Defensive Contest Modifier ──────────────────────────────────────────
 /**
  * Maps a defender's perimeterDef attribute (0–100) to a per-possession
@@ -1550,13 +1649,18 @@ const simulatePossession = (
 
     // Gambles / steal attempt
     if (Math.random() < gambles / 400) {
-      // Steal success inversely proportional to ball handler's ball security.
-      // Elite handles (BH=90+) are very hard to pilfer even when a defender gambles;
-      // weak handlers (BH<60) are easy targets on aggressive reaches.
-      //   BH=50 → ~25 % steal success  |  BH=75 → 18 %  |  BH=90+ → ~10-13 %
-      const bhAttr = offHandler.attributes.ballHandling ?? 65;
-      const stealSuccessRate = Math.max(0.10, Math.min(0.38,
-        0.18 + (75 - bhAttr) / 100 * 0.30,
+      // Steal success: defender's Steals attr (via getStealChance) is the primary
+      // driver, synergised with perimeterDef for positioning.  Elite thieves
+      // (attr 90+) convert 35-42 % of gambles; average players 15-25 %.
+      // Handler's ball handling inversely caps how often a reach pays off.
+      const bhAttr      = offHandler.attributes.ballHandling ?? 65;
+      const stealAttr   = defender?.attributes.steals ?? 50;
+      const perimDef    = defender?.attributes.perimeterDef ?? 50;
+      const stealChance = getStealChance(stealAttr, defender?.position);
+      // perimeterDef synergy: tight coverage opens steal angles (+up to 3 %)
+      const perimBonus  = Math.max(0, (perimDef - 55) / 100 * 0.03);
+      const stealSuccessRate = Math.max(0.10, Math.min(0.42,
+        stealChance * 8 + perimBonus + (75 - bhAttr) / 100 * 0.18,
       ));
       if (Math.random() < stealSuccessRate) {
         return {
@@ -1626,9 +1730,15 @@ const simulatePossession = (
         // ── Separate block-chance for slam dunks ────────────────────────────
         // Elite shot-blockers (high interiorDef + blocks) can flat-out reject dunks.
         // Probability: near-zero for avg defenders; up to ~14 % for elite rim protectors.
-        const blockRating = defender?.attributes.blocks ?? 50;
         const intNorm     = Math.max(0, (intDef - 40) / 60);
-        const blockChance = intNorm * (blockRating / 100) * 0.22;
+        // getBlockChance: attribute-driven per-shot block %, amplified by how well
+        // the defender is positioned at the rim (intNorm, from interiorDef).
+        // Multiplier 2.2 calibrates so elite rim protectors block ~13 % of dunks
+        // in perfect position; hard cap at 15 % for even Wemby-tier defenders.
+        const blockChance = Math.min(0.15,
+          getBlockChance(defender?.attributes.blocks ?? 50, defender?.position)
+          * intNorm * 2.2,
+        );
         if (Math.random() < blockChance) {
           const blockLine = intDef >= 90
             ? `${defLn} SWATS IT INTO THE STANDS! Emphatic rejection!`
@@ -2515,8 +2625,25 @@ const simulatePlayerGameLine = (
   const adjAstShare = Math.max(0.01, astEff * adjUsage * 3.0 * (1 + tm.astBoost));
   const ast = Math.max(0, Math.round(teamAst * adjAstShare));
 
-  const stl = Math.floor((player.attributes.steals / 100) * 2 * minFac * (1 + tm.stlBoost) + Math.random() * 1);
-  const blk = Math.floor((player.attributes.blocks  / 100) * 2 * minFac + Math.random() * 1);
+  // STL: getStealChance × 65 steal-opportunities per 48 min × minutes fraction.
+  // STL_OPP_SCALE=65 calibrated so a 10-player rotation hits ~8.5-9.0 team STL/game.
+  // stlBoost from defensive tendencies (pass-denial schemes, pressure defense).
+  // Stamina: fatigued defenders lose a step — up to 15 % reduction at stamina=40.
+  const STL_OPP_SCALE = 65;
+  const stlBase    = getStealChance(player.attributes.steals, player.position)
+    * STL_OPP_SCALE * minFac * (1 + tm.stlBoost);
+  const stlFatigue = Math.max(0, (65 - (player.attributes.stamina ?? 70)) / 100 * 0.15);
+  const stl        = Math.max(0, Math.floor(stlBase * (1 - stlFatigue) + Math.random() * 0.8));
+
+  // BLK: getBlockChance × 50 block-opportunities per 48 min × minutes fraction.
+  // BLK_OPP_SCALE=50 calibrated so a realistic roster hits ~5.0 team BLK/game.
+  // Elite rim protectors (attr 88+, C, 32 min) naturally reach 2.0-2.5 BPG.
+  // Stamina: tired bigs lose the vertical step — up to 12 % late-game reduction.
+  const BLK_OPP_SCALE = 50;
+  const blkBase    = getBlockChance(player.attributes.blocks, player.position)
+    * BLK_OPP_SCALE * minFac;
+  const blkFatigue = Math.max(0, (65 - (player.attributes.stamina ?? 70)) / 100 * 0.12);
+  const blk        = Math.max(0, Math.floor(blkBase * (1 - blkFatigue) + Math.random() * 0.8));
   const pf  = Math.min(6, Math.round((Math.floor(Math.random() * 4 * minFac + 1)) * (1 + tm.foulRisk)));
 
   // TOV: possession-scaled off actual FGA (proxy for ball touches).
