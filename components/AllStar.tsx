@@ -1,534 +1,716 @@
-import React, { useState, useMemo, useEffect } from 'react';
-import { LeagueState, Player, AllStarWeekend, AllStarEventResult, NewsItem } from '../types';
+import React, { useState } from 'react';
+import {
+  LeagueState, AllStarWeekendData, AllStarContestResult,
+  AllStarGameResult, Player, AllStarVoteEntry,
+} from '../types';
 
 interface AllStarProps {
   league: LeagueState;
-  updateLeague: (updated: Partial<LeagueState>) => void;
-  onComplete: () => void;
+  updateLeague: (updated: Partial<LeagueState> | ((prev: LeagueState) => LeagueState)) => void;
+  onAdvancePhase: () => void;
 }
 
-// ── Roster selection ─────────────────────────────────────────────────────────
+// ── SVG paths ────────────────────────────────────────────────────────────────
+const STAR_PATH = 'M11.049 2.927c.3-.921 1.603-.921 1.902 0l1.519 4.674a1 1 0 00.95.69h4.915c.969 0 1.371 1.24.588 1.81l-3.976 2.888a1 1 0 00-.363 1.118l1.518 4.674c.3.922-.755 1.688-1.538 1.118l-3.976-2.888a1 1 0 00-1.176 0l-3.976 2.888c-.783.57-1.838-.197-1.538-1.118l1.518-4.674a1 1 0 00-.363-1.118l-3.976-2.888c-.784-.57-.382-1.81.588-1.81h4.914a1 1 0 00.951-.69l1.519-4.674z';
 
-/** Score a player for All-Star candidacy (points + rating + stats) */
-const allStarScore = (p: Player): number => {
-  const statPts = p.stats.gamesPlayed > 0
-    ? (p.stats.points / p.stats.gamesPlayed) * 1.5 +
-      (p.stats.assists / p.stats.gamesPlayed) * 1.0 +
-      (p.stats.rebounds / p.stats.gamesPlayed) * 0.8
-    : 0;
-  return p.rating * 0.6 + statPts * 2;
-};
+// ── Helpers ──────────────────────────────────────────────────────────────────
+function getPlayerById(league: LeagueState, id: string): Player | undefined {
+  for (const team of league.teams) {
+    const p = team.roster.find(pl => pl.id === id);
+    if (p) return p;
+  }
+  return undefined;
+}
 
-const selectAllStarRosters = (
-  league: LeagueState
-): { eastIds: string[]; westIds: string[] } => {
-  const east: Player[] = [];
-  const west: Player[] = [];
+function getTeamForPlayer(league: LeagueState, playerId: string) {
+  for (const team of league.teams) {
+    if (team.roster.some(p => p.id === playerId)) return team;
+  }
+  return null;
+}
 
-  league.teams.forEach(t => {
-    const bucket = t.conference === 'Eastern' ? east : west;
-    t.roster.forEach(p => bucket.push(p));
-  });
+function teamName(league: LeagueState, playerId: string): string {
+  const t = getTeamForPlayer(league, playerId);
+  return t ? `${t.city} ${t.name}` : '';
+}
 
-  const topN = (pool: Player[], n: number) =>
-    [...pool].sort((a, b) => allStarScore(b) - allStarScore(a)).slice(0, n).map(p => p.id);
+function teamId(league: LeagueState, playerId: string): string {
+  return getTeamForPlayer(league, playerId)?.id ?? '';
+}
 
-  return { eastIds: topN(east, 12), westIds: topN(west, 12) };
-};
+function ppg(p: Player) { return p.stats.gamesPlayed > 0 ? p.stats.points / p.stats.gamesPlayed : 0; }
+function rpg(p: Player) { return p.stats.gamesPlayed > 0 ? p.stats.rebounds / p.stats.gamesPlayed : 0; }
+function apg(p: Player) { return p.stats.gamesPlayed > 0 ? p.stats.assists / p.stats.gamesPlayed : 0; }
 
-// ── Event simulation ─────────────────────────────────────────────────────────
+// ── Contest simulation ────────────────────────────────────────────────────────
+function pickWinner(
+  league: LeagueState,
+  participants: string[],
+  scorer: (p: Player) => number,
+): { playerId: string; playerName: string; teamId: string; teamName: string; rawScore: number } {
+  let best = participants[0];
+  let bestScore = -1;
+  for (const id of participants) {
+    const p = getPlayerById(league, id);
+    if (!p) continue;
+    const s = scorer(p) + Math.random() * 20;
+    if (s > bestScore) { bestScore = s; best = id; }
+  }
+  const w = getPlayerById(league, best)!;
+  return { playerId: best, playerName: w.name, teamId: teamId(league, best), teamName: teamName(league, best), rawScore: bestScore };
+}
 
-type EventName = 'Skills Challenge' | '3-Point Contest' | 'Slam Dunk Contest' | 'All-Star Game';
-
-const runSkillsChallenge = (players: Player[]): AllStarEventResult => {
-  const contestants = [...players]
-    .sort((a, b) =>
-      (b.attributes.ballHandling + b.attributes.passing + b.attributes.layups) -
-      (a.attributes.ballHandling + a.attributes.passing + a.attributes.layups)
-    )
-    .slice(0, 4);
-
-  const scores = contestants.map(p => ({
-    p,
-    score: p.attributes.ballHandling * 0.4 + p.attributes.passing * 0.35 +
-      p.attributes.layups * 0.25 + Math.random() * 15,
-  }));
-  scores.sort((a, b) => b.score - a.score);
-  const winner = scores[0].p;
-
+function simulateSkillsChallenge(league: LeagueState, participants: string[]): AllStarContestResult {
+  const pool = participants.length >= 4 ? participants : participants;
+  const scorer = (p: Player) => (p.attributes.ballHandling || 0) * 0.4 + (p.attributes.speed || 0) * 0.35 + (p.attributes.passing || 0) * 0.25;
+  const winner = pickWinner(league, pool, scorer);
+  const runnerUpPool = pool.filter(id => id !== winner.playerId);
+  const runnerUp = runnerUpPool.length > 0 ? pickWinner(league, runnerUpPool, scorer) : null;
+  const times = ['15.2s', '14.8s', '15.9s', '13.6s', '16.1s'];
+  const wTime = times[Math.floor(Math.random() * times.length)];
+  const ruTime = times[Math.floor(Math.random() * times.length)];
   return {
-    name: 'Skills Challenge',
-    winnerId: winner.id,
-    winnerName: winner.name,
+    eventName: 'Skills Challenge',
+    participants: pool,
+    winner: { ...winner },
+    runnerUp: runnerUp ? { ...runnerUp } : undefined,
     highlights: [
-      `${winner.name} blazes through the obstacle course in record time`,
-      `${scores[1].p.name} puts up a great fight in the final round`,
-      `Fans go wild for ${winner.name}'s flawless behind-the-back pass`,
-    ],
+      `${winner.playerName} flew through the obstacle course in ${wTime} — a new record!`,
+      runnerUp ? `${runnerUp.playerName} was close with ${ruTime} but came up just short.` : '',
+      `The crowd erupted as ${winner.playerName} nailed the final shooting station.`,
+    ].filter(Boolean),
   };
-};
+}
 
-const runThreePointContest = (players: Player[]): AllStarEventResult => {
-  const contestants = [...players]
-    .sort((a, b) => b.attributes.shooting3pt - a.attributes.shooting3pt)
-    .slice(0, 8);
-
-  const scores = contestants.map(p => ({
-    p,
-    score: Math.round(p.attributes.shooting3pt * 0.35 + Math.random() * 22),
-  }));
-  scores.sort((a, b) => b.score - a.score);
-  const winner = scores[0].p;
-
+function simulate3PtContest(league: LeagueState, participants: string[]): AllStarContestResult {
+  const scorer = (p: Player) => (p.attributes.shooting3pt || 0) * 0.7 + (p.attributes.freeThrow || 0) * 0.3;
+  const winner = pickWinner(league, participants, scorer);
+  const runnerUpPool = participants.filter(id => id !== winner.playerId);
+  const runnerUp = runnerUpPool.length > 0 ? pickWinner(league, runnerUpPool, scorer) : null;
+  const wScore = 18 + Math.floor(Math.random() * 9);   // 18-26 of 27
+  const ruScore = Math.max(12, wScore - 1 - Math.floor(Math.random() * 5));
+  const racks = ['the corner rack', 'the wing rack', 'the money ball rack'];
+  const hotRack = racks[Math.floor(Math.random() * racks.length)];
   return {
-    name: '3-Point Contest',
-    winnerId: winner.id,
-    winnerName: winner.name,
+    eventName: '3-Point Contest',
+    participants,
+    winner: { ...winner, score: `${wScore}/27` },
+    runnerUp: runnerUp ? { ...runnerUp, score: `${ruScore}/27` } : undefined,
     highlights: [
-      `${winner.name} heats up with ${scores[0].score} points — a blazing performance`,
-      `${scores[1].p.name} goes back-to-back on the money ball rack`,
-      `The crowd erupts as ${winner.name} knocks down the final five`,
-    ],
+      `${winner.playerName} drained ${wScore} of 27 to claim the title — nearly a perfect round!`,
+      `${hotRack.charAt(0).toUpperCase() + hotRack.slice(1)} was money: ${winner.playerName} went 5-for-5!`,
+      runnerUp ? `${runnerUp.playerName} finished runner-up at ${ruScore}/27 — an outstanding effort.` : '',
+    ].filter(Boolean),
   };
-};
+}
 
-const runDunkContest = (players: Player[]): AllStarEventResult => {
-  const contestants = [...players]
-    .sort((a, b) =>
-      (b.attributes.dunks + b.attributes.jumping + b.attributes.athleticism) -
-      (a.attributes.dunks + a.attributes.jumping + a.attributes.athleticism)
-    )
-    .slice(0, 4);
-
-  const scores = contestants.map(p => ({
-    p,
-    score: p.attributes.dunks * 0.4 + p.attributes.jumping * 0.3 +
-      p.attributes.athleticism * 0.3 + Math.random() * 20,
-  }));
-  scores.sort((a, b) => b.score - a.score);
-  const winner = scores[0].p;
-
+function simulateDunkContest(league: LeagueState, participants: string[]): AllStarContestResult {
+  const scorer = (p: Player) => (p.attributes.dunks || 0) * 0.45 + (p.attributes.jumping || 0) * 0.35 + (p.attributes.athleticism || 0) * 0.2;
+  const winner = pickWinner(league, participants, scorer);
+  const runnerUpPool = participants.filter(id => id !== winner.playerId);
+  const runnerUp = runnerUpPool.length > 0 ? pickWinner(league, runnerUpPool, scorer) : null;
   const dunks = [
-    'a 360-degree windmill from the free-throw line',
-    'a between-the-legs reverse dunk over two teammates',
-    'a tomahawk from behind the backboard',
-    'an elbow-hang windmill that brings the house down',
-    'a blindfolded baseline flush',
+    'a between-the-legs off the back-board', 'a 360-degree windmill from the free-throw line',
+    'a double-pump reverse off the glass', 'a no-look alley-oop off the backboard',
+    'a behind-the-back dribble slam', 'a twisting baseline power jam',
   ];
+  const d1 = dunks[Math.floor(Math.random() * dunks.length)];
+  const d2 = dunks[Math.floor(Math.random() * dunks.length)];
+  return {
+    eventName: 'Dunk Contest',
+    participants,
+    winner: { ...winner, score: '50/50' },
+    runnerUp: runnerUp ? { ...runnerUp, score: `${44 + Math.floor(Math.random() * 6)}/50` } : undefined,
+    highlights: [
+      `${winner.playerName} opened with ${d1} — an immediate perfect 50 from the judges!`,
+      `The crowd went silent, then erupted: ${d2} to seal the crown.`,
+      runnerUp ? `${runnerUp.playerName} put on a show but couldn't match ${winner.playerName}'s creativity.` : '',
+    ].filter(Boolean),
+  };
+}
+
+function simulateAllStarGame(league: LeagueState, eastRoster: string[], westRoster: string[]): AllStarGameResult {
+  // Quarter-by-quarter simulation — All-Star games average ~170-220 pts per team
+  const simQ = () => 38 + Math.floor(Math.random() * 18);  // 38-55 per quarter
+  const eQ = [simQ(), simQ(), simQ(), simQ()];
+  const wQ = [simQ(), simQ(), simQ(), simQ()];
+  const eastScore = eQ.reduce((a, b) => a + b, 0);
+  const westScore = wQ.reduce((a, b) => a + b, 0);
+
+  const winnerRoster = eastScore >= westScore ? eastRoster : westRoster;
+  // MVP: highest performing player on winning team (OVR + scoring ability + randomness)
+  let mvpId = winnerRoster[0];
+  let mvpBest = -1;
+  for (const id of winnerRoster) {
+    const p = getPlayerById(league, id);
+    if (!p) continue;
+    const s = p.rating * 0.5 + ppg(p) * 1.5 + Math.random() * 18;
+    if (s > mvpBest) { mvpBest = s; mvpId = id; }
+  }
+  const mvpPlayer = getPlayerById(league, mvpId)!;
+  const pts = 22 + Math.floor(Math.random() * 18);
+  const reb = 4 + Math.floor(Math.random() * 9);
+  const ast = 4 + Math.floor(Math.random() * 10);
+  const stl = Math.floor(Math.random() * 4);
+  const confWon = eastScore >= westScore ? 'East' : 'West';
 
   return {
-    name: 'Slam Dunk Contest',
-    winnerId: winner.id,
-    winnerName: winner.name,
+    eastScore, westScore,
+    mvp: {
+      playerId: mvpId, playerName: mvpPlayer.name,
+      teamId: teamId(league, mvpId), teamName: teamName(league, mvpId),
+      statLine: `${pts} pts, ${reb} reb, ${ast} ast, ${stl} stl`,
+    },
+    eastRoster, westRoster,
+    quarterScores: { east: eQ, west: wQ },
     highlights: [
-      `${winner.name} throws down ${dunks[Math.floor(Math.random() * dunks.length)]}`,
-      `Judges give a perfect 50 — the arena is on its feet`,
-      `${scores[1].p.name}'s final dunk nearly steals the show`,
+      `${confWon} wins ${Math.max(eastScore, westScore)}-${Math.min(eastScore, westScore)} in an offensive showcase!`,
+      `${mvpPlayer.name} was unstoppable: ${pts} points on high-efficiency shooting.`,
+      `Both teams combined for ${eastScore + westScore} points — a new All-Star scoring landmark.`,
+      `${mvpPlayer.name} caps the night with the MVP trophy to a standing ovation.`,
     ],
   };
+}
+
+// ── Sub-components ────────────────────────────────────────────────────────────
+
+const OVRBadge: React.FC<{ rating: number }> = ({ rating }) => (
+  <span
+    className="font-bold text-xs px-1.5 py-0.5 rounded"
+    style={{
+      color: rating >= 90 ? '#f97316' : rating >= 82 ? '#eab308' : '#94a3b8',
+      backgroundColor: rating >= 90 ? 'rgba(249,115,22,0.12)' : rating >= 82 ? 'rgba(234,179,8,0.12)' : 'transparent',
+    }}
+  >
+    {rating}
+  </span>
+);
+
+const SelectionBadge: React.FC<{ type: AllStarVoteEntry['selectionType'] }> = ({ type }) => {
+  const map: Record<AllStarVoteEntry['selectionType'], { label: string; cls: string }> = {
+    'starter-fan':          { label: 'Fan Vote', cls: 'text-sky-400 bg-sky-500/10 border-sky-500/20' },
+    'starter-media':        { label: 'Media Vote', cls: 'text-violet-400 bg-violet-500/10 border-violet-500/20' },
+    'reserve-coach':        { label: 'Coach Pick', cls: 'text-amber-400 bg-amber-500/10 border-amber-500/20' },
+    'injury-replacement':   { label: 'Replacement', cls: 'text-rose-400 bg-rose-500/10 border-rose-500/20' },
+  };
+  const { label, cls } = map[type];
+  return <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded border ${cls}`}>{label}</span>;
 };
 
-const runAllStarGame = (
-  eastPlayers: Player[],
-  westPlayers: Player[]
-): { result: AllStarEventResult; eastScore: number; westScore: number; mvpId: string } => {
-  const eastOVR = eastPlayers.reduce((s, p) => s + p.rating, 0) / eastPlayers.length;
-  const westOVR = westPlayers.reduce((s, p) => s + p.rating, 0) / westPlayers.length;
+const StarIcon: React.FC<{ className?: string }> = ({ className = 'w-4 h-4' }) => (
+  <svg className={className} fill="currentColor" viewBox="0 0 24 24">
+    <path d={STAR_PATH} />
+  </svg>
+);
 
-  const baseScore = 135;
-  const eastScore = Math.round(baseScore + (eastOVR - 75) * 0.8 + (Math.random() - 0.5) * 18);
-  const westScore = Math.round(baseScore + (westOVR - 75) * 0.8 + (Math.random() - 0.5) * 18);
+const PlayerRow: React.FC<{
+  player: Player;
+  tName: string;
+  isStarter: boolean;
+  vote?: AllStarVoteEntry;
+  isInjured?: boolean;
+  replacedBy?: string;
+}> = ({ player, tName, isStarter, vote, isInjured, replacedBy }) => (
+  <tr className={`border-b border-slate-800/40 transition-colors ${isInjured ? 'opacity-50' : 'hover:bg-slate-800/25'}`}>
+    <td className="py-2.5 pr-3">
+      <div className="flex items-center gap-2 flex-wrap">
+        {isStarter && <StarIcon className="w-3.5 h-3.5 text-orange-400 shrink-0" />}
+        <span className={`font-semibold text-sm ${isInjured ? 'line-through text-slate-500' : 'text-white'}`}>{player.name}</span>
+        {isStarter && !isInjured && <span className="text-[10px] font-black text-orange-300 uppercase">Starter</span>}
+        {isInjured && replacedBy && <span className="text-[10px] text-rose-400 font-bold">OUT — replaced</span>}
+        {vote && <SelectionBadge type={vote.selectionType} />}
+      </div>
+    </td>
+    <td className="py-2.5 pr-2 text-slate-400 text-xs whitespace-nowrap">{tName}</td>
+    <td className="py-2.5 pr-2">
+      <span className="text-xs text-slate-400 bg-slate-800 px-1.5 py-0.5 rounded font-mono">{player.position}</span>
+    </td>
+    <td className="py-2.5 pr-2 text-xs text-slate-400 text-right">
+      {player.stats.gamesPlayed > 0 ? ppg(player).toFixed(1) : '—'}
+    </td>
+    <td className="py-2.5 text-right"><OVRBadge rating={player.rating} /></td>
+  </tr>
+);
 
-  const allPlayers = [...eastPlayers, ...westPlayers];
-  const mvpPool = allPlayers.map(p => ({
-    p,
-    score: p.rating * 0.5 + Math.random() * 40,
-  }));
-  mvpPool.sort((a, b) => b.score - a.score);
-  const mvp = mvpPool[0].p;
-  const winner = eastScore > westScore ? 'East' : 'West';
-
-  const result: AllStarEventResult = {
-    name: 'All-Star Game',
-    winnerId: mvp.id,
-    winnerName: `${winner} wins ${eastScore}-${westScore} · MVP: ${mvp.name}`,
-    highlights: [
-      `${winner} All-Stars take the lead with back-to-back-to-back threes`,
-      `${mvp.name} drops a monster all-star performance — pure entertainment`,
-      `Final score: East ${eastScore}, West ${westScore} in a high-flying showcase`,
-    ],
-  };
-
-  return { result, eastScore, westScore, mvpId: mvp.id };
-};
-
-// ── Component ─────────────────────────────────────────────────────────────────
-
-const EVENT_ORDER: EventName[] = [
-  'Skills Challenge',
-  '3-Point Contest',
-  'Slam Dunk Contest',
-  'All-Star Game',
-];
-
-const EVENT_ICONS: Record<EventName, string> = {
-  'Skills Challenge': '🏃',
-  '3-Point Contest': '🎯',
-  'Slam Dunk Contest': '💥',
-  'All-Star Game': '🏀',
-};
-
-const EVENT_DESC: Record<EventName, string> = {
-  'Skills Challenge': 'Best ball-handlers and passers race through the obstacle course',
-  '3-Point Contest': 'Elite shooters compete in back-to-back rack rounds',
-  'Slam Dunk Contest': 'The most athletic players put on a show for the judges',
-  'All-Star Game': 'Eastern Conference vs Western Conference exhibition game',
-};
-
-const AllStar: React.FC<AllStarProps> = ({ league, updateLeague, onComplete }) => {
-  const [activeSection, setActiveSection] = useState<'rosters' | 'events'>('rosters');
-  const [simming, setSimming] = useState<EventName | null>(null);
-
-  // Build or load weekend state
-  const weekend = league.allStarWeekend!;
-  const { eastIds, westIds, events } = weekend;
-
-  // Lookup helpers
-  const allPlayers = useMemo(
-    () => league.teams.flatMap(t => t.roster),
-    [league.teams]
-  );
-  const byId = (id: string) => allPlayers.find(p => p.id === id);
-
-  const eastPlayers = useMemo(
-    () => eastIds.map(id => byId(id)).filter(Boolean) as Player[],
-    [eastIds, allPlayers]
-  );
-  const westPlayers = useMemo(
-    () => westIds.map(id => byId(id)).filter(Boolean) as Player[],
-    [westIds, allPlayers]
-  );
-
-  const completedEventNames = new Set(events.map(e => e.name));
-  const allEventsComplete = EVENT_ORDER.every(n => completedEventNames.has(n));
-
-  // ── Simulate an event ──
-  const handleSimEvent = async (eventName: EventName) => {
-    if (completedEventNames.has(eventName) || simming) return;
-    setSimming(eventName);
-
-    await new Promise(r => setTimeout(r, 800));
-
-    let result: AllStarEventResult;
-    let updates: Partial<AllStarWeekend> = {};
-
-    if (eventName === 'Skills Challenge') {
-      result = runSkillsChallenge([...eastPlayers, ...westPlayers]);
-    } else if (eventName === '3-Point Contest') {
-      result = runThreePointContest([...eastPlayers, ...westPlayers]);
-    } else if (eventName === 'Slam Dunk Contest') {
-      result = runDunkContest([...eastPlayers, ...westPlayers]);
-    } else {
-      const { result: gameResult, eastScore, westScore, mvpId } = runAllStarGame(
-        eastPlayers,
-        westPlayers
-      );
-      result = gameResult;
-      updates = { gameMvpId: mvpId, gameEastScore: eastScore, gameWestScore: westScore };
-    }
-
-    const newsItem: NewsItem = {
-      id: `allstar-${eventName.replace(/\s/g, '-')}-${Date.now()}`,
-      category: 'award',
-      headline: `🏆 ALL-STAR: ${eventName.toUpperCase()}`,
-      content: `${result.winnerName} — ${result.highlights[0]}`,
-      timestamp: league.currentDay,
-      realTimestamp: Date.now(),
-      isBreaking: eventName === 'All-Star Game',
-    };
-
-    updateLeague({
-      allStarWeekend: {
-        ...weekend,
-        ...updates,
-        events: [...events, result],
-      },
-      newsFeed: [newsItem, ...league.newsFeed],
-    });
-
-    setSimming(null);
-  };
-
-  // ── End weekend ──
-  const handleEndWeekend = () => {
-    const mvp = weekend.gameMvpId ? byId(weekend.gameMvpId) : null;
-    const closingNews: NewsItem = {
-      id: `allstar-complete-${Date.now()}`,
-      category: 'award',
-      headline: '⭐ ALL-STAR WEEKEND COMPLETE',
-      content: `The All-Star Weekend is in the books! ${mvp ? `${mvp.name} takes home All-Star Game MVP honors. ` : ''}The second half of the regular season begins now.`,
-      timestamp: league.currentDay,
-      realTimestamp: Date.now(),
-      isBreaking: true,
-    };
-    updateLeague({
-      allStarWeekend: { ...weekend, completed: true },
-      newsFeed: [closingNews, ...league.newsFeed],
-    });
-    onComplete();
-  };
-
-  // ── Render helpers ──
-  const ConferenceBadge: React.FC<{ conf: 'East' | 'West' }> = ({ conf }) => (
-    <span
-      className={`text-[9px] font-black uppercase px-2 py-0.5 rounded-full ${
-        conf === 'East'
-          ? 'bg-blue-500/20 text-blue-400 border border-blue-500/30'
-          : 'bg-red-500/20 text-red-400 border border-red-500/30'
-      }`}
-    >
-      {conf}
-    </span>
-  );
-
-  const ratingBadge = (r: number) => {
-    if (r >= 90) return 'text-amber-400';
-    if (r >= 82) return 'text-emerald-400';
-    return 'text-slate-300';
-  };
-
-  return (
-    <div className="space-y-6 animate-in fade-in duration-500 pb-40">
-      {/* ── Hero Header ── */}
-      <header className="relative bg-gradient-to-br from-slate-900 via-slate-900 to-blue-950 border border-slate-700 rounded-[2.5rem] p-8 overflow-hidden shadow-2xl">
-        <div className="absolute inset-0 bg-gradient-to-r from-blue-600/10 via-transparent to-red-600/10" />
-        <div className="absolute top-0 left-1/2 -translate-x-1/2 w-96 h-32 bg-amber-500/10 blur-[80px] rounded-full -mt-8" />
-
-        <div className="relative z-10 flex flex-col md:flex-row items-center justify-between gap-6">
-          <div className="text-center md:text-left">
-            <p className="text-[10px] font-black uppercase tracking-[0.5em] text-amber-500 mb-2">
-              ⭐ {league.season} All-Star Weekend
-            </p>
-            <h1 className="text-5xl md:text-6xl font-display font-black uppercase tracking-tighter text-white">
-              All-Star
-            </h1>
-            <p className="text-slate-400 text-sm font-bold uppercase tracking-widest mt-1">
-              East vs West · Mid-Season Showcase
-            </p>
-          </div>
-
-          <div className="flex items-center gap-6">
-            <div className="text-center">
-              <p className="text-[10px] text-blue-400 font-black uppercase mb-1">Eastern</p>
-              <p className="text-3xl font-display font-black text-blue-300">{eastPlayers.length}</p>
-              <p className="text-[10px] text-slate-600 uppercase">All-Stars</p>
-            </div>
-            <div className="text-4xl text-slate-600 font-display">vs</div>
-            <div className="text-center">
-              <p className="text-[10px] text-red-400 font-black uppercase mb-1">Western</p>
-              <p className="text-3xl font-display font-black text-red-300">{westPlayers.length}</p>
-              <p className="text-[10px] text-slate-600 uppercase">All-Stars</p>
-            </div>
-          </div>
-        </div>
-
-        {/* Section tabs */}
-        <div className="relative z-10 flex gap-2 mt-6">
-          {(['rosters', 'events'] as const).map(s => (
-            <button
-              key={s}
-              onClick={() => setActiveSection(s)}
-              className={`px-5 py-2 rounded-xl text-sm font-black uppercase tracking-wide transition-all ${
-                activeSection === s
-                  ? 'bg-amber-500 text-slate-950'
-                  : 'bg-slate-800/60 text-slate-400 hover:text-white'
-              }`}
-            >
-              {s === 'rosters' ? '👥 Rosters' : '🎪 Events'}
-              {s === 'events' && events.length > 0 && (
-                <span className="ml-2 text-[10px] bg-emerald-500 text-slate-950 rounded-full px-1.5 py-0.5">
-                  {events.length}/{EVENT_ORDER.length}
-                </span>
-              )}
-            </button>
-          ))}
-        </div>
-      </header>
-
-      {/* ── Rosters Section ── */}
-      {activeSection === 'rosters' && (
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-          {(
-            [
-              { label: 'Eastern Conference', players: eastPlayers, conf: 'East' as const, accent: 'border-blue-500/20 bg-blue-900/10' },
-              { label: 'Western Conference', players: westPlayers, conf: 'West' as const, accent: 'border-red-500/20 bg-red-900/10' },
-            ] as const
-          ).map(({ label, players, conf, accent }) => (
-            <div key={conf} className={`bg-slate-900 border ${accent} rounded-3xl overflow-hidden shadow-xl`}>
-              <div className={`p-5 border-b ${accent} flex items-center justify-between`}>
-                <h3 className="font-display font-black uppercase text-white text-lg">{label}</h3>
-                <ConferenceBadge conf={conf} />
-              </div>
-              <div className="divide-y divide-slate-800/50">
-                {players.map((p, i) => {
-                  const team = league.teams.find(t => t.roster.some(r => r.id === p.id));
-                  const ppg = p.stats.gamesPlayed > 0
-                    ? (p.stats.points / p.stats.gamesPlayed).toFixed(1)
-                    : '—';
-                  return (
-                    <div key={p.id} className="flex items-center gap-3 px-5 py-3 hover:bg-slate-800/30 transition-all">
-                      <span className="text-[10px] font-black text-slate-600 w-5 text-right">{i + 1}</span>
-                      <div className="flex-1 min-w-0">
-                        <p className="font-bold text-slate-200 text-sm truncate">{p.name}</p>
-                        <p className="text-[10px] text-slate-600 font-bold uppercase">
-                          {p.position} · {team?.name ?? ''}
-                        </p>
-                      </div>
-                      <div className="text-right shrink-0">
-                        <p className={`text-sm font-black tabular-nums ${ratingBadge(p.rating)}`}>{p.rating}</p>
-                        <p className="text-[10px] text-slate-600">{ppg} ppg</p>
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            </div>
-          ))}
-        </div>
-      )}
-
-      {/* ── Events Section ── */}
-      {activeSection === 'events' && (
-        <div className="space-y-4">
-          {EVENT_ORDER.map((eventName, idx) => {
-            const done = completedEventNames.has(eventName);
-            const result = events.find(e => e.name === eventName);
-            const prevDone = idx === 0 || completedEventNames.has(EVENT_ORDER[idx - 1]);
-            const locked = !prevDone;
-            const isSimming = simming === eventName;
-
+const RosterSection: React.FC<{
+  league: LeagueState;
+  conf: string;
+  starters: string[];
+  reserves: string[];
+  voteEntries: AllStarVoteEntry[];
+  injuryReplacements?: AllStarWeekendData['injuryReplacements'];
+}> = ({ league, conf, starters, reserves, voteEntries, injuryReplacements = [] }) => {
+  const replacedIds = new Set(injuryReplacements.map(r => r.originalId));
+  const renderGroup = (ids: string[], label: string) => (
+    <div className="mb-4">
+      <div className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-500 mb-2 flex items-center gap-2">
+        {label === 'Starters' && <StarIcon className="w-3 h-3 text-orange-400" />}
+        {label}
+      </div>
+      <table className="w-full text-sm">
+        <thead>
+          <tr className="text-slate-600 text-[10px] uppercase tracking-wider border-b border-slate-800/60">
+            <th className="text-left pb-1.5 pr-3 font-medium">Player</th>
+            <th className="text-left pb-1.5 pr-2 font-medium">Team</th>
+            <th className="text-left pb-1.5 pr-2 font-medium">Pos</th>
+            <th className="text-right pb-1.5 pr-2 font-medium">PPG</th>
+            <th className="text-right pb-1.5 font-medium">OVR</th>
+          </tr>
+        </thead>
+        <tbody>
+          {ids.map(id => {
+            const p = getPlayerById(league, id);
+            if (!p) return null;
+            const vote = voteEntries.find(v => v.playerId === id);
+            const isInjured = replacedIds.has(id);
+            const rep = isInjured ? injuryReplacements.find(r => r.originalId === id) : undefined;
             return (
-              <div
-                key={eventName}
-                className={`bg-slate-900 border rounded-3xl overflow-hidden shadow-xl transition-all ${
-                  done
-                    ? 'border-emerald-500/30'
-                    : locked
-                      ? 'border-slate-800 opacity-60'
-                      : 'border-amber-500/30'
-                }`}
-              >
-                <div className="p-6 flex items-start justify-between gap-4">
-                  <div className="flex items-start gap-4 flex-1">
-                    <div className={`w-12 h-12 rounded-2xl flex items-center justify-center text-2xl shrink-0 ${
-                      done ? 'bg-emerald-500/20' : locked ? 'bg-slate-800' : 'bg-amber-500/20'
-                    }`}>
-                      {done ? '✅' : EVENT_ICONS[eventName]}
-                    </div>
-                    <div className="flex-1">
-                      <div className="flex items-center gap-2 flex-wrap">
-                        <h4 className="font-display font-black uppercase text-white">{eventName}</h4>
-                        {done && (
-                          <span className="text-[10px] bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 rounded-full px-2 py-0.5 font-black uppercase">
-                            Complete
-                          </span>
-                        )}
-                        {!done && !locked && (
-                          <span className="text-[10px] bg-amber-500/20 text-amber-400 border border-amber-500/30 rounded-full px-2 py-0.5 font-black uppercase animate-pulse">
-                            Up Next
-                          </span>
-                        )}
-                      </div>
-                      <p className="text-slate-500 text-xs mt-0.5">{EVENT_DESC[eventName]}</p>
-
-                      {/* Result */}
-                      {result && (
-                        <div className="mt-4 space-y-2">
-                          <div className="bg-slate-950/60 border border-slate-800 rounded-2xl p-4">
-                            <p className="text-[10px] font-black uppercase text-amber-500 mb-1">
-                              🏆 {eventName === 'All-Star Game' ? 'Result' : 'Winner'}
-                            </p>
-                            <p className="font-bold text-white text-sm">{result.winnerName}</p>
-                          </div>
-                          <div className="space-y-1.5">
-                            {result.highlights.map((h, i) => (
-                              <div key={i} className="flex items-start gap-2">
-                                <span className="text-amber-500 text-xs mt-0.5 shrink-0">›</span>
-                                <p className="text-xs text-slate-400 italic">{h}</p>
-                              </div>
-                            ))}
-                          </div>
-                        </div>
-                      )}
-                    </div>
-                  </div>
-
-                  {!done && !locked && (
-                    <button
-                      onClick={() => handleSimEvent(eventName)}
-                      disabled={!!isSimming}
-                      className="shrink-0 px-6 py-3 bg-amber-500 hover:bg-amber-400 disabled:opacity-60 text-slate-950 font-black uppercase text-sm rounded-xl transition-all active:scale-95 shadow-lg shadow-amber-500/20"
-                    >
-                      {isSimming ? (
-                        <span className="flex items-center gap-2">
-                          <svg className="animate-spin w-4 h-4" viewBox="0 0 24 24" fill="none">
-                            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/>
-                            <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"/>
-                          </svg>
-                          Simming…
-                        </span>
-                      ) : (
-                        `Run ${EVENT_ICONS[eventName]}`
-                      )}
-                    </button>
-                  )}
-                </div>
-              </div>
+              <PlayerRow
+                key={id}
+                player={p}
+                tName={teamName(league, id)}
+                isStarter={label === 'Starters'}
+                vote={vote}
+                isInjured={isInjured}
+                replacedBy={rep?.replacementId}
+              />
             );
           })}
+        </tbody>
+      </table>
+    </div>
+  );
 
-          {/* All-Star Game Score Summary */}
-          {weekend.gameEastScore !== undefined && (
-            <div className="bg-gradient-to-r from-blue-900/30 via-slate-900 to-red-900/30 border border-slate-700 rounded-3xl p-6 text-center shadow-xl">
-              <p className="text-[10px] font-black uppercase tracking-[0.4em] text-slate-500 mb-4">Final Score</p>
-              <div className="flex items-center justify-center gap-8">
-                <div>
-                  <p className="text-[10px] text-blue-400 font-black uppercase mb-1">East</p>
-                  <p className="text-5xl font-display font-black text-blue-300">{weekend.gameEastScore}</p>
-                </div>
-                <p className="text-slate-600 font-display text-2xl">—</p>
-                <div>
-                  <p className="text-[10px] text-red-400 font-black uppercase mb-1">West</p>
-                  <p className="text-5xl font-display font-black text-red-300">{weekend.gameWestScore}</p>
-                </div>
-              </div>
-              {weekend.gameMvpId && byId(weekend.gameMvpId) && (
-                <div className="mt-4">
-                  <p className="text-[10px] text-slate-500 uppercase font-bold">All-Star Game MVP</p>
-                  <p className="text-xl font-display font-black text-amber-400 mt-1">
-                    ⭐ {byId(weekend.gameMvpId)!.name}
-                  </p>
-                </div>
-              )}
-            </div>
-          )}
-
-          {/* End Weekend button */}
-          {allEventsComplete && (
-            <div className="flex justify-center pt-4">
-              <button
-                onClick={handleEndWeekend}
-                className="px-12 py-5 bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-display font-black uppercase text-lg rounded-2xl transition-all shadow-2xl shadow-emerald-500/30 active:scale-95 animate-in zoom-in-95 duration-300"
-              >
-                Begin Second Half of Season →
-              </button>
-            </div>
-          )}
+  return (
+    <div className="bg-slate-900/50 border border-slate-800 rounded-xl p-5">
+      <h3 className="font-display font-bold text-base text-orange-400 mb-4 flex items-center gap-2">
+        <span className="text-lg">{conf === 'Eastern' ? '🔵' : '🔴'}</span>
+        {conf} Conference All-Stars
+        <span className="text-slate-500 text-xs font-normal">({starters.length + reserves.length} players)</span>
+      </h3>
+      {renderGroup(starters, 'Starters')}
+      {renderGroup(reserves, 'Reserves')}
+      {injuryReplacements.length > 0 && (
+        <div className="mt-3 p-3 bg-rose-500/5 border border-rose-500/20 rounded-lg">
+          <p className="text-rose-400 text-xs font-bold mb-1">⚠ Injury Replacements</p>
+          {injuryReplacements.map(r => {
+            const orig = getPlayerById(league, r.originalId);
+            const rep = getPlayerById(league, r.replacementId);
+            return orig && rep ? (
+              <p key={r.originalId} className="text-slate-400 text-xs">
+                {orig.name} (out) → replaced by <span className="text-white font-semibold">{rep.name}</span>
+              </p>
+            ) : null;
+          })}
         </div>
       )}
     </div>
   );
 };
 
-export { selectAllStarRosters };
+const ParticipantList: React.FC<{
+  league: LeagueState;
+  ids: string[];
+  title: string;
+  subtitle: string;
+  icon: string;
+  qualLabel: string;
+}> = ({ league, ids, title, subtitle, icon, qualLabel }) => (
+  <div className="bg-slate-800/40 border border-slate-700/60 rounded-xl p-4">
+    <div className="flex items-center gap-2 mb-3">
+      <span className="text-xl">{icon}</span>
+      <div>
+        <div className="font-bold text-sm text-white">{title} Participants</div>
+        <div className="text-slate-500 text-xs">{subtitle} · {qualLabel}</div>
+      </div>
+    </div>
+    <div className="flex flex-wrap gap-2">
+      {ids.map(id => {
+        const p = getPlayerById(league, id);
+        if (!p) return null;
+        const tn = teamName(league, id);
+        return (
+          <div key={id} className="flex items-center gap-1.5 bg-slate-900/60 border border-slate-700/60 rounded-lg px-2.5 py-1.5">
+            <span className="text-white text-xs font-semibold">{p.name}</span>
+            <span className="text-slate-500 text-[10px]">{p.position}</span>
+            <OVRBadge rating={p.rating} />
+            <span className="text-slate-600 text-[10px] hidden sm:inline">{tn.split(' ').pop()}</span>
+          </div>
+        );
+      })}
+    </div>
+  </div>
+);
+
+const EventCard: React.FC<{
+  title: string;
+  icon: string;
+  result?: AllStarContestResult;
+  participants: string[];
+  league: LeagueState;
+  onSim: () => void;
+}> = ({ title, icon, result, participants, league, onSim }) => (
+  <div className="bg-slate-800/60 border border-slate-700 rounded-xl overflow-hidden">
+    <div className="flex items-center justify-between p-5 pb-3">
+      <div className="flex items-center gap-3">
+        <span className="text-2xl">{icon}</span>
+        <div>
+          <h3 className="font-display font-bold text-base text-white">{title}</h3>
+          <p className="text-slate-500 text-xs">{participants.length} participants</p>
+        </div>
+      </div>
+      {result ? (
+        <span className="px-3 py-1 bg-emerald-500/15 text-emerald-400 text-xs font-bold rounded-full border border-emerald-500/25">COMPLETE</span>
+      ) : (
+        <button
+          onClick={onSim}
+          className="px-4 py-1.5 bg-orange-500 hover:bg-orange-400 active:scale-95 text-slate-950 font-bold text-sm rounded-lg transition-all"
+        >
+          Simulate
+        </button>
+      )}
+    </div>
+
+    {/* Participants chips */}
+    {!result && (
+      <div className="px-5 pb-3 flex flex-wrap gap-1.5">
+        {participants.map(id => {
+          const p = getPlayerById(league, id);
+          return p ? (
+            <span key={id} className="text-[10px] font-semibold bg-slate-900/60 text-slate-300 px-2 py-0.5 rounded border border-slate-700/40">
+              {p.name}
+            </span>
+          ) : null;
+        })}
+      </div>
+    )}
+
+    {result && (
+      <div className="px-5 pb-5 space-y-3 border-t border-slate-700/50 pt-3">
+        {/* Winner */}
+        <div className="flex items-center gap-3">
+          <div className="w-8 h-8 rounded-full bg-orange-500/20 border border-orange-400/40 flex items-center justify-center shrink-0">
+            <StarIcon className="w-4 h-4 text-orange-400" />
+          </div>
+          <div className="min-w-0">
+            <div className="text-[10px] text-orange-300 font-bold uppercase tracking-wider">Winner</div>
+            <div className="font-bold text-white text-sm truncate">{result.winner.playerName}</div>
+            <div className="text-slate-400 text-xs flex gap-2">
+              <span>{result.winner.teamName}</span>
+              {result.winner.score && <span className="font-mono text-orange-300">{result.winner.score}</span>}
+            </div>
+          </div>
+        </div>
+        {result.runnerUp && (
+          <div className="flex items-center gap-3 opacity-75">
+            <div className="w-8 h-8 rounded-full bg-slate-700/50 border border-slate-600 flex items-center justify-center shrink-0 text-slate-400 font-bold text-xs">2</div>
+            <div className="min-w-0">
+              <div className="text-[10px] text-slate-500 font-bold uppercase tracking-wider">Runner-up</div>
+              <div className="font-semibold text-slate-300 text-sm truncate">{result.runnerUp.playerName}</div>
+              <div className="text-slate-500 text-xs flex gap-2">
+                <span>{result.runnerUp.teamName}</span>
+                {result.runnerUp.score && <span className="font-mono">{result.runnerUp.score}</span>}
+              </div>
+            </div>
+          </div>
+        )}
+        {/* Highlights */}
+        <div className="space-y-1 pt-1">
+          {result.highlights.map((h, i) => (
+            <div key={i} className="flex gap-2 text-xs text-slate-400">
+              <span className="text-orange-500 shrink-0 mt-px">▸</span>
+              {h}
+            </div>
+          ))}
+        </div>
+      </div>
+    )}
+  </div>
+);
+
+// ── Main component ────────────────────────────────────────────────────────────
+const AllStar: React.FC<AllStarProps> = ({ league, updateLeague, onAdvancePhase }) => {
+  const asd = league.allStarWeekend;
+  const [tab, setTab] = useState<'rosters' | 'events' | 'game'>('rosters');
+
+  if (!asd) {
+    return (
+      <div className="flex flex-col items-center justify-center py-24 text-slate-500 gap-3">
+        <StarIcon className="w-12 h-12 opacity-30" />
+        <p className="text-lg font-medium">All-Star Weekend not yet scheduled.</p>
+        <p className="text-sm">It will be unlocked after the Trade Deadline.</p>
+      </div>
+    );
+  }
+
+  const voteEntries = asd.voteEntries ?? [];
+  const injRep = asd.injuryReplacements ?? [];
+
+  // ── Event handlers ────────────────────────────────────────────────────────
+  const handleSimSkills = () => {
+    const r = simulateSkillsChallenge(league, asd.skillsParticipants);
+    updateLeague(prev => ({ ...prev, allStarWeekend: prev.allStarWeekend ? { ...prev.allStarWeekend, skillsChallenge: r } : prev.allStarWeekend }));
+  };
+  const handleSim3Pt = () => {
+    const r = simulate3PtContest(league, asd.threePtParticipants);
+    updateLeague(prev => ({ ...prev, allStarWeekend: prev.allStarWeekend ? { ...prev.allStarWeekend, threePtContest: r } : prev.allStarWeekend }));
+  };
+  const handleSimDunk = () => {
+    const r = simulateDunkContest(league, asd.dunkParticipants);
+    updateLeague(prev => ({ ...prev, allStarWeekend: prev.allStarWeekend ? { ...prev.allStarWeekend, dunkContest: r } : prev.allStarWeekend }));
+  };
+  const handleSimGame = () => {
+    const r = simulateAllStarGame(league, asd.eastRoster, asd.westRoster);
+    updateLeague(prev => ({
+      ...prev,
+      allStarWeekend: prev.allStarWeekend ? { ...prev.allStarWeekend, allStarGame: r, completed: true } : prev.allStarWeekend,
+      newsFeed: [{
+        id: `allstar-game-${Date.now()}`,
+        category: 'milestone' as const,
+        headline: 'ALL-STAR GAME FINAL',
+        content: `${r.eastScore > r.westScore ? 'East' : 'West'} wins the All-Star Game ${Math.max(r.eastScore, r.westScore)}-${Math.min(r.eastScore, r.westScore)}. MVP: ${r.mvp.playerName} (${r.mvp.statLine}).`,
+        timestamp: prev.currentDay,
+        realTimestamp: Date.now(),
+        isBreaking: true,
+      }, ...prev.newsFeed],
+    }));
+  };
+
+  const allEventsComplete = !!(asd.skillsChallenge && asd.threePtContest && asd.dunkContest && asd.allStarGame);
+
+  const TABS = [
+    { id: 'rosters' as const, label: 'Rosters' },
+    { id: 'events' as const, label: 'Events' },
+    { id: 'game' as const, label: 'All-Star Game' },
+  ];
+
+  return (
+    <div className="space-y-6 max-w-5xl">
+      {/* ── Header ── */}
+      <div className="relative overflow-hidden rounded-2xl border border-orange-500/20 p-7"
+        style={{ background: 'linear-gradient(135deg, #0f172a 0%, #1a0a00 50%, #0f172a 100%)' }}>
+        {/* Stars background */}
+        <div className="absolute inset-0 overflow-hidden pointer-events-none" aria-hidden>
+          {[...Array(12)].map((_, i) => (
+            <StarIcon key={i} className="absolute w-6 h-6 text-orange-500 opacity-[0.07]"
+              // @ts-ignore
+              style={{ top: `${15 + (i * 37) % 75}%`, left: `${(i * 53) % 95}%` }} />
+          ))}
+        </div>
+        <div className="relative flex flex-col sm:flex-row sm:items-center gap-4">
+          <div className="flex-1">
+            <div className="flex items-center gap-3 mb-1">
+              <StarIcon className="w-7 h-7 text-orange-400" />
+              <h1 className="font-display font-bold text-2xl sm:text-3xl text-white uppercase tracking-widest">All-Star Weekend</h1>
+            </div>
+            <p className="text-slate-400 text-sm">{league.season} Season · The game's brightest stars take center stage</p>
+          </div>
+          <div className="flex flex-wrap gap-3 text-center">
+            <div className="bg-slate-900/60 border border-slate-700 rounded-xl px-4 py-2">
+              <div className="font-bold text-orange-400 text-lg">{asd.eastRoster.length + asd.westRoster.length}</div>
+              <div className="text-slate-500 text-xs">All-Stars</div>
+            </div>
+            {asd.completed && (
+              <div className="flex items-center gap-2 px-4 py-2 bg-emerald-500/10 border border-emerald-500/25 rounded-xl">
+                <svg className="w-4 h-4 text-emerald-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M5 13l4 4L19 7" />
+                </svg>
+                <span className="text-emerald-400 font-bold text-sm">Complete</span>
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+
+      {/* ── Vote legend ── */}
+      <div className="flex flex-wrap gap-3 text-xs">
+        {([
+          { type: 'starter-fan' as const, label: 'Fan Vote (50%)', desc: 'OVR + PPG + team wins' },
+          { type: 'starter-media' as const, label: 'Media/Coach Vote (50%)', desc: 'OVR + PER + form' },
+          { type: 'reserve-coach' as const, label: 'Coach Pick (reserves)', desc: 'OVR + impact + need' },
+        ]).map(({ type, label, desc }) => (
+          <div key={type} className="flex items-center gap-1.5">
+            <SelectionBadge type={type} />
+            <span className="text-slate-500">{desc}</span>
+          </div>
+        ))}
+      </div>
+
+      {/* ── Tabs ── */}
+      <div className="flex gap-1 bg-slate-800/40 rounded-xl p-1 w-fit flex-wrap">
+        {TABS.map(t => (
+          <button key={t.id} onClick={() => setTab(t.id)}
+            className={`px-4 py-2 rounded-lg font-bold text-sm transition-all whitespace-nowrap ${tab === t.id ? 'bg-orange-500 text-slate-950 shadow-md' : 'text-slate-400 hover:text-white'}`}
+          >
+            {t.label}
+          </button>
+        ))}
+      </div>
+
+      {/* ── Rosters ── */}
+      {tab === 'rosters' && (
+        <div className="grid lg:grid-cols-2 gap-5">
+          <RosterSection
+            league={league} conf="Eastern"
+            starters={asd.eastStarters} reserves={asd.eastReserves ?? []}
+            voteEntries={voteEntries}
+            injuryReplacements={injRep.filter(r => r.conf === 'Eastern')}
+          />
+          <RosterSection
+            league={league} conf="Western"
+            starters={asd.westStarters} reserves={asd.westReserves ?? []}
+            voteEntries={voteEntries}
+            injuryReplacements={injRep.filter(r => r.conf === 'Western')}
+          />
+        </div>
+      )}
+
+      {/* ── Events ── */}
+      {tab === 'events' && (
+        <div className="space-y-5">
+          {/* Qualification info */}
+          <div className="grid sm:grid-cols-3 gap-3">
+            <ParticipantList league={league} ids={asd.skillsParticipants} title="Skills Challenge"
+              icon="🏃" subtitle="Guards & Wings" qualLabel="Age <27 · Ball-handling + Speed + Passing" />
+            <ParticipantList league={league} ids={asd.threePtParticipants} title="3-Point Contest"
+              icon="🎯" subtitle="Top Shooters" qualLabel="3P Rating + Volume + Accuracy" />
+            <ParticipantList league={league} ids={asd.dunkParticipants} title="Dunk Contest"
+              icon="🔥" subtitle="Aerial Artists" qualLabel="Age <30 · Dunks + Jumping + Athleticism" />
+          </div>
+
+          <div className="space-y-4">
+            <EventCard title="Skills Challenge" icon="🏃"
+              result={asd.skillsChallenge} participants={asd.skillsParticipants}
+              league={league} onSim={handleSimSkills} />
+            <EventCard title="3-Point Contest" icon="🎯"
+              result={asd.threePtContest} participants={asd.threePtParticipants}
+              league={league} onSim={handleSim3Pt} />
+            <EventCard title="Dunk Contest" icon="🔥"
+              result={asd.dunkContest} participants={asd.dunkParticipants}
+              league={league} onSim={handleSimDunk} />
+          </div>
+        </div>
+      )}
+
+      {/* ── All-Star Game ── */}
+      {tab === 'game' && (
+        <div className="space-y-5">
+          {!asd.allStarGame ? (
+            <div className="bg-slate-900/50 border border-slate-800 rounded-2xl p-10 text-center space-y-5">
+              <div className="text-7xl">🏀</div>
+              <div>
+                <h3 className="font-display font-bold text-2xl text-white mb-1">East vs. West</h3>
+                <p className="text-slate-400">The ultimate All-Star exhibition. {asd.eastRoster.length} East vs {asd.westRoster.length} West.</p>
+              </div>
+              <div className="flex justify-center gap-10">
+                {[
+                  { label: 'East Starters', players: asd.eastStarters, color: 'text-blue-400' },
+                  { label: 'West Starters', players: asd.westStarters, color: 'text-red-400' },
+                ].map(({ label, players, color }) => (
+                  <div key={label} className="space-y-1.5">
+                    <div className={`text-xs font-bold uppercase tracking-wider ${color}`}>{label}</div>
+                    {players.map(id => {
+                      const p = getPlayerById(league, id);
+                      return p ? <div key={id} className="text-slate-300 text-sm">{p.name}</div> : null;
+                    })}
+                  </div>
+                ))}
+              </div>
+              <button onClick={handleSimGame}
+                className="px-10 py-3 bg-orange-500 hover:bg-orange-400 active:scale-95 text-slate-950 font-bold text-base rounded-xl transition-all shadow-lg shadow-orange-500/20">
+                Simulate All-Star Game
+              </button>
+            </div>
+          ) : (
+            <div className="space-y-4">
+              {/* Scoreboard */}
+              <div className="border border-slate-700 rounded-2xl overflow-hidden">
+                <div className="text-center py-2 bg-slate-800/50 border-b border-slate-700">
+                  <span className="text-xs font-black text-slate-500 uppercase tracking-widest">Final · All-Star Game {asd.year}</span>
+                </div>
+                <div className="grid grid-cols-3 text-center p-6"
+                  style={{ background: 'linear-gradient(135deg, rgba(59,130,246,0.08) 0%, transparent 50%, rgba(239,68,68,0.08) 100%)' }}>
+                  <div>
+                    <div className="font-display font-bold text-5xl text-blue-400">{asd.allStarGame.eastScore}</div>
+                    <div className="text-slate-400 text-sm font-bold mt-1">EAST</div>
+                  </div>
+                  <div className="flex flex-col items-center justify-center gap-1">
+                    <div className="text-slate-600 font-bold text-xl">–</div>
+                    {asd.allStarGame.quarterScores && (
+                      <div className="text-slate-600 text-[10px] font-mono space-y-0.5">
+                        {asd.allStarGame.quarterScores.east.map((q, i) => (
+                          <div key={i} className="flex gap-2">
+                            <span className="w-3 text-slate-700">Q{i + 1}</span>
+                            <span className="text-blue-600">{q}</span>
+                            <span className="text-slate-700">–</span>
+                            <span className="text-red-600">{asd.allStarGame.quarterScores!.west[i]}</span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                  <div>
+                    <div className="font-display font-bold text-5xl text-red-400">{asd.allStarGame.westScore}</div>
+                    <div className="text-slate-400 text-sm font-bold mt-1">WEST</div>
+                  </div>
+                </div>
+                <div className="text-center pb-3">
+                  <span className={`text-sm font-bold ${asd.allStarGame.eastScore > asd.allStarGame.westScore ? 'text-blue-400' : 'text-red-400'}`}>
+                    {asd.allStarGame.eastScore > asd.allStarGame.westScore ? 'East Wins!' : 'West Wins!'}
+                    {' '}· {Math.max(asd.allStarGame.eastScore, asd.allStarGame.westScore)}-{Math.min(asd.allStarGame.eastScore, asd.allStarGame.westScore)}
+                  </span>
+                </div>
+              </div>
+
+              {/* MVP */}
+              <div className="bg-gradient-to-r from-orange-950/30 to-slate-900 border border-orange-500/25 rounded-2xl p-5">
+                <div className="flex items-center gap-4">
+                  <div className="w-14 h-14 rounded-full bg-orange-500/15 border-2 border-orange-400/50 flex items-center justify-center shrink-0">
+                    <StarIcon className="w-7 h-7 text-orange-400" />
+                  </div>
+                  <div>
+                    <div className="text-[10px] text-orange-400 font-black uppercase tracking-[0.2em]">All-Star Game MVP</div>
+                    <div className="font-display font-bold text-2xl text-white">{asd.allStarGame.mvp.playerName}</div>
+                    <div className="text-slate-400 text-sm">{asd.allStarGame.mvp.teamName}</div>
+                    <div className="text-orange-300 font-mono text-sm font-bold mt-0.5">{asd.allStarGame.mvp.statLine}</div>
+                  </div>
+                </div>
+              </div>
+
+              {/* Highlights */}
+              <div className="bg-slate-900/50 border border-slate-800 rounded-xl p-5">
+                <h4 className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-500 mb-3">Game Highlights</h4>
+                <div className="space-y-2">
+                  {asd.allStarGame.highlights.map((h, i) => (
+                    <div key={i} className="flex gap-2.5 text-sm text-slate-300">
+                      <span className="text-orange-500 shrink-0 mt-0.5">▸</span>
+                      {h}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* ── Continue CTA ── */}
+      {allEventsComplete && (
+        <div className="bg-slate-800/40 border border-slate-700 rounded-xl p-5 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+          <div>
+            <div className="font-bold text-white">All-Star Weekend Complete</div>
+            <div className="text-slate-400 text-sm">
+              {asd.allStarGame?.mvp.playerName} named MVP · Resume the grind toward the playoffs.
+            </div>
+          </div>
+          <button onClick={onAdvancePhase}
+            className="px-6 py-2.5 bg-orange-500 hover:bg-orange-400 active:scale-95 text-slate-950 font-bold rounded-xl transition-all shrink-0">
+            Continue Season →
+          </button>
+        </div>
+      )}
+    </div>
+  );
+};
+
 export default AllStar;

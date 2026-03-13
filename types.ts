@@ -659,26 +659,6 @@ export interface RivalryStats {
   badBloodScore: number; // For trades/suspensions
 }
 
-export type SeasonPhase = 'preseason' | 'regular' | 'allstar' | 'playoffs' | 'offseason';
-
-export interface AllStarEventResult {
-  name: string;
-  winnerId?: string;
-  winnerName: string;
-  highlights: string[];
-}
-
-export interface AllStarWeekend {
-  year: number;
-  eastIds: string[];
-  westIds: string[];
-  events: AllStarEventResult[];
-  gameMvpId?: string;
-  gameEastScore?: number;
-  gameWestScore?: number;
-  completed: boolean;
-}
-
 export interface LeagueState {
   id: string;
   lastUpdated: number;
@@ -708,7 +688,6 @@ export interface LeagueState {
   currentDraftPickIndex?: number;
   championshipHistory?: ChampionshipRecord[];
   rivalryHistory?: RivalryStats[];
-  allStarWeekend?: AllStarWeekend;
   expansionDraft?: {
     active: boolean;
     phase: 'protection' | 'draft' | 'completed';
@@ -718,6 +697,9 @@ export interface LeagueState {
   };
   /** Populated when the human roster OVR ranks top-3 at season start (advisory only). */
   humanOvrAlert?: string;
+  seasonPhase?: SeasonPhase;
+  tradeDeadlinePassed?: boolean;
+  allStarWeekend?: AllStarWeekendData;
   liveGame?: {
     gameId: string;
     homeScore: number;
@@ -733,3 +715,57 @@ export interface LeagueState {
 }
 
 export type TransactionType = 'trade' | 'signing' | 'release' | 'hiring' | 'firing' | 'injury' | 'waiver' | 'draft';
+
+export type SeasonPhase = 'Preseason' | 'Regular Season' | 'Trade Deadline' | 'All-Star Weekend' | 'Playoffs' | 'Offseason';
+
+export interface AllStarVoteEntry {
+  playerId: string;
+  fanScore: number;      // 0-100 weighted fan vote
+  mediaScore: number;    // 0-100 weighted player/media/coach vote
+  totalScore: number;    // combined
+  selectionType: 'starter-fan' | 'starter-media' | 'reserve-coach' | 'injury-replacement';
+}
+
+export interface AllStarContestResult {
+  eventName: 'Skills Challenge' | '3-Point Contest' | 'Dunk Contest';
+  participants: string[];  // player IDs who competed
+  winner: { playerId: string; playerName: string; teamId: string; teamName: string; score?: string };
+  runnerUp?: { playerId: string; playerName: string; teamId: string; teamName: string; score?: string };
+  highlights: string[];
+}
+
+export interface AllStarGameResult {
+  eastScore: number;
+  westScore: number;
+  mvp: { playerId: string; playerName: string; teamId: string; teamName: string; statLine: string };
+  eastRoster: string[];
+  westRoster: string[];
+  highlights: string[];
+  quarterScores?: { east: number[]; west: number[] };
+}
+
+export interface AllStarWeekendData {
+  year: number;
+  day: number;
+  // Full rosters (starters + reserves)
+  eastRoster: string[];        // 12 total (5 starters + 7 reserves)
+  westRoster: string[];        // 12 total
+  eastStarters: string[];      // 5: 2 guards + 3 frontcourt
+  westStarters: string[];
+  eastReserves: string[];      // 7 coach picks
+  westReserves: string[];
+  // Injury replacements
+  injuryReplacements?: Array<{ originalId: string; replacementId: string; conf: 'Eastern' | 'Western' }>;
+  // Vote breakdown per player
+  voteEntries?: AllStarVoteEntry[];
+  // Event participants (qualified pool, not just allstar roster)
+  skillsParticipants: string[];     // 4-6 guards/wings age<27
+  threePtParticipants: string[];    // 8 sharpshooters
+  dunkParticipants: string[];       // 4-6 athletes age<30
+  // Results
+  skillsChallenge?: AllStarContestResult;
+  threePtContest?: AllStarContestResult;
+  dunkContest?: AllStarContestResult;
+  allStarGame?: AllStarGameResult;
+  completed: boolean;
+}

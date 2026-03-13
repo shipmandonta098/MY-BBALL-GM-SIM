@@ -10,7 +10,8 @@ interface StatsProps {
 }
 
 type StatTab = 'leaderboards' | 'advanced' | 'compare' | 'teams' | 'players';
-type PlayerSubTab = 'traditional' | 'advanced' | 'per36' | 'shooting';
+type PlayerSubTab = 'traditional' | 'advanced' | 'per36' | 'shooting' | 'totals';
+type PlayerStatsView = 'season' | 'career';
 
 const Stats: React.FC<StatsProps> = ({ league, onViewRoster, onManageTeam, onViewPlayer }) => {
   const [activeTab, setActiveTab] = useState<StatTab>('leaderboards');
@@ -23,6 +24,7 @@ const Stats: React.FC<StatsProps> = ({ league, onViewRoster, onManageTeam, onVie
   const [sortKey, setSortKey] = useState<string>('ppg');
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc');
   const [page, setPage] = useState(0);
+  const [playerStatsView, setPlayerStatsView] = useState<PlayerStatsView>('season');
 
   const allPlayers = useMemo(() => {
     return league.teams.flatMap(t => t.roster.map(p => ({
@@ -117,22 +119,27 @@ const Stats: React.FC<StatsProps> = ({ league, onViewRoster, onManageTeam, onVie
     const ppg = p.stats.points / gp;
     const rpg = p.stats.rebounds / gp;
     const apg = p.stats.assists / gp;
-    
+    const spg = p.stats.steals / gp;
+    const bpg = p.stats.blocks / gp;
+    const tpm = p.stats.threepm / gp;
+    const fgPct = p.stats.fga > 0 ? p.stats.fgm / p.stats.fga : 0;
+    const tpPct = p.stats.threepa > 0 ? p.stats.threepm / p.stats.threepa : 0;
+
     // eFG%: (FGM + 0.5 * 3PM) / FGA
     const eFG = p.stats.fga > 0 ? (p.stats.fgm + 0.5 * p.stats.threepm) / p.stats.fga : 0;
-    
+
     // TS%: PTS / (2 * (FGA + 0.44 * FTA))
     const TS = (p.stats.fga + 0.44 * p.stats.fta) > 0 ? p.stats.points / (2 * (p.stats.fga + 0.44 * p.stats.fta)) : 0;
-    
+
     // Usage% (Estimated): (FGA + 0.44 * FTA + TOV) per minute relative to team
     const USG = p.stats.minutes > 0 ? (p.stats.fga + 0.44 * p.stats.fta + p.stats.tov) / p.stats.minutes : 0;
-    
+
     // Simplified PER: (PTS + REB + AST + STL + BLK - MissedFG - MissedFT - TOV) / MIN
-    const PER = p.stats.minutes > 0 ? 
+    const PER = p.stats.minutes > 0 ?
       (p.stats.points + p.stats.rebounds + p.stats.assists + p.stats.steals + p.stats.blocks - (p.stats.fga - p.stats.fgm) - (p.stats.fta - p.stats.ftm) - p.stats.tov) / p.stats.minutes * 30
       : 0;
 
-    return { eFG, TS, USG, PER, ppg, rpg, apg };
+    return { eFG, TS, USG, PER, ppg, rpg, apg, spg, bpg, tpm, fgPct, tpPct };
   };
 
   const filteredLeaders = useMemo(() => {
@@ -146,10 +153,10 @@ const Stats: React.FC<StatsProps> = ({ league, onViewRoster, onManageTeam, onVie
     else if (compareList.length < 4) setCompareList(prev => [...prev, id]);
   };
 
-  const LeaderTable = ({ statKey, label }: { statKey: string, label: string }) => {
+  const LeaderTable = ({ statKey, label, fmt }: { statKey: string; label: string; fmt?: (v: number) => string }) => {
     const sorted = [...filteredLeaders].sort((a, b) => {
-      const aVal = (a.adv as any)[statKey] || (a.stats as any)[statKey] / Math.max(1, a.stats.gamesPlayed);
-      const bVal = (b.adv as any)[statKey] || (b.stats as any)[statKey] / Math.max(1, b.stats.gamesPlayed);
+      const aVal = (a.adv as any)[statKey] ?? (a.stats as any)[statKey] / Math.max(1, a.stats.gamesPlayed) ?? 0;
+      const bVal = (b.adv as any)[statKey] ?? (b.stats as any)[statKey] / Math.max(1, b.stats.gamesPlayed) ?? 0;
       return bVal - aVal;
     }).slice(0, 25);
 
@@ -189,7 +196,7 @@ const Stats: React.FC<StatsProps> = ({ league, onViewRoster, onManageTeam, onVie
                        </div>
                     </td>
                     <td className="px-6 py-4 text-right font-display font-bold text-amber-500 text-lg">
-                      {val.toFixed(statKey === 'PER' ? 1 : statKey === 'TS' || statKey === 'eFG' ? 3 : 1)}
+                      {fmt ? fmt(val) : val.toFixed(statKey === 'PER' ? 1 : statKey === 'TS' || statKey === 'eFG' ? 3 : 1)}
                     </td>
                   </tr>
                 );
@@ -265,49 +272,98 @@ const Stats: React.FC<StatsProps> = ({ league, onViewRoster, onManageTeam, onVie
     const PAGE_SIZE = 25;
     const positions: Array<'ALL' | Position> = ['ALL', 'PG', 'SG', 'SF', 'PF', 'C'];
 
-    // Aggregate stats per player
+    // Aggregate stats per player (season or career)
     const playerRows = useMemo(() => {
       return league.teams.flatMap(team =>
         team.roster.map(p => {
-          const gp  = Math.max(1, p.stats.gamesPlayed);
-          const min = p.stats.minutes;
-          const pts = p.stats.points;
-          const reb = p.stats.rebounds;
-          const ast = p.stats.assists;
-          const stl = p.stats.steals;
-          const blk = p.stats.blocks;
-          const tov = p.stats.tov;
-          const fgm = p.stats.fgm;
-          const fga = p.stats.fga;
-          const tpm = p.stats.threepm;
-          const tpa = p.stats.threepa;
-          const ftm = p.stats.ftm;
-          const fta = p.stats.fta;
-          const pm  = p.stats.plusMinus;
+          // ── Source stats: current season or summed career ─────────────────
+          let gp: number, min: number, pts: number, reb: number, ast: number;
+          let stl: number, blk: number, tov: number, fgm: number, fga: number;
+          let tpm: number, tpa: number, ftm: number, fta: number, pm: number;
+          let gs: number, orb: number, drb: number, pf: number;
 
-          const ppg = pts / gp;
-          const rpg = reb / gp;
-          const apg = ast / gp;
-          const spg = stl / gp;
-          const bpg = blk / gp;
-          const tpg = tov / gp;
-          const mpg = min / gp;
+          if (playerStatsView === 'career' && p.careerStats && p.careerStats.length > 0) {
+            const cs = p.careerStats;
+            const sum = <K extends keyof typeof cs[0]>(k: K) =>
+              cs.reduce((acc, s) => acc + ((s[k] as number) ?? 0), 0);
+            gp  = sum('gamesPlayed');
+            gs  = sum('gamesStarted');
+            min = sum('minutes');
+            pts = sum('points');
+            reb = sum('rebounds');
+            ast = sum('assists');
+            stl = sum('steals');
+            blk = sum('blocks');
+            tov = sum('tov');
+            fgm = sum('fgm');
+            fga = sum('fga');
+            tpm = sum('threepm');
+            tpa = sum('threepa');
+            ftm = sum('ftm');
+            fta = sum('fta');
+            orb = sum('offReb');
+            drb = sum('defReb');
+            pf  = sum('pf');
+            pm  = sum('plusMinus');
+          } else {
+            gp  = p.stats.gamesPlayed;
+            gs  = p.stats.gamesStarted ?? 0;
+            min = p.stats.minutes;
+            pts = p.stats.points;
+            reb = p.stats.rebounds;
+            ast = p.stats.assists;
+            stl = p.stats.steals;
+            blk = p.stats.blocks;
+            tov = p.stats.tov;
+            fgm = p.stats.fgm;
+            fga = p.stats.fga;
+            tpm = p.stats.threepm;
+            tpa = p.stats.threepa;
+            ftm = p.stats.ftm;
+            fta = p.stats.fta;
+            orb = p.stats.offReb ?? 0;
+            drb = p.stats.defReb ?? 0;
+            pf  = p.stats.pf ?? 0;
+            pm  = p.stats.plusMinus;
+          }
+
+          const gpSafe = Math.max(1, gp);
+          const ppg  = pts / gpSafe;
+          const rpg  = reb / gpSafe;
+          const apg  = ast / gpSafe;
+          const spg  = stl / gpSafe;
+          const bpg  = blk / gpSafe;
+          const tpg  = tov / gpSafe;
+          const mpg  = min / gpSafe;
+          const orbPg = orb / gpSafe;
+          const drbPg = drb / gpSafe;
+          const pfPg  = pf  / gpSafe;
+          const fgmPg = fgm / gpSafe;
+          const fgaPg = fga / gpSafe;
+          const tpmPg = tpm / gpSafe;
+          const tpaPg = tpa / gpSafe;
+          const ftmPg = ftm / gpSafe;
+          const ftaPg = fta / gpSafe;
           const fgPct  = fga > 0 ? fgm / fga : 0;
           const tpPct  = tpa > 0 ? tpm / tpa : 0;
           const ftPct  = fta > 0 ? ftm / fta : 0;
-          // 2-pt (mid + post) derived
-          const twom = fgm - tpm;
-          const twoa = fga - tpa;
+          // 2-pt derived
+          const twom   = fgm - tpm;
+          const twoa   = fga - tpa;
           const twoPct = twoa > 0 ? twom / twoa : 0;
+          const twomPg = twom / gpSafe;
+          const twoaPg = twoa / gpSafe;
+          // EFG%
+          const efg = fga > 0 ? (fgm + 0.5 * tpm) / fga : 0;
           // Advanced
           const per = min > 0
             ? (pts + reb + ast + stl + blk - (fga - fgm) - (fta - ftm) - tov) / min * 30
             : 0;
           const ts  = (fga + 0.44 * fta) > 0 ? pts / (2 * (fga + 0.44 * fta)) : 0;
           const usg = min > 0 ? (fga + 0.44 * fta + tov) / min : 0;
-          const bpm = gp > 0 ? pm / gp : 0;
-          const vorp = bpm * (gp / 82) * 2.7;
-          const pmPg = gp > 0 ? pm / gp : 0;
+          const bpm = gpSafe > 0 ? pm / gpSafe : 0;
+          const vorp = bpm * (gpSafe / 82) * 2.7;
+          const pmPg = gpSafe > 0 ? pm / gpSafe : 0;
           // Per 36
           const p36 = (stat: number) => min > 0 ? (stat / min) * 36 : 0;
 
@@ -319,17 +375,25 @@ const Stats: React.FC<StatsProps> = ({ league, onViewRoster, onManageTeam, onVie
             teamName: team.name,
             team,
             pos: p.position,
-            gp, mpg, ppg, rpg, apg, spg, bpg, tpg,
+            gp, gs, mpg, ppg, rpg, apg, spg, bpg, tpg,
+            orbPg, drbPg, pfPg,
             fgm, fga, fgPct, tpm, tpa, tpPct, ftm, fta, ftPct,
-            twom, twoa, twoPct,
+            fgmPg, fgaPg, tpmPg, tpaPg, ftmPg, ftaPg,
+            twom, twoa, twoPct, twomPg, twoaPg, efg,
             per, ts, usg, bpm, vorp, pmPg,
             p36pts: p36(pts), p36reb: p36(reb), p36ast: p36(ast),
             p36stl: p36(stl), p36blk: p36(blk), p36tov: p36(tov),
             p36fgPct: fgPct, p36tpPct: tpPct, p36ftPct: ftPct,
+            // Raw totals (used by the Totals subtab)
+            totalPts: pts, totalReb: reb, totalAst: ast,
+            totalStl: stl, totalBlk: blk, totalTov: tov,
+            totalMin: min, totalFgm: fgm, totalFga: fga,
+            totalTpm: tpm, totalTpa: tpa, totalFtm: ftm, totalFta: fta,
+            totalOrb: orb, totalDrb: drb,
           };
         })
       );
-    }, [league.teams]);
+    }, [league.teams, playerStatsView]);
 
     // Filter
     const filtered = useMemo(() => {
@@ -413,19 +477,38 @@ const Stats: React.FC<StatsProps> = ({ league, onViewRoster, onManageTeam, onVie
           <SpotCard title="Blocks Leader"   row={blocksLeader}   stat={blocksLeader?.bpg   ?? 0} label="BPG" />
         </div>
 
-        {/* Sub-tabs */}
-        <div className="flex gap-2 flex-wrap">
-          {(['traditional', 'advanced', 'per36', 'shooting'] as PlayerSubTab[]).map(t => (
-            <button
-              key={t}
-              onClick={() => { setPlayerSubTab(t); setSortKey(t === 'advanced' ? 'per' : t === 'shooting' ? 'fgPct' : 'ppg'); setSortDir('desc'); setPage(0); }}
-              className={`text-[10px] font-black uppercase tracking-widest px-4 py-2 rounded-full transition-all ${
-                playerSubTab === t ? 'bg-amber-500 text-slate-950' : 'bg-slate-800 text-slate-500 hover:text-white'
-              }`}
-            >
-              {t === 'per36' ? 'Per 36' : t}
-            </button>
-          ))}
+        {/* Season / Career toggle */}
+        <div className="flex items-center justify-between flex-wrap gap-3">
+          <div className="flex gap-1 bg-slate-900 border border-slate-800 rounded-full p-0.5">
+            {(['season', 'career'] as PlayerStatsView[]).map(v => (
+              <button
+                key={v}
+                onClick={() => { setPlayerStatsView(v); setPage(0); }}
+                className={`px-5 py-1.5 text-[10px] font-black uppercase tracking-widest rounded-full transition-all ${
+                  playerStatsView === v ? 'bg-amber-500 text-slate-950' : 'text-slate-500 hover:text-white'
+                }`}
+              >{v}</button>
+            ))}
+          </div>
+          {/* Sub-tabs */}
+          <div className="flex gap-2 flex-wrap">
+            {(['traditional', 'advanced', 'per36', 'shooting', 'totals'] as PlayerSubTab[]).map(t => (
+              <button
+                key={t}
+                onClick={() => {
+                  setPlayerSubTab(t);
+                  setSortKey(t === 'advanced' ? 'per' : t === 'shooting' ? 'fgPct' : t === 'totals' ? 'totalPts' : 'ppg');
+                  setSortDir('desc');
+                  setPage(0);
+                }}
+                className={`text-[10px] font-black uppercase tracking-widest px-4 py-2 rounded-full transition-all ${
+                  playerSubTab === t ? 'bg-amber-500 text-slate-950' : 'bg-slate-800 text-slate-500 hover:text-white'
+                }`}
+              >
+                {t === 'per36' ? 'Per 36' : t}
+              </button>
+            ))}
+          </div>
         </div>
 
         {/* Table */}
@@ -440,13 +523,17 @@ const Stats: React.FC<StatsProps> = ({ league, onViewRoster, onManageTeam, onVie
                   <th className="px-2 py-3 text-slate-500 text-center">Pos</th>
                   <Th k="gp"  label="GP" />
                   {playerSubTab === 'traditional' && (<>
+                    <Th k="gs"  label="GS" />
                     <Th k="mpg" label="MPG" />
                     <Th k="ppg" label="PPG" />
+                    <Th k="orbPg" label="ORB" />
+                    <Th k="drbPg" label="DRB" />
                     <Th k="rpg" label="RPG" />
                     <Th k="apg" label="APG" />
                     <Th k="spg" label="SPG" />
                     <Th k="bpg" label="BPG" />
                     <Th k="tpg" label="TPG" />
+                    <Th k="pfPg" label="PF" />
                     <Th k="fgPct" label="FG%" />
                     <Th k="tpPct" label="3P%" />
                     <Th k="ftPct" label="FT%" />
@@ -472,14 +559,40 @@ const Stats: React.FC<StatsProps> = ({ league, onViewRoster, onManageTeam, onVie
                     <Th k="p36ftPct" label="FT%" />
                   </>)}
                   {playerSubTab === 'shooting' && (<>
-                    <Th k="fga"    label="FGA" />
+                    <Th k="fgmPg"  label="FGM" />
+                    <Th k="fgaPg"  label="FGA" />
                     <Th k="fgPct"  label="FG%" />
-                    <Th k="tpa"    label="3PA" />
+                    <Th k="efg"    label="EFG%" />
+                    <Th k="tpmPg"  label="3PM" />
+                    <Th k="tpaPg"  label="3PA" />
                     <Th k="tpPct"  label="3P%" />
-                    <Th k="fta"    label="FTA" />
-                    <Th k="ftPct"  label="FT%" />
-                    <Th k="twoa"   label="2PA" />
+                    <Th k="twomPg" label="2PM" />
+                    <Th k="twoaPg" label="2PA" />
                     <Th k="twoPct" label="2P%" />
+                    <Th k="ftmPg"  label="FTM" />
+                    <Th k="ftaPg"  label="FTA" />
+                    <Th k="ftPct"  label="FT%" />
+                  </>)}
+                  {playerSubTab === 'totals' && (<>
+                    <Th k="gs"       label="GS" />
+                    <Th k="totalMin" label="MIN" />
+                    <Th k="totalPts" label="PTS" />
+                    <Th k="totalOrb" label="ORB" />
+                    <Th k="totalDrb" label="DRB" />
+                    <Th k="totalReb" label="REB" />
+                    <Th k="totalAst" label="AST" />
+                    <Th k="totalStl" label="STL" />
+                    <Th k="totalBlk" label="BLK" />
+                    <Th k="totalTov" label="TOV" />
+                    <Th k="totalFgm" label="FGM" />
+                    <Th k="totalFga" label="FGA" />
+                    <Th k="fgPct"    label="FG%" />
+                    <Th k="totalTpm" label="3PM" />
+                    <Th k="totalTpa" label="3PA" />
+                    <Th k="tpPct"    label="3P%" />
+                    <Th k="totalFtm" label="FTM" />
+                    <Th k="totalFta" label="FTA" />
+                    <Th k="ftPct"    label="FT%" />
                   </>)}
                 </tr>
               </thead>
@@ -504,13 +617,17 @@ const Stats: React.FC<StatsProps> = ({ league, onViewRoster, onManageTeam, onVie
                       <td className="px-2 py-3 text-center text-slate-400 font-black text-[10px] uppercase">{r.pos}</td>
                       <td className="px-2 py-3 text-center font-mono">{r.gp}</td>
                       {playerSubTab === 'traditional' && (<>
+                        <td className="px-2 py-3 text-center font-mono text-slate-400">{r.gs}</td>
                         <td className="px-2 py-3 text-center font-mono">{fix1(r.mpg)}</td>
                         <td className="px-2 py-3 text-center font-mono font-bold text-amber-400">{fix1(r.ppg)}</td>
+                        <td className="px-2 py-3 text-center font-mono">{fix1(r.orbPg)}</td>
+                        <td className="px-2 py-3 text-center font-mono">{fix1(r.drbPg)}</td>
                         <td className="px-2 py-3 text-center font-mono">{fix1(r.rpg)}</td>
                         <td className="px-2 py-3 text-center font-mono">{fix1(r.apg)}</td>
                         <td className="px-2 py-3 text-center font-mono">{fix1(r.spg)}</td>
                         <td className="px-2 py-3 text-center font-mono">{fix1(r.bpg)}</td>
                         <td className="px-2 py-3 text-center font-mono text-rose-400/70">{fix1(r.tpg)}</td>
+                        <td className="px-2 py-3 text-center font-mono text-slate-400">{fix1(r.pfPg)}</td>
                         <td className="px-2 py-3 text-center font-mono">{pct(r.fgPct)}</td>
                         <td className="px-2 py-3 text-center font-mono">{r.tpa > 0 ? pct(r.tpPct) : '—'}</td>
                         <td className="px-2 py-3 text-center font-mono">{r.fta > 0 ? pct(r.ftPct) : '—'}</td>
@@ -536,14 +653,40 @@ const Stats: React.FC<StatsProps> = ({ league, onViewRoster, onManageTeam, onVie
                         <td className="px-2 py-3 text-center font-mono">{r.fta > 0 ? pct(r.p36ftPct) : '—'}</td>
                       </>)}
                       {playerSubTab === 'shooting' && (<>
-                        <td className="px-2 py-3 text-center font-mono">{r.fga}</td>
+                        <td className="px-2 py-3 text-center font-mono">{fix1(r.fgmPg)}</td>
+                        <td className="px-2 py-3 text-center font-mono">{fix1(r.fgaPg)}</td>
                         <td className="px-2 py-3 text-center font-mono font-bold">{pct(r.fgPct)}</td>
-                        <td className="px-2 py-3 text-center font-mono">{r.tpa}</td>
+                        <td className="px-2 py-3 text-center font-mono font-bold text-sky-400">{r.fga > 0 ? pct(r.efg) : '—'}</td>
+                        <td className="px-2 py-3 text-center font-mono">{fix1(r.tpmPg)}</td>
+                        <td className="px-2 py-3 text-center font-mono">{fix1(r.tpaPg)}</td>
                         <td className="px-2 py-3 text-center font-mono">{r.tpa > 0 ? pct(r.tpPct) : '—'}</td>
-                        <td className="px-2 py-3 text-center font-mono">{r.fta}</td>
-                        <td className="px-2 py-3 text-center font-mono">{r.fta > 0 ? pct(r.ftPct) : '—'}</td>
-                        <td className="px-2 py-3 text-center font-mono">{r.twoa}</td>
+                        <td className="px-2 py-3 text-center font-mono">{fix1(r.twomPg)}</td>
+                        <td className="px-2 py-3 text-center font-mono">{fix1(r.twoaPg)}</td>
                         <td className="px-2 py-3 text-center font-mono font-bold">{r.twoa > 0 ? pct(r.twoPct) : '—'}</td>
+                        <td className="px-2 py-3 text-center font-mono">{fix1(r.ftmPg)}</td>
+                        <td className="px-2 py-3 text-center font-mono">{fix1(r.ftaPg)}</td>
+                        <td className="px-2 py-3 text-center font-mono">{r.fta > 0 ? pct(r.ftPct) : '—'}</td>
+                      </>)}
+                      {playerSubTab === 'totals' && (<>
+                        <td className="px-2 py-3 text-center font-mono text-slate-400">{r.gs}</td>
+                        <td className="px-2 py-3 text-center font-mono">{r.totalMin}</td>
+                        <td className="px-2 py-3 text-center font-mono font-bold text-amber-400">{r.totalPts}</td>
+                        <td className="px-2 py-3 text-center font-mono">{r.totalOrb}</td>
+                        <td className="px-2 py-3 text-center font-mono">{r.totalDrb}</td>
+                        <td className="px-2 py-3 text-center font-mono">{r.totalReb}</td>
+                        <td className="px-2 py-3 text-center font-mono">{r.totalAst}</td>
+                        <td className="px-2 py-3 text-center font-mono">{r.totalStl}</td>
+                        <td className="px-2 py-3 text-center font-mono">{r.totalBlk}</td>
+                        <td className="px-2 py-3 text-center font-mono text-rose-400/70">{r.totalTov}</td>
+                        <td className="px-2 py-3 text-center font-mono">{r.totalFgm}</td>
+                        <td className="px-2 py-3 text-center font-mono">{r.totalFga}</td>
+                        <td className="px-2 py-3 text-center font-mono font-bold">{r.fga > 0 ? pct(r.fgPct) : '—'}</td>
+                        <td className="px-2 py-3 text-center font-mono">{r.totalTpm}</td>
+                        <td className="px-2 py-3 text-center font-mono">{r.totalTpa}</td>
+                        <td className="px-2 py-3 text-center font-mono">{r.tpa > 0 ? pct(r.tpPct) : '—'}</td>
+                        <td className="px-2 py-3 text-center font-mono">{r.totalFtm}</td>
+                        <td className="px-2 py-3 text-center font-mono">{r.totalFta}</td>
+                        <td className="px-2 py-3 text-center font-mono">{r.fta > 0 ? pct(r.ftPct) : '—'}</td>
                       </>)}
                     </tr>
                   );
@@ -862,10 +1005,15 @@ const Stats: React.FC<StatsProps> = ({ league, onViewRoster, onManageTeam, onVie
       </header>
 
       {activeTab === 'leaderboards' && (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
-           <LeaderTable statKey="ppg" label="Scoring" />
-           <LeaderTable statKey="rpg" label="Rebounding" />
-           <LeaderTable statKey="apg" label="Assisting" />
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-8">
+          <LeaderTable statKey="ppg" label="Scoring" />
+          <LeaderTable statKey="rpg" label="Rebounding" />
+          <LeaderTable statKey="apg" label="Assists" />
+          <LeaderTable statKey="spg" label="Steals" />
+          <LeaderTable statKey="bpg" label="Blocks" />
+          <LeaderTable statKey="fgPct" label="FG%" fmt={v => (v * 100).toFixed(1) + '%'} />
+          <LeaderTable statKey="tpm"   label="3-Pointers Made" />
+          <LeaderTable statKey="tpPct" label="3-Point %" fmt={v => (v * 100).toFixed(1) + '%'} />
         </div>
       )}
 

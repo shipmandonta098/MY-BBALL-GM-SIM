@@ -1,32 +1,39 @@
 import { LeagueState, SeasonPhase } from '../types';
 
 /** Derive the current season phase from league state.
- *  Does not mutate state — safe to call anywhere. */
+ *  Respects stored `league.seasonPhase` if set (set by App.tsx sim loop),
+ *  then falls back to structural inference. Safe to call anywhere. */
 export const getSeasonPhase = (league: LeagueState): SeasonPhase => {
-  if (league.isOffseason) return 'offseason';
-  if (league.playoffBracket) return 'playoffs';
-  if (league.allStarWeekend && !league.allStarWeekend.completed) return 'allstar';
+  // If the sim loop has explicitly tracked a phase, trust it
+  if (league.seasonPhase) return league.seasonPhase;
+
+  if (league.isOffseason) return 'Offseason';
+  if (league.playoffBracket) return 'Playoffs';
+  if (league.allStarWeekend && !league.allStarWeekend.completed) return 'All-Star Weekend';
+  if (league.tradeDeadlinePassed) return 'Trade Deadline';
 
   const playedGames = league.schedule.filter(g => g.played).length;
-  if (playedGames === 0) return 'preseason';
+  if (playedGames === 0) return 'Preseason';
 
-  return 'regular';
+  return 'Regular Season';
 };
 
-/** Human-readable label for each phase */
+/** Human-readable label — already embedded in SeasonPhase strings */
 export const PHASE_LABELS: Record<SeasonPhase, string> = {
-  preseason: 'Preseason',
-  regular: 'Regular Season',
-  allstar: 'All-Star Weekend',
-  playoffs: 'Playoffs',
-  offseason: 'Offseason',
+  'Preseason':       'Preseason',
+  'Regular Season':  'Regular Season',
+  'Trade Deadline':  'Trade Deadline',
+  'All-Star Weekend': 'All-Star Weekend',
+  'Playoffs':        'Playoffs',
+  'Offseason':       'Offseason',
 };
 
 /** Ordered list of phases for progress display */
 export const PHASE_ORDER: SeasonPhase[] = [
-  'preseason',
-  'regular',
-  'allstar',
-  'playoffs',
-  'offseason',
+  'Preseason',
+  'Regular Season',
+  'Trade Deadline',
+  'All-Star Weekend',
+  'Playoffs',
+  'Offseason',
 ];
