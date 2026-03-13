@@ -1366,7 +1366,7 @@ const weightedRandom = <T>(pool: { value: T; weight: number }[]): T => {
 const lastName = (p: Player) => p.name.split(' ').at(-1) ?? p.name;
 
 // ─── Possession Types ─────────────────────────────────────────────────────────
-type OffAction  = 'ISO' | 'POST_UP' | 'DRIVE' | 'PASS_FIRST' | 'TRANSITION';
+type OffAction  = 'ISO' | 'POST_UP' | 'DRIVE' | 'PASS_FIRST' | 'TRANSITION' | 'SPOT_UP' | 'CUT';
 type ShotType   = 'PULL_UP_3' | 'MID_RANGE' | 'DRIVE_LAYUP' | 'POST_FADE' | 'CATCH_AND_SHOOT_3';
 type PossResult = 'MADE' | 'MISSED' | 'TURNOVER' | 'STEAL' | 'FOUL_DRAWN';
 
@@ -1414,18 +1414,66 @@ const simulatePossession = (
     : transHunter >= 50 ? Math.random() < 0.15 : Math.random() < 0.05;
 
   // ── Step 2: Offensive action ──────────────────────────────────────────────
+  // Uses the pseudo-code base-score approach:
+  //   score = baselineScore × (tendency / 50) × multiplier
+  // then contextual boosts are applied, ±5 noise is added, and a weighted
+  // random pick is made.  SPOT_UP and CUT are now first-class actions.
   let offAction: OffAction;
   if (isTransition) {
     offAction = 'TRANSITION';
   } else {
-    // dribbleHandOff: boosts both DRIVE (initiator turns corner) and PASS_FIRST (kicks off DHO)
-    const dhoWeight = tendencyWeight(ot?.dribbleHandOff ?? 50);
-    const pool: { value: OffAction; weight: number }[] = [
-      { value: 'ISO',        weight: tendencyWeight(ot?.isoHeavy      ?? 50) },
-      { value: 'POST_UP',    weight: tendencyWeight(ot?.postUp        ?? 50) },
-      { value: 'DRIVE',      weight: tendencyWeight(ot?.driveToBasket ?? 50) + dhoWeight * 0.30 },
-      { value: 'PASS_FIRST', weight: tendencyWeight(ot?.kickOutPasser ?? 50) + dhoWeight * 0.40 },
-    ];
+    // ── Contextual flags ────────────────────────────────────────────────────
+    // isInPost: big man already sealed on the block
+    const isInPost     = (offHandler.position === 'C' || offHandler.position === 'PF')
+                         && Math.random() < 0.45 + (ot?.postUp ?? 50) / 200;
+    // isOpen: catch situation where the off-ball shooter has space
+    const isOpen       = Math.random() < Math.max(0.15, 0.60 - (dt?.denyThePass ?? 50) / 125);
+    // isCloseOut: defense was late recovering → drive out of a spot-up catch
+    const isCloseOut   = isOpen && Math.random() < 0.30 + (ot?.attackCloseOuts ?? 50) / 280;
+    // isPnRHandler: PG/SG coming off a screen with pull-up potential
+    const isPnRHandler = (offHandler.position === 'PG' || offHandler.position === 'SG')
+                         && Math.random() < 0.25 + (ot?.pullUpOffPnr ?? 50) / 200;
+    // isClutch: late-game, score is close, player has the clutch tendency
+    const isClutch     = situationalBoost > 0.03 && (ot?.clutchShotTaker ?? 50) > 50;
+    // dhoBoost: dribble hand-off player weights DRIVE and PASS_FIRST heavier
+    const dhoBoost     = (ot?.dribbleHandOff ?? 50) / 100;
+
+    // ── Base scores × tendency multipliers ─────────────────────────────────
+    // Baseline reflects a "neutral 50-tendency" starting frequency.
+    // Dividing by 50 keeps the multiplier centred at 1×, so values above 50
+    // increase the weight and values below 50 decrease it.
+    const scores: Partial<Record<OffAction, number>> = {
+      ISO:        30  * (ot?.isoHeavy      ?? 50) / 50,
+      POST_UP:    28  * (ot?.postUp        ?? 50) / 50 * 1.8,
+      DRIVE:      38  * (ot?.driveToBasket ?? 50) / 50 * 1.5 + dhoBoost * 12,
+      PASS_FIRST: 45  * (ot?.kickOutPasser ?? 50) / 50 * 1.2
+                      + (100 - (ot?.isoHeavy ?? 50)) / 100 * 20
+                      + dhoBoost * 18,
+      SPOT_UP:    32  * (ot?.spotUp        ?? 50) / 50 * 1.6,
+      CUT:        22  * (ot?.cutter        ?? 50) / 50 * 1.8,
+    };
+
+    // ── Contextual boosts ───────────────────────────────────────────────────
+    if (isInPost)     scores.POST_UP!   *= 3.5;  // dominant position on block
+    if (isOpen)       scores.SPOT_UP!   *= 2.8;  // wide open in the corner
+    if (isCloseOut)   scores.DRIVE!     *= 2.0;  // attack the scrambling defender
+    if (isPnRHandler) scores.DRIVE!     *= 1.6;  // coming off a screen, attack downhill
+    if (isClutch) {
+      scores.ISO!   *= 1.4;   // isolation hero ball in the clutch
+      scores.DRIVE! *= 1.2;
+    }
+
+    // ── ±5 noise for possession-to-possession variance ──────────────────────
+    for (const k of Object.keys(scores) as OffAction[]) {
+      scores[k] = (scores[k] ?? 0) + (Math.random() * 10 - 5);
+    }
+
+    // ── Weighted pick (floor at 0 to avoid negative weights) ───────────────
+    const pool: { value: OffAction; weight: number }[] = (
+      Object.entries(scores) as [OffAction, number][]
+    ).filter(([, w]) => w > 0)
+     .map(([value, weight]) => ({ value, weight }));
+
     offAction = weightedRandom(pool);
   }
 
@@ -1461,6 +1509,14 @@ const simulatePossession = (
       }
       break;
     }
+    case 'SPOT_UP':
+      // Off-ball spot-up: catch on the perimeter and fire immediately
+      shotType = 'CATCH_AND_SHOOT_3';
+      break;
+    case 'CUT':
+      // Backdoor / basket cut: receives pass at the rim
+      shotType = 'DRIVE_LAYUP';
+      break;
     default: shotType = 'CATCH_AND_SHOOT_3';
   }
 
@@ -1557,10 +1613,23 @@ const simulatePossession = (
               : `${ln} drives the lane...`;
       }
 
-      tendencyUsed  = 'driveToBasket';
-      tendencyScore = ot?.driveToBasket ?? 50;
-      const m       = (tendencyScore / 100) * 0.10;
-      shotModifier  = tendencyScore >= 70 ? +m : tendencyScore < 30 ? -m : 0;
+      if (offAction === 'CUT') {
+        tendencyUsed  = 'cutter';
+        tendencyScore = ot?.cutter ?? 50;
+        // Cuts generate high-efficiency uncontested looks at the rim
+        const m = (tendencyScore / 100) * 0.12;
+        shotModifier = tendencyScore >= 70 ? +m : tendencyScore < 30 ? -m : 0;
+        pbpBase = tendencyScore >= 80
+          ? `${ln} back-cuts off the weak side — catches it in stride!`
+          : tendencyScore >= 60
+            ? `${ln} cuts hard to the basket...`
+            : `${ln} slips in off a cut...`;
+      } else {
+        tendencyUsed  = 'driveToBasket';
+        tendencyScore = ot?.driveToBasket ?? 50;
+        const m       = (tendencyScore / 100) * 0.10;
+        shotModifier  = tendencyScore >= 70 ? +m : tendencyScore < 30 ? -m : 0;
+      }
       break;
     }
     case 'POST_FADE': {
@@ -1589,16 +1658,30 @@ const simulatePossession = (
     }
     case 'CATCH_AND_SHOOT_3': {
       // Catch-and-shoot is a quality look; base is the expected %, tendency/spot-up modifiers lift it further
-      baseProb      = getThreePointPercentage(offHandler.attributes.shooting3pt);
-      tendencyUsed  = 'kickOutPasser';
-      tendencyScore = ot?.kickOutPasser ?? 50;
-      shotModifier  = +0.04;
-      // Spot Up / Off Screen: well-positioned off-ball shooter earns higher-quality looks
-      shotModifier += ((ot?.spotUp    ?? 50) - 50) / 100 * 0.06;
-      shotModifier += ((ot?.offScreen ?? 50) - 50) / 100 * 0.04;
-      pbpBase = offAction === 'PASS_FIRST'
-        ? `${ln} swings it and finds the open man in the corner...`
-        : `${ln} kicks it out to the shooter...`;
+      baseProb = getThreePointPercentage(offHandler.attributes.shooting3pt);
+      if (offAction === 'SPOT_UP') {
+        // Pure spot-up shooter: the primary tendency is spotUp, not kickOutPasser
+        tendencyUsed  = 'spotUp';
+        tendencyScore = ot?.spotUp ?? 50;
+        // Specialist spot-up shooters earn a larger bonus for staying in their corners
+        shotModifier  = +0.04 + ((tendencyScore - 50) / 100) * 0.10;
+        shotModifier += ((ot?.offScreen ?? 50) - 50) / 100 * 0.04;
+        pbpBase = tendencyScore >= 80
+          ? `${ln} sets his feet in the corner — pure shooter's stroke incoming...`
+          : tendencyScore >= 60
+            ? `${ln} spots up and catches in rhythm...`
+            : `${ln} catches on the wing and fires...`;
+      } else {
+        tendencyUsed  = 'kickOutPasser';
+        tendencyScore = ot?.kickOutPasser ?? 50;
+        shotModifier  = +0.04;
+        // Spot Up / Off Screen: well-positioned off-ball shooter earns higher-quality looks
+        shotModifier += ((ot?.spotUp    ?? 50) - 50) / 100 * 0.06;
+        shotModifier += ((ot?.offScreen ?? 50) - 50) / 100 * 0.04;
+        pbpBase = offAction === 'PASS_FIRST'
+          ? `${ln} swings it and finds the open man in the corner...`
+          : `${ln} kicks it out to the shooter...`;
+      }
       break;
     }
   }
