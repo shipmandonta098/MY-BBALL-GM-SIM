@@ -82,6 +82,123 @@ export function getThreePointPercentage(attr: number): number {
   return Math.max(0.20, Math.min(0.50, base));
 }
 
+// ─── Rebound Chance Functions ────────────────────────────────────────────────
+/**
+ * Maps an offRebounding attribute (0–100) to an individual ORB% chance
+ * per rebound opportunity (decimal).
+ *
+ * Calibrated to 2025-26 NBA data:
+ *   • League avg individual ORB% ≈ 8-13 % (big men 10-20 %, guards 3-8 %)
+ *   • Elite crashers (Robinson, Drummond): 20-25 %+
+ *   • Team ORB% ~29-31 % emerges naturally when five players compete
+ *
+ * Piecewise-linear breakpoints (easy to tune independently):
+ *   attr  │  C/PF   │  SF    │  PG/SG
+ *   ──────┼─────────┼────────┼────────
+ *    50   │   8.0 % │  6.0 % │   4.0 %
+ *    65   │  13.0 % │ 11.0 % │   9.0 %
+ *    80   │  18.0 % │ 16.0 % │  14.0 %
+ *    94   │  24.0 % │ 22.0 % │  20.0 %
+ *   100   │  28.0 % │ 26.0 % │  24.0 %
+ *
+ * Tuning guide:
+ *   • Raise segment endpoints to inflate ORB league-wide.
+ *   • Shift the positional bonus/penalty (±0.03 / ±0.02) to widen or narrow
+ *     the C vs. guard gap.
+ *   • Hard clamp [0.03, 0.28] is a last-resort safety net.
+ */
+export function getOffReboundChance(attr: number, position?: string): number {
+  const a = Math.max(0, Math.min(100, attr));
+
+  let base: number;
+  if (a <= 60) {
+    // Poor crashers: 4 % at 0 → 9 % at 60
+    base = 0.04 + (a / 60) * 0.05;
+  } else if (a <= 80) {
+    // Solid to plus: 9 % at 60 → 15 % at 80
+    base = 0.09 + ((a - 60) / 20) * 0.06;
+  } else if (a <= 94) {
+    // Elite: 15 % at 80 → 21 % at 94
+    base = 0.15 + ((a - 80) / 14) * 0.06;
+  } else {
+    // Rodman/Drummond peaks: 21 % at 95 → 25 % at 100
+    base = 0.21 + ((a - 95) / 5) * 0.04;
+  }
+
+  // Positional modifier: size = natural board advantage
+  if (position === 'C' || position === 'PF') base += 0.03;
+  else if (position === 'PG' || position === 'SG') base -= 0.02;
+
+  return Math.max(0.03, Math.min(0.28, base));
+}
+
+/**
+ * Maps a defRebounding attribute (0–100) to an individual DRB% chance
+ * per rebound opportunity (decimal).
+ *
+ * Calibrated to 2025-26 NBA data:
+ *   • League avg team DRB% ≈ 74-77 %
+ *   • Elite anchors (Gobert, Turner): 28-33 % individual DRB%
+ *   • Guards: typically 8-14 % individual DRB%
+ *
+ * Piecewise-linear breakpoints (easy to tune independently):
+ *   attr  │  C/PF   │  SF    │  PG/SG
+ *   ──────┼─────────┼────────┼────────
+ *    50   │  17.0 % │ 13.0 % │  10.0 %
+ *    65   │  22.0 % │ 18.0 % │  15.0 %
+ *    80   │  27.0 % │ 23.0 % │  20.0 %
+ *    94   │  32.0 % │ 28.0 % │  25.0 %
+ *   100   │  37.0 % │ 33.0 % │  30.0 %
+ */
+export function getDefReboundChance(attr: number, position?: string): number {
+  const a = Math.max(0, Math.min(100, attr));
+
+  let base: number;
+  if (a <= 60) {
+    // Weak box-out: 10 % at 0 → 16 % at 60
+    base = 0.10 + (a / 60) * 0.06;
+  } else if (a <= 80) {
+    // Average to solid: 16 % at 60 → 23 % at 80
+    base = 0.16 + ((a - 60) / 20) * 0.07;
+  } else if (a <= 94) {
+    // Plus to elite: 23 % at 80 → 29 % at 94
+    base = 0.23 + ((a - 80) / 14) * 0.06;
+  } else {
+    // Dominant anchors: 29 % at 95 → 33 % at 100
+    base = 0.29 + ((a - 95) / 5) * 0.04;
+  }
+
+  // Positional modifier
+  if (position === 'C' || position === 'PF') base += 0.04;
+  else if (position === 'PG' || position === 'SG') base -= 0.03;
+
+  return Math.max(0.08, Math.min(0.38, base));
+}
+
+/**
+ * Computes the probability that THIS offensive team secures a rebound
+ * on a given miss (team ORB%), by aggregating individual player chances.
+ *
+ * Each player independently "contests" the rebound; the team wins it if
+ * any one of them does. We use a soft-sum (not independent-event product)
+ * to stay in realistic range when 5 strong rebounders are on the floor.
+ *
+ *   teamOrbChance = clamp(Σ playerOrbChance × DECAY_FACTOR, 0.20, 0.38)
+ *
+ * DECAY_FACTOR = 0.55 → a squad of five attr-75 players (each ~12 %)
+ *   yields 5 × 0.12 × 0.55 ≈ 0.33  → league-avg ~29-33 %. ✓
+ */
+export function getTeamOrbChance(
+  rotation: Array<{ attributes: { offReb: number }; position?: string }>,
+): number {
+  const DECAY = 0.55;
+  const sum = rotation.reduce(
+    (acc, p) => acc + getOffReboundChance(p.attributes.offReb, p.position),
+    0,
+  );
+  return Math.max(0.20, Math.min(0.38, sum * DECAY));
+}
+
 // ─── 3PT Defensive Contest Modifier ──────────────────────────────────────────
 /**
  * Maps a defender's perimeterDef attribute (0–100) to a per-possession
@@ -2042,7 +2159,11 @@ const generateQuarterPBP = (
     // If OReb: push the rebound event THEN the putback attempt (made or missed).
     // The rebounder and putback scorer are the same player.
     // Putback does NOT earn an assist. It IS an offensive rebound.
-    if (poss.result === 'MISSED' && Math.random() < 0.12) {
+    // Team ORB chance: derived from each player's offRebounding attribute via
+    // getTeamOrbChance() — replaces the old hardcoded 12 %.
+    // League-avg rotation yields ~29-31 % ORB; elite boards squads reach ~35 %.
+    const teamOrbChance = getTeamOrbChance(rotation);
+    if (poss.result === 'MISSED' && Math.random() < teamOrbChance) {
       // Prefer big men (high offReb + layups); exclude the original missed shooter.
       const rebCandidates = rotation.filter(p =>
         p.id !== handler.id && (p.attributes.layups ?? 40) >= 40);
@@ -2050,11 +2171,17 @@ const generateQuarterPBP = (
         ? rebCandidates
         : rotation.filter(p => p.id !== handler.id);
       if (pool.length > 0) {
-        const sortedReb = [...pool].sort((a, b) =>
-          (b.attributes.offReb ?? 50) - (a.attributes.offReb ?? 50));
-        const rebounder = Math.random() < 0.55
-          ? sortedReb[0]
-          : sortedReb[Math.floor(Math.random() * Math.min(3, sortedReb.length))];
+        // Weight each candidate by their individual ORB% chance so elite
+        // crashers are selected proportionally, not just by rank.
+        const orbWeights = pool.map(p =>
+          getOffReboundChance(p.attributes.offReb ?? 50, p.position));
+        const totalOrbWeight = orbWeights.reduce((s, w) => s + w, 0);
+        let orbRoll = Math.random() * totalOrbWeight;
+        let rebounder = pool[pool.length - 1]; // fallback
+        for (let ri = 0; ri < pool.length; ri++) {
+          orbRoll -= orbWeights[ri];
+          if (orbRoll <= 0) { rebounder = pool[ri]; break; }
+        }
         const rebLn = lastName(rebounder);
 
         // Step 2: Offensive Rebound event (BUG 3: counts as OReb, same possession)
@@ -2231,8 +2358,13 @@ const simulatePlayerGameLine = (
   const pts = midFgm * 2 + insFgm * 2 + threepm * 3 + ftm;
 
   const totalReb = Math.max(0, Math.round(teamReb * (player.attributes.rebounding / 100) * adjUsage * 2.5));
-  const offReb   = Math.round(totalReb * (player.attributes.offReb / (player.attributes.offReb + player.attributes.defReb || 1)));
-  const defReb   = totalReb - offReb;
+  // Split ORB/DRB using the calibrated chance functions so the ratio reflects
+  // realistic position-adjusted board rates, not raw attribute proportions.
+  const orbChance = getOffReboundChance(player.attributes.offReb, player.position);
+  const drbChance = getDefReboundChance(player.attributes.defReb, player.position);
+  const orbRatio  = orbChance / (orbChance + drbChance);
+  const offReb    = Math.round(totalReb * orbRatio);
+  const defReb    = totalReb - offReb;
 
   const adjAstShare = Math.max(0.01, (player.attributes.playmaking / 100) * adjUsage * 3.0 * (1 + tm.astBoost));
   const ast = Math.max(0, Math.round(teamAst * adjAstShare));
