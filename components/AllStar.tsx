@@ -129,6 +129,145 @@ function simulateDunkContest(league: LeagueState, participants: string[]): AllSt
   };
 }
 
+// ── Play-by-play generator ────────────────────────────────────────────────────
+function generatePlayByPlay(
+  eastLines: AllStarPlayerLine[],
+  westLines: AllStarPlayerLine[],
+  eQ: number[],
+  wQ: number[],
+): string[] {
+  const verbs2 = [
+    'drives and finishes at the rim', 'mid-range pull-up — GOOD', 'pump-fake and glides in',
+    'floater over the outstretched hand', 'catch-and-shoot from the elbow',
+    'turnaround jumper — money', 'tough bucket through contact',
+    'step-back at the free-throw line', 'finger roll off the glass',
+    'lefty scoop — GOOD', 'spin move and up-and-under',
+  ];
+  const verbs3 = [
+    'fires from deep — THREE 🎯', 'step-back triple — SPLASH 💦',
+    'top-of-the-arc — BANG', 'corner catch — nothing but net 🔥',
+    'logo shot — nailed it!', 'hand in the face — SPLASH',
+    'pull-up three — GOOD!',
+  ];
+  const dunkDescs = [
+    'catches the lob and HAMMERS it 🔨', 'windmill jam off the fast break 🌀',
+    'tomahawk slam — crowd erupts 🔥', 'off the alley-oop — BOOM 💥',
+    'power dunk over the helpside!', 'between the legs — pure showmanship!',
+    'off the glass, reverse slam!',
+  ];
+  const bigRunDescs = [
+    'goes on a personal 6-0 run', 'hits back-to-back buckets to ignite the run',
+    'takes over — three straight baskets', 'can\'t be stopped right now',
+    'scores 6 in a blink',
+  ];
+  const assistVerbs = ['dishes to', 'threads the needle to', 'no-look pass to', 'behind-the-back to', 'beautiful feed to'];
+  const nonScoring = [
+    (name: string) => `${name} swats it away — BLOCKED! 🛡️`,
+    (name: string) => `${name} picks the pocket and pushes in transition`,
+    (name: string) => `Crowd on their feet after ${name}'s near-miss no-look`,
+    (name: string) => `Timeout called on the floor — coaches huddle up`,
+    (name: string) => `${name} shows off some handles, draws the oohs and ahhs`,
+  ];
+
+  const pick = <T,>(arr: T[]): T => arr[Math.floor(Math.random() * arr.length)];
+  const pickWeighted = (lines: AllStarPlayerLine[]): AllStarPlayerLine => {
+    if (lines.length === 0) return lines[0];
+    const total = lines.reduce((s, l) => s + Math.max(1, l.pts), 0);
+    let r = Math.random() * total;
+    for (const l of lines) { r -= Math.max(1, l.pts); if (r <= 0) return l; }
+    return lines[lines.length - 1];
+  };
+
+  type SEvent = { conf: 'East' | 'West'; pts: number; text: string };
+
+  const buildEvents = (lines: AllStarPlayerLine[], target: number, conf: 'East' | 'West'): SEvent[] => {
+    const evts: SEvent[] = [];
+    let rem = target;
+    const maxEvents = 11;
+    while (rem > 3 && evts.length < maxEvents) {
+      const shooter = pickWeighted(lines);
+      const rand = Math.random();
+      if (rand < 0.07 && rem >= 6) {
+        // Big run — 6–8 pts chunk
+        const runPlayer = pickWeighted(lines);
+        const pts = Math.random() < 0.5 ? 6 : 8;
+        evts.push({ conf, pts, text: `${runPlayer.playerName} ${pick(bigRunDescs)}` });
+        rem -= pts;
+      } else if (rand < 0.20 && shooter.threepa > 0 && rem >= 3) {
+        evts.push({ conf, pts: 3, text: `${shooter.playerName} ${pick(verbs3)}` });
+        rem -= 3;
+      } else if (rand < 0.30 && shooter.pts >= 12) {
+        evts.push({ conf, pts: 2, text: `${shooter.playerName} ${pick(dunkDescs)}` });
+        rem -= 2;
+      } else if (rand < 0.45 && lines.length >= 2) {
+        const passer = pickWeighted(lines.filter(l => l.playerId !== shooter.playerId));
+        evts.push({ conf, pts: 2, text: `${passer.playerName} ${pick(assistVerbs)} ${shooter.playerName} for 2` });
+        rem -= 2;
+      } else {
+        evts.push({ conf, pts: 2, text: `${shooter.playerName} ${pick(verbs2)}` });
+        rem -= 2;
+      }
+    }
+    // Absorb remainder
+    if (rem > 0 && lines.length > 0) {
+      const shooter = pickWeighted(lines);
+      const text = rem === 1
+        ? `${shooter.playerName} converts 1-of-2 from the line`
+        : rem === 3 ? `${shooter.playerName} ${pick(verbs3)}`
+        : `${shooter.playerName} ${pick(verbs2)}`;
+      evts.push({ conf, pts: rem, text });
+    }
+    return evts;
+  };
+
+  let cumE = 0;
+  let cumW = 0;
+  const plays: string[] = [];
+
+  for (let q = 0; q < 4; q++) {
+    plays.push(`──── Quarter ${q + 1} ────`);
+    const eEvts = buildEvents(eastLines, eQ[q], 'East');
+    const wEvts = buildEvents(westLines, wQ[q], 'West');
+
+    // Interleave East/West events randomly
+    const combined: SEvent[] = [];
+    let ei = 0, wi = 0;
+    while (ei < eEvts.length || wi < wEvts.length) {
+      if (ei >= eEvts.length) { combined.push(wEvts[wi++]); continue; }
+      if (wi >= wEvts.length) { combined.push(eEvts[ei++]); continue; }
+      if (Math.random() < 0.5) combined.push(eEvts[ei++]);
+      else combined.push(wEvts[wi++]);
+    }
+
+    // Inject 1–2 non-scoring flavor lines per quarter
+    const flavourCount = 1 + (Math.random() < 0.5 ? 1 : 0);
+    for (let f = 0; f < flavourCount; f++) {
+      const allPlayers = [...eastLines, ...westLines];
+      const fp = allPlayers[Math.floor(Math.random() * allPlayers.length)];
+      const flavourIdx = Math.floor(Math.random() * (combined.length + 1));
+      combined.splice(flavourIdx, 0, { conf: fp.playerId < 'p' ? 'East' : 'West', pts: 0, text: pick(nonScoring)(fp.playerName) });
+    }
+
+    for (const ev of combined) {
+      if (ev.pts > 0) {
+        if (ev.conf === 'East') cumE += ev.pts;
+        else cumW += ev.pts;
+      }
+      const scoreTag = ev.pts > 0 ? ` · E ${cumE} – W ${cumW}` : '';
+      plays.push(`${ev.conf === 'East' ? '🔵' : '🔴'} ${ev.text}${scoreTag}`);
+    }
+
+    // Snap cumulative to actual quarter totals to avoid drift
+    const qEEnd = eQ.slice(0, q + 1).reduce((a, b) => a + b, 0);
+    const qWEnd = wQ.slice(0, q + 1).reduce((a, b) => a + b, 0);
+    plays.push(`📊 End Q${q + 1}: East ${qEEnd} – West ${qWEnd}`);
+    cumE = qEEnd;
+    cumW = qWEnd;
+  }
+
+  return plays;
+}
+
 // ── Per-player box score generator ───────────────────────────────────────────
 function genTeamBoxScore(
   league: LeagueState,
@@ -239,6 +378,8 @@ function simulateAllStarGame(
     highlights.splice(2, 0, `Q${closeQ + 1} was a thriller — just ${Math.abs(eQ[closeQ] - wQ[closeQ])} points separated the teams after three quarters of the period.`);
   }
 
+  const playByPlay = generatePlayByPlay(eastLines, westLines, eQ, wQ);
+
   return {
     eastScore, westScore,
     mvp: {
@@ -255,6 +396,7 @@ function simulateAllStarGame(
       east: markMvp(eastLines),
       west: markMvp(westLines),
     },
+    playByPlay,
   };
 }
 
@@ -594,6 +736,70 @@ const BoxScoreTable: React.FC<{
   );
 };
 
+// ── Play-by-Play Feed ─────────────────────────────────────────────────────────
+const PlayByPlayFeed: React.FC<{ plays: string[] }> = ({ plays }) => {
+  const [expanded, setExpanded] = React.useState(false);
+
+  const isQuarterHeader = (line: string) => line.startsWith('────');
+  const isEndOfQuarter  = (line: string) => line.startsWith('📊');
+  const isEast          = (line: string) => line.startsWith('🔵');
+  const isWest          = (line: string) => line.startsWith('🔴');
+
+  return (
+    <div className="bg-slate-900/50 border border-slate-800 rounded-xl overflow-hidden">
+      {/* Header — click to expand/collapse */}
+      <button
+        onClick={() => setExpanded(v => !v)}
+        className="w-full flex items-center justify-between px-5 py-3.5 text-left hover:bg-slate-800/30 transition-colors"
+      >
+        <span className="text-[10px] font-black uppercase tracking-[0.25em] text-slate-500 flex items-center gap-2">
+          <span>🏀</span> Play-by-Play
+          <span className="text-slate-700 font-normal normal-case tracking-normal">({plays.filter(p => !isQuarterHeader(p) && !isEndOfQuarter(p)).length} plays)</span>
+        </span>
+        <span className={`text-slate-600 transition-transform duration-200 ${expanded ? 'rotate-180' : ''}`}>▼</span>
+      </button>
+
+      {expanded && (
+        <div className="border-t border-slate-800/60">
+          <div className="max-h-96 overflow-y-auto px-3 py-2 space-y-0.5 text-xs" style={{ scrollbarWidth: 'thin' }}>
+            {plays.map((line, i) => {
+              if (isQuarterHeader(line)) {
+                return (
+                  <div key={i} className="sticky top-0 z-10 py-2 px-2 bg-slate-900/95 text-[10px] font-black text-orange-400 uppercase tracking-[0.25em] border-b border-slate-800/60 mt-1">
+                    {line.replace(/─+/g, '').trim()}
+                  </div>
+                );
+              }
+              if (isEndOfQuarter(line)) {
+                return (
+                  <div key={i} className="py-1.5 px-3 my-1 bg-slate-800/40 rounded-lg text-slate-400 font-semibold text-[11px]">
+                    {line}
+                  </div>
+                );
+              }
+              return (
+                <div
+                  key={i}
+                  className={`flex items-start gap-2 py-1.5 px-2 rounded transition-colors ${
+                    isEast(line)
+                      ? 'text-blue-300 hover:bg-blue-500/5'
+                      : isWest(line)
+                      ? 'text-red-300 hover:bg-red-500/5'
+                      : 'text-slate-400 hover:bg-slate-800/30'
+                  }`}
+                >
+                  <span className="shrink-0 mt-px leading-none">{line.slice(0, 2)}</span>
+                  <span className="leading-relaxed">{line.slice(2).trim()}</span>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+};
+
 // ── Main component ────────────────────────────────────────────────────────────
 const AllStar: React.FC<AllStarProps> = ({ league, updateLeague, onAdvancePhase }) => {
   const asd = league.allStarWeekend;
@@ -831,6 +1037,11 @@ const AllStar: React.FC<AllStarProps> = ({ league, updateLeague, onAdvancePhase 
                   ))}
                 </div>
               </div>
+
+              {/* Play-by-Play */}
+              {asd.allStarGame.playByPlay && asd.allStarGame.playByPlay.length > 0 && (
+                <PlayByPlayFeed plays={asd.allStarGame.playByPlay} />
+              )}
 
               {/* Box Score */}
               {asd.allStarGame.boxScore && (
