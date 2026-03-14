@@ -348,6 +348,8 @@ export interface Player {
   suspensionGames?: number;
   injuryType?: InjuryType;
   injuryDaysLeft?: number;
+  /** Years (season numbers) in which this player was selected as an All-Star */
+  allStarSelections?: number[];
 }
 
 export interface Prospect extends Omit<Player, 'stats' | 'status' | 'morale' | 'salary' | 'contractYears'> {

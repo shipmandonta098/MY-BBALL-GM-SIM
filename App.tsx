@@ -845,8 +845,8 @@ const App: React.FC = () => {
         setActiveTab('news');
       }
 
-      // All-Star Weekend: triggers once at ~52% games played (right after trade deadline)
-      if (tempState.tradeDeadlinePassed && !tempState.allStarWeekend && pct >= 0.52 && pct < 0.75) {
+      // All-Star Weekend: triggers once at ~73% games played (~60 of 82 games, mid-season break)
+      if (tempState.tradeDeadlinePassed && !tempState.allStarWeekend && pct >= 0.73 && pct < 0.90) {
         const asd = buildAllStarWeekend(tempState);
         tempState = { ...tempState, allStarWeekend: asd, seasonPhase: 'All-Star Weekend' as SeasonPhase };
         const eastStarters = asd.eastStarters.map(id => {
@@ -1237,11 +1237,32 @@ const App: React.FC = () => {
               league={league}
               updateLeague={updateLeagueState}
               onAdvancePhase={() => {
-                updateLeagueState(prev => ({
-                  ...prev,
-                  seasonPhase: 'Regular Season' as SeasonPhase,
-                  allStarWeekend: prev.allStarWeekend ? { ...prev.allStarWeekend, completed: true } : prev.allStarWeekend,
-                }));
+                updateLeagueState(prev => {
+                  const asd = prev.allStarWeekend;
+                  const year = prev.season;
+                  // Stamp allStarSelections on every player who made the roster
+                  const allStarIds = new Set([
+                    ...(asd?.eastStarters ?? []),
+                    ...(asd?.eastReserves ?? []),
+                    ...(asd?.westStarters ?? []),
+                    ...(asd?.westReserves ?? []),
+                  ]);
+                  const teams = prev.teams.map(t => ({
+                    ...t,
+                    roster: t.roster.map(p => {
+                      if (!allStarIds.has(p.id)) return p;
+                      const existing = p.allStarSelections ?? [];
+                      if (existing.includes(year)) return p;
+                      return { ...p, allStarSelections: [...existing, year] };
+                    }),
+                  }));
+                  return {
+                    ...prev,
+                    teams,
+                    seasonPhase: 'Regular Season' as SeasonPhase,
+                    allStarWeekend: asd ? { ...asd, completed: true } : asd,
+                  };
+                });
                 setActiveTab('dashboard');
               }}
             />
@@ -1274,21 +1295,61 @@ const App: React.FC = () => {
           {activeTab === 'settings' && <Settings league={league} updateLeague={updateLeagueState} />}
         </div>
       </main>
-      {selectedPlayer && (
-        <PlayerModal 
-          player={selectedPlayer} 
-          onClose={() => setSelectedPlayer(null)} 
-          onScout={handleScoutPlayer} 
-          scoutingReport={scoutingReport} 
-          isUserTeam={league.teams.find(t => t.id === league.userTeamId)?.roster.some(p => p.id === selectedPlayer.id) ?? false} 
-          onUpdateStatus={handleUpdatePlayerStatus} 
-          onRelease={handleReleasePlayer}
-          godMode={league.settings.godMode}
-          onUpdatePlayer={handleUpdatePlayer}
-        />
-      )}
-      {selectedCoach && (
-         <CoachModal coach={selectedCoach} onClose={() => setSelectedCoach(null)} onScout={handleGenerateCoachIntelligence} scoutingReport={coachScoutingReport} godMode={league.settings.godMode} onUpdateCoach={handleUpdateCoach} isUserTeam={(Object.values(userTeam.staff) as (Coach | null)[]).some(s => s?.id === selectedCoach.id)} onFire={(id) => {
+      {selectedPlayer && (() => {
+        // ── All-Star status ────────────────────────────────────────────────────
+        const asd = league.allStarWeekend;
+        const starterIds  = new Set([...(asd?.eastStarters ?? []), ...(asd?.westStarters ?? [])]);
+        const allStarIds  = new Set([...starterIds, ...(asd?.eastReserves ?? []), ...(asd?.westReserves ?? [])]);
+        const isCurrentAllStar   = allStarIds.has(selectedPlayer.id);
+        const currentAllStarRole = isCurrentAllStar ? (starterIds.has(selectedPlayer.id) ? 'Starter' : 'Reserve') as 'Starter' | 'Reserve' : undefined;
+
+        // ── Career awards from awardHistory ────────────────────────────────────
+        const AWARD_META = [
+          { key: 'mvp',      label: 'MVP',       icon: '🏆' },
+          { key: 'dpoy',     label: 'DPOY',      icon: '🛡️' },
+          { key: 'roy',      label: 'ROY',       icon: '🌟' },
+          { key: 'sixthMan', label: 'Sixth Man', icon: '🎯' },
+          { key: 'mip',      label: 'MIP',       icon: '📈' },
+        ] as const;
+        type AwardMeta = typeof AWARD_META[number];
+        const careerAwards: { label: string; year: number; icon: string }[] = [];
+        for (const hist of (league.awardHistory ?? [])) {
+          for (const { key, label, icon } of AWARD_META as readonly AwardMeta[]) {
+            const winner = (hist as any)[key];
+            if (winner?.playerId === selectedPlayer.id) careerAwards.push({ label, year: hist.year, icon });
+          }
+          if (hist.allNbaFirst?.includes(selectedPlayer.id))  careerAwards.push({ label: 'All-NBA 1st', year: hist.year, icon: '🥇' });
+          else if (hist.allNbaSecond?.includes(selectedPlayer.id)) careerAwards.push({ label: 'All-NBA 2nd', year: hist.year, icon: '🥈' });
+          else if (hist.allNbaThird?.includes(selectedPlayer.id))  careerAwards.push({ label: 'All-NBA 3rd', year: hist.year, icon: '🥉' });
+          if (hist.allDefensive?.includes(selectedPlayer.id)) careerAwards.push({ label: 'All-Defense', year: hist.year, icon: '🛡️' });
+        }
+        careerAwards.sort((a, b) => b.year - a.year);
+
+        return (
+          <PlayerModal
+            player={selectedPlayer}
+            onClose={() => setSelectedPlayer(null)}
+            onScout={handleScoutPlayer}
+            scoutingReport={scoutingReport}
+            isUserTeam={league.teams.find(t => t.id === league.userTeamId)?.roster.some(p => p.id === selectedPlayer.id) ?? false}
+            onUpdateStatus={handleUpdatePlayerStatus}
+            onRelease={handleReleasePlayer}
+            godMode={league.settings.godMode}
+            onUpdatePlayer={handleUpdatePlayer}
+            isCurrentAllStar={isCurrentAllStar}
+            currentAllStarRole={currentAllStarRole}
+            careerAwards={careerAwards}
+          />
+        );
+      })()}
+      {selectedCoach && (() => {
+        const coachAwards: { label: string; year: number; icon: string }[] = [];
+        for (const hist of (league.awardHistory ?? [])) {
+          if (hist.coy?.coachId === selectedCoach.id) coachAwards.push({ label: 'Coach of the Year', year: hist.year, icon: '🏆' });
+        }
+        coachAwards.sort((a, b) => b.year - a.year);
+        return (
+         <CoachModal coach={selectedCoach} onClose={() => setSelectedCoach(null)} onScout={handleGenerateCoachIntelligence} scoutingReport={coachScoutingReport} godMode={league.settings.godMode} onUpdateCoach={handleUpdateCoach} careerAwards={coachAwards} isUserTeam={(Object.values(userTeam.staff) as (Coach | null)[]).some(s => s?.id === selectedCoach.id)} onFire={(id) => {
                const updatedStaff = { ...userTeam.staff };
                const oldCoachName = (Object.values(updatedStaff) as (Coach | null)[]).find(s => s?.id === id)?.name;
                if (updatedStaff.headCoach?.id === id) updatedStaff.headCoach = null;
@@ -1300,7 +1361,9 @@ const App: React.FC = () => {
                updateLeagueState({ teams: league.teams.map(t => t.id === userTeam.id ? { ...t, staff: updatedStaff } : t), transactions: updatedTransactions });
                setSelectedCoach(null);
             }} />
-      )}
+        );
+      })()}
+
       {viewingBoxScore && <BoxScoreModal result={viewingBoxScore.result} homeTeam={viewingBoxScore.home} awayTeam={viewingBoxScore.away} onClose={() => setViewingBoxScore(null)} />}
       {watchingGame && (
         <LiveGameModal 
