@@ -47,16 +47,18 @@ const SCHEME_DEFAULT_PACE: Record<CoachScheme, number> = {
  *    75   │ 35.8 %   ← league average
  *    80   │ 37.7 %   (solid starter)
  *    85   │ 39.5 %   (plus shooter)
- *    90   │ 41.0 %   (elite)
- *    94   │ 44.0 %   (elite ceiling)
- *    95   │ 44.0 %   (god-tier floor)
- *   100   │ 47.0 %   (historic peak, very rare)
+ *    90   │ 41.5 %   (elite)
+ *    94   │ 44.5 %   (elite ceiling)
+ *    95   │ 45.0 %   (god-tier floor)
+ *   100   │ 50.0 %   (historic specialist peak — low volume only)
+ *
+ * Volume regression is applied at the call site (high threepa → season avg
+ * converges to base%; low threepa specialists can sustain 46-50% naturally).
  *
  * Tuning guide:
- *   - Raise/lower the segment endpoints (0.25, 0.32, 0.358, 0.41, 0.44, 0.47)
- *     to shift the whole curve or individual tiers.
- *   - Move the breakpoints (59, 74, 89, 94) to widen/narrow each band.
- *   - The hard clamp [0.20, 0.50] is a last-resort safety net; keep it wide.
+ *   - Raise/lower segment endpoints to shift whole curve or individual tiers.
+ *   - Move breakpoints (59, 74, 89, 94) to widen/narrow each band.
+ *   - Hard clamp [0.20, 0.55] — removed artificial 50% ceiling.
  */
 export function getThreePointPercentage(attr: number): number {
   const a = Math.max(0, Math.min(100, attr));
@@ -69,17 +71,17 @@ export function getThreePointPercentage(attr: number): number {
     // Below-avg to league-avg: 32 % at 60 → 35.8 % at 74
     base = 0.32 + ((a - 60) / 14) * 0.038;
   } else if (a <= 89) {
-    // Solid starter to plus shooter: 35.8 % at 75 → 41 % at 89
-    base = 0.358 + ((a - 75) / 14) * 0.052;
+    // Solid starter to plus shooter: 35.8 % at 75 → 41.5 % at 89
+    base = 0.358 + ((a - 75) / 14) * 0.057;
   } else if (a <= 94) {
-    // Elite: 41 % at 90 → 44 % at 94
-    base = 0.41 + ((a - 90) / 4) * 0.03;
+    // Elite: 41.5 % at 90 → 44.5 % at 94
+    base = 0.415 + ((a - 90) / 4) * 0.030;
   } else {
-    // God-tier: 44 % at 95 → 47 % at 100  (historically rare)
-    base = 0.44 + ((a - 95) / 5) * 0.03;
+    // God-tier: 45 % at 95 → 50 % at 100 (specialist peak, rare volume)
+    base = 0.45 + ((a - 95) / 5) * 0.05;
   }
 
-  return Math.max(0.20, Math.min(0.50, base));
+  return Math.max(0.20, Math.min(0.55, base));
 }
 
 // ─── Rebound Chance Functions ────────────────────────────────────────────────
@@ -237,56 +239,62 @@ export function getTurnoverPercentage(
   offIQ:        number,
   position?:    string,
   stamina?:     number,
+  personalityTraits?: string[],
 ): number {
   const bh = Math.max(0, Math.min(100, ballHandling));
 
   // ── Primary driver: ball handling (inverse — better BH = lower TO%) ───────
   let base: number;
   if (bh <= 60) {
-    // Sloppy: 20 % at 0 → 15 % at 60
-    base = 0.20 - (bh / 60) * 0.05;
+    // Sloppy: 27 % at 0 → 21 % at 60
+    base = 0.27 - (bh / 60) * 0.06;
   } else if (bh <= 80) {
-    // Average: 15 % at 60 → 11 % at 80
-    base = 0.15 - ((bh - 60) / 20) * 0.04;
+    // Average: 21 % at 60 → 15 % at 80
+    base = 0.21 - ((bh - 60) / 20) * 0.06;
   } else if (bh <= 94) {
-    // Plus → elite: 11 % at 80 → 8 % at 94
-    base = 0.11 - ((bh - 80) / 14) * 0.03;
+    // Plus → elite: 15 % at 80 → 10 % at 94
+    base = 0.15 - ((bh - 80) / 14) * 0.05;
   } else {
-    // God-tier: 8 % at 95 → 7 % at 100
-    base = 0.08 - ((bh - 95) / 5) * 0.01;
+    // God-tier: 10 % at 95 → 8.5 % at 100
+    base = 0.10 - ((bh - 95) / 5) * 0.015;
   }
 
   // ── Passing: vision vs. ball-security balance ─────────────────────────────
-  // If passing >> ballHandling the player sees reads they can't execute safely.
-  // If balanced, sharper vision slightly protects the ball.
   const passDelta = passing - bh;
   let passMod: number;
   if (passDelta > 10) {
-    // Overambitious: ramps +0→2 % as the gap widens past 10 pts
-    passMod = Math.min(0.02, (passDelta - 10) / 100 * 0.03);
+    passMod = Math.min(0.025, (passDelta - 10) / 100 * 0.04);
   } else if (passDelta >= -10) {
-    // Balanced creator: reads + handles working together
     passMod = -0.005;
   } else {
-    // Conservative big: keeps it simple, marginal positive
     passMod = Math.min(0.005, (-passDelta - 10) / 100 * 0.01);
   }
   base += passMod;
 
-  // ── Off IQ: decision quality — cleans up bad reads and risky passes ───────
-  // Neutral at offIQ=70; shifts ±0.75 % per 30-pt IQ swing.
+  // ── Off IQ: decision quality ───────────────────────────────────────────────
   base += -(offIQ - 70) / 100 * 0.025;
 
-  // ── Positional pressure: PGs carry under sustained guard pressure ──────────
-  if (position === 'PG') base += 0.015;
-  else if (position === 'C' || position === 'PF') base -= 0.010;
+  // ── Positional pressure ────────────────────────────────────────────────────
+  if (position === 'PG') base += 0.025;  // primary ball-handler; most pressure
+  else if (position === 'SG') base += 0.010;
+  else if (position === 'C' || position === 'PF') base -= 0.015;
 
   // ── Fatigue: low-stamina players lose ball security late in games ─────────
   if (stamina !== undefined) {
-    base += Math.max(0, (60 - stamina) / 100 * 0.025);
+    base += Math.max(0, (60 - stamina) / 100 * 0.030);
   }
 
-  return Math.max(0.06, Math.min(0.22, base));
+  // ── Personality trait modifiers ───────────────────────────────────────────
+  if (personalityTraits) {
+    if (personalityTraits.includes('Diva/Star'))           base *= 1.25; // ballhogs, risky iso
+    if (personalityTraits.includes('Lazy'))                base *= 1.20; // low IQ decisions
+    if (personalityTraits.includes('Hot Head'))            base *= 1.12; // erratic passes
+    if (personalityTraits.includes('Professional'))        base *= 0.88; // clean decisions
+    if (personalityTraits.includes('Leader'))              base *= 0.92; // composed under pressure
+    if (personalityTraits.includes('Friendly/Team First')) base *= 0.90; // careful ball-mover
+  }
+
+  return Math.max(0.08, Math.min(0.30, base));
 }
 
 /**
@@ -3065,6 +3073,7 @@ const simulatePlayerGameLine = (
     player.attributes.offensiveIQ,
     player.position,
     player.attributes.stamina,
+    player.personalityTraits,
   );
 
   // 3PA share influenced by pullUpThree tendency
@@ -3173,11 +3182,18 @@ const simulatePlayerGameLine = (
   const blk        = Math.max(0, Math.floor(blkBase * (1 - blkFatigue) + Math.random() * 0.8));
   const pf  = Math.min(6, Math.round((Math.floor(Math.random() * 4 * minFac + 1)) * (1 + tm.foulRisk)));
 
-  // TOV: possession-scaled off actual FGA (proxy for ball touches).
-  // toRate=0.12, fga=13 → ~1.56 base + noise; high-usage stars accumulate more
-  // naturally without a separate multiplier. Noise ±2 % for game-to-game variance.
-  const tovNoise = (Math.random() - 0.5) * 0.04;
-  const tov      = Math.max(0, Math.round((toRate + tovNoise) * fga));
+  // TOV: scaled by position-based touch multiplier so ball-handlers accrue
+  // turnovers from dribble actions beyond just shot attempts.
+  //   PG  × 1.6 — primary handler; ISO drives, P&R triggers, outlet passes
+  //   SG  × 1.4 — secondary handler; off-ball cuts + some creation
+  //   SF  × 1.25 — versatile; less primary handle time than guards
+  //   PF/C × 1.05 — mostly catch-and-finish; lower possession chain risk
+  const touchMul =
+    player.position === 'PG' ? 1.6 :
+    player.position === 'SG' ? 1.4 :
+    player.position === 'SF' ? 1.25 : 1.05;
+  const tovNoise = (Math.random() - 0.5) * 0.06;
+  const tov      = Math.max(0, Math.round((toRate + tovNoise) * fga * touchMul));
 
   return {
     playerId: player.id, name: player.name, min: minutes,
