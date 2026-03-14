@@ -20,6 +20,8 @@ interface PlayerModalProps {
   currentAllStarRole?: 'Starter' | 'Reserve';
   /** Career awards sorted newest-first */
   careerAwards?: { label: string; year: number; icon: string }[];
+  /** Current league season number — labels the "This Season" stats tab */
+  currentSeason?: number;
 }
 
 const traitIcons: Record<PersonalityTrait, string> = {
@@ -51,6 +53,7 @@ const PlayerModal: React.FC<PlayerModalProps> = ({
   isCurrentAllStar = false,
   currentAllStarRole,
   careerAwards = [],
+  currentSeason,
 }) => {
   const [isEditing, setIsEditing] = React.useState(false);
   const [statsTab, setStatsTab] = useState<'season' | 'career'>('season');
@@ -1017,7 +1020,14 @@ const PlayerModal: React.FC<PlayerModalProps> = ({
               <section className="space-y-5">
                 {/* Header + tab switcher */}
                 <div className="flex items-center justify-between">
-                  <h3 className="text-[10px] font-black text-amber-500 uppercase tracking-[0.5em]">Statistics</h3>
+                  <div>
+                    <h3 className="text-[10px] font-black text-amber-500 uppercase tracking-[0.5em]">Statistics</h3>
+                    {statsTab === 'season' && currentSeason && (
+                      <p className="text-[10px] text-slate-500 font-bold uppercase tracking-widest mt-0.5">
+                        {currentSeason}–{String(currentSeason + 1).slice(2)} Season
+                      </p>
+                    )}
+                  </div>
                   {hasCareer && (
                     <div className="flex gap-1 bg-slate-900 border border-slate-800 rounded-full p-0.5">
                       {(['season', 'career'] as const).map(tab => (
@@ -1030,7 +1040,7 @@ const PlayerModal: React.FC<PlayerModalProps> = ({
                               : 'text-slate-500 hover:text-white'
                           }`}
                         >
-                          {tab === 'season' ? 'This Season' : 'Career'}
+                          {tab === 'season' ? (currentSeason ? `${currentSeason}–${String(currentSeason + 1).slice(2)}` : 'This Season') : 'Career'}
                         </button>
                       ))}
                     </div>
