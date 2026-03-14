@@ -20,12 +20,12 @@ const PACE_TABLE: Array<{ lo: number; hi: number; possLo: number; possHi: number
 
 /** Base scheme pace ratings. Used when team.paceRating is not set. */
 const SCHEME_DEFAULT_PACE: Record<CoachScheme, number> = {
-  'Balanced':       78,
-  'Pace and Space': 87,
+  'Balanced':       82,  // 108–112 poss (up from 78)
+  'Pace and Space': 89,  // 113–117 poss
   'Grit and Grind': 64,
-  'Triangle':       73,
-  'Small Ball':     82,
-  'Showtime':       91,
+  'Triangle':       76,  // 103–107 poss
+  'Small Ball':     86,  // 113–117 poss
+  'Showtime':       95,  // 118–125 poss
 };
 
 // ─── Attribute → Expected 3P% ─────────────────────────────────────────────────
@@ -825,9 +825,9 @@ export function getRimProtectionMod(
 
   // (down = how much elite D suppresses; up = how much poor D rewards shooter)
   const RANGES: Record<RimContext, { down: number; up: number }> = {
-    DRIVE_LAYUP:    { down: 0.120, up: 0.040 }, // elite protector: up to −12 % per drive
-    POST_FADE:      { down: 0.080, up: 0.025 }, // post-up: less direct rim contest
-    TEAM_BOX_SCORE: { down: 0.060, up: 0.040 }, // team game average — larger up for porous Ds
+    DRIVE_LAYUP:    { down: 0.090, up: 0.040 }, // elite protector: up to −9 % per drive
+    POST_FADE:      { down: 0.060, up: 0.025 }, // post-up: less direct rim contest
+    TEAM_BOX_SCORE: { down: 0.040, up: 0.035 }, // team game average — stars not fully blanked
     // Slam dunks are telegraphed — elite shot-blockers time the challenge better than on layups.
     // However, porous interior D barely changes dunk % (no one to contest → dunker just finishes).
     // Effective range: elite rim protector (attr 90) → up to −18 %; weak D → +1.5 % at most.
@@ -971,7 +971,7 @@ export function getFreeThrowSituationalMod(ctx: FreeThrowContext): number {
   let mod = 0;
 
   // 1. Stamina / fatigue — heavier minute load amplifies the penalty
-  const minFac      = Math.min(1, ctx.minutesPlayed / 40); // full penalty at 40+ mins
+  const minFac      = Math.min(1, ctx.minutesPlayed / 44); // full penalty at 44+ mins
   const fatigueScale =
     ctx.stamina < 40 ? 0.050 :
     ctx.stamina < 55 ? 0.030 :
@@ -1205,9 +1205,9 @@ const getQuarterScoringBounds = (
   gamePace: number,
 ): { lo: number; hi: number } => {
   // Points = possessions × PPP; PPP varies by game tempo
-  const basePPP = gamePace <= 70 ? 1.02 :
-                  gamePace <= 80 ? 1.08 :
-                  gamePace <= 90 ? 1.12 : 1.16;
+  const basePPP = gamePace <= 70 ? 1.04 :
+                  gamePace <= 80 ? 1.10 :
+                  gamePace <= 90 ? 1.14 : 1.18;
   const expected  = possessions * basePPP;
   const variance  = possessions * 0.14;
   return { lo: Math.round(expected - variance), hi: Math.round(expected + variance) };
@@ -2494,7 +2494,7 @@ const computeTendencyModifiers = (p: Player): TendencyModifiers => {
     threepaBoost: (( ot?.pullUpThree    ?? 50) - 50) / 100 * 0.40,
     insideBoost:  (( ot?.driveToBasket  ?? 50) - 50) / 100 * 0.30
                 + ((ot?.cutter         ?? 50) - 50) / 100 * 0.12,
-    usageBoost:   (( ot?.isoHeavy       ?? 50) - 50) / 100 * 0.15
+    usageBoost:   (( ot?.isoHeavy       ?? 50) - 50) / 100 * 0.28
                 - ((ot?.kickOutPasser   ?? 50) - 50) / 100 * 0.12
                 + ((ot?.drawFoul        ?? 50) - 50) / 100 * 0.06,
     astBoost:     (( ot?.kickOutPasser  ?? 50) - 50) / 100 * 0.35
@@ -3444,8 +3444,8 @@ export const simulateGame = (
     runningAway = Math.round(runningAway * factor);
   }
 
-  let totalHome = Math.max(85, Math.min(145, runningHome));
-  let totalAway = Math.max(85, Math.min(145, runningAway));
+  let totalHome = Math.max(90, Math.min(160, runningHome));
+  let totalAway = Math.max(90, Math.min(160, runningAway));
 
   // ── 7. Player stat distribution ──────────────────────────────────────────
   const statPace = totalPoss; // use actual total possessions for FGA/REB scaling
@@ -3477,9 +3477,9 @@ export const simulateGame = (
     const oppAvgInteriorStr = oppTopN.reduce((s, op) => s + (op.attributes.strength ?? 50), 0) / oppCount;
     const oppPostDefMod     = getPostDefenseMod(oppAvgInteriorDef, oppAvgInteriorStr, 'TEAM_BOX_SCORE_POST');
 
-    // Power-curve usage: (rating/avg)^2.5 so stars get disproportionately more FGA
+    // Power-curve usage: (rating/avg)^3.5 so stars get disproportionately more FGA
     const avgRating     = totalRating / Math.max(1, roster.length);
-    const rawUsageArr   = roster.map(p => Math.pow(Math.max(1, p.rating) / avgRating, 2.5));
+    const rawUsageArr   = roster.map(p => Math.pow(Math.max(1, p.rating) / avgRating, 3.5));
     const totalRawUsage = rawUsageArr.reduce((s, u) => s + u, 0);
     const usageShares   = rawUsageArr.map(u => u / Math.max(1, totalRawUsage));
 
@@ -3496,10 +3496,10 @@ export const simulateGame = (
       } else {
         const rank = ratingRank.get(p.id) ?? i;
         if (i < 5) {
-          if (rank === 0)      mins = 34 + Math.floor(Math.random() * 5);  // 34–38 (star)
-          else if (rank === 1) mins = 31 + Math.floor(Math.random() * 5);  // 31–35 (co-star)
-          else if (rank === 2) mins = 28 + Math.floor(Math.random() * 5);  // 28–32
-          else                 mins = 26 + Math.floor(Math.random() * 6);  // 26–31
+          if (rank === 0)      mins = 37 + Math.floor(Math.random() * 4);  // 37–40 (star)
+          else if (rank === 1) mins = 34 + Math.floor(Math.random() * 4);  // 34–37 (co-star)
+          else if (rank === 2) mins = 30 + Math.floor(Math.random() * 4);  // 30–33
+          else                 mins = 26 + Math.floor(Math.random() * 5);  // 26–30
         } else if (i < 9) mins = 14 + Math.floor(Math.random() * 10);
         else if (i < 12)  mins = Math.floor(Math.random() * 6);
       }

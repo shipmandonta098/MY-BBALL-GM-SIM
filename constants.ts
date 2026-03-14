@@ -27,18 +27,18 @@ export const generateTendencies = (pos: Position, traits: PersonalityTrait[]): P
     rollVsPop?: number; // PF/C only
   };
   const baseMap: Record<Position, Base> = {
-    PG: { pullUpThree: 65, postUp: 20, driveToBasket: 70, midRangeJumper: 45, kickOutPasser: 75, isoHeavy: 35, transitionHunter: 70,
-          spotUp: 52, cutter: 57, offScreen: 52, attackCloseOuts: 67, drawFoul: 57, dribbleHandOff: 52, pullUpOffPnr: 67,
+    PG: { pullUpThree: 75, postUp: 20, driveToBasket: 72, midRangeJumper: 58, kickOutPasser: 70, isoHeavy: 55, transitionHunter: 72,
+          spotUp: 55, cutter: 57, offScreen: 55, attackCloseOuts: 75, drawFoul: 62, dribbleHandOff: 52, pullUpOffPnr: 75,
           gambles: 50, helpDefender: 65, physicality: 40, faceUpGuard: 60,
-          onBallPest: 62, denyThePass: 60, shotContestDiscipline: 62, clutchShotTaker: 50 },
-    SG: { pullUpThree: 70, postUp: 35, driveToBasket: 60, midRangeJumper: 55, kickOutPasser: 50, isoHeavy: 55, transitionHunter: 55,
-          spotUp: 77, cutter: 52, offScreen: 72, attackCloseOuts: 67, drawFoul: 57, dribbleHandOff: 47, pullUpOffPnr: 62,
+          onBallPest: 62, denyThePass: 60, shotContestDiscipline: 62, clutchShotTaker: 55 },
+    SG: { pullUpThree: 82, postUp: 35, driveToBasket: 65, midRangeJumper: 68, kickOutPasser: 45, isoHeavy: 72, transitionHunter: 58,
+          spotUp: 85, cutter: 52, offScreen: 72, attackCloseOuts: 75, drawFoul: 62, dribbleHandOff: 47, pullUpOffPnr: 72,
           gambles: 55, helpDefender: 55, physicality: 50, faceUpGuard: 65,
-          onBallPest: 62, denyThePass: 65, shotContestDiscipline: 62, clutchShotTaker: 50 },
-    SF: { pullUpThree: 55, postUp: 50, driveToBasket: 55, midRangeJumper: 60, kickOutPasser: 55, isoHeavy: 50, transitionHunter: 45,
-          spotUp: 62, cutter: 62, offScreen: 57, attackCloseOuts: 67, drawFoul: 57, dribbleHandOff: 42, pullUpOffPnr: 52,
+          onBallPest: 62, denyThePass: 65, shotContestDiscipline: 62, clutchShotTaker: 58 },
+    SF: { pullUpThree: 68, postUp: 50, driveToBasket: 60, midRangeJumper: 70, kickOutPasser: 50, isoHeavy: 65, transitionHunter: 50,
+          spotUp: 68, cutter: 62, offScreen: 57, attackCloseOuts: 75, drawFoul: 62, dribbleHandOff: 42, pullUpOffPnr: 60,
           gambles: 50, helpDefender: 60, physicality: 60, faceUpGuard: 55,
-          onBallPest: 57, denyThePass: 60, shotContestDiscipline: 67, clutchShotTaker: 50 },
+          onBallPest: 57, denyThePass: 60, shotContestDiscipline: 67, clutchShotTaker: 55 },
     PF: { pullUpThree: 35, postUp: 70, driveToBasket: 45, midRangeJumper: 55, kickOutPasser: 40, isoHeavy: 45, transitionHunter: 35,
           spotUp: 42, cutter: 65, offScreen: 32, attackCloseOuts: 52, drawFoul: 62, dribbleHandOff: 47, pullUpOffPnr: 32,
           gambles: 45, helpDefender: 70, physicality: 75, faceUpGuard: 45,
@@ -163,9 +163,9 @@ export const COACH_BADGES: CoachBadge[] = [
 
 export type PosAttrRangeKey = 'shooting' | 'playmaking' | 'defense' | 'rebounding' | 'athleticism';
 export const POS_ATTR_RANGES: Record<Position, Record<PosAttrRangeKey, [number, number]>> = {
-  PG: { shooting: [80, 95], playmaking: [85, 98], defense: [65, 85], rebounding: [55, 75], athleticism: [75, 90] },
-  SG: { shooting: [80, 95], playmaking: [70, 85], defense: [65, 85], rebounding: [55, 75], athleticism: [80, 95] },
-  SF: { shooting: [70, 90], playmaking: [65, 85], defense: [75, 90], rebounding: [65, 85], athleticism: [85, 98] },
+  PG: { shooting: [82, 97], playmaking: [85, 98], defense: [65, 85], rebounding: [55, 75], athleticism: [75, 90] },
+  SG: { shooting: [83, 97], playmaking: [70, 85], defense: [65, 85], rebounding: [55, 75], athleticism: [80, 95] },
+  SF: { shooting: [75, 93], playmaking: [65, 85], defense: [75, 90], rebounding: [65, 85], athleticism: [85, 98] },
   PF: { shooting: [65, 85], playmaking: [60, 80], defense: [80, 95], rebounding: [85, 98], athleticism: [80, 95] },
   C:  { shooting: [55, 80], playmaking: [50, 75], defense: [85, 98], rebounding: [90, 98], athleticism: [80, 95] },
 };
@@ -180,8 +180,8 @@ export const POSITION_HARD_CAPS: Record<Position, AttrBounds> = {
   C:  { shooting3pt: 72, ballHandling: 68, speed: 72, perimeterDef: 70, passing: 68 },
 };
 export const POSITION_HARD_FLOORS: Record<Position, AttrBounds> = {
-  PG: { ballHandling: 78, speed: 80, passing: 75, perimeterDef: 72, shooting3pt: 70 },
-  SG: { shooting3pt: 72, speed: 76, perimeterDef: 74, ballHandling: 70 },
+  PG: { ballHandling: 78, speed: 80, passing: 75, perimeterDef: 72, shooting3pt: 75 },
+  SG: { shooting3pt: 76, speed: 76, perimeterDef: 74, ballHandling: 70 },
   SF: { speed: 74, perimeterDef: 72, athleticism: 76 },
   PF: { strength: 78, interiorDef: 76, offReb: 72, defReb: 75 },
   C:  { strength: 82, interiorDef: 80, offReb: 76, defReb: 78, blocks: 76, postScoring: 76 },
