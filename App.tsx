@@ -321,7 +321,8 @@ const App: React.FC = () => {
       ...partialSettings
     };
 
-    const freshTeams = generateLeagueTeams(genderRatio, year).map(t => ({
+    const requestedTeams = partialSettings.numTeams ?? 30;
+    const freshTeams = generateLeagueTeams(genderRatio, year).slice(0, requestedTeams).map(t => ({
       ...t, needs: ['PG', 'C', 'SG', 'PF', 'SF'].sort(() => 0.5 - Math.random()).slice(0, 2) as Position[]
     }));
     const freshSchedule = generateSeasonSchedule(freshTeams, finalSettings.seasonLength);
@@ -1191,7 +1192,9 @@ const App: React.FC = () => {
 
   if (status === 'title') return <TitleScreen onNewLeague={handleNewLeague} onLoadSave={handleLoadSave} onDeleteSave={handleDeleteSave} onRenameSave={handleRenameSave} onImportSave={handleImportSave} saves={allSaves} />;
   if (status === 'config') return <LeagueConfiguration onConfirm={handleConfigLeague} onCancel={() => setStatus('title')} />;
-  if (status === 'setup' && league) return <TeamSelection teams={league.teams} onSelectTeam={handleSelectTeam} />;
+  if (status === 'setup' && league) return <TeamSelection teams={league.teams} onSelectTeam={handleSelectTeam} onEditTeam={(teamId, updates) => {
+    setLeague(prev => prev ? { ...prev, teams: prev.teams.map(t => t.id === teamId ? { ...t, ...updates } : t) } : prev);
+  }} />;
   if (!league || !league.userTeamId) return null;
 
   const userTeam = league.teams.find(t => t.id === league.userTeamId)!;
