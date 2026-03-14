@@ -138,7 +138,7 @@ const TeamSelection: React.FC<TeamSelectionProps> = ({ teams, onSelectTeam, onEd
                 {onEditTeam && (
                   <button
                     onClick={(e) => openEdit(e, team)}
-                    className={`absolute top-3 right-3 z-10 p-1.5 rounded-lg bg-slate-800/90 text-slate-400 hover:text-amber-400 hover:bg-slate-700 transition-all border border-slate-700 ${isHovered ? 'opacity-100' : 'opacity-0'}`}
+                    className={`absolute top-3 right-3 z-10 p-1.5 rounded-lg bg-slate-800/90 text-slate-400 hover:text-amber-400 hover:bg-slate-700 transition-all border border-slate-700 opacity-100 sm:opacity-0 ${isHovered ? 'sm:opacity-100' : ''}`}
                     title="Edit team info"
                   >
                     <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
