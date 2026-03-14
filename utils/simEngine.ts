@@ -1391,6 +1391,235 @@ interface PossessionResult {
   defenderRef?: Player;
 }
 
+// ─── Defensive Foul + Steal/Block Resolution ─────────────────────────────────
+//
+// TUNABLE WEIGHTS — adjust these to calibrate team-level foul totals.
+//
+//   GAMBLE_FOUL_W   (0.15) — raise to make high-Gambles defenders commit more
+//                             reach-in fouls.
+//   PHYSICS_FOUL_W  (0.12) — raise to penalise high-Physicality defenders on
+//                             contact plays (body fouls, blocking fouls).
+//   DISCIP_FOUL_R   (0.08) — raise to give more relief to disciplined contesters
+//                             (clean hands-up reduces foul risk).
+//   IQ_FOUL_DAMPEN  (0.20) — raise to let smart defenders avoid bad fouls more.
+//   HELP_FOUL_EXTRA (0.06) — raise to penalise out-of-position help rotations.
+//
+// Calibration targets (NBA 2025-26):
+//   • League avg PF ≈ 18-20 per team per game
+//   • Aggressive wing (Gambles 80+, Physicality 85+): ~4-5 PF/game
+//   • Disciplined rim protector (Discipline 75+, IQ 80+): ~2-3 PF/game
+//   • Moderate-gambles player (Gambles ~50, Physicality ~70): ~2-3 PF/game
+//
+// Example — Gambles 47, Physicality 87, Discipline 69, IQ 83:
+//   steal: 0.05 + (47/100)×0.15 + (87/100)×0.12 − (69/100)×0.08 = 0.160
+//   × IQ scale (1 − 0.83×0.20) = ×0.834 → ~13 % foul risk per steal attempt
+//   Attempt freq = gambles/400 ≈ 12 %; reach-in fouls ≈ 0.9/game from steals
+//   + block fouls + onBallPest fouls → total ≈ 2.5–3.5 PF/game  ✓
+const GAMBLE_FOUL_W   = 0.15;
+const PHYSICS_FOUL_W  = 0.12;
+const DISCIP_FOUL_R   = 0.08;
+const IQ_FOUL_DAMPEN  = 0.20;
+const HELP_FOUL_EXTRA = 0.06;
+
+/** Situational context passed to the defensive-action resolvers. */
+interface DefActionContext {
+  /** Defender is a weakside help rotator, not the primary on-ball defender. */
+  isHelp:   boolean;
+  /** Defender is guarding the active ball-handler directly. */
+  isOnBall: boolean;
+}
+
+/**
+ * Returns the probability [0.02 – 0.25] that a defensive action draws a foul.
+ *
+ * Formula (before IQ dampen):
+ *   base  (steal 5 % / block 4 %)
+ *   + gambles      × GAMBLE_FOUL_W    ← reach-in / illegal-contact risk
+ *   + physicality  × PHYSICS_FOUL_W   ← contact foul on contests
+ *   − discipline   × DISCIP_FOUL_R    ← clean hands-up reduces risk
+ *   + (isHelp ? helpDef × HELP_FOUL_EXTRA : 0)  ← out-of-position rotation
+ *   × (1 − defIQ × IQ_FOUL_DAMPEN)              ← smart players avoid bad fouls
+ */
+function calculateDefFoulChance(
+  dt: NonNullable<Player['tendencies']>['defensiveTendencies'] | undefined,
+  attrs: Player['attributes'],
+  actionType: 'steal' | 'block',
+  ctx: DefActionContext,
+): number {
+  const gambles     = dt?.gambles               ?? 50;
+  const physicality = dt?.physicality           ?? 50;
+  const discipline  = dt?.shotContestDiscipline ?? 50;
+  const helpDef     = dt?.helpDefender          ?? 50;
+  const defIQ       = attrs.defensiveIQ;
+
+  // Blocks start from a slightly lower base (hands-up contest vs. reaching grab)
+  const base      = actionType === 'steal' ? 0.05 : 0.04;
+  const gambleMod = (gambles     / 100) * GAMBLE_FOUL_W;   // 47 → +0.071
+  const physMod   = (physicality / 100) * PHYSICS_FOUL_W;  // 87 → +0.104
+  const discMod   = -(discipline / 100) * DISCIP_FOUL_R;   // 69 → −0.055
+  const helpMod   = ctx.isHelp ? (helpDef / 100) * HELP_FOUL_EXTRA : 0;
+  const iqScale   = 1 - (defIQ  / 100) * IQ_FOUL_DAMPEN;  // 83 → ×0.834
+
+  return Math.max(0.02, Math.min(0.25,
+    (base + gambleMod + physMod + discMod + helpMod) * iqScale,
+  ));
+}
+
+/** Return type for attemptDefensiveSteal. */
+interface DefStealResult {
+  outcome: 'steal' | 'foul' | 'nothing';
+  pbpText: string;
+}
+
+/**
+ * Resolves a single steal attempt using the full tendency + attribute model.
+ *
+ * Probability chain:
+ *   1. Foul roll (reach-in / illegal contact) — returns foul early if hit.
+ *   2. Steal success roll — scaled by gambles, helpDefender, onBallPest
+ *      tendencies, then attenuated by the handler's ballHandling attribute.
+ *   3. 'nothing' — reach failed; caller applies +0.15 defenseModifier penalty.
+ *
+ * PBP text differentiates help-lane reads vs. on-ball pokes vs. wild gambles.
+ */
+function attemptDefensiveSteal(
+  defender: Player,
+  offHandler: Player,
+  ctx: DefActionContext,
+): DefStealResult {
+  const dt      = defender.tendencies?.defensiveTendencies;
+  const gambles = dt?.gambles      ?? 50;
+  const helpDef = dt?.helpDefender ?? 50;
+  const pest    = dt?.onBallPest   ?? 50;
+  const defLn   = defender.name.split(' ').at(-1) ?? defender.name;
+
+  // Attribute-driven base steal chance (2.5-3.5 % for elite thieves at attr 84)
+  const baseChance = getStealChance(defender.attributes.steals, defender.position);
+
+  // Tendency multipliers scale how often a reach converts to a steal:
+  //   Gambles ×1.5: high-gambles players get more conversions on their reaches
+  //   HelpDef ×2.0 in help / ×0.8 off-ball: help defenders read passing lanes
+  //   OnBallPest ×1.8 on-ball / ×0.6 off: tight coverage creates steal angles
+  const gambleMod = (gambles / 100) * 1.5;
+  const helpMod   = (helpDef / 100) * (ctx.isHelp ? 2.0 : 0.8);
+  const pestMod   = (pest    / 100) * (ctx.isOnBall ? 1.8 : 0.6);
+
+  // Elite ball-handlers protect the ball — attenuates steal % for good handlers
+  const bhPenalty = Math.max(0, (offHandler.attributes.ballHandling - 50) / 100 * 0.40);
+
+  const adjustedSteal = Math.max(0.01, Math.min(0.45,
+    baseChance * (1 + gambleMod + helpMod + pestMod)
+    - bhPenalty
+    + (Math.random() * 0.01 - 0.005),   // ±0.5 % noise
+  ));
+
+  // ── 1. Foul roll — reaching defenders risk illegal-contact calls ─────────
+  const foulChance = calculateDefFoulChance(dt, defender.attributes, 'steal', ctx);
+  if (Math.random() < foulChance) {
+    const pbpText = gambles >= 75
+      ? `${defLn} lunges for the steal — reach-in foul!`
+      : ctx.isHelp
+        ? `${defLn} gambles rotating into the lane — foul on the help defender!`
+        : `${defLn} reaches in — illegal contact, foul called!`;
+    return { outcome: 'foul', pbpText };
+  }
+
+  // ── 2. Steal success roll ────────────────────────────────────────────────
+  if (Math.random() < adjustedSteal) {
+    const pbpText = ctx.isHelp
+      ? `${defLn} reads the pass — intercepts it in the lane! Turnover.`
+      : gambles >= 70
+        ? `${defLn} gambles for the steal — picks his pocket! Turnover.`
+        : pest >= 65
+          ? `${defLn} pokes it free — steal!`
+          : `${defLn} deflects it — steal!`;
+    return { outcome: 'steal', pbpText };
+  }
+
+  // ── 3. Nothing — reach failed; defender is out of position ──────────────
+  return { outcome: 'nothing', pbpText: `${defLn} reaches — out of position.` };
+}
+
+/** Return type for attemptDefensiveBlock. */
+interface DefBlockResult {
+  outcome: 'block' | 'foul' | 'contest';
+  pbpText: string;
+}
+
+/**
+ * Resolves a block attempt on a non-dunk shot (DRIVE_LAYUP or POST_FADE).
+ * Dunk blocks are handled separately via the intNorm path in simulatePossession.
+ *
+ * Foul risks:
+ *   • High Physicality → body contact during contest → shooting foul
+ *   • Low ShotContestDiscipline → bites pump fake / wild swipe → blocking foul
+ *   • Help rotations that arrive off-balance → charging/blocking call
+ *
+ * Probability chain:
+ *   1. Foul roll — shooting or blocking foul; returns early.
+ *   2. Block roll — clean rejection (hands, length, timing).
+ *   3. 'contest' — neither; rim-protection modifier still applies via caller.
+ */
+function attemptDefensiveBlock(
+  defender: Player,
+  shotType: ShotType,
+  offAction: OffAction,
+  ctx: DefActionContext,
+): DefBlockResult {
+  const dt          = defender.tendencies?.defensiveTendencies;
+  const discipline  = dt?.shotContestDiscipline ?? 50;
+  const helpDef     = dt?.helpDefender          ?? 50;
+  const physicality = dt?.physicality           ?? 50;
+  const defLn       = defender.name.split(' ').at(-1) ?? defender.name;
+
+  // Base block % from the attribute curve (4-7 % for elite rim protectors at 84-94)
+  const baseChance = getBlockChance(defender.attributes.blocks, defender.position);
+
+  // Tendency multipliers (averaged to prevent triple-stacking):
+  //   Discipline ×1.2: clean contests → better hand positioning → more blocks
+  //   Help ×2.5 in help: rotating defender arrives with momentum for a clean block
+  //   Physicality ×1.1: stronger bodies close off lanes and win block opportunities
+  const discMult = (discipline  / 100) * 1.2;
+  const helpMult = (helpDef     / 100) * (ctx.isHelp ? 2.5 : 1.0);
+  const physMult = (physicality / 100) * 1.1;
+
+  const adjustedBlock = Math.max(0.01, Math.min(0.20,
+    baseChance * (discMult + helpMult + physMult) / 3
+    + (Math.random() * 0.02 - 0.01),   // ±1 % noise
+  ));
+
+  // ── 1. Foul roll — contact / undisciplined contests risk foul calls ──────
+  const foulChance = calculateDefFoulChance(dt, defender.attributes, 'block', ctx);
+  if (Math.random() < foulChance) {
+    const pbpText = physicality >= 80
+      ? `${defLn} makes body contact going for the block — shooting foul!`
+      : ctx.isHelp
+        ? `${defLn} rotates too aggressively — foul on the help-side block!`
+        : discipline < 45
+          ? `${defLn} bites on the pump fake and swipes — blocking foul!`
+          : `${defLn} gets a piece of him — blocking foul called!`;
+    return { outcome: 'foul', pbpText };
+  }
+
+  // ── 2. Block roll — clean rejection ─────────────────────────────────────
+  if (Math.random() < adjustedBlock) {
+    const blkAttr = defender.attributes.blocks;
+    const pbpText = ctx.isHelp
+      ? blkAttr >= 85
+          ? `${defLn} comes from the weak side — HELP BLOCK! Huge swing play.`
+          : `${defLn} rotates and deflects it — great help-side block!`
+      : blkAttr >= 90
+          ? `${defLn} pins it against the glass! Elite rim protection.`
+          : blkAttr >= 78
+              ? `${defLn} rises and rejects it cleanly!`
+              : `${defLn} gets a piece of it — blocked!`;
+    return { outcome: 'block', pbpText };
+  }
+
+  // ── 3. Contest — no block, no foul; rim-protection modifier still applies ─
+  return { outcome: 'contest', pbpText: `${defLn} contests.` };
+}
+
 // ─── Possession Simulator ─────────────────────────────────────────────────────
 const simulatePossession = (
   offHandler: Player,
@@ -1730,46 +1959,39 @@ const simulatePossession = (
     const physicality= dt.physicality  ?? 50;
     const faceUp     = dt.faceUpGuard  ?? 50;
 
-    // Gambles / steal attempt
-    if (Math.random() < gambles / 400) {
-      // Steal success: defender's Steals attr (via getStealChance) is the primary
-      // driver, synergised with perimeterDef for positioning.  Elite thieves
-      // (attr 90+) convert 35-42 % of gambles; average players 15-25 %.
-      // Handler's ball handling inversely caps how often a reach pays off.
-      const bhAttr      = offHandler.attributes.ballHandling ?? 65;
-      const stealAttr   = defender?.attributes.steals ?? 50;
-      const perimDef    = defender?.attributes.perimeterDef ?? 50;
-      const stealChance = getStealChance(stealAttr, defender?.position);
-      // perimeterDef synergy: tight coverage opens steal angles (+up to 3 %)
-      const perimBonus  = Math.max(0, (perimDef - 55) / 100 * 0.03);
-      const stealSuccessRate = Math.max(0.10, Math.min(0.42,
-        stealChance * 8 + perimBonus + (75 - bhAttr) / 100 * 0.18,
-      ));
-      if (Math.random() < stealSuccessRate) {
+    // Gambles / steal attempt — delegated to attemptDefensiveSteal helper
+    if (defender && Math.random() < gambles / 400) {
+      const stealCtx: DefActionContext = {
+        isHelp:    offAction === 'PASS_FIRST' || offAction === 'CUT',
+        isOnBall:  offAction === 'ISO' || offAction === 'DRIVE',
+      };
+      const stealResult = attemptDefensiveSteal(defender, offHandler, stealCtx);
+      if (stealResult.outcome === 'steal') {
         return {
           ballHandlerName: offHandler.name, ballHandlerId: offHandler.id,
           tendencyUsed: tendencyUsed || offAction, actionTaken: offAction,
           tendencyScore, shotModifier: 0, conflictFired: false,
           defenderTendency: 'gambles', defenseModifier: 0,
           finalShotProbability: 0, result: 'STEAL',
-          stolenBy: defender?.name, isTransition, defenderRef: defender,
-          pbpText: `${defLn} gambles for the steal — picks his pocket! Turnover.`,
+          stolenBy: defender.name, isTransition, defenderRef: defender,
+          pbpText: stealResult.pbpText,
         };
       }
-      defenseModifier += 0.15;
-      defTendencyUsed  = 'gambles';
-      pbpDefPrefix     = `${defLn} reaches — out of position. `;
-      if (gambles >= 75 && (defender?.attributes.defensiveIQ ?? 65) < 65 && Math.random() < 0.10) {
+      if (stealResult.outcome === 'foul') {
         return {
           ballHandlerName: offHandler.name, ballHandlerId: offHandler.id,
           tendencyUsed: tendencyUsed || offAction, actionTaken: offAction,
           tendencyScore, shotModifier: 0, conflictFired: false,
           defenderTendency: 'gambles', defenseModifier: 0,
           finalShotProbability: 0, result: 'FOUL_DRAWN',
-          foulsOn: defender?.name, isTransition, defenderRef: defender,
-          pbpText: `${defLn} reaches in recklessly — foul called on the play!`,
+          foulsOn: defender.name, isTransition, defenderRef: defender,
+          pbpText: stealResult.pbpText,
         };
       }
+      // 'nothing' — reach failed; defender out of position
+      defenseModifier += 0.15;
+      defTendencyUsed  = 'gambles';
+      pbpDefPrefix     = `${defLn} reaches — out of position. `;
     }
 
     // Help defender
@@ -1849,7 +2071,37 @@ const simulatePossession = (
           pbpDefPrefix = pbpDefPrefix || `${defLn} has no answer — clear path to the rim — `;
         }
       } else {
-        // Standard layup PBP flavour
+        // Standard layup — try attemptDefensiveBlock helper
+        if (defender) {
+          const blockCtx: DefActionContext = {
+            isHelp:   helpDef >= 65,
+            isOnBall: offAction === 'DRIVE' || offAction === 'CUT',
+          };
+          const blockResult = attemptDefensiveBlock(defender, shotType, offAction, blockCtx);
+          if (blockResult.outcome === 'block') {
+            return {
+              ballHandlerName: offHandler.name, ballHandlerId: offHandler.id,
+              tendencyUsed: tendencyUsed || offAction, actionTaken: offAction,
+              tendencyScore, shotModifier, conflictFired: false,
+              defenderTendency: 'blocks', defenseModifier,
+              finalShotProbability: 0, result: 'MISSED',
+              isTransition, defenderRef: defender,
+              pbpText: blockResult.pbpText,
+            };
+          }
+          if (blockResult.outcome === 'foul') {
+            return {
+              ballHandlerName: offHandler.name, ballHandlerId: offHandler.id,
+              tendencyUsed: tendencyUsed || offAction, actionTaken: offAction,
+              tendencyScore, shotModifier: 0, conflictFired: false,
+              defenderTendency: 'physicality', defenseModifier: 0,
+              finalShotProbability: 0, result: 'FOUL_DRAWN',
+              foulsOn: defender.name, isTransition, defenderRef: defender,
+              pbpText: blockResult.pbpText,
+            };
+          }
+          // 'contest' — use PBP flavour from attribute level
+        }
         if (intDef >= 80 && rimContestMod <= -0.06) {
           if (!defTendencyUsed) defTendencyUsed = 'interiorDef';
           pbpDefPrefix = pbpDefPrefix || `${defLn} meets him at the rim — massive contest — `;
@@ -1870,6 +2122,38 @@ const simulatePossession = (
       const postCtx: PostDefContext = offAction === 'POST_UP' ? 'POST_BACK' : 'POST_FADE_MID';
       const postDefMod  = getPostDefenseMod(intDef, defStr, postCtx);
       defenseModifier  += postDefMod;
+
+      // Block attempt on post fade — help rotations and length defenders can reject
+      if (defender) {
+        const blockCtx: DefActionContext = {
+          isHelp:   helpDef >= 65,
+          isOnBall: offAction === 'POST_UP',
+        };
+        const blockResult = attemptDefensiveBlock(defender, shotType, offAction, blockCtx);
+        if (blockResult.outcome === 'block') {
+          return {
+            ballHandlerName: offHandler.name, ballHandlerId: offHandler.id,
+            tendencyUsed: tendencyUsed || offAction, actionTaken: offAction,
+            tendencyScore, shotModifier, conflictFired: false,
+            defenderTendency: 'blocks', defenseModifier,
+            finalShotProbability: 0, result: 'MISSED',
+            isTransition, defenderRef: defender,
+            pbpText: blockResult.pbpText,
+          };
+        }
+        if (blockResult.outcome === 'foul') {
+          return {
+            ballHandlerName: offHandler.name, ballHandlerId: offHandler.id,
+            tendencyUsed: tendencyUsed || offAction, actionTaken: offAction,
+            tendencyScore, shotModifier: 0, conflictFired: false,
+            defenderTendency: 'physicality', defenseModifier: 0,
+            finalShotProbability: 0, result: 'FOUL_DRAWN',
+            foulsOn: defender.name, isTransition, defenderRef: defender,
+            pbpText: blockResult.pbpText,
+          };
+        }
+        // 'contest' — post defense modifier already applied above
+      }
 
       if (intDef >= 85 && postDefMod <= -0.10) {
         if (!defTendencyUsed) defTendencyUsed = 'interiorDef';
