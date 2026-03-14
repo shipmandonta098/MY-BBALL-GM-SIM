@@ -819,7 +819,6 @@ const App: React.FC = () => {
     }
 
     // ── Season Phase Milestones ─────────────────────────────────────────────
-    // Only check if we're still in the regular season (no playoff bracket yet)
     if (!tempState.isOffseason && !tempState.playoffBracket) {
       const totalGames = tempState.schedule.length;
       const playedGames = tempState.schedule.filter(g => g.played).length;
@@ -828,7 +827,6 @@ const App: React.FC = () => {
       // Trade Deadline: triggers once at ~49% games played (≈game 40 of 82)
       if (!tempState.tradeDeadlinePassed && pct >= 0.49 && pct < 0.75) {
         tempState = { ...tempState, tradeDeadlinePassed: true, seasonPhase: 'Trade Deadline' as SeasonPhase };
-        // AI GMs make trade deadline moves
         try {
           const aiDeadlineResult = aiGMTradeDeadlineAction(tempState);
           tempState = aiDeadlineResult.updatedState;
@@ -848,11 +846,10 @@ const App: React.FC = () => {
         setActiveTab('news');
       }
 
-      // All-Star Weekend: triggers once at ~52% games played (right after trade deadline)
-      if (tempState.tradeDeadlinePassed && !tempState.allStarWeekend && pct >= 0.52 && pct < 0.75) {
+      // All-Star Weekend: triggers once at ~73% games played (~60 of 82 games, mid-season break)
+      if (tempState.tradeDeadlinePassed && !tempState.allStarWeekend && pct >= 0.73 && pct < 0.90) {
         const asd = buildAllStarWeekend(tempState);
         tempState = { ...tempState, allStarWeekend: asd, seasonPhase: 'All-Star Weekend' as SeasonPhase };
-        // Build roster announcement news
         const eastStarters = asd.eastStarters.map(id => {
           for (const t of tempState.teams) { const p = t.roster.find(pl => pl.id === id); if (p) return p.name; }
           return id;
@@ -873,11 +870,10 @@ const App: React.FC = () => {
         setActiveTab('allstar');
       }
 
-      // Update phase to Regular Season once trade deadline / All-Star events are resolved
+      // Phase tracking during regular season
       if (tempState.allStarWeekend?.completed && tempState.seasonPhase === 'All-Star Weekend') {
         tempState = { ...tempState, seasonPhase: 'Regular Season' as SeasonPhase };
       }
-      // Keep phase as Regular Season during normal play
       if (!tempState.tradeDeadlinePassed && pct > 0 && pct < 0.49) {
         tempState = { ...tempState, seasonPhase: 'Regular Season' as SeasonPhase };
       }
@@ -1213,7 +1209,7 @@ const App: React.FC = () => {
 
   return (
     <div className="flex h-screen overflow-hidden bg-slate-950 text-slate-50 relative">
-      <Sidebar activeTab={activeTab} setActiveTab={setActiveTab} team={userTeam} onQuit={() => setStatus('title')} isOffseason={league.isOffseason} isExpansionActive={league.expansionDraft?.active} seasonPhase={league.seasonPhase ?? (league.isOffseason ? 'Offseason' : 'Regular Season')} currentDay={league.currentDay} totalDays={league.schedule.length > 0 ? Math.max(...league.schedule.map(g => g.day)) : undefined} draftPhase={league.draftPhase} />
+      <Sidebar activeTab={activeTab} setActiveTab={setActiveTab} team={userTeam} onQuit={() => setStatus('title')} league={league} isExpansionActive={league.expansionDraft?.active} />
       <main className="flex-1 overflow-y-auto p-6 md:p-10 space-y-8 pb-32 transition-all duration-300 ease-in-out">
         <div key={activeTab} className="animate-in fade-in slide-in-from-bottom-2 duration-500">
           {activeTab === 'dashboard' && <Dashboard league={league} news={news} onSimulate={handleSimulate} onScout={handleViewPlayer} scoutingReport={scoutingReport} setActiveTab={setActiveTab} onViewRoster={handleViewRoster} onManageTeam={handleManageTeam} />}
@@ -1244,11 +1240,45 @@ const App: React.FC = () => {
               league={league}
               updateLeague={updateLeagueState}
               onAdvancePhase={() => {
-                updateLeagueState(prev => ({
-                  ...prev,
-                  seasonPhase: 'Regular Season' as SeasonPhase,
-                  allStarWeekend: prev.allStarWeekend ? { ...prev.allStarWeekend, completed: true } : prev.allStarWeekend,
-                }));
+                updateLeagueState(prev => {
+                  const asd = prev.allStarWeekend;
+                  const year = prev.season;
+                  // Stamp allStarSelections on every player who made the roster
+                  const allStarIds = new Set([
+                    ...(asd?.eastStarters ?? []),
+                    ...(asd?.eastReserves ?? []),
+                    ...(asd?.westStarters ?? []),
+                    ...(asd?.westReserves ?? []),
+                  ]);
+                  const mvpId = asd?.allStarGame?.mvp?.playerId;
+                  let teams = prev.teams.map(t => ({
+                    ...t,
+                    roster: t.roster.map(p => {
+                      if (!allStarIds.has(p.id)) return p;
+                      const existing = p.allStarSelections ?? [];
+                      if (existing.includes(year)) return p;
+                      return { ...p, allStarSelections: [...existing, year] };
+                    }),
+                  }));
+                  // Stamp allStarMvpYears on the All-Star Game MVP
+                  if (mvpId) {
+                    teams = teams.map(t => ({
+                      ...t,
+                      roster: t.roster.map(p => {
+                        if (p.id !== mvpId) return p;
+                        const existing = p.allStarMvpYears ?? [];
+                        if (existing.includes(year)) return p;
+                        return { ...p, allStarMvpYears: [...existing, year] };
+                      }),
+                    }));
+                  }
+                  return {
+                    ...prev,
+                    teams,
+                    seasonPhase: 'Regular Season' as SeasonPhase,
+                    allStarWeekend: asd ? { ...asd, completed: true } : asd,
+                  };
+                });
                 setActiveTab('dashboard');
               }}
             />
@@ -1281,21 +1311,75 @@ const App: React.FC = () => {
           {activeTab === 'settings' && <Settings league={league} updateLeague={updateLeagueState} />}
         </div>
       </main>
-      {selectedPlayer && (
-        <PlayerModal 
-          player={selectedPlayer} 
-          onClose={() => setSelectedPlayer(null)} 
-          onScout={handleScoutPlayer} 
-          scoutingReport={scoutingReport} 
-          isUserTeam={league.teams.find(t => t.id === league.userTeamId)?.roster.some(p => p.id === selectedPlayer.id) ?? false} 
-          onUpdateStatus={handleUpdatePlayerStatus} 
-          onRelease={handleReleasePlayer}
-          godMode={league.settings.godMode}
-          onUpdatePlayer={handleUpdatePlayer}
-        />
-      )}
-      {selectedCoach && (
-         <CoachModal coach={selectedCoach} onClose={() => setSelectedCoach(null)} onScout={handleGenerateCoachIntelligence} scoutingReport={coachScoutingReport} godMode={league.settings.godMode} onUpdateCoach={handleUpdateCoach} isUserTeam={(Object.values(userTeam.staff) as (Coach | null)[]).some(s => s?.id === selectedCoach.id)} onFire={(id) => {
+      {selectedPlayer && (() => {
+        // ── All-Star status ────────────────────────────────────────────────────
+        const asd = league.allStarWeekend;
+        const starterIds  = new Set([...(asd?.eastStarters ?? []), ...(asd?.westStarters ?? [])]);
+        const allStarIds  = new Set([...starterIds, ...(asd?.eastReserves ?? []), ...(asd?.westReserves ?? [])]);
+        const isCurrentAllStar   = allStarIds.has(selectedPlayer.id);
+        const currentAllStarRole = isCurrentAllStar ? (starterIds.has(selectedPlayer.id) ? 'Starter' : 'Reserve') as 'Starter' | 'Reserve' : undefined;
+
+        // ── Career awards from awardHistory ────────────────────────────────────
+        const AWARD_META = [
+          { key: 'mvp',      label: 'MVP',       icon: '🏆' },
+          { key: 'dpoy',     label: 'DPOY',      icon: '🛡️' },
+          { key: 'roy',      label: 'ROY',       icon: '🌟' },
+          { key: 'sixthMan', label: 'Sixth Man', icon: '🎯' },
+          { key: 'mip',      label: 'MIP',       icon: '📈' },
+        ] as const;
+        type AwardMeta = typeof AWARD_META[number];
+        const careerAwards: { label: string; year: number; icon: string }[] = [];
+        for (const hist of (league.awardHistory ?? [])) {
+          for (const { key, label, icon } of AWARD_META as readonly AwardMeta[]) {
+            const winner = (hist as any)[key];
+            if (winner?.playerId === selectedPlayer.id) careerAwards.push({ label, year: hist.year, icon });
+          }
+          if (hist.allNbaFirst?.includes(selectedPlayer.id))  careerAwards.push({ label: 'All-NBA 1st', year: hist.year, icon: '🥇' });
+          else if (hist.allNbaSecond?.includes(selectedPlayer.id)) careerAwards.push({ label: 'All-NBA 2nd', year: hist.year, icon: '🥈' });
+          else if (hist.allNbaThird?.includes(selectedPlayer.id))  careerAwards.push({ label: 'All-NBA 3rd', year: hist.year, icon: '🥉' });
+          if (hist.allDefensive?.includes(selectedPlayer.id)) careerAwards.push({ label: 'All-Defense', year: hist.year, icon: '🛡️' });
+        }
+        // All-Star MVP: current season (from allStarWeekend) + historical (from allStarMvpYears on player)
+        const currentMvpId = league.allStarWeekend?.allStarGame?.mvp?.playerId;
+        if (currentMvpId === selectedPlayer.id) {
+          const mvpYear = league.season;
+          if (!careerAwards.some(a => a.label === 'All-Star MVP' && a.year === mvpYear)) {
+            careerAwards.push({ label: 'All-Star MVP', year: mvpYear, icon: '⭐' });
+          }
+        }
+        for (const mvpYear of (selectedPlayer.allStarMvpYears ?? [])) {
+          if (!careerAwards.some(a => a.label === 'All-Star MVP' && a.year === mvpYear)) {
+            careerAwards.push({ label: 'All-Star MVP', year: mvpYear, icon: '⭐' });
+          }
+        }
+        careerAwards.sort((a, b) => b.year - a.year);
+
+        return (
+          <PlayerModal
+            player={selectedPlayer}
+            onClose={() => setSelectedPlayer(null)}
+            onScout={handleScoutPlayer}
+            scoutingReport={scoutingReport}
+            isUserTeam={league.teams.find(t => t.id === league.userTeamId)?.roster.some(p => p.id === selectedPlayer.id) ?? false}
+            onUpdateStatus={handleUpdatePlayerStatus}
+            onRelease={handleReleasePlayer}
+            godMode={league.settings.godMode}
+            onUpdatePlayer={handleUpdatePlayer}
+            isCurrentAllStar={isCurrentAllStar}
+            currentAllStarRole={currentAllStarRole}
+            careerAwards={careerAwards}
+            currentSeason={league.season}
+          />
+        );
+      })()}
+      {selectedCoach && (() => {
+        const coachAwards: { label: string; year: number; icon: string }[] = [];
+        for (const hist of (league.awardHistory ?? [])) {
+          if (hist.coy?.coachId === selectedCoach.id) coachAwards.push({ label: 'Coach of the Year', year: hist.year, icon: '🏆' });
+        }
+        coachAwards.sort((a, b) => b.year - a.year);
+        return (
+         <CoachModal coach={selectedCoach} onClose={() => setSelectedCoach(null)} onScout={handleGenerateCoachIntelligence} scoutingReport={coachScoutingReport} godMode={league.settings.godMode} onUpdateCoach={handleUpdateCoach} careerAwards={coachAwards} isUserTeam={(Object.values(userTeam.staff) as (Coach | null)[]).some(s => s?.id === selectedCoach.id)} onFire={(id) => {
                const updatedStaff = { ...userTeam.staff };
                const oldCoachName = (Object.values(updatedStaff) as (Coach | null)[]).find(s => s?.id === id)?.name;
                if (updatedStaff.headCoach?.id === id) updatedStaff.headCoach = null;
@@ -1307,7 +1391,9 @@ const App: React.FC = () => {
                updateLeagueState({ teams: league.teams.map(t => t.id === userTeam.id ? { ...t, staff: updatedStaff } : t), transactions: updatedTransactions });
                setSelectedCoach(null);
             }} />
-      )}
+        );
+      })()}
+
       {viewingBoxScore && <BoxScoreModal result={viewingBoxScore.result} homeTeam={viewingBoxScore.home} awayTeam={viewingBoxScore.away} onClose={() => setViewingBoxScore(null)} />}
       {watchingGame && (
         <LiveGameModal 

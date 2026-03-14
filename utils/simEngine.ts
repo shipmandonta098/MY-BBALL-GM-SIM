@@ -1365,6 +1365,14 @@ const weightedRandom = <T>(pool: { value: T; weight: number }[]): T => {
 
 const lastName = (p: Player) => p.name.split(' ').at(-1) ?? p.name;
 
+/** Returns gender-appropriate pronouns for a player. Non-binary and unknown → they/them. */
+const pronouns = (p: Player | undefined): { he: string; He: string; him: string; his: string; His: string; himself: string } => {
+  const g = p?.gender;
+  if (g === 'Female')     return { he: 'she',  He: 'She',  him: 'her',  his: 'her',   His: 'Her',   himself: 'herself' };
+  if (g === 'Non-binary') return { he: 'they', He: 'They', him: 'them', his: 'their', His: 'Their', himself: 'themselves' };
+  return                         { he: 'he',   He: 'He',   him: 'him',  his: 'his',   His: 'His',   himself: 'himself'  };
+};
+
 // ─── Possession Types ─────────────────────────────────────────────────────────
 type OffAction  = 'ISO' | 'POST_UP' | 'DRIVE' | 'PASS_FIRST' | 'TRANSITION' | 'SPOT_UP' | 'CUT';
 type ShotType   = 'PULL_UP_3' | 'MID_RANGE' | 'DRIVE_LAYUP' | 'POST_FADE' | 'CATCH_AND_SHOOT_3';
@@ -1635,6 +1643,8 @@ const simulatePossession = (
   const defender = defense.roster[defIdx];
   const dt       = defender?.tendencies?.defensiveTendencies;
   const defLn    = defender ? lastName(defender) : 'Defender';
+  const oP       = pronouns(offHandler);   // offender pronouns
+  const dP       = pronouns(defender);     // defender pronouns
 
   // ── Step 1: Transition? ───────────────────────────────────────────────────
   const transHunter = ot?.transitionHunter ?? 50;
@@ -1793,9 +1803,9 @@ const simulatePossession = (
       const m = (tendencyScore / 100) * 0.12;
       shotModifier = tendencyScore >= 70 ? +m : tendencyScore < 30 ? -m : 0;
       pbpBase = tendencyScore >= 86
-        ? `${ln} gets to his spot at the elbow — money every time...`
+        ? `${ln} gets to ${oP.his} spot at the elbow — money every time...`
         : tendencyScore >= 70
-          ? `${ln} rises up from the elbow — that's his spot...`
+          ? `${ln} rises up from the elbow — that's ${oP.his} spot...`
           : tendencyScore < 30
             ? `${ln} settles for a tough mid-range...`
             : `${ln} pulls up for the mid-range jumper...`;
@@ -1823,7 +1833,7 @@ const simulatePossession = (
         pbpBase  = isTransition && transHunter >= 70
           ? `${ln} catches it in transition and throws it down!`
           : dunkAttr >= 90
-            ? `${ln} rises up and POSTERIZES him — windmill, one-hand, raw POWER!`
+            ? `${ln} rises up and POSTERIZES ${dP.him} — windmill, one-hand, raw POWER!`
             : dunkAttr >= 80
               ? `${ln} attacks and throws it down!`
               : `${ln} goes up strong for the dunk...`;
@@ -1877,9 +1887,9 @@ const simulatePossession = (
       const m = (tendencyScore / 100) * 0.13;
       shotModifier = tendencyScore >= 70 ? +m : tendencyScore < 30 ? -m : 0;
       pbpBase = tendencyScore >= 85
-        ? `${ln} seals deep, drops the shoulder, and goes to his bag...`
+        ? `${ln} seals deep, drops the shoulder, and goes to ${oP.his} bag...`
         : tendencyScore >= 75
-          ? `${ln} backs down his defender in the post, drops his shoulder and goes to work...`
+          ? `${ln} backs down ${oP.his} defender in the post, drops ${oP.his} shoulder and goes to work...`
           : tendencyScore < 35
             ? `${ln} is forced into an uncomfortable post-up...`
             : `${ln} goes to work in the post...`;
@@ -1896,7 +1906,7 @@ const simulatePossession = (
         shotModifier  = +0.04 + ((tendencyScore - 50) / 100) * 0.10;
         shotModifier += ((ot?.offScreen ?? 50) - 50) / 100 * 0.04;
         pbpBase = tendencyScore >= 80
-          ? `${ln} sets his feet in the corner — pure shooter's stroke incoming...`
+          ? `${ln} sets ${oP.his} feet in the corner — pure shooter's stroke incoming...`
           : tendencyScore >= 60
             ? `${ln} spots up and catches in rhythm...`
             : `${ln} catches on the wing and fires...`;
@@ -1994,13 +2004,50 @@ const simulatePossession = (
       pbpDefPrefix     = `${defLn} reaches — out of position. `;
     }
 
-    // Help defender
+    // ── Help defender ─────────────────────────────────────────────────────────
+    // Help rotations give elite help-defenders two chances:
+    //   (a) a help-side steal if the offense telegraphs the pass/drive entry
+    //   (b) a contested block/denial that suppresses shot quality
+    // Both carry foul risk because the help defender arrives at speed with
+    // less body control than the primary on-ball defender.
     if (shotType === 'DRIVE_LAYUP' || shotType === 'POST_FADE') {
       if (helpDef >= 70) {
+        // ── (a) Help steal opportunity (passing-lane read on drive entry) ───────
+        // Fires when helpDef is elite (≥80) and the driver telegraphs the pass.
+        // Probability: helpDef 80 → ~6 %; helpDef 90 → ~9 %
+        if (helpDef >= 80 && Math.random() < (helpDef - 70) / 100 * 0.60) {
+          // Foul check first: help rotations at speed risk body contact
+          const helpFoulCtx: FoulContext = { isHelpSituation: true, isOnBall: false };
+          const helpFoulChance = calculateFoulChance(defender as Player, 'steal', helpFoulCtx);
+          if (defender && Math.random() < helpFoulChance) {
+            return {
+              ballHandlerName: offHandler.name, ballHandlerId: offHandler.id,
+              tendencyUsed: tendencyUsed || offAction, actionTaken: offAction,
+              tendencyScore, shotModifier: 0, conflictFired: false,
+              defenderTendency: 'helpDefender', defenseModifier: 0,
+              finalShotProbability: 0, result: 'FOUL_DRAWN',
+              foulsOn: defender?.name, isTransition, defenderRef: defender,
+              pbpText: `${defLn} rotates hard from help side — arrives with contact, foul called!`,
+            };
+          }
+          // Clean help steal
+          return {
+            ballHandlerName: offHandler.name, ballHandlerId: offHandler.id,
+            tendencyUsed: tendencyUsed || offAction, actionTaken: offAction,
+            tendencyScore, shotModifier: 0, conflictFired: false,
+            defenderTendency: 'helpDefender', defenseModifier: 0,
+            finalShotProbability: 0, result: 'STEAL',
+            stolenBy: defender?.name, isTransition, defenderRef: defender,
+            pbpText: `${defLn} sneaks in from the weak side and deflects the entry pass — turnover!`,
+          };
+        }
+
+        // ── (b) Quality help contest suppresses shot quality ─────────────────
         defenseModifier -= 0.08;
         defTendencyUsed  = 'helpDefender';
         pbpDefPrefix     = `${defLn} rotates over from the weak side. `;
         if ((defender?.attributes.defensiveIQ ?? 70) < 55) {
+          // Low-IQ help defender over-rotates — offensive kick-out reads the rotation
           defenseModifier += 0.10;
           pbpDefPrefix = `${defLn} over-rotates — kick-out leads to an open look. `;
         }
@@ -2014,7 +2061,7 @@ const simulatePossession = (
     if (physicality >= 85) {
       defenseModifier -= 0.06;
       if (!defTendencyUsed) defTendencyUsed = 'physicality';
-      pbpBase += ` ${defLn} met him at the rim with contact.`;
+      pbpBase += ` ${defLn} met ${oP.him} at the rim with contact.`;
       if ((offHandler.attributes.strength ?? 60) < 55 &&
           (shotType === 'DRIVE_LAYUP' || shotType === 'POST_FADE')) defenseModifier -= 0.04;
     } else if (physicality >= 70) {
@@ -2036,14 +2083,39 @@ const simulatePossession = (
         // Elite shot-blockers (high interiorDef + blocks) can flat-out reject dunks.
         // Probability: near-zero for avg defenders; up to ~14 % for elite rim protectors.
         const intNorm     = Math.max(0, (intDef - 40) / 60);
-        // getBlockChance: attribute-driven per-shot block %, amplified by how well
-        // the defender is positioned at the rim (intNorm, from interiorDef).
-        // Multiplier 2.2 calibrates so elite rim protectors block ~13 % of dunks
-        // in perfect position; hard cap at 15 % for even Wemby-tier defenders.
+        // getBlockChance: attribute-driven per-shot block %, amplified by rim position.
+        // Hard cap at 15 % for even elite rim protectors.
         const blockChance = Math.min(0.15,
           getBlockChance(defender?.attributes.blocks ?? 50, defender?.position)
           * intNorm * 2.2,
         );
+
+        // ── Foul check: aggressive rim protection carries shooting-foul risk ──────
+        // Physical defenders (Phys 87, Disc 69, IQ 83) → ~15–17 % raw block foul.
+        // We apply at 40 % weight — many contests are clean rejections.
+        if (defender) {
+          const blockFoulCtx: FoulContext = {
+            isHelpSituation: helpDef >= 70,
+            isOnBall: false,
+          };
+          const blockFoulChance = calculateFoulChance(defender, 'block', blockFoulCtx);
+          if (Math.random() < blockFoulChance * 0.40) {
+            const foulLine = (defender.attributes.physicality ?? physicality) >= 85
+              ? `${defLn} goes up strong but catches the shooter on the way up — shooting foul!`
+              : `${defLn} contests the dunk but makes contact — foul called!`;
+            return {
+              ballHandlerName: offHandler.name, ballHandlerId: offHandler.id,
+              tendencyUsed: tendencyUsed || offAction, actionTaken: offAction,
+              tendencyScore, shotModifier: 0, conflictFired: false,
+              defenderTendency: 'physicality', defenseModifier: 0,
+              finalShotProbability: 0, result: 'FOUL_DRAWN',
+              foulsOn: defender?.name, isTransition, defenderRef: defender,
+              pbpText: foulLine,
+            };
+          }
+        }
+
+
         if (Math.random() < blockChance) {
           const blockLine = intDef >= 90
             ? `${defLn} SWATS IT INTO THE STANDS! Emphatic rejection!`
@@ -2066,7 +2138,7 @@ const simulatePossession = (
           if (!defTendencyUsed) defTendencyUsed = 'interiorDef';
         } else if (intDef >= 80 && rimContestMod <= -0.08) {
           if (!defTendencyUsed) defTendencyUsed = 'interiorDef';
-          pbpBase += ` ${defLn} rises to meet him at the rim!`;
+          pbpBase += ` ${defLn} rises to meet ${oP.him} at the rim!`;
         } else if (intDef <= 30) {
           pbpDefPrefix = pbpDefPrefix || `${defLn} has no answer — clear path to the rim — `;
         }
@@ -2104,7 +2176,7 @@ const simulatePossession = (
         }
         if (intDef >= 80 && rimContestMod <= -0.06) {
           if (!defTendencyUsed) defTendencyUsed = 'interiorDef';
-          pbpDefPrefix = pbpDefPrefix || `${defLn} meets him at the rim — massive contest — `;
+          pbpDefPrefix = pbpDefPrefix || `${defLn} meets ${oP.him} at the rim — massive contest — `;
         } else if (intDef >= 90 && rimContestMod <= -0.09) {
           pbpBase += ` ${defLn} is a wall at the rim!`;
         } else if (intDef <= 30) {
@@ -2157,7 +2229,7 @@ const simulatePossession = (
 
       if (intDef >= 85 && postDefMod <= -0.10) {
         if (!defTendencyUsed) defTendencyUsed = 'interiorDef';
-        pbpDefPrefix = pbpDefPrefix || `${defLn} body-locks him — no room to operate — `;
+        pbpDefPrefix = pbpDefPrefix || `${defLn} body-locks ${oP.him} — no room to operate — `;
       } else if (intDef >= 90 && postDefMod <= -0.13) {
         pbpBase += ` ${defLn} shuts it down with elite post positioning!`;
       } else if (intDef <= 30) {
@@ -2220,7 +2292,7 @@ const simulatePossession = (
     if (onBallPest >= 70 && (offAction === 'ISO' || offAction === 'DRIVE') && !isTransition) {
       defenseModifier -= 0.05;
       if (!defTendencyUsed) defTendencyUsed = 'onBallPest';
-      pbpBase += ` ${defLn} gets right in his face.`;
+      pbpBase += ` ${defLn} gets right in ${oP.his} face.`;
       if (onBallPest >= 82 && Math.random() < 0.07) {
         return {
           ballHandlerName: offHandler.name, ballHandlerId: offHandler.id,
@@ -2304,9 +2376,9 @@ const simulatePossession = (
           ? ` — puts it down hard! Two points the easy way.`
           : ` — finishes the dunk!`;
     } else if (shotType === 'POST_FADE' && (ot?.postUp ?? 0) >= 75) {
-      fullText += ` — drops his shoulder and hits the post fade!`;
+      fullText += ` — drops ${oP.his} shoulder and hits the post fade!`;
     } else if (shotType === 'PULL_UP_3' && (ot?.pullUpThree ?? 0) >= 71) {
-      fullText += ` — BANG! Right in his wheelhouse.`;
+      fullText += ` — BANG! Right in ${oP.his} wheelhouse.`;
     } else if (offHandler.personalityTraits.includes('Streaky') && hotStreak >= 2) {
       fullText += ` — Good. ${ln} is feeling it right now...`;
     } else {
@@ -2316,7 +2388,7 @@ const simulatePossession = (
     fullText += isDunkAttempt
       ? ` — rattles out! Missed the dunk.`
       : offHandler.personalityTraits.includes('Streaky') && hotStreak <= -2
-        ? ` — No good. ${ln} is struggling to find his shot...`
+        ? ` — No good. ${ln} is struggling to find ${oP.his} shot...`
         : ` — No good.`;
   }
   if (conflictFired && conflictText) fullText += ` (${conflictText})`;
@@ -2331,6 +2403,78 @@ const simulatePossession = (
   };
 };
 
+// ─── Defensive foul-chance model ──────────────────────────────────────────────
+//
+// Returns the probability (0.02–0.25) that a defensive action (steal attempt or
+// shot contest/block) results in the defender committing a foul rather than
+// making a clean play.
+//
+// Tuning targets (league-realistic per 36-min benchmarks):
+//   • Average defender (all attrs/tendencies ≈ 50, IQ 65)  → ~8–10 % per attempt
+//   • Aggressive gambler (Gambles 80, Phys 85, IQ 60)       → ~18–22 % per attempt
+//   • Disciplined stopper (Gambles 30, Disc 80, IQ 85)      → ~3–6  % per attempt
+//   • This player (Gambles 47, Phys 87, Disc 69, IQ 83)     → ~13–15 % steal / ~15–17 % block
+//
+// Simulated PF totals using these per-attempt rates:
+//   Aggressive (Phys 87): ~3.5–4.5 PF/game   ✓ realistic for physical wings/bigs
+//   Disciplined (Disc 80, IQ 85): ~1.5–2.5 PF/game ✓ smart stopper profile
+//
+type DefensiveActionType = 'steal' | 'block';
+interface FoulContext {
+  /** Defender arriving from help side (less body control, more foul risk) */
+  isHelpSituation: boolean;
+  /** Defender actively pressuring ball handler on-ball */
+  isOnBall: boolean;
+}
+
+const calculateFoulChance = (
+  defender: Player,
+  actionType: DefensiveActionType,
+  context: FoulContext,
+): number => {
+  const dt  = defender.tendencies?.defensiveTendencies;
+  const gambles           = dt?.gambles              ?? 50;
+  const physicality       = dt?.physicality          ?? 50;
+  const contestDiscipline = dt?.shotContestDiscipline ?? 50;
+  const helpDefender      = dt?.helpDefender         ?? 50;
+  const defensiveIQ       = defender.attributes.defensiveIQ ?? 65;
+
+  // ── Base risk: every aggressive defensive action carries some foul risk ──────
+  let foulChance = 0.05;
+
+  // Gambles (reach-ins, gambling for loose balls):
+  //   tendency 50 → +7.5 %; 47 → +7.1 %; 80 → +12 %; 20 → +3 %
+  //   High-gambler who misses the steal risks an illegal contact call.
+  foulChance += (gambles / 100) * 0.15;
+
+  // Physicality (body contact, strength plays):
+  //   tendency 50 → +6 %; 87 → +10.4 %; 30 → +3.6 %
+  //   Physical defenders bump shooters, post players, and drive-finishers.
+  foulChance += (physicality / 100) * 0.12;
+
+  // Shot Contest Discipline (clean hands-up vs. bite/hack):
+  //   tendency 50 → −4 %; 69 → −5.5 %; 90 → −7.2 %
+  //   Disciplined contestants keep arms up and avoid swiping.
+  foulChance -= (contestDiscipline / 100) * 0.08;
+
+  // Help rotations: arriving late = less balance = extra contact risk
+  if (context.isHelpSituation) {
+    // tendency 50 → +3 %; 78 → +4.7 %; 90 → +5.4 %
+    foulChance += (helpDefender / 100) * 0.06;
+  }
+
+  // Defensive IQ: smart defenders read the play and choose safer angles
+  //   IQ 50 → ×1.0 (no change); IQ 83 → ×0.834 (−16.6 %); IQ 95 → ×0.81
+  foulChance *= (1 - (defensiveIQ / 100) * 0.20);
+
+  // Block-specific: shot contests carry slightly more foul risk than steals
+  // because the body/arm is in motion during the shot and contact is harder to avoid.
+  if (actionType === 'block') foulChance *= 1.15;
+
+  // Clamp: 2 % floor (freak accidents) — 25 % ceiling (even worst gambler rarely fouls every play)
+  return Math.max(0.02, Math.min(0.25, foulChance));
+};
+
 // ─── Tendency → stat-line modifiers ──────────────────────────────────────────
 interface TendencyModifiers {
   threepaBoost: number;
@@ -2338,11 +2482,14 @@ interface TendencyModifiers {
   usageBoost:   number;
   astBoost:     number;
   stlBoost:     number;
+  /** NEW: tendency-driven boost to per-game block totals in box score */
+  blkBoost:     number;
   foulRisk:     number;
 }
 const computeTendencyModifiers = (p: Player): TendencyModifiers => {
   const ot = p.tendencies?.offensiveTendencies;
   const dt = p.tendencies?.defensiveTendencies;
+  const diq = p.attributes.defensiveIQ ?? 65;
   return {
     threepaBoost: (( ot?.pullUpThree    ?? 50) - 50) / 100 * 0.40,
     insideBoost:  (( ot?.driveToBasket  ?? 50) - 50) / 100 * 0.30
@@ -2352,12 +2499,26 @@ const computeTendencyModifiers = (p: Player): TendencyModifiers => {
                 + ((ot?.drawFoul        ?? 50) - 50) / 100 * 0.06,
     astBoost:     (( ot?.kickOutPasser  ?? 50) - 50) / 100 * 0.35
                 + ((ot?.spotUp          ?? 50) - 50) / 100 * 0.08,
+
+    // stlBoost: gambles (reach frequency) + denyThePass (passing-lane reads)
+    //           + helpDefender (rotation intercepts from weak side)
     stlBoost:     (( dt?.gambles        ?? 50) - 50) / 100 * 0.30
-                + ((dt?.denyThePass     ?? 50) - 50) / 100 * 0.10,
-    foulRisk:     (( dt?.physicality    ?? 50) - 50) / 100 * 0.25
-                + ((dt?.gambles         ?? 50) - 50) / 100 * 0.15
-                + ((dt?.onBallPest      ?? 50) - 50) / 100 * 0.10
-                - ((dt?.shotContestDiscipline ?? 50) - 50) / 100 * 0.12,
+                + ((dt?.denyThePass     ?? 50) - 50) / 100 * 0.10
+                + ((dt?.helpDefender    ?? 50) - 50) / 100 * 0.08,
+
+    // blkBoost: help rotations generate most blocks; physicality adds contested
+    //           rejection power; disciplined contests rarely get pump-faked.
+    blkBoost:     (( dt?.helpDefender   ?? 50) - 50) / 100 * 0.25
+                + ((dt?.physicality     ?? 50) - 50) / 100 * 0.10
+                + ((dt?.shotContestDiscipline ?? 50) - 50) / 100 * 0.05,
+
+    // foulRisk: tendency-driven raw risk.  Now also reduced by Defensive IQ
+    //   so smart defenders who are physical still commit fewer dumb fouls.
+    foulRisk:     (( dt?.physicality             ?? 50) - 50) / 100 * 0.25
+                + ((dt?.gambles                  ?? 50) - 50) / 100 * 0.15
+                + ((dt?.onBallPest               ?? 50) - 50) / 100 * 0.10
+                - ((dt?.shotContestDiscipline    ?? 50) - 50) / 100 * 0.12
+                - ((diq - 50) / 100) * 0.18,
   };
 };
 
@@ -2380,13 +2541,15 @@ const generateCinematicLines = (
   const adv = (offHandler.rating ?? 70) - (def?.rating ?? 70);
   const oTr = offHandler.personalityTraits ?? [];
   const dTr = def?.personalityTraits ?? [];
+  const oP  = pronouns(offHandler);
+  const dP  = pronouns(def);
 
   // ── LINE 1: MATCHUP SETUP ───────────────────────────────────────────────────
   let setup: string;
   if (action === 'ISO') {
     if (oTr.includes('Diva/Star')) {
       setup = _pick([
-        `${o} is calling his own number here. ISO.`,
+        `${o} is calling ${oP.his} own number here. ISO.`,
         `Nobody is getting this ball. ${o} wants the ISO.`,
       ]);
     } else if (adv >= 8) {
@@ -2395,41 +2558,41 @@ const generateCinematicLines = (
         `The bench is pointing — ${o} has ${d} isolated. Everyone in the building knows it.`,
         `They're going right at ${d}. ${o} dribbles over and sets up.`,
         `ISO. ${o} on ${d}. This is a problem.`,
-        `${o} calls for the ball at the top and waves teammates off. ${d} is all that stands between him and the basket.`,
+        `${o} calls for the ball at the top and waves teammates off. ${d} is all that stands between ${oP.him} and the basket.`,
       ]);
     } else if (adv <= -8) {
       setup = dTr.includes('Workhorse')
         ? _pick([
             `${o} takes the challenge anyway. ${d} has been locked in all game.`,
-            `${d} doesn't take plays off. ${o} goes right at him anyway.`,
+            `${d} doesn't take plays off. ${o} goes right at ${dP.him} anyway.`,
           ])
         : dTr.includes('Hot Head')
         ? _pick([
-            `Watch ${d} here — he's been chippy. ${o} attacks anyway.`,
+            `Watch ${d} here — ${dP.he}'s been chippy. ${o} attacks anyway.`,
             `${d} is fired up. ${o} takes the challenge.`,
           ])
         : _pick([
             `${o} takes the challenge anyway.`,
-            `${d} locks in — he's been dominant tonight.`,
+            `${d} locks in — ${dP.he}'s been dominant tonight.`,
             `${o} dribbles into ${d}'s territory. Bold move.`,
           ]);
     } else {
       setup = dTr.includes('Workhorse')
         ? _pick([
             `Good luck — ${d} doesn't take plays off.`,
-            `${d} has been locked in all game. ${o} isolates on him anyway.`,
+            `${d} has been locked in all game. ${o} isolates on ${dP.him} anyway.`,
             `${o} and ${d} have been going at it all night. Here we go again.`,
           ])
         : _pick([
             `This is a battle — ${o} vs ${d}, one on one.`,
-            `${d} slides over. He's ready for this.`,
+            `${d} slides over. ${dP.He}'s ready for this.`,
             `${o} and ${d} have been going at it all night. Here we go again.`,
             `${o} calls for the ISO. ${d} steps up.`,
             `${o} isolates on ${d} at the top of the arc.`,
             `${o} sizes up ${d} at the elbow.`,
-            `${o} waves off the play — he's got ${d}.`,
-            `${o} catches on the wing. ${d} crouches into his defensive stance.`,
-            `${o} pounds the ball at the top. ${d} is all that stands between him and the basket.`,
+            `${o} waves off the play — ${oP.he}'s got ${d}.`,
+            `${o} catches on the wing. ${d} crouches into ${dP.his} defensive stance.`,
+            `${o} pounds the ball at the top. ${d} is all that stands between ${oP.him} and the basket.`,
           ]);
     }
     if (oTr.includes('Professional')) {
@@ -2437,14 +2600,14 @@ const generateCinematicLines = (
     }
     if (streak >= 2) {
       setup += oTr.includes('Hot Head')
-        ? ` ${o} is locked in — don't foul him.`
-        : ` ${o} is in a zone right now. Nobody is stopping him in ISO.`;
+        ? ` ${o} is locked in — don't foul ${oP.him}.`
+        : ` ${o} is in a zone right now. Nobody is stopping ${oP.him} in ISO.`;
     } else if (streak <= -2) {
       setup += ` ${o} keeps going back to the well.`;
     }
   } else if (action === 'DRIVE') {
     setup = _pick([
-      `${o} puts his head down and attacks ${d} off the dribble.`,
+      `${o} puts ${oP.his} head down and attacks ${d} off the dribble.`,
       `${o} surveys the floor, sees the lane, and goes.`,
       `${o} gets a head of steam — ${d} retreats to protect the rim.`,
       `${o} attacks ${d} off the dribble, looking to get to the paint.`,
@@ -2453,8 +2616,8 @@ const generateCinematicLines = (
     setup = _pick([
       `${o} seals ${d} in the post. Ball goes in.`,
       `${o} backs ${d} down into the paint.`,
-      `${o} catches at the block. ${d} is trying to front him.`,
-      `${o} calls for the ball on the low block. ${d} sets up behind him.`,
+      `${o} catches at the block. ${d} is trying to front ${oP.him}.`,
+      `${o} calls for the ball on the low block. ${d} sets up behind ${oP.him}.`,
     ]);
   }
 
@@ -2466,11 +2629,11 @@ const generateCinematicLines = (
     switch (shot) {
       case 'DRIVE_LAYUP':
         attack = _pick([
-          `${o} hits ${d} with a crossover, blows past him to the left.`,
+          `${o} hits ${d} with a crossover, blows past ${dP.him} to the left.`,
           `${o} crosses over twice — ${d} bites — and attacks the lane.`,
           `One hard crossover and ${o} is gone. ${d} is a step behind.`,
           `${o} plants and goes — euro step leaves ${d} frozen at the arc.`,
-          `${o} changes direction so fast ${d} nearly loses his footing. He's at the rim.`,
+          `${o} changes direction so fast ${d} nearly loses ${dP.his} footing. ${oP.He}'s at the rim.`,
         ]);
         break;
       case 'MID_RANGE':
@@ -2485,14 +2648,14 @@ const generateCinematicLines = (
       case 'PULL_UP_3':
         attack = _pick([
           `${o} pulls up in ${d}'s face from well beyond the arc.`,
-          `${o} stops and pops — ${d} had position but ${o} got his shot off.`,
-          `Mid-dribble, ${o} elevates. ${d} jumps but he's a fraction late.`,
+          `${o} stops and pops — ${d} had position but ${o} got ${oP.his} shot off.`,
+          `Mid-dribble, ${o} elevates. ${d} jumps but ${dP.he}'s a fraction late.`,
           `${o} jab steps, ${d} shifts — ${o} steps all the way back to the three-point line and elevates.`,
         ]);
         break;
       case 'POST_FADE':
         attack = _pick([
-          `${o} catches deep in the post, feels ${d} on his back, and spins baseline.`,
+          `${o} catches deep in the post, feels ${d} on ${oP.his} back, and spins baseline.`,
           `${o} seals ${d}, spins middle and goes up strong.`,
           `Quick spin — ${d} loses track for just a second. That's all ${o} needed.`,
           `${o} leans into ${d}, fades away toward the baseline and releases.`,
@@ -2535,12 +2698,12 @@ const generateCinematicLines = (
   } else {
     // POST_UP
     attack = _pick([
-      `${o} catches deep in the post, feels ${d} on his back, and spins baseline.`,
+      `${o} catches deep in the post, feels ${d} on ${oP.his} back, and spins baseline.`,
       `${o} seals ${d}, spins middle and goes up strong.`,
       `Quick spin — ${d} loses track for just a second. That's all ${o} needed.`,
       `${o} leans into ${d}, fades away toward the baseline and releases.`,
-      `${o} backs ${d} down, fades to his right — high off the glass attempt.`,
-      `Back to the basket, ${o} turns over his left shoulder and fires over ${d}.`,
+      `${o} backs ${d} down, fades to ${oP.his} right — high off the glass attempt.`,
+      `Back to the basket, ${o} turns over ${oP.his} left shoulder and fires over ${d}.`,
       `${o} catches at the elbow and turns. ${d} is a step slow.`,
       `${o} pivots. ${d} contests — but ${o}'s release is too quick.`,
     ]);
@@ -2561,7 +2724,7 @@ const generateCinematicLines = (
             `GOOD.`,
             `It falls. ${o} converts.`,
             `Splash. Nothing but net.`,
-            `He got it! ${o} converts.`,
+            `${oP.He} got it! ${o} converts.`,
             `${d} had good position but ${o} is just better right there.`,
             `Good for two.`,
             `Drains it.`,
@@ -2570,13 +2733,13 @@ const generateCinematicLines = (
     case 'MISSED':
       result = (adv <= -5)
         ? _pick([
-            `${d} stays with him — no good. ${d} wins this round.`,
+            `${d} stays with ${oP.him} — no good. ${d} wins this round.`,
             `${d} had great position and it shows. Missed.`,
-            `Off the back iron. ${d} held his ground.`,
+            `Off the back iron. ${d} held ${dP.his} ground.`,
             `Not tonight — ${d} contests and ${o} can't finish.`,
           ])
         : _pick([
-            `${d} stays with him — no good.`,
+            `${d} stays with ${oP.him} — no good.`,
             `Off the back iron. ${d} hangs tough.`,
             `${o} couldn't convert. ${d} with a great stop.`,
             `Not tonight — no good.`,
@@ -2592,7 +2755,7 @@ const generateCinematicLines = (
       break;
     case 'FOUL_DRAWN':
       result = _pick([
-        `AND ONE! ${o} converts through contact! He's going to the line!`,
+        `AND ONE! ${o} converts through contact! ${oP.He}'s going to the line!`,
         `Foul on ${d}! ${o} gets the bucket and a free throw.`,
         `Bucket AND the foul on ${d}! ${o} is heading to the stripe.`,
         `${o} draws the foul on ${d}. Free throws coming.`,
@@ -2600,7 +2763,7 @@ const generateCinematicLines = (
       break;
     default:
       result = _pick([
-        `${o} picks up his dribble — ${d} forces the jump ball. Turnover.`,
+        `${o} picks up ${oP.his} dribble — ${d} forces the jump ball. Turnover.`,
         `Lost ball! ${d} pokes it free from ${o}'s grasp.`,
         `${o} turns it over. Good defense by ${d}.`,
       ]);
@@ -2993,8 +3156,7 @@ const simulatePlayerGameLine = (
   const ast = Math.max(0, Math.round(teamAst * adjAstShare));
 
   // STL: getStealChance × 65 steal-opportunities per 48 min × minutes fraction.
-  // STL_OPP_SCALE=65 calibrated so a 10-player rotation hits ~8.5-9.0 team STL/game.
-  // stlBoost from defensive tendencies (pass-denial schemes, pressure defense).
+  // stlBoost from defensive tendencies (pass-denial, gambles, helpDefender).
   // Stamina: fatigued defenders lose a step — up to 15 % reduction at stamina=40.
   const STL_OPP_SCALE = 65;
   const stlBase    = getStealChance(player.attributes.steals, player.position)
@@ -3003,12 +3165,10 @@ const simulatePlayerGameLine = (
   const stl        = Math.max(0, Math.floor(stlBase * (1 - stlFatigue) + Math.random() * 0.8));
 
   // BLK: getBlockChance × 50 block-opportunities per 48 min × minutes fraction.
-  // BLK_OPP_SCALE=50 calibrated so a realistic roster hits ~5.0 team BLK/game.
-  // Elite rim protectors (attr 88+, C, 32 min) naturally reach 2.0-2.5 BPG.
-  // Stamina: tired bigs lose the vertical step — up to 12 % late-game reduction.
+  // blkBoost from helpDefender/physicality tendencies; stamina reduction for tired bigs.
   const BLK_OPP_SCALE = 50;
   const blkBase    = getBlockChance(player.attributes.blocks, player.position)
-    * BLK_OPP_SCALE * minFac;
+    * BLK_OPP_SCALE * minFac * (1 + tm.blkBoost);
   const blkFatigue = Math.max(0, (65 - (player.attributes.stamina ?? 70)) / 100 * 0.12);
   const blk        = Math.max(0, Math.floor(blkBase * (1 - blkFatigue) + Math.random() * 0.8));
   const pf  = Math.min(6, Math.round((Math.floor(Math.random() * 4 * minFac + 1)) * (1 + tm.foulRisk)));
@@ -3458,8 +3618,39 @@ export const simulateGame = (
   pbp.push({ time: '0:00', text: 'Final Buzzer', type: 'info', quarter: 4 });
 
   const margin = totalHome - totalAway;
-  homePlayerStats = homePlayerStats.map(p => ({ ...p, plusMinus: margin }));
-  awayPlayerStats = awayPlayerStats.map(p => ({ ...p, plusMinus: -margin }));
+
+  // Distribute per-player +/- so sum(home) = 5 × margin, sum(away) = -5 × margin.
+  // Each player's value reflects their relative efficiency and minutes, with noise.
+  const assignPlusMinuses = <T extends { plusMinus: number; pts: number; reb: number; ast: number; tov: number; min: number }>(
+    stats: T[],
+    teamMargin: number,
+  ): T[] => {
+    if (stats.length === 0) return stats;
+    const target = 5 * teamMargin; // mathematical on-court constraint
+    const effs = stats.map(p =>
+      p.min > 0 ? (p.pts + p.reb * 0.4 + p.ast * 0.6 - (p.tov ?? 0) * 0.8) / p.min : 0,
+    );
+    const avgEff = effs.reduce((a, b) => a + b, 0) / effs.length;
+    const raw = stats.map((p, i) => {
+      const relEff = effs[i] - avgEff;
+      const effShift = relEff * 14;           // 0.1 eff unit above avg ≈ +1.4 PM
+      const noise    = (Math.random() - 0.5) * 6; // ±3 natural game variance
+      return teamMargin + effShift + noise;
+    });
+    const rawSum = raw.reduce((a, b) => a + b, 0);
+    const adj    = (target - rawSum) / stats.length;
+    const rounded = raw.map(pm => Math.round(pm + adj));
+    // Fix integer rounding drift on the highest-minute player
+    const drift = target - rounded.reduce((a, b) => a + b, 0);
+    if (drift !== 0) {
+      const maxIdx = stats.reduce((best, _, i) => stats[i].min > stats[best].min ? i : best, 0);
+      rounded[maxIdx] += drift;
+    }
+    return stats.map((s, i) => ({ ...s, plusMinus: rounded[i] }));
+  };
+
+  homePlayerStats = assignPlusMinuses(homePlayerStats, margin);
+  awayPlayerStats = assignPlusMinuses(awayPlayerStats, -margin);
 
   // ── Simulation Symmetry Check (dev console only — never affects sim math) ──
   // Logs a warning if one team's FG% is 8%+ better than the opponent in this game.
