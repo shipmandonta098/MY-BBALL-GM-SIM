@@ -1339,6 +1339,7 @@ const App: React.FC = () => {
             isCurrentAllStar={isCurrentAllStar}
             currentAllStarRole={currentAllStarRole}
             careerAwards={careerAwards}
+            currentSeason={league.season}
           />
         );
       })()}
