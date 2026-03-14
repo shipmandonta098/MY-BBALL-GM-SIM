@@ -565,6 +565,7 @@ export interface LeagueSettings {
   scheduledExpansion?: 'Off' | 'Year 2' | 'Year 3' | 'Year 5';
   expansionTeamCount?: 1 | 2 | 4;
   expansionDraftRules?: 'Standard' | 'Protected' | 'Open';
+  numTeams?: number;
 
   // ── Gameplay Tab additions ────────────────────────────────────────────────
   fatigueImpact?: 'None' | 'Low' | 'Medium' | 'High';

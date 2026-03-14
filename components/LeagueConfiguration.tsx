@@ -91,6 +91,7 @@ const LeagueConfiguration: React.FC<LeagueConfigurationProps> = ({ onConfirm, on
   const [showAdvanced, setShowAdvanced] = useState(false);
   const [saveAsDefault, setSaveAsDefault] = useState(false);
   const [errors, setErrors] = useState<Record<string, string>>({});
+  const [numTeams, setNumTeams] = useState(30);
   const [godModeConfirm, setGodModeConfirm] = useState(false);
   const [genderWarning, setGenderWarning] = useState(false);
 
@@ -111,6 +112,7 @@ const LeagueConfiguration: React.FC<LeagueConfigurationProps> = ({ onConfirm, on
       if (p.seasonLength) setSeasonLength(p.seasonLength);
       if (p.salaryCap) setSalaryCap(p.salaryCap);
       if (p.b2bFrequency) setB2bFrequency(p.b2bFrequency);
+      if (p.numTeams) setNumTeams(p.numTeams);
     } catch { /* ignore */ }
   }, []);
 
@@ -158,6 +160,7 @@ const LeagueConfiguration: React.FC<LeagueConfigurationProps> = ({ onConfirm, on
       allowManualGenderEdits,
       b2bFrequency,
       showAdvancedStats,
+      numTeams,
     };
     if (saveAsDefault) {
       localStorage.setItem(DEFAULT_SETTINGS_KEY, JSON.stringify({ ...settings, leagueName: name }));
@@ -362,6 +365,11 @@ const LeagueConfiguration: React.FC<LeagueConfigurationProps> = ({ onConfirm, on
           </button>
           {showAdvanced && (
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mt-6 animate-in slide-in-from-top-4">
+              <Field label="Number of Teams" hint="How many franchises start in the league. Max 38 (all available). Must be even.">
+                <BtnGroup options={['20','24','28','30','32','38']}
+                  value={String(numTeams)}
+                  onChange={v => setNumTeams(parseInt(v))} />
+              </Field>
               <Field label="Enable God Mode">
                 <div className={`flex items-start gap-3 px-4 py-3 border rounded-xl cursor-pointer transition-all ${godMode ? 'bg-rose-500/10 border-rose-500/30' : 'bg-slate-950 border-slate-800'}`}
                   onClick={() => handleGodModeToggle(!godMode)}>
