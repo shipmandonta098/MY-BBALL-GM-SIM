@@ -1015,9 +1015,8 @@ const LiveGameModal: React.FC<LiveGameModalProps> = ({
       if (currentAwayQScore.length < currentQuarter) currentAwayQScore.push(0);
     }
 
-    const margin = currentHomeScore - currentAwayScore;
-    const homePlayerStats = (Object.values(currentHomeStats) as GamePlayerLine[]).map(s => ({ ...s, plusMinus: margin }));
-    const awayPlayerStats = (Object.values(currentAwayStats) as GamePlayerLine[]).map(s => ({ ...s, plusMinus: -margin }));
+    const homePlayerStats = (Object.values(currentHomeStats) as GamePlayerLine[]);
+    const awayPlayerStats = (Object.values(currentAwayStats) as GamePlayerLine[]);
     const allLines = [...homePlayerStats, ...awayPlayerStats].sort((a, b) => b.pts - a.pts);
 
     const res: GameResult = {
@@ -1092,15 +1091,8 @@ const LiveGameModal: React.FC<LiveGameModalProps> = ({
   }, [isPlaying, timeLeft, quarter, speed]);
 
   const finishGame = () => {
-    const margin = homeScore - awayScore;
-    const homePlayerStats = (Object.values(homeStats) as GamePlayerLine[]).map(s => ({
-      ...s,
-      plusMinus: margin
-    }));
-    const awayPlayerStats = (Object.values(awayStats) as GamePlayerLine[]).map(s => ({
-      ...s,
-      plusMinus: -margin
-    }));
+    const homePlayerStats = Object.values(homeStats) as GamePlayerLine[];
+    const awayPlayerStats = Object.values(awayStats) as GamePlayerLine[];
     const allLines = [...homePlayerStats, ...awayPlayerStats].sort((a, b) => b.pts - a.pts);
 
     const isBuzzerBeater = Math.abs(homeScore - awayScore) <= 2 && Math.random() < 0.3;

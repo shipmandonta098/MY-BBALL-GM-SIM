@@ -3350,8 +3350,39 @@ export const simulateGame = (
   pbp.push({ time: '0:00', text: 'Final Buzzer', type: 'info', quarter: 4 });
 
   const margin = totalHome - totalAway;
-  homePlayerStats = homePlayerStats.map(p => ({ ...p, plusMinus: margin }));
-  awayPlayerStats = awayPlayerStats.map(p => ({ ...p, plusMinus: -margin }));
+
+  // Distribute per-player +/- so sum(home) = 5 × margin, sum(away) = -5 × margin.
+  // Each player's value reflects their relative efficiency and minutes, with noise.
+  const assignPlusMinuses = <T extends { plusMinus: number; pts: number; reb: number; ast: number; tov: number; min: number }>(
+    stats: T[],
+    teamMargin: number,
+  ): T[] => {
+    if (stats.length === 0) return stats;
+    const target = 5 * teamMargin; // mathematical on-court constraint
+    const effs = stats.map(p =>
+      p.min > 0 ? (p.pts + p.reb * 0.4 + p.ast * 0.6 - (p.tov ?? 0) * 0.8) / p.min : 0,
+    );
+    const avgEff = effs.reduce((a, b) => a + b, 0) / effs.length;
+    const raw = stats.map((p, i) => {
+      const relEff = effs[i] - avgEff;
+      const effShift = relEff * 14;           // 0.1 eff unit above avg ≈ +1.4 PM
+      const noise    = (Math.random() - 0.5) * 6; // ±3 natural game variance
+      return teamMargin + effShift + noise;
+    });
+    const rawSum = raw.reduce((a, b) => a + b, 0);
+    const adj    = (target - rawSum) / stats.length;
+    const rounded = raw.map(pm => Math.round(pm + adj));
+    // Fix integer rounding drift on the highest-minute player
+    const drift = target - rounded.reduce((a, b) => a + b, 0);
+    if (drift !== 0) {
+      const maxIdx = stats.reduce((best, _, i) => stats[i].min > stats[best].min ? i : best, 0);
+      rounded[maxIdx] += drift;
+    }
+    return stats.map((s, i) => ({ ...s, plusMinus: rounded[i] }));
+  };
+
+  homePlayerStats = assignPlusMinuses(homePlayerStats, margin);
+  awayPlayerStats = assignPlusMinuses(awayPlayerStats, -margin);
 
   // ── Simulation Symmetry Check (dev console only — never affects sim math) ──
   // Logs a warning if one team's FG% is 8%+ better than the opponent in this game.
