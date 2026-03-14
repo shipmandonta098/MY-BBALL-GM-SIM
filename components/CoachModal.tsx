@@ -12,6 +12,8 @@ interface CoachModalProps {
   onFire?: (coachId: string) => void;
   godMode?: boolean;
   onUpdateCoach?: (coach: Coach) => void;
+  /** Career awards (e.g. COY wins) sorted newest-first */
+  careerAwards?: { label: string; year: number; icon: string }[];
 }
 
 const badgeDescriptions: Record<CoachBadge, string> = {
@@ -36,7 +38,8 @@ const CoachModal: React.FC<CoachModalProps> = ({
   isUserTeam,
   onFire,
   godMode = false,
-  onUpdateCoach
+  onUpdateCoach,
+  careerAwards = [],
 }) => {
   const [isEditing, setIsEditing] = useState(false);
   const [editedCoach, setEditedCoach] = useState<Coach>(coach);
@@ -354,6 +357,26 @@ const CoachModal: React.FC<CoachModalProps> = ({
               {coach.badges.length === 0 && <p className="text-slate-600 italic">No specialist badges acquired yet.</p>}
             </div>
           </section>
+
+          {careerAwards.length > 0 && (
+            <section className="space-y-4">
+              <div className="flex items-center gap-4">
+                <h3 className="text-[10px] font-black text-amber-500 uppercase tracking-[0.5em] whitespace-nowrap">Honours & Awards</h3>
+                <div className="h-px w-full bg-slate-800/50"></div>
+              </div>
+              <div className="flex flex-wrap gap-3">
+                {careerAwards.map((award, i) => (
+                  <div key={`${award.label}-${award.year}-${i}`} className="flex items-center gap-2 px-4 py-3 bg-slate-950/40 border border-slate-800 rounded-2xl hover:border-amber-500/30 transition-colors">
+                    <span className="text-xl leading-none">{award.icon}</span>
+                    <div>
+                      <div className="text-[9px] font-black uppercase tracking-widest text-slate-500">{award.year}</div>
+                      <div className="text-sm font-bold text-slate-200">{award.label}</div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </section>
+          )}
 
           <section className="space-y-8">
              <div className="flex items-center justify-between">

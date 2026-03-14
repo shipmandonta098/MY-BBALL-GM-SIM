@@ -14,6 +14,12 @@ interface PlayerModalProps {
   onRelease: (playerId: string) => void;
   godMode?: boolean;
   onUpdatePlayer?: (player: Player) => void;
+  /** Whether this player is in the current season's All-Star game */
+  isCurrentAllStar?: boolean;
+  /** 'Starter' if voted in as starter, 'Reserve' if coach's pick */
+  currentAllStarRole?: 'Starter' | 'Reserve';
+  /** Career awards sorted newest-first */
+  careerAwards?: { label: string; year: number; icon: string }[];
 }
 
 const traitIcons: Record<PersonalityTrait, string> = {
@@ -32,16 +38,19 @@ const traitIcons: Record<PersonalityTrait, string> = {
   'Streaky': '📈'
 };
 
-const PlayerModal: React.FC<PlayerModalProps> = ({ 
-  player, 
-  onClose, 
-  onScout, 
-  scoutingReport, 
-  isUserTeam, 
-  onUpdateStatus, 
+const PlayerModal: React.FC<PlayerModalProps> = ({
+  player,
+  onClose,
+  onScout,
+  scoutingReport,
+  isUserTeam,
+  onUpdateStatus,
   onRelease,
   godMode = false,
-  onUpdatePlayer
+  onUpdatePlayer,
+  isCurrentAllStar = false,
+  currentAllStarRole,
+  careerAwards = [],
 }) => {
   const [isEditing, setIsEditing] = React.useState(false);
   const [statsTab, setStatsTab] = useState<'season' | 'career'>('season');
@@ -677,6 +686,15 @@ const PlayerModal: React.FC<PlayerModalProps> = ({
                 <span className={`px-3 py-1 text-[10px] font-black uppercase tracking-widest rounded border ${player.status === 'Starter' ? 'bg-emerald-500/10 text-emerald-500 border-emerald-500/30' : 'bg-slate-800/50 text-slate-400 border-slate-700/50'}`}>
                   {player.status}
                 </span>
+                {isCurrentAllStar && (
+                  <span className={`px-3 py-1 text-[10px] font-black uppercase tracking-widest rounded-full border flex items-center gap-1.5 shadow-lg ${
+                    currentAllStarRole === 'Starter'
+                      ? 'bg-amber-500/20 text-amber-400 border-amber-500/40 shadow-amber-900/30'
+                      : 'bg-sky-500/15 text-sky-400 border-sky-500/30 shadow-sky-900/20'
+                  }`}>
+                    ⭐ All-Star {currentAllStarRole}
+                  </span>
+                )}
               </div>
               <div className="flex flex-wrap gap-2 mt-4">
                 {player.personalityTraits.map(trait => (
@@ -685,6 +703,11 @@ const PlayerModal: React.FC<PlayerModalProps> = ({
                     {trait}
                   </span>
                 ))}
+                {(player.allStarSelections?.length ?? 0) > 0 && (
+                  <span className="px-3 py-1 bg-amber-500/10 text-amber-500 border border-amber-500/20 text-[10px] font-black uppercase tracking-widest rounded-full flex items-center gap-1.5">
+                    ⭐ {player.allStarSelections!.length}× All-Star
+                  </span>
+                )}
               </div>
             </div>
           </div>
@@ -1129,6 +1152,37 @@ const PlayerModal: React.FC<PlayerModalProps> = ({
                         <div key={h.label} className="bg-slate-900 border border-slate-800 rounded-2xl p-3 text-center">
                           <div className="text-[10px] font-black uppercase tracking-widest text-slate-600">{h.label}</div>
                           <div className="font-display font-bold text-xl text-amber-400 mt-0.5 tabular-nums">{h.value || '—'}</div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* ── Career awards & honours ─────────────────────────────────── */}
+                {(careerAwards.length > 0 || (player.allStarSelections?.length ?? 0) > 0) && (
+                  <div className="space-y-3">
+                    <p className="text-[10px] font-black text-slate-600 uppercase tracking-widest">Honours & Awards</p>
+                    <div className="flex flex-wrap gap-2">
+                      {/* All-Star selections bubble */}
+                      {(player.allStarSelections?.length ?? 0) > 0 && (
+                        <div className="flex items-center gap-2 px-3 py-2 bg-amber-500/10 border border-amber-500/25 rounded-2xl">
+                          <span className="text-base leading-none">⭐</span>
+                          <div>
+                            <div className="text-[9px] font-black uppercase tracking-widest text-amber-500/70">All-Star</div>
+                            <div className="text-xs font-bold text-amber-400">
+                              {player.allStarSelections!.length}× ({player.allStarSelections!.slice().sort((a,b)=>a-b).join(', ')})
+                            </div>
+                          </div>
+                        </div>
+                      )}
+                      {/* Individual award badges */}
+                      {careerAwards.map((award, i) => (
+                        <div key={`${award.label}-${award.year}-${i}`} className="flex items-center gap-2 px-3 py-2 bg-slate-900 border border-slate-800 rounded-2xl hover:border-amber-500/30 transition-colors">
+                          <span className="text-base leading-none">{award.icon}</span>
+                          <div>
+                            <div className="text-[9px] font-black uppercase tracking-widest text-slate-500">{award.year}</div>
+                            <div className="text-xs font-bold text-slate-200">{award.label}</div>
+                          </div>
                         </div>
                       ))}
                     </div>
