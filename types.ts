@@ -350,6 +350,8 @@ export interface Player {
   injuryDaysLeft?: number;
   /** Years (season numbers) in which this player was selected as an All-Star */
   allStarSelections?: number[];
+  /** Years in which this player won the All-Star Game MVP award */
+  allStarMvpYears?: number[];
 }
 
 export interface Prospect extends Omit<Player, 'stats' | 'status' | 'morale' | 'salary' | 'contractYears'> {
@@ -736,6 +738,25 @@ export interface AllStarContestResult {
   highlights: string[];
 }
 
+export interface AllStarPlayerLine {
+  playerId: string;
+  playerName: string;
+  position: string;
+  pts: number;
+  reb: number;
+  ast: number;
+  stl: number;
+  blk: number;
+  fgm: number;
+  fga: number;
+  threepm: number;
+  threepa: number;
+  ftm: number;
+  fta: number;
+  isStarter: boolean;
+  isMvp?: boolean;
+}
+
 export interface AllStarGameResult {
   eastScore: number;
   westScore: number;
@@ -744,6 +765,7 @@ export interface AllStarGameResult {
   westRoster: string[];
   highlights: string[];
   quarterScores?: { east: number[]; west: number[] };
+  boxScore?: { east: AllStarPlayerLine[]; west: AllStarPlayerLine[] };
 }
 
 export interface AllStarWeekendData {

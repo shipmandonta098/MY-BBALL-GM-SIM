@@ -1247,7 +1247,8 @@ const App: React.FC = () => {
                     ...(asd?.westStarters ?? []),
                     ...(asd?.westReserves ?? []),
                   ]);
-                  const teams = prev.teams.map(t => ({
+                  const mvpId = asd?.allStarGame?.mvp?.playerId;
+                  let teams = prev.teams.map(t => ({
                     ...t,
                     roster: t.roster.map(p => {
                       if (!allStarIds.has(p.id)) return p;
@@ -1256,6 +1257,18 @@ const App: React.FC = () => {
                       return { ...p, allStarSelections: [...existing, year] };
                     }),
                   }));
+                  // Stamp allStarMvpYears on the All-Star Game MVP
+                  if (mvpId) {
+                    teams = teams.map(t => ({
+                      ...t,
+                      roster: t.roster.map(p => {
+                        if (p.id !== mvpId) return p;
+                        const existing = p.allStarMvpYears ?? [];
+                        if (existing.includes(year)) return p;
+                        return { ...p, allStarMvpYears: [...existing, year] };
+                      }),
+                    }));
+                  }
                   return {
                     ...prev,
                     teams,
@@ -1322,6 +1335,19 @@ const App: React.FC = () => {
           else if (hist.allNbaSecond?.includes(selectedPlayer.id)) careerAwards.push({ label: 'All-NBA 2nd', year: hist.year, icon: '🥈' });
           else if (hist.allNbaThird?.includes(selectedPlayer.id))  careerAwards.push({ label: 'All-NBA 3rd', year: hist.year, icon: '🥉' });
           if (hist.allDefensive?.includes(selectedPlayer.id)) careerAwards.push({ label: 'All-Defense', year: hist.year, icon: '🛡️' });
+        }
+        // All-Star MVP: current season (from allStarWeekend) + historical (from allStarMvpYears on player)
+        const currentMvpId = league.allStarWeekend?.allStarGame?.mvp?.playerId;
+        if (currentMvpId === selectedPlayer.id) {
+          const mvpYear = league.season;
+          if (!careerAwards.some(a => a.label === 'All-Star MVP' && a.year === mvpYear)) {
+            careerAwards.push({ label: 'All-Star MVP', year: mvpYear, icon: '⭐' });
+          }
+        }
+        for (const mvpYear of (selectedPlayer.allStarMvpYears ?? [])) {
+          if (!careerAwards.some(a => a.label === 'All-Star MVP' && a.year === mvpYear)) {
+            careerAwards.push({ label: 'All-Star MVP', year: mvpYear, icon: '⭐' });
+          }
         }
         careerAwards.sort((a, b) => b.year - a.year);
 
