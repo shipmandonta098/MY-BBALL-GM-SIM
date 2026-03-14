@@ -2799,6 +2799,16 @@ const generateQuarterPBP = (
   let teamStreak = momentumStreak; // consecutive scoring possessions
   let emergencyBoostPoss = 0;      // possessions remaining with emergency +10% boost
 
+  // ── Running quarter clock ─────────────────────────────────────────────────
+  // Counts DOWN from 720 s (12:00) to 0 (0:00). Every possession consumes a
+  // slice of the 720-second quarter. Sub-events within a single possession each
+  // tick the clock by 1–3 s so no two events share the same timestamp.
+  let clockSecs = 12 * 60;
+  const fmtClock = (s: number): string => {
+    const clamped = Math.max(0, s);
+    return `${Math.floor(clamped / 60)}:${String(clamped % 60).padStart(2, '0')}`;
+  };
+
   const rotation = offTeam.rotation
     ? [
         ...Object.values(offTeam.rotation.starters).map(id => offTeam.roster.find(p => p.id === id)!).filter(Boolean),
@@ -2811,6 +2821,21 @@ const generateQuarterPBP = (
 
   const sample = Math.round(possessions / 3);
   for (let i = 0; i < sample; i++) {
+    // ── Clock window for this possession ─────────────────────────────────────
+    // Each PBP possession represents ~3 real possessions; spread 720 s evenly
+    // with ±4 s jitter so the clock feels organic. Sub-events tick down 1–3 s
+    // from the possession's start time so every line has a unique timestamp.
+    const possClockUsed = Math.max(12, Math.round(720 / Math.max(1, sample)) + Math.floor(Math.random() * 9) - 4);
+    let subSec = clockSecs;                       // start of this possession's time window
+    clockSecs  = Math.max(1, clockSecs - possClockUsed); // advance main clock FIRST
+    const subFloor = clockSecs;                   // sub-events stay within this possession's window
+    // tickSub: decrement the sub-clock by `adv` seconds and return formatted time.
+    // Every call produces a strictly lower timestamp → correct sort order.
+    const tickSub = (adv: number = 2): string => {
+      subSec = Math.max(subFloor + 1, subSec - Math.max(1, adv));
+      return fmtClock(subSec);
+    };
+
     // Garbage time: prefer bench players in the rotation
     const handlerPool = isGarbageTime
       ? rotation.slice(Math.min(3, rotation.length - 1))
@@ -2836,22 +2861,21 @@ const generateQuarterPBP = (
       teamStreak = 0;
     }
 
-    // Momentum checks
+    // Momentum checks — use tickSub so these get a unique clock value
     if (teamStreak === 4) {
       const coachName = offTeam.staff.headCoach?.name?.split(' ').at(-1) ?? 'The coach';
-      events.push({ time: `${12 - Math.floor((i / sample) * 12)}:00`, text: `${coachName} calls timeout to stop the run — momentum reset`, type: 'info', quarter });
+      events.push({ time: tickSub(1), text: `${coachName} calls timeout to stop the run — momentum reset`, type: 'info', quarter });
       teamStreak = 0; // timeout resets streak
     }
     if (teamStreak >= 6) {
       // 12-0 run without timeout → emergency boost for next 3 possessions
-      events.push({ time: `${12 - Math.floor((i / sample) * 12)}:00`, text: `${offTeam.name} on a massive run — showing heart, fighting back!`, type: 'info', quarter });
+      events.push({ time: tickSub(1), text: `${offTeam.name} on a massive run — showing heart, fighting back!`, type: 'info', quarter });
       emergencyBoostPoss = 3;
       teamStreak = 0;
     }
 
-    const mins = 12 - Math.floor((i / sample) * 12);
-    const secs = Math.floor(Math.random() * 60);
-    const time  = `${mins}:${String(secs).padStart(2, '0')}`;
+    // Base event timestamp — consumed by non-cinematic single-event plays
+    const time = tickSub(Math.floor(Math.random() * 3) + 2);
 
     const evType: PlayByPlayEvent['type'] =
       poss.result === 'STEAL'      ? 'turnover' :
@@ -2928,21 +2952,19 @@ const generateQuarterPBP = (
       ? generateCinematicLines(poss, handler, streak)
       : null;
     if (cinematic) {
-      events.push({ time, text: cinematic.setup,  type: 'info',  quarter });
-      events.push({ time, text: cinematic.attack, type: 'info',  quarter });
-      events.push({ time, text: cinematic.result, type: evType,  quarter });
+      // Each cinematic line gets its own clock tick: setup → attack → result
+      // are strictly ordered in time, never sharing a timestamp.
+      events.push({ time: tickSub(2), text: cinematic.setup,  type: 'info',  quarter });
+      events.push({ time: tickSub(2), text: cinematic.attack, type: 'info',  quarter });
+      events.push({ time: tickSub(1), text: cinematic.result, type: evType,  quarter });
     } else {
       events.push({ time, text: finalPbpText, type: evType, quarter });
     }
 
-    // ── BUG 2 & 3 FIX: Putback sequence — missed shot MUST precede putback ──
-    // After any missed field goal: roll for offensive rebound.
-    // If OReb: push the rebound event THEN the putback attempt (made or missed).
-    // The rebounder and putback scorer are the same player.
-    // Putback does NOT earn an assist. It IS an offensive rebound.
-    // Team ORB chance: derived from each player's offRebounding attribute via
-    // getTeamOrbChance() — replaces the old hardcoded 12 %.
-    // League-avg rotation yields ~29-31 % ORB; elite boards squads reach ~35 %.
+    // ── Putback sequence — missed shot → rebound → putback (strictly ordered) ─
+    // Each step ticks the clock: miss is already logged above, then the clock
+    // advances so the rebound appears 2 s later and the putback attempt 1 s after.
+    // No event in this chain can share a timestamp with the original miss.
     const teamOrbChance = getTeamOrbChance(rotation);
     if (poss.result === 'MISSED' && Math.random() < teamOrbChance) {
       // Prefer big men (high offReb + layups); exclude the original missed shooter.
@@ -2952,8 +2974,6 @@ const generateQuarterPBP = (
         ? rebCandidates
         : rotation.filter(p => p.id !== handler.id);
       if (pool.length > 0) {
-        // Weight each candidate by their individual ORB% chance so elite
-        // crashers are selected proportionally, not just by rank.
         const orbWeights = pool.map(p =>
           getOffReboundChance(p.attributes.offReb ?? 50, p.position));
         const totalOrbWeight = orbWeights.reduce((s, w) => s + w, 0);
@@ -2965,22 +2985,21 @@ const generateQuarterPBP = (
         }
         const rebLn = lastName(rebounder);
 
-        // Step 2: Offensive Rebound event (BUG 3: counts as OReb, same possession)
-        events.push({ time, text: `${rebLn} Offensive Rebound.`, type: 'info', quarter });
+        // Rebound: 2 s after the miss
+        events.push({ time: tickSub(2), text: `${rebLn} Offensive Rebound.`, type: 'info', quarter });
 
-        // Step 3: Putback attempt — success rate = (offReb × 0.4 + layups × 0.6) / 100
+        // Putback attempt: 1 s after the rebound
         const putbackChance = (
           (rebounder.attributes.offReb ?? 50) * 0.4 +
           (rebounder.attributes.layups ?? 50) * 0.6
         ) / 100;
         const putbackMade = Math.random() < putbackChance;
         if (putbackMade) {
-          // Putback Made: updates teamStreak, no assist credited
-          events.push({ time, text: `${rebLn} Putback Layup: Made.`, type: 'score', quarter });
+          events.push({ time: tickSub(1), text: `${rebLn} Putback Layup: Made.`, type: 'score', quarter });
           teamStreak++;
           streakMap.set(rebounder.id, Math.max(0, streakMap.get(rebounder.id) ?? 0) + 1);
         } else {
-          events.push({ time, text: `${rebLn} Putback Layup: Missed.`, type: 'miss', quarter });
+          events.push({ time: tickSub(1), text: `${rebLn} Putback Layup: Missed.`, type: 'miss', quarter });
         }
       }
     }
@@ -2990,10 +3009,10 @@ const generateQuarterPBP = (
       const msg = newStreak > 0
         ? `${lastName(handler)} is on fire — can't miss right now!`
         : `${lastName(handler)} can't seem to buy a bucket tonight`;
-      events.push({ time, text: msg, type: 'info', quarter });
+      events.push({ time: tickSub(1), text: msg, type: 'info', quarter });
     }
     if (poss.conflictFired && poss.conflictText)
-      events.push({ time, text: poss.conflictText, type: 'info', quarter });
+      events.push({ time: tickSub(1), text: poss.conflictText, type: 'info', quarter });
   }
   return { events, teamStreak };
 };
