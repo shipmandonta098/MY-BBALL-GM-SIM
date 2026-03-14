@@ -931,6 +931,9 @@ const PlayerModal: React.FC<PlayerModalProps> = ({
             const tpp = s.threepa > 0 ? s.threepm / s.threepa : 0;
             const ftp = s.fta  > 0 ? s.ftm  / s.fta  : 0;
             const eFG = s.fga  > 0 ? (s.fgm + 0.5 * s.threepm) / s.fga : 0;
+            const twopm = s.fgm - s.threepm;
+            const twopa = s.fga - s.threepa;
+            const twop = twopa > 0 ? twopm / twopa : 0;
             const ts  = (s.fga + 0.44 * s.fta) > 0
               ? s.points / (2 * (s.fga + 0.44 * s.fta)) : 0;
             const per = s.minutes > 0
@@ -955,23 +958,36 @@ const PlayerModal: React.FC<PlayerModalProps> = ({
 
             const statCols: { label: string; value: string; hi?: boolean }[] = [
               { label: 'GP',  value: String(s.gamesPlayed) },
+              { label: 'GS',  value: String(s.gamesStarted) },
               { label: 'MIN', value: fmt1(mpg) },
               { label: 'PTS', value: fmt1(ppg), hi: ppg >= 20 },
               { label: 'REB', value: fmt1(rpg), hi: rpg >= 8 },
+              { label: 'ORB', value: fmt1(s.offReb / gp) },
+              { label: 'DRB', value: fmt1(s.defReb / gp) },
               { label: 'AST', value: fmt1(apg), hi: apg >= 6 },
               { label: 'STL', value: fmt1(spg), hi: spg >= 1.5 },
               { label: 'BLK', value: fmt1(bpg), hi: bpg >= 1.5 },
               { label: 'TO',  value: fmt1(tpg) },
+              { label: 'PF',  value: fmt1(s.pf / gp) },
+              { label: 'FGM', value: fmt1(s.fgm / gp) },
+              { label: 'FGA', value: fmt1(s.fga / gp) },
               { label: 'FG%', value: fmtPct(fgp), hi: fgp >= 0.5 },
+              { label: '3PM', value: fmt1(s.threepm / gp) },
+              { label: '3PA', value: fmt1(s.threepa / gp) },
               { label: '3P%', value: s.threepa > 0 ? fmtPct(tpp) : '—', hi: tpp >= 0.38 },
+              { label: '2PM', value: fmt1(twopm / gp) },
+              { label: '2PA', value: fmt1(twopa / gp) },
+              { label: '2P%', value: twopa > 0 ? fmtPct(twop) : '—', hi: twop >= 0.52 },
+              { label: 'FTM', value: fmt1(s.ftm / gp) },
+              { label: 'FTA', value: fmt1(s.fta / gp) },
               { label: 'FT%', value: s.fta > 0 ? fmtPct(ftp) : '—' },
+              { label: 'eFG%', value: fmtPct(eFG) },
             ];
 
             const advCols: { label: string; value: string }[] = [
-              { label: 'PER',  value: fmt1(per) },
-              { label: 'TS%',  value: fmtPct(ts) },
-              { label: 'eFG%', value: fmtPct(eFG) },
-              { label: '+/-',  value: fmtPm(pmPg) },
+              { label: 'PER', value: fmt1(per) },
+              { label: 'TS%', value: fmtPct(ts) },
+              { label: '+/-', value: fmtPm(pmPg) },
             ];
 
             return (
@@ -1024,7 +1040,7 @@ const PlayerModal: React.FC<PlayerModalProps> = ({
                       </table>
                     </div>
                     {/* Advanced row */}
-                    <div className="border-t border-slate-800 grid grid-cols-4 divide-x divide-slate-800">
+                    <div className="border-t border-slate-800 grid grid-cols-3 divide-x divide-slate-800">
                       {advCols.map(c => (
                         <div key={c.label} className="py-3 text-center">
                           <div className="text-[10px] font-black uppercase tracking-widest text-slate-500">{c.label}</div>
@@ -1042,7 +1058,7 @@ const PlayerModal: React.FC<PlayerModalProps> = ({
                       <table className="w-full text-center">
                         <thead>
                           <tr className="border-b border-slate-800">
-                            {['Season', 'Team', 'GP', 'MIN', 'PTS', 'REB', 'AST', 'STL', 'BLK', 'FG%', '3P%', 'FT%'].map(h => (
+                            {['Season', 'Team', 'GP', 'GS', 'MIN', 'PTS', 'REB', 'ORB', 'DRB', 'AST', 'STL', 'BLK', 'PF', 'FGM', 'FGA', 'FG%', '3PM', '3PA', '3P%', '2PM', '2PA', '2P%', 'FTM', 'FTA', 'FT%', 'eFG%'].map(h => (
                               <th key={h} className="px-3 py-3 text-[10px] font-black uppercase tracking-widest text-slate-500 whitespace-nowrap">
                                 {h}
                               </th>
@@ -1064,15 +1080,29 @@ const PlayerModal: React.FC<PlayerModalProps> = ({
                                     {cs.teamName.length > 10 ? cs.teamName.slice(0, 10) + '…' : cs.teamName}
                                   </td>
                                   <td className="px-3 py-3 font-display font-bold text-slate-300 tabular-nums text-sm">{cs.gamesPlayed}</td>
+                                  <td className="px-3 py-3 font-display font-bold text-slate-300 tabular-nums text-sm">{cs.gamesStarted}</td>
                                   <td className="px-3 py-3 font-display font-bold text-slate-300 tabular-nums text-sm">{fmt1(cs.minutes / cgp)}</td>
                                   <td className={`px-3 py-3 font-display font-bold tabular-nums text-sm ${cs.points / cgp >= 20 ? 'text-amber-400' : 'text-slate-200'}`}>{fmt1(cs.points / cgp)}</td>
                                   <td className="px-3 py-3 font-display font-bold text-slate-200 tabular-nums text-sm">{fmt1(cs.rebounds / cgp)}</td>
+                                  <td className="px-3 py-3 font-display font-bold text-slate-300 tabular-nums text-sm">{fmt1(cs.offReb / cgp)}</td>
+                                  <td className="px-3 py-3 font-display font-bold text-slate-300 tabular-nums text-sm">{fmt1(cs.defReb / cgp)}</td>
                                   <td className="px-3 py-3 font-display font-bold text-slate-200 tabular-nums text-sm">{fmt1(cs.assists / cgp)}</td>
                                   <td className="px-3 py-3 font-display font-bold text-slate-300 tabular-nums text-sm">{fmt1(cs.steals / cgp)}</td>
                                   <td className="px-3 py-3 font-display font-bold text-slate-300 tabular-nums text-sm">{fmt1(cs.blocks / cgp)}</td>
+                                  <td className="px-3 py-3 font-display font-bold text-slate-300 tabular-nums text-sm">{fmt1(cs.pf / cgp)}</td>
+                                  <td className="px-3 py-3 font-display font-bold text-slate-300 tabular-nums text-sm">{fmt1(cs.fgm / cgp)}</td>
+                                  <td className="px-3 py-3 font-display font-bold text-slate-300 tabular-nums text-sm">{fmt1(cs.fga / cgp)}</td>
                                   <td className="px-3 py-3 font-display font-bold text-slate-300 tabular-nums text-sm">{cs.fga > 0 ? fmtPct(cs.fgm / cs.fga) : '—'}</td>
+                                  <td className="px-3 py-3 font-display font-bold text-slate-300 tabular-nums text-sm">{fmt1(cs.threepm / cgp)}</td>
+                                  <td className="px-3 py-3 font-display font-bold text-slate-300 tabular-nums text-sm">{fmt1(cs.threepa / cgp)}</td>
                                   <td className="px-3 py-3 font-display font-bold text-slate-300 tabular-nums text-sm">{cs.threepa > 0 ? fmtPct(cs.threepm / cs.threepa) : '—'}</td>
+                                  <td className="px-3 py-3 font-display font-bold text-slate-300 tabular-nums text-sm">{fmt1((cs.fgm - cs.threepm) / cgp)}</td>
+                                  <td className="px-3 py-3 font-display font-bold text-slate-300 tabular-nums text-sm">{fmt1((cs.fga - cs.threepa) / cgp)}</td>
+                                  <td className="px-3 py-3 font-display font-bold text-slate-300 tabular-nums text-sm">{(cs.fga - cs.threepa) > 0 ? fmtPct((cs.fgm - cs.threepm) / (cs.fga - cs.threepa)) : '—'}</td>
+                                  <td className="px-3 py-3 font-display font-bold text-slate-300 tabular-nums text-sm">{fmt1(cs.ftm / cgp)}</td>
+                                  <td className="px-3 py-3 font-display font-bold text-slate-300 tabular-nums text-sm">{fmt1(cs.fta / cgp)}</td>
                                   <td className="px-3 py-3 font-display font-bold text-slate-300 tabular-nums text-sm">{cs.fta > 0 ? fmtPct(cs.ftm / cs.fta) : '—'}</td>
+                                  <td className="px-3 py-3 font-display font-bold text-slate-300 tabular-nums text-sm">{cs.fga > 0 ? fmtPct((cs.fgm + 0.5 * cs.threepm) / cs.fga) : '—'}</td>
                                 </tr>
                               );
                             })
