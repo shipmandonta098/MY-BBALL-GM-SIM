@@ -1,6 +1,7 @@
 import React, { useState, useMemo, useEffect } from 'react';
-import { Team, Player, Position, PlayerStatus, PersonalityTrait, Coach } from '../types';
+import { Team, Player, Position, PlayerStatus, PersonalityTrait, Coach, TeamRotation } from '../types';
 import TeamBadge from './TeamBadge';
+import { getFlag } from '../constants';
 
 export interface RosterProps {
   leagueTeams: Team[];
@@ -27,6 +28,32 @@ const traitIcons: Record<PersonalityTrait, string> = {
   'Hot Head': '🔥',
   'Workhorse': '🐴',
   'Streaky': '📈'
+};
+
+/** True if a player is currently injured (status field or days remaining). */
+const isPlayerInjured = (p: Player) =>
+  p.status === 'Injured' || (p.injuryDaysLeft != null && p.injuryDaysLeft > 0);
+
+/** Derive display status from rotation slot, overriding with injury when applicable. */
+const getEffectiveStatus = (p: Player, rotation?: TeamRotation): PlayerStatus => {
+  if (isPlayerInjured(p)) return 'Injured';
+  if (!rotation) return p.status;
+  const starterIds = Object.values(rotation.starters);
+  if (starterIds.includes(p.id)) return 'Starter';
+  if (rotation.bench.includes(p.id)) return 'Rotation';
+  if (rotation.reserves.includes(p.id)) return 'Bench';
+  return p.status;
+};
+
+const ARCHETYPE_COLORS: Record<string, string> = {
+  'Hybrid Star':        'bg-amber-500/20 text-amber-400 border-amber-500/30',
+  '3&D Wing':           'bg-blue-500/20 text-blue-400 border-blue-500/30',
+  'Pure Scorer':        'bg-rose-500/20 text-rose-400 border-rose-500/30',
+  'Lockdown Defender':  'bg-slate-500/20 text-slate-400 border-slate-500/30',
+  'Stretch Big':        'bg-violet-500/20 text-violet-400 border-violet-500/30',
+  'Rim Protector':      'bg-emerald-500/20 text-emerald-400 border-emerald-500/30',
+  'Playmaking Guard':   'bg-cyan-500/20 text-cyan-400 border-cyan-500/30',
+  'Two-Way Forward':    'bg-teal-500/20 text-teal-400 border-teal-500/30',
 };
 
 const Roster: React.FC<RosterProps> = ({ leagueTeams, userTeamId, initialTeamId, onScout, onScoutCoach, scoutingReport, onUpdateTeamRoster, onManageTeam }) => {
@@ -80,7 +107,7 @@ const Roster: React.FC<RosterProps> = ({ leagueTeams, userTeamId, initialTeamId,
         const matchesSearch = p.name.toLowerCase().includes(searchTerm.toLowerCase());
         const matchesPos = posFilter === 'ALL' || p.position === posFilter;
         const matchesOvr = p.rating >= minOvr;
-        const matchesInjured = !injuredOnly || p.status === 'Injured';
+        const matchesInjured = !injuredOnly || isPlayerInjured(p);
         return matchesSearch && matchesPos && matchesOvr && matchesInjured;
       })
       .sort((a, b) => {
@@ -249,28 +276,45 @@ const Roster: React.FC<RosterProps> = ({ leagueTeams, userTeamId, initialTeamId,
               {filteredRoster.map((player) => (
                 <tr 
                   key={player.id} 
-                  className={`group hover:bg-slate-800/40 transition-all cursor-pointer ${player.status === 'Injured' ? 'bg-rose-950/20 border-l-2 border-rose-500/30' : ''}`}
+                  className={`group hover:bg-slate-800/40 transition-all cursor-pointer ${isPlayerInjured(player) ? 'bg-rose-950/20 border-l-2 border-rose-500/30' : ''}`}
                   onClick={() => onScout(player)}
                 >
                   <td className="px-8 py-6">
                     <div className="flex items-center gap-4">
-                      <div className="w-12 h-12 bg-slate-800 rounded-xl flex items-center justify-center font-display text-xl text-slate-600 border border-slate-700">
+                      <div className={`w-12 h-12 rounded-xl flex items-center justify-center font-display text-xl border ${isPlayerInjured(player) ? 'bg-rose-950/40 border-rose-500/40 text-rose-400' : 'bg-slate-800 border-slate-700 text-slate-600'}`}>
                         {player.name.charAt(0)}
                       </div>
-                      <div>
-                        <div className="flex items-center gap-2">
-                          <span className="font-display font-bold text-lg text-slate-100 group-hover:text-amber-500 transition-colors uppercase tracking-tight">
+                      <div className="min-w-0">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          {player.country && (
+                            <span className="text-base leading-none" title={player.country}>{getFlag(player.country)}</span>
+                          )}
+                          <span className={`font-display font-bold text-lg uppercase tracking-tight transition-colors group-hover:text-amber-500 ${isPlayerInjured(player) ? 'text-rose-400' : 'text-slate-100'}`}>
                             {player.name}
                           </span>
                         </div>
-                        <div className="flex items-center gap-2 mt-0.5">
-                          {player.status === 'Injured' ? (
-                            <span className="text-[10px] font-black uppercase tracking-widest px-1.5 py-0.5 rounded bg-rose-500/10 text-rose-400 border border-rose-500/20 whitespace-nowrap">
-                              🤕 {player.injuryType ?? 'Injured'}{player.injuryDaysLeft ? ` · ${player.injuryDaysLeft}d` : ''}
-                            </span>
-                          ) : (
-                            <span className={`text-[10px] font-black uppercase tracking-widest px-1.5 py-0.5 rounded ${player.status === 'Starter' ? 'bg-emerald-500/10 text-emerald-500' : 'bg-slate-800 text-slate-500'}`}>
-                              {player.status}
+                        <div className="flex items-center gap-2 mt-1 flex-wrap">
+                          {(() => {
+                            const eff = getEffectiveStatus(player, activeTeam.rotation);
+                            if (eff === 'Injured') return (
+                              <span className="text-[10px] font-black uppercase tracking-widest px-1.5 py-0.5 rounded bg-rose-500/10 text-rose-400 border border-rose-500/20 whitespace-nowrap">
+                                🤕 {player.injuryType ?? 'Injured'}{player.injuryDaysLeft ? ` · ${player.injuryDaysLeft}d` : ''}
+                              </span>
+                            );
+                            const statusColors: Record<string, string> = {
+                              Starter:  'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20',
+                              Rotation: 'bg-blue-500/10 text-blue-400 border border-blue-500/20',
+                              Bench:    'bg-slate-800 text-slate-500 border border-slate-700',
+                            };
+                            return (
+                              <span className={`text-[10px] font-black uppercase tracking-widest px-1.5 py-0.5 rounded ${statusColors[eff] ?? 'bg-slate-800 text-slate-500'}`}>
+                                {eff}
+                              </span>
+                            );
+                          })()}
+                          {player.archetype && (
+                            <span className={`text-[10px] font-black uppercase tracking-widest px-1.5 py-0.5 rounded border ${ARCHETYPE_COLORS[player.archetype] ?? 'bg-slate-800/50 text-slate-400 border-slate-700'}`}>
+                              {player.archetype}
                             </span>
                           )}
                           <div className="flex gap-1">
