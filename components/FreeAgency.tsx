@@ -118,14 +118,15 @@ const FreeAgency: React.FC<FreeAgencyProps> = ({
   const isOverCap = capSpace < 0;
   const isOverLux = currentSalary > luxuryTax;
 
-  const moratoriumActive = league.offseasonDay < MORATORIUM_DAYS;
-  const daysUntilOpen = Math.max(0, MORATORIUM_DAYS - league.offseasonDay);
-  const isInSeason = !league.isOffseason &&
-    league.seasonPhase !== 'Preseason' &&
-    league.seasonPhase !== 'Offseason';
-  const gamesRemaining = isInSeason
-    ? league.schedule.filter(g => !g.played).length
-    : 0;
+  const moratoriumActive = league.isOffseason && league.offseasonDay < MORATORIUM_DAYS;
+  const daysUntilOpen = league.isOffseason ? Math.max(0, MORATORIUM_DAYS - league.offseasonDay) : 0;
+  // Preseason: no games played yet (or phase explicitly says so) — FA locked until tip-off
+  const gamesPlayedSoFar = league.schedule.filter(g => g.played).length;
+  const isPreseason = !league.isOffseason &&
+    (league.seasonPhase === 'Preseason' || gamesPlayedSoFar === 0);
+  // In-season: regular season / trade deadline / all-star — signing fully open
+  const isInSeason = !league.isOffseason && !isPreseason && league.seasonPhase !== 'Offseason';
+  const gamesRemaining = isInSeason ? league.schedule.filter(g => !g.played).length : 0;
 
   // ── In-season signing handler ──
   const handleInSeasonSign = (player: Player, contractType: InSeasonContractType, salary: number) => {
@@ -486,8 +487,23 @@ const FreeAgency: React.FC<FreeAgencyProps> = ({
         </div>
       )}
 
+      {/* ── Preseason Banner ── */}
+      {isPreseason && (
+        <div className="bg-slate-800/40 border border-slate-700/60 rounded-[2rem] p-5 flex items-center gap-5">
+          <div className="text-3xl shrink-0">⏸️</div>
+          <div>
+            <p className="text-[10px] font-black uppercase tracking-[0.4em] text-slate-500 mb-0.5">Preseason</p>
+            <h3 className="text-lg font-display font-bold text-slate-300 uppercase">FA Market opens at tip-off</h3>
+            <p className="text-slate-600 text-xs mt-0.5">
+              In-season waivers &amp; buyouts become available once the regular season begins.
+              Advance your first game to unlock.
+            </p>
+          </div>
+        </div>
+      )}
+
       {/* ── Moratorium Banner ── */}
-      {!isInSeason && moratoriumActive && (
+      {!isInSeason && !isPreseason && moratoriumActive && (
         <div className="bg-amber-500/10 border border-amber-500/30 rounded-[2rem] p-6 flex flex-col sm:flex-row items-center justify-between gap-4">
           <div>
             <p className="text-[10px] font-black uppercase tracking-[0.4em] text-amber-500 mb-1">
@@ -522,9 +538,11 @@ const FreeAgency: React.FC<FreeAgencyProps> = ({
             <p className="text-slate-500 text-sm font-bold uppercase tracking-widest">
               {isInSeason
                 ? <span className="text-orange-400">🟠 In-Season Signings Open</span>
-                : moratoriumActive
-                  ? <span className="text-amber-500">Moratorium Active</span>
-                  : <span className="text-emerald-400">🟢 Signings Open — Day {league.offseasonDay}</span>
+                : isPreseason
+                  ? <span className="text-slate-500">⏸ Preseason — Market Opens Soon</span>
+                  : moratoriumActive
+                    ? <span className="text-amber-500">🔒 Moratorium Active</span>
+                    : <span className="text-emerald-400">🟢 Signings Open — Day {league.offseasonDay}</span>
               }
               <span className="ml-3 text-slate-700">·</span>
               <span className="ml-3 text-slate-500">
@@ -566,8 +584,8 @@ const FreeAgency: React.FC<FreeAgencyProps> = ({
               <p className="text-xl font-display font-bold text-slate-300">{fmt(currentSalary)}</p>
             </div>
 
-            {/* Advance Day — offseason only */}
-            {!isInSeason && (
+            {/* Advance Day — offseason only (moratorium phase) */}
+            {league.isOffseason && (
               <button
                 onClick={advanceDay}
                 className="px-7 py-4 bg-amber-500 hover:bg-amber-400 text-slate-950 font-display font-bold uppercase rounded-xl transition-all shadow-xl shadow-amber-500/20 active:scale-95"
@@ -686,7 +704,10 @@ const FreeAgency: React.FC<FreeAgencyProps> = ({
                 {filteredFAs.map(p => {
                   const interest = interestLabel(p.interestScore ?? 50);
                   const desired = getDesired(p);
-                  const canSign = !moratoriumActive && capSpace >= desired.salary * 0.7;
+                  // In-season: only needs minimum cap room; offseason: full cap check + no moratorium
+                  const canSign = isInSeason
+                    ? capSpace >= 600_000
+                    : !moratoriumActive && capSpace >= desired.salary * 0.7;
                   return (
                     <tr
                       key={p.id}
@@ -746,10 +767,12 @@ const FreeAgency: React.FC<FreeAgencyProps> = ({
                       </td>
 
                       <td className="px-5 py-4 text-right" onClick={e => e.stopPropagation()}>
-                        {isInSeason ? (
+                        {isPreseason ? (
+                          <span className="text-[10px] text-slate-700 font-bold uppercase">Preseason</span>
+                        ) : isInSeason ? (
                           <button
                             onClick={() => { setInSeasonPlayer(p); setInSeasonResult(null); }}
-                            disabled={!canSign && capSpace < 600_000}
+                            disabled={capSpace < 600_000}
                             className={`px-4 py-2 text-[10px] font-black uppercase rounded-lg transition-all ${
                               capSpace < 600_000
                                 ? 'bg-slate-800 text-slate-700 cursor-not-allowed'

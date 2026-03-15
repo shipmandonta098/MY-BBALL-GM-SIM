@@ -694,6 +694,269 @@ export function aiGMTradeDeadlineAction(
   return { newsItems, updatedState: s };
 }
 
+// ─── In-season AI-vs-AI trades ──────────────────────────────
+/**
+ * Runs ~weekly during the regular season. Each AI team has a personality-
+ * based probability of initiating a trade. Contenders buy; rebuilders sell.
+ * Only AI-vs-AI trades are generated (no user team involvement).
+ */
+export function aiGMInSeasonTrades(
+  state: LeagueState,
+  difficulty: string
+): { updatedState: LeagueState; newsItems: NewsItem[]; transactions: Transaction[] } {
+  const newsItems: NewsItem[] = [];
+  const transactions: Transaction[] = [];
+  let s = { ...state, teams: [...state.teams] };
+
+  const aiTeams = s.teams.filter(t => t.id !== s.userTeamId && !!t.aiGM);
+  const totalPlayed = aiTeams.reduce((max, t) => Math.max(max, t.wins + t.losses), 0);
+
+  // Don't trade until at least 10 games into the season
+  if (totalPlayed < 10) return { updatedState: s, newsItems, transactions };
+
+  const tradedTeams = new Set<string>();
+  // Shuffle so different teams initiate each cycle
+  const shuffled = [...aiTeams].sort(() => Math.random() - 0.5);
+
+  const diffLevel = normalizeDifficulty(difficulty);
+  // Higher difficulty = more trades per cycle
+  const maxTradesPerCycle = diffLevel >= 3 ? 3 : diffLevel === 2 ? 2 : 1;
+  let tradesThisCycle = 0;
+
+  for (const team of shuffled) {
+    if (tradedTeams.has(team.id) || tradesThisCycle >= maxTradesPerCycle) break;
+
+    const { personality } = team.aiGM!;
+    const gamesAbove = team.wins - team.losses;
+    const isRebuilding = gamesAbove <= -3 || personality === 'Rebuilder';
+    const isContending = gamesAbove >= 3 || personality === 'Win Now' || personality === 'Superstar Chaser';
+
+    // Per-personality activity chance
+    const actChance =
+      personality === 'Rebuilder'        ? (gamesAbove <= -5 ? 0.40 : 0.20) :
+      personality === 'Win Now'          ? (gamesAbove >= 5  ? 0.38 : 0.18) :
+      personality === 'Superstar Chaser' ? 0.30 :
+      personality === 'Analytics'        ? 0.22 :
+      personality === 'Balanced'         ? 0.14 :
+      0.08; // Loyalist
+
+    if (Math.random() > actChance) continue;
+
+    // ── REBUILDER: dump veteran for young asset ──────────────
+    if (isRebuilding && !isContending) {
+      const vetCandidates = s.teams.find(t => t.id === team.id)!.roster
+        .filter(p => p.age >= 29 && p.rating >= 72 && p.contractYears <= 2)
+        .sort((a, b) => b.rating - a.rating);
+      if (vetCandidates.length === 0) continue;
+      const vet = vetCandidates[0];
+
+      // Find a contending buyer
+      const buyers = shuffled.filter(t =>
+        t.id !== team.id && !tradedTeams.has(t.id) &&
+        (t.wins - t.losses) >= 3
+      );
+      if (buyers.length === 0) continue;
+      const buyer = buyers[Math.floor(Math.random() * buyers.length)];
+      const buyerData = s.teams.find(t => t.id === buyer.id)!;
+
+      // Buyer offers back a young, affordable player
+      const returnCandidates = buyerData.roster
+        .filter(p => p.age <= 26 && p.rating >= 65 && p.rating <= vet.rating + 4)
+        .sort((a, b) => a.salary - b.salary);
+      if (returnCandidates.length === 0) continue;
+      const returnPlayer = returnCandidates[0];
+
+      const rebuilderGets: TradePackage = { players: [returnPlayer], picks: [] };
+      const rebuilderSends: TradePackage = { players: [vet], picks: [] };
+      const buyerGets: TradePackage = { players: [vet], picks: [] };
+      const buyerSends: TradePackage = { players: [returnPlayer], picks: [] };
+
+      if (
+        evaluateTrade(rebuilderGets, rebuilderSends, personality, s.teams.length) &&
+        evaluateTrade(buyerGets, buyerSends, buyer.aiGM!.personality, s.teams.length)
+      ) {
+        const rebuilderTeam = s.teams.find(t => t.id === team.id)!;
+        const buyerTeam = s.teams.find(t => t.id === buyer.id)!;
+        s = {
+          ...s,
+          teams: s.teams.map(t => {
+            if (t.id === rebuilderTeam.id) return { ...t, roster: [...t.roster.filter(p => p.id !== vet.id), { ...returnPlayer, lastTeamId: buyerTeam.id }] };
+            if (t.id === buyerTeam.id) return { ...t, roster: [...t.roster.filter(p => p.id !== returnPlayer.id), { ...vet, lastTeamId: rebuilderTeam.id }] };
+            return t;
+          }),
+        };
+        tradedTeams.add(team.id);
+        tradedTeams.add(buyer.id);
+        tradesThisCycle++;
+
+        newsItems.push(makeNewsItem(
+          'trade',
+          `TRADE: ${vet.name} → ${buyerTeam.abbreviation}`,
+          `${buyerTeam.name} acquired ${vet.name} (${vet.position}, ${vet.rating} OVR) from ${rebuilderTeam.name} in exchange for ${returnPlayer.name}.`,
+          s.currentDay, rebuilderTeam.id, vet.id, false
+        ));
+        transactions.push(makeTransaction(
+          s, 'trade', [rebuilderTeam.id, buyerTeam.id],
+          `TRADE: ${rebuilderTeam.name} sends ${vet.name} to ${buyerTeam.name} for ${returnPlayer.name}.`,
+          [vet.id, returnPlayer.id]
+        ));
+      }
+    }
+
+    // ── CONTENDER: acquire help at position of need ──────────
+    else if (isContending && !isRebuilding) {
+      const contenderData = s.teams.find(t => t.id === team.id)!;
+      const neededPos = mostNeededPosition(contenderData);
+
+      // Find a non-contender with a good player at that position
+      const sellers = shuffled.filter(t =>
+        t.id !== team.id && !tradedTeams.has(t.id) &&
+        (t.wins - t.losses) <= 0
+      );
+      let foundSellerId: string | null = null;
+      let targetPlayer: Player | null = null;
+
+      for (const seller of sellers) {
+        const sellerData = s.teams.find(t => t.id === seller.id)!;
+        const candidate = sellerData.roster.find(p =>
+          p.position === neededPos && p.rating >= 72 && p.age <= 34
+        );
+        if (candidate) { foundSellerId = seller.id; targetPlayer = candidate; break; }
+      }
+      if (!foundSellerId || !targetPlayer) continue;
+
+      const sellerData = s.teams.find(t => t.id === foundSellerId!)!;
+      // Contender sends back an affordable young asset
+      const sendBack = contenderData.roster
+        .filter(p => p.age <= 27 && p.rating >= 65 && p.rating <= targetPlayer!.rating + 5 && p.contractYears >= 1)
+        .sort((a, b) => a.rating - b.rating);
+      if (sendBack.length === 0) continue;
+      const returnPlayer = sendBack[0];
+
+      const sellerGets: TradePackage = { players: [returnPlayer], picks: [] };
+      const sellerSends: TradePackage = { players: [targetPlayer!], picks: [] };
+      const contenderGets: TradePackage = { players: [targetPlayer!], picks: [] };
+      const contenderSends: TradePackage = { players: [returnPlayer], picks: [] };
+
+      if (
+        evaluateTrade(sellerGets, sellerSends, sellerData.aiGM?.personality ?? 'Balanced', s.teams.length) &&
+        evaluateTrade(contenderGets, contenderSends, personality, s.teams.length)
+      ) {
+        s = {
+          ...s,
+          teams: s.teams.map(t => {
+            if (t.id === foundSellerId) return { ...t, roster: [...t.roster.filter(p => p.id !== targetPlayer!.id), { ...returnPlayer, lastTeamId: contenderData.id }] };
+            if (t.id === team.id) return { ...t, roster: [...t.roster.filter(p => p.id !== returnPlayer.id), { ...targetPlayer!, lastTeamId: sellerData.id }] };
+            return t;
+          }),
+        };
+        tradedTeams.add(team.id);
+        tradedTeams.add(foundSellerId);
+        tradesThisCycle++;
+
+        newsItems.push(makeNewsItem(
+          'trade',
+          `TRADE: ${targetPlayer.name} → ${contenderData.abbreviation}`,
+          `${contenderData.name} acquired ${targetPlayer.name} (${targetPlayer.position}, ${targetPlayer.rating} OVR) from ${sellerData.name} for ${returnPlayer.name}.`,
+          s.currentDay, team.id, targetPlayer.id, false
+        ));
+        transactions.push(makeTransaction(
+          s, 'trade', [team.id, foundSellerId],
+          `TRADE: ${contenderData.name} acquires ${targetPlayer.name} from ${sellerData.name} for ${returnPlayer.name}.`,
+          [targetPlayer.id, returnPlayer.id]
+        ));
+      }
+    }
+  }
+
+  return { updatedState: s, newsItems, transactions };
+}
+
+// ─── Pre-offseason agreements (moratorium window) ────────────
+/**
+ * Fires at offseasonDay=0. AI GMs make preliminary FA agreements
+ * announced as "agrees to terms" — flavor of real NBA July 1 activity.
+ * Only a few early signings; main FA logic stays in runAIGMOffseason.
+ */
+export function aiGMPreOffseasonAgreements(
+  state: LeagueState,
+  difficulty: string
+): { updatedState: LeagueState; newsItems: NewsItem[]; transactions: Transaction[] } {
+  const newsItems: NewsItem[] = [];
+  const transactions: Transaction[] = [];
+  let s = { ...state };
+
+  if (!s.freeAgents || s.freeAgents.length === 0) return { updatedState: s, newsItems, transactions };
+
+  const cap = s.settings.salaryCap || 140_000_000;
+  const diffLevel = normalizeDifficulty(difficulty);
+  // Higher difficulty = more pre-offseason activity
+  const maxSignings = diffLevel >= 3 ? 4 : 2;
+
+  const aiTeams = s.teams
+    .filter(t => t.id !== s.userTeamId && !!t.aiGM)
+    .sort(() => Math.random() - 0.5);
+
+  let totalSigned = 0;
+  let updatedFAs = [...s.freeAgents].sort((a, b) => b.rating - a.rating);
+
+  for (const team of aiTeams) {
+    if (totalSigned >= maxSignings || updatedFAs.length === 0) break;
+    // Only contenders / Win Now sign early (urgency)
+    const { personality } = team.aiGM!;
+    const isEagerSigner =
+      personality === 'Win Now' ||
+      personality === 'Superstar Chaser' ||
+      (personality === 'Analytics' && Math.random() < 0.5);
+    if (!isEagerSigner) continue;
+
+    const teamSalary = team.roster.reduce((s, p) => s + (p.salary || 0), 0);
+    const teamCap = cap - teamSalary;
+    if (teamCap < 1_000_000) continue;
+
+    // Find best affordable FA
+    const faIdx = updatedFAs.findIndex(fa =>
+      (fa.desiredContract?.salary ?? 3_000_000) <= teamCap * 0.9
+    );
+    if (faIdx === -1) continue;
+    const [fa] = updatedFAs.splice(faIdx, 1);
+
+    const desired = fa.desiredContract?.salary ?? 5_000_000;
+    const offerSalary = Math.round(Math.min(teamCap * 0.8, desired * (0.90 + Math.random() * 0.15)) / 250_000) * 250_000;
+    const offerYears = personality === 'Win Now' ? 3 : 2;
+
+    const signedPlayer: Player = {
+      ...fa,
+      isFreeAgent: false,
+      salary: offerSalary,
+      contractYears: offerYears,
+      lastTeamId: fa.lastTeamId,
+    };
+    s = {
+      ...s,
+      teams: s.teams.map(t =>
+        t.id === team.id ? { ...t, roster: [...t.roster, signedPlayer] } : t
+      ),
+    };
+    totalSigned++;
+
+    newsItems.push(makeNewsItem(
+      'transaction',
+      `${fa.name} agrees to terms with ${team.name}`,
+      `${team.name} have agreed to terms with ${fa.name} (${fa.position}, ${fa.rating} OVR) on a ${offerYears}-year deal worth ${(offerSalary / 1_000_000).toFixed(1)}M/yr — pending moratorium.`,
+      s.currentDay, team.id, fa.id, false
+    ));
+    transactions.push(makeTransaction(
+      s, 'signing', [team.id],
+      `${team.name} agrees to terms with ${fa.name} — deal pending moratorium.`,
+      [fa.id]
+    ));
+  }
+
+  s = { ...s, freeAgents: updatedFAs };
+  return { updatedState: s, newsItems, transactions };
+}
+
 // ─── Summary of AI personalities for display ────────────────
 export const AI_GM_PERSONALITY_INFO: Record<AIGMPersonality, {
   color: string;

@@ -5,7 +5,7 @@ import { generateLeagueTeams, generateSeasonSchedule, generateProspects, generat
 import { simulateGame, normalizeLeagueOVRs } from './utils/simEngine';
 import { generateGameRecap, generateScoutingReport, generateSeasonNarrative, generateCoachScoutingReport, generateNewsHeadline } from './services/geminiService';
 import { generateAwards } from './utils/awardEngine';
-import { assignAIPersonalities, runAIGMOffseason, aiGMTradeDeadlineAction } from './utils/aiGMEngine';
+import { assignAIPersonalities, runAIGMOffseason, aiGMTradeDeadlineAction, aiGMInSeasonTrades, aiGMPreOffseasonAgreements } from './utils/aiGMEngine';
 import { db } from './db';
 
 // Components
@@ -748,6 +748,22 @@ const App: React.FC = () => {
       }
     }
 
+    // ── AI in-season trades (~weekly, during regular season) ──
+    if (!newState.isOffseason && newState.currentDay % 7 === 0 && !newState.tradeDeadlinePassed) {
+      try {
+        const tradeResult = aiGMInSeasonTrades(newState, newState.settings.difficulty ?? 'Medium');
+        if (tradeResult.newsItems.length > 0) {
+          newState = {
+            ...tradeResult.updatedState,
+            newsFeed: [...tradeResult.newsItems, ...(newState.newsFeed || [])].slice(0, 200),
+            transactions: [...tradeResult.transactions, ...(newState.transactions || [])].slice(0, 1000),
+          };
+        } else {
+          newState = tradeResult.updatedState;
+        }
+      } catch (_e) { /* non-fatal */ }
+    }
+
     // ── AI in-season signings (~30% chance per sim-day when FAs available) ──
     if (!newState.isOffseason && newState.freeAgents.length > 0 && Math.random() < 0.3) {
       const cap = newState.settings.salaryCap || 140_000_000;
@@ -1079,6 +1095,18 @@ const App: React.FC = () => {
       : tempState.settings.draftClassSize === 'Large' ? 120 : 90;
     tempState.prospects = generateProspects(tempState.season, classSize, tempState.settings.playerGenderRatio);
     tempState.draftPicks = []; // Clear old picks; lottery will populate
+
+    // ── Pre-offseason agreements (moratorium window, Day 0) ─
+    try {
+      const preResult = aiGMPreOffseasonAgreements(tempState, tempState.settings.difficulty ?? 'Medium');
+      tempState = preResult.updatedState;
+      if (preResult.newsItems.length > 0) {
+        tempState.newsFeed = [...preResult.newsItems, ...(tempState.newsFeed || [])].slice(0, 200);
+      }
+      if (preResult.transactions.length > 0) {
+        tempState.transactions = [...preResult.transactions, ...(tempState.transactions || [])].slice(0, 1000);
+      }
+    } catch (_e) { /* non-fatal */ }
 
     // ── Run AI GM offseason decisions ───────────────────────
     const aiResult = runAIGMOffseason(tempState, tempState.settings.difficulty);
