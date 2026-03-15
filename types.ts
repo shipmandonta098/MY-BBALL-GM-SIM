@@ -337,6 +337,7 @@ export interface Player {
     year: number;
   };
   isFreeAgent?: boolean;
+  inSeasonFA?: boolean; // true when waived during the regular season (10-day / rest-of-season pool)
   lastTeamId?: string;
   desiredContract?: {
     years: number;

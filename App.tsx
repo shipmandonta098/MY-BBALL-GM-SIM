@@ -748,6 +748,48 @@ const App: React.FC = () => {
       }
     }
 
+    // ── AI in-season signings (~30% chance per sim-day when FAs available) ──
+    if (!newState.isOffseason && newState.freeAgents.length > 0 && Math.random() < 0.3) {
+      const cap = newState.settings.salaryCap || 140_000_000;
+      const aiTeamsNeedingHelp = newState.teams.filter(t => {
+        if (t.id === newState.userTeamId) return false;
+        const activeRoster = t.roster.filter(p => !p.injuryDaysLeft || p.injuryDaysLeft === 0);
+        return activeRoster.length < 10; // sign if short-handed
+      });
+      if (aiTeamsNeedingHelp.length > 0) {
+        const team = aiTeamsNeedingHelp[Math.floor(Math.random() * aiTeamsNeedingHelp.length)];
+        const teamSalary = team.roster.reduce((s, p) => s + (p.salary || 0), 0);
+        const teamCapSpace = cap - teamSalary;
+        const minSalary = 600_000;
+        if (teamCapSpace >= minSalary) {
+          const eligible = newState.freeAgents.filter(fa => (fa.desiredContract?.salary ?? 600_000) <= teamCapSpace * 1.2);
+          if (eligible.length > 0) {
+            const fa = eligible[Math.floor(Math.random() * Math.min(5, eligible.length))];
+            const salary = Math.min(
+              Math.round((fa.desiredContract?.salary ?? 1_500_000) * (0.8 + Math.random() * 0.3) / 250_000) * 250_000,
+              teamCapSpace
+            );
+            const signingType = salary <= 700_000 ? '10-day' : 'rest-of-season minimum';
+            const signedPlayer = { ...fa, isFreeAgent: false, inSeasonFA: false, salary, contractYears: 1, morale: Math.min(100, (fa.morale || 70) + 5) };
+            newState = {
+              ...newState,
+              teams: newState.teams.map(t => t.id === team.id ? { ...t, roster: [...t.roster, signedPlayer] } : t),
+              freeAgents: newState.freeAgents.filter(p => p.id !== fa.id),
+              newsFeed: [{
+                id: `in-season-sign-${Date.now()}-${fa.id}`,
+                category: 'transaction' as const,
+                headline: `${fa.name} signs with ${team.name}`,
+                content: `${team.name} signed ${fa.name} (${fa.position}, ${fa.rating} OVR) to a ${signingType} deal${salary > 0 ? ` worth ${(salary / 1_000_000).toFixed(1)}M` : ''}.`,
+                timestamp: newState.currentDay,
+                realTimestamp: Date.now(),
+                isBreaking: false,
+              }, ...newState.newsFeed].slice(0, 200),
+            };
+          }
+        }
+      }
+    }
+
     return { newState: { ...newState, currentDay: newState.currentDay + 1 }, dayResults };
   };
 
@@ -1171,14 +1213,50 @@ const App: React.FC = () => {
     if (selectedPlayer && selectedPlayer.id === playerId) setSelectedPlayer({ ...selectedPlayer, status }); 
   };
   
-  const handleReleasePlayer = (playerId: string) => { 
-    if (!league || !league.userTeamId) return; 
-    const userTeam = league.teams.find(t => t.id === league.userTeamId)!; 
+  const handleReleasePlayer = (playerId: string) => {
+    if (!league || !league.userTeamId) return;
+    const userTeam = league.teams.find(t => t.id === league.userTeamId)!;
     const p = userTeam.roster.find(pl => pl.id === playerId);
-    const updatedRoster = userTeam.roster.filter(pl => pl.id !== playerId); 
+    const updatedRoster = userTeam.roster.filter(pl => pl.id !== playerId);
     const updatedTransactions = recordTransaction(league, 'release', [userTeam.id], `${userTeam.name} waived ${p?.name || 'player'}.`, [playerId]);
-    setLeague({ ...league, teams: league.teams.map(t => t.id === userTeam.id ? { ...t, roster: updatedRoster } : t), transactions: updatedTransactions });
-    setSelectedPlayer(null); 
+
+    // During the season, waived player immediately enters the in-season FA pool
+    let updatedFAs = league.freeAgents;
+    let extraNews: typeof league.newsFeed = [];
+    if (!league.isOffseason && p) {
+      const waivedFA = {
+        ...p,
+        isFreeAgent: true,
+        inSeasonFA: true,
+        lastTeamId: userTeam.id,
+        salary: 0,
+        contractYears: 0,
+        interestScore: Math.round(Math.min(90, Math.max(15, 40 + Math.random() * 30))),
+        desiredContract: {
+          years: 1,
+          salary: p.rating >= 80 ? 3_000_000 : p.rating >= 70 ? 1_500_000 : 600_000,
+        },
+      };
+      updatedFAs = [waivedFA, ...league.freeAgents];
+      extraNews = [{
+        id: `waive-${Date.now()}`,
+        category: 'transaction' as const,
+        headline: `${p.name} waived by ${userTeam.name}`,
+        content: `${p.name} (${p.position}, ${p.rating} OVR) has been placed on waivers and is now available in the FA Market.`,
+        timestamp: league.currentDay,
+        realTimestamp: Date.now(),
+        isBreaking: false,
+      }];
+    }
+
+    setLeague({
+      ...league,
+      teams: league.teams.map(t => t.id === userTeam.id ? { ...t, roster: updatedRoster } : t),
+      freeAgents: updatedFAs,
+      transactions: updatedTransactions,
+      newsFeed: [...extraNews, ...league.newsFeed],
+    });
+    setSelectedPlayer(null);
   };
   
   const handleViewRoster = (teamId: string) => { setRosterTeamId(teamId); setActiveTab('roster'); };
