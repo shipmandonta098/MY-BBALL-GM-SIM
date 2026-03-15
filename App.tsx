@@ -610,7 +610,8 @@ const App: React.FC = () => {
         ...team,
         roster: team.roster.map(p => {
           const line = lines.find(l => l.playerId === p.id);
-          if (!line) return p;
+          // No line, or DNP (injured/inactive) — leave all stats untouched
+          if (!line || line.dnp) return p;
           const newTechs = (p.stats.techs || 0) + (line.techs || 0);
           const newFlagrants = (p.stats.flagrants || 0) + (line.flagrants || 0);
           const newEjections = (p.stats.ejections || 0) + (line.ejected ? 1 : 0);

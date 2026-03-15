@@ -266,6 +266,8 @@ export interface GamePlayerLine {
   date?: number;
   opponentTeamId?: string;
   opponentTeamName?: string;
+  /** Set when player did not play. Value is the reason, e.g. 'Injured'. */
+  dnp?: string;
 }
 
 export interface Player {

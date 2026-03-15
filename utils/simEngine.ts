@@ -3539,22 +3539,33 @@ export const simulateGame = (
     const ratingRank = new Map(sortedByRating.map(({ id }, rank) => [id, rank]));
 
     return roster.map((p, i) => {
-      let mins = 0;
-      // Hard gate: injured players NEVER receive minutes regardless of saved rotation
+      // Hard gate: injured players get a zero-stat DNP line, bypassing all sim logic.
+      // This must run before the isGT block to prevent garbage-time code from
+      // overwriting mins for players who happen to be in the first 5 roster slots.
       const isInjured = p.status === 'Injured' || (p.injuryDaysLeft != null && p.injuryDaysLeft > 0);
-      if (!isInjured) {
-        if (team.rotation && team.rotation.minutes[p.id] !== undefined) {
-          mins = team.rotation.minutes[p.id];
-        } else {
-          const rank = ratingRank.get(p.id) ?? i;
-          if (i < 5) {
-            if (rank === 0)      mins = 37 + Math.floor(Math.random() * 4);
-            else if (rank === 1) mins = 34 + Math.floor(Math.random() * 4);
-            else if (rank === 2) mins = 30 + Math.floor(Math.random() * 4);
-            else                 mins = 26 + Math.floor(Math.random() * 5);
-          } else if (i < 9) mins = 14 + Math.floor(Math.random() * 10);
-          else if (i < 12)  mins = Math.floor(Math.random() * 6);
-        }
+      if (isInjured) {
+        return {
+          playerId: p.id, name: p.name,
+          min: 0, pts: 0, reb: 0, offReb: 0, defReb: 0,
+          ast: 0, stl: 0, blk: 0,
+          fgm: 0, fga: 0, threepm: 0, threepa: 0, ftm: 0, fta: 0,
+          tov: 0, pf: 0, techs: 0, flagrants: 0, plusMinus: 0,
+          ejected: false, dnp: 'Injured',
+        };
+      }
+
+      let mins = 0;
+      if (team.rotation && team.rotation.minutes[p.id] !== undefined) {
+        mins = team.rotation.minutes[p.id];
+      } else {
+        const rank = ratingRank.get(p.id) ?? i;
+        if (i < 5) {
+          if (rank === 0)      mins = 37 + Math.floor(Math.random() * 4);
+          else if (rank === 1) mins = 34 + Math.floor(Math.random() * 4);
+          else if (rank === 2) mins = 30 + Math.floor(Math.random() * 4);
+          else                 mins = 26 + Math.floor(Math.random() * 5);
+        } else if (i < 9) mins = 14 + Math.floor(Math.random() * 10);
+        else if (i < 12)  mins = Math.floor(Math.random() * 6);
       }
       if (isGT) {
         if (i < 5) mins = Math.max(20, mins - 10);
