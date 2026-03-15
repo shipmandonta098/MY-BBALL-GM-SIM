@@ -960,7 +960,14 @@ const App: React.FC = () => {
       t.roster.forEach(p => {
         if (p.contractYears <= 1) {
           // Player enters free agency
-          const desiredBase = Math.round((p.rating * 160_000 + 500_000) / 250_000) * 250_000;
+          const _r = p.rating;
+          const desiredBase = Math.round((
+            _r >= 95 ? 38_000_000 + (_r - 95) * 1_400_000 :
+            _r >= 88 ? 26_000_000 + (_r - 88) * 1_714_286 :
+            _r >= 80 ? 16_000_000 + (_r - 80) * 1_250_000 :
+            _r >= 70 ? 7_000_000  + (_r - 70) * 900_000   :
+            _r >= 60 ? 3_000_000  + (_r - 60) * 400_000   : 1_500_000
+          ) / 250_000) * 250_000;
           const desiredYears = p.rating >= 80 ? 4 : p.rating >= 70 ? 3 : p.age >= 33 ? 1 : 2;
           // Interest in user's team: based on wins + market size
           const userWins = tempState.teams.find(t2 => t2.id === tempState.userTeamId)?.wins ?? 0;

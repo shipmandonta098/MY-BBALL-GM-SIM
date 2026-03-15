@@ -52,36 +52,44 @@ const SCHEME_DEFAULT_PACE: Record<CoachScheme, number> = {
  *    95   │ 45.0 %   (god-tier floor)
  *   100   │ 50.0 %   (historic specialist peak — low volume only)
  *
- * Volume regression is applied at the call site (high threepa → season avg
- * converges to base%; low threepa specialists can sustain 46-50% naturally).
+ * Volume regression is applied via stochastic rounding at the call site
+ * (Math.floor(n*rate + random()) eliminates Math.round bias that was causing
+ * 50% season averages for players with high base rates).
  *
  * Tuning guide:
  *   - Raise/lower segment endpoints to shift whole curve or individual tiers.
  *   - Move breakpoints (59, 74, 89, 94) to widen/narrow each band.
- *   - Hard clamp [0.20, 0.55] — removed artificial 50% ceiling.
+ *   - Hard clamp [0.20, 0.48] — realistic max for any shooter on volume.
+ *
+ * Calibrated range:
+ *   attr 75 → 34.5%  (below-avg starter)
+ *   attr 85 → 39.4%  (solid shooter)
+ *   attr 90 → 40.0%  (plus shooter)
+ *   attr 94 → 43.0%  (elite)
+ *   attr 99 → 45.4%  (best realistic PG/SG — never reaches 50%)
  */
 export function getThreePointPercentage(attr: number): number {
   const a = Math.max(0, Math.min(100, attr));
 
   let base: number;
   if (a <= 59) {
-    // Non-shooters / big men: 25 % at 0 → 32 % at 59
+    // Non-shooters / big men: 25% at 0 → 32% at 59
     base = 0.25 + (a / 59) * 0.07;
   } else if (a <= 74) {
-    // Below-avg to league-avg: 32 % at 60 → 35.8 % at 74
-    base = 0.32 + ((a - 60) / 14) * 0.038;
+    // Below-avg to league-avg: 32% at 60 → 34.5% at 74
+    base = 0.32 + ((a - 60) / 14) * 0.025;
   } else if (a <= 89) {
-    // Solid starter to plus shooter: 35.8 % at 75 → 41.5 % at 89
-    base = 0.358 + ((a - 75) / 14) * 0.057;
+    // Solid starter to plus shooter: 34.5% at 75 → 40% at 89
+    base = 0.345 + ((a - 75) / 14) * 0.055;
   } else if (a <= 94) {
-    // Elite: 41.5 % at 90 → 44.5 % at 94
-    base = 0.415 + ((a - 90) / 4) * 0.030;
+    // Elite: 40% at 90 → 43% at 94
+    base = 0.40 + ((a - 90) / 4) * 0.030;
   } else {
-    // God-tier: 45 % at 95 → 50 % at 100 (specialist peak, rare volume)
-    base = 0.45 + ((a - 95) / 5) * 0.05;
+    // God-tier: 43% at 95 → 46% at 100 (max for any player on volume)
+    base = 0.43 + ((a - 95) / 5) * 0.03;
   }
 
-  return Math.max(0.20, Math.min(0.55, base));
+  return Math.max(0.20, Math.min(0.48, base));
 }
 
 // ─── Rebound Chance Functions ────────────────────────────────────────────────
@@ -3135,18 +3143,21 @@ const simulatePlayerGameLine = (
   const layupWeight = Math.max(0,    1 - dunkWeight - postWeight);
   const fgPctIns    = layupBase * layupWeight + dunkBase * dunkWeight + postBase * postWeight;
 
-  const threepm = Math.min(threepa, Math.round(threepa * Math.max(0.05,
-    fgPct3 + fgPctBoost + opponentPerimDefMod + (Math.random() * 0.06 - 0.03))));
-  const midFgm  = Math.min(midFga,  Math.round(midFga  * Math.max(0.05,
-    fgPctMid + fgPctBoost + opponentMidDefMod + (Math.random() * 0.06 - 0.03))));
+  // Stochastic rounding: Math.floor(n*rate + rand()) gives correct expected
+  // value (= n*rate) without the systematic upward bias of Math.round that
+  // was locking season 3PT% leaders at 50% for high-base shooters.
+  const threeRate = Math.max(0.05, fgPct3 + fgPctBoost + opponentPerimDefMod + (Math.random() * 0.06 - 0.03));
+  const threepm   = Math.min(threepa, Math.floor(threepa * threeRate + Math.random()));
+  const midRate   = Math.max(0.05, fgPctMid + fgPctBoost + opponentMidDefMod + (Math.random() * 0.06 - 0.03));
+  const midFgm    = Math.min(midFga,  Math.floor(midFga  * midRate   + Math.random()));
   // Inside FGM: interior + post defense mods both apply (weighted by post share).
   // opponentInteriorDefMod suppresses drives/dunks; opponentPostDefMod suppresses
   // post-ups.  Blend them proportionally to postWeight so a non-post player
   // (postWeight≈0) is barely affected by post defense, and a pure post scorer
   // (postWeight≈0.25) feels the full post-defense penalty.
   const blendedInsideMod = opponentInteriorDefMod * (1 - postWeight) + opponentPostDefMod * postWeight;
-  const insFgm  = Math.min(insFga,  Math.round(insFga  * Math.max(0.35,
-    fgPctIns + fgPctBoost + blendedInsideMod + (Math.random() * 0.06 - 0.03))));
+  const insRate   = Math.max(0.35, fgPctIns + fgPctBoost + blendedInsideMod + (Math.random() * 0.06 - 0.03));
+  const insFgm    = Math.min(insFga,  Math.floor(insFga  * insRate   + Math.random()));
   const fgm     = threepm + midFgm + insFgm;
 
   const fta = Math.round((player.attributes.strength / 100) * 5 * minFac + Math.random() * 2);
