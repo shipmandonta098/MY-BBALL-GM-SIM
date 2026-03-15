@@ -3685,32 +3685,35 @@ export const simulateGame = (
 
   // Distribute per-player +/- so sum(home) = 5 × margin, sum(away) = -5 × margin.
   // Each player's value reflects their relative efficiency and minutes, with noise.
-  const assignPlusMinuses = <T extends { plusMinus: number; pts: number; reb: number; ast: number; tov: number; min: number }>(
+  const assignPlusMinuses = <T extends { plusMinus: number; pts: number; reb: number; ast: number; tov: number; min: number; dnp?: string }>(
     stats: T[],
     teamMargin: number,
   ): T[] => {
     if (stats.length === 0) return stats;
+    // DNP players never get +/- — they weren't on the court
+    const active = stats.filter(p => !p.dnp && p.min > 0);
+    if (active.length === 0) return stats;
     const target = 5 * teamMargin; // mathematical on-court constraint
-    const effs = stats.map(p =>
-      p.min > 0 ? (p.pts + p.reb * 0.4 + p.ast * 0.6 - (p.tov ?? 0) * 0.8) / p.min : 0,
+    const effs = active.map(p =>
+      (p.pts + p.reb * 0.4 + p.ast * 0.6 - (p.tov ?? 0) * 0.8) / p.min,
     );
     const avgEff = effs.reduce((a, b) => a + b, 0) / effs.length;
-    const raw = stats.map((p, i) => {
+    const raw = active.map((p, i) => {
       const relEff = effs[i] - avgEff;
-      const effShift = relEff * 14;           // 0.1 eff unit above avg ≈ +1.4 PM
-      const noise    = (Math.random() - 0.5) * 6; // ±3 natural game variance
+      const effShift = relEff * 14;
+      const noise    = (Math.random() - 0.5) * 6;
       return teamMargin + effShift + noise;
     });
     const rawSum = raw.reduce((a, b) => a + b, 0);
-    const adj    = (target - rawSum) / stats.length;
+    const adj    = (target - rawSum) / active.length;
     const rounded = raw.map(pm => Math.round(pm + adj));
-    // Fix integer rounding drift on the highest-minute player
     const drift = target - rounded.reduce((a, b) => a + b, 0);
     if (drift !== 0) {
-      const maxIdx = stats.reduce((best, _, i) => stats[i].min > stats[best].min ? i : best, 0);
+      const maxIdx = active.reduce((best, _, i) => active[i].min > active[best].min ? i : best, 0);
       rounded[maxIdx] += drift;
     }
-    return stats.map((s, i) => ({ ...s, plusMinus: rounded[i] }));
+    let ai = 0;
+    return stats.map(s => s.dnp || s.min === 0 ? { ...s, plusMinus: 0 } : { ...s, plusMinus: rounded[ai++] });
   };
 
   homePlayerStats = assignPlusMinuses(homePlayerStats, margin);

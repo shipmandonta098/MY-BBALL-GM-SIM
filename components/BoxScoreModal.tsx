@@ -14,60 +14,73 @@ const BoxScoreModal: React.FC<BoxScoreModalProps> = ({ result, homeTeam, awayTea
   const [activeTab, setActiveTab] = useState<'stats' | 'pbp'>('stats');
   const isHomeWinner = result.homeScore > result.awayScore;
 
-  const StatTable = ({ team, stats }: { team: Team, stats: GamePlayerLine[] }) => (
-    <div className="space-y-4">
-      <div className="flex items-center gap-4">
-        <TeamBadge team={team} size="md" />
-        <h3 className="text-xl font-display font-bold uppercase text-white">{team.city} {team.name}</h3>
-      </div>
-      <div className="overflow-x-auto rounded-2xl border border-slate-800">
-        <table className="w-full text-left text-xs">
-          <thead className="bg-slate-950/50 border-b border-slate-800 text-[10px] font-black uppercase text-slate-500">
-            <tr>
-              <th className="px-4 py-4">Player</th>
-              <th className="px-2 py-4 text-center">MIN</th>
-              <th className="px-2 py-4 text-center">PTS</th>
-              <th className="px-2 py-4 text-center">REB</th>
-              <th className="px-2 py-4 text-center">AST</th>
-              <th className="px-2 py-4 text-center">STL</th>
-              <th className="px-2 py-4 text-center">BLK</th>
-              <th className="px-2 py-4 text-center">FG</th>
-              <th className="px-2 py-4 text-center">3P</th>
-              <th className="px-2 py-4 text-center">FT</th>
-              <th className="px-2 py-4 text-center">+/-</th>
-              <th className="px-2 py-4 text-center">TO</th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-slate-800/40">
-            {stats.sort((a,b) => b.pts - a.pts).map(line => (
-              <tr key={line.playerId} className="hover:bg-slate-800/30 transition-colors">
-                <td className="px-4 py-4 font-bold text-slate-200 uppercase tracking-tight">{line.name}</td>
-                <td className="px-2 py-4 text-center font-mono">{line.min}</td>
-                <td className="px-2 py-4 text-center font-display font-bold text-sm text-amber-500">{line.pts}</td>
-                <td className="px-2 py-4 text-center font-mono">{line.reb}</td>
-                <td className="px-2 py-4 text-center font-mono">{line.ast}</td>
-                <td className="px-2 py-4 text-center font-mono text-slate-500">{line.stl}</td>
-                <td className="px-2 py-4 text-center font-mono text-slate-500">{line.blk}</td>
-                <td className="px-2 py-4 text-center font-mono text-[10px]">
-                  {line.fgm}-{line.fga}
-                </td>
-                <td className="px-2 py-4 text-center font-mono text-[10px] text-slate-400">
-                  {line.threepm}-{line.threepa}
-                </td>
-                <td className="px-2 py-4 text-center font-mono text-[10px] text-slate-400">
-                  {line.ftm}-{line.fta}
-                </td>
-                <td className={`px-2 py-4 text-center font-mono font-bold ${line.plusMinus > 0 ? 'text-emerald-500' : line.plusMinus < 0 ? 'text-rose-500' : 'text-slate-500'}`}>
-                  {line.plusMinus > 0 ? `+${line.plusMinus}` : line.plusMinus}
-                </td>
-                <td className="px-2 py-4 text-center font-mono text-rose-500/50">{line.tov}</td>
+  const StatTable = ({ team, stats }: { team: Team, stats: GamePlayerLine[] }) => {
+    const active = stats.filter(l => !l.dnp).sort((a, b) => b.pts - a.pts);
+    const dnp    = stats.filter(l => !!l.dnp);
+    return (
+      <div className="space-y-4">
+        <div className="flex items-center gap-4">
+          <TeamBadge team={team} size="md" />
+          <h3 className="text-xl font-display font-bold uppercase text-white">{team.city} {team.name}</h3>
+        </div>
+        <div className="overflow-x-auto rounded-2xl border border-slate-800">
+          <table className="w-full text-left text-xs">
+            <thead className="bg-slate-950/50 border-b border-slate-800 text-[10px] font-black uppercase text-slate-500">
+              <tr>
+                <th className="px-4 py-4">Player</th>
+                <th className="px-2 py-4 text-center">MIN</th>
+                <th className="px-2 py-4 text-center">PTS</th>
+                <th className="px-2 py-4 text-center">REB</th>
+                <th className="px-2 py-4 text-center">AST</th>
+                <th className="px-2 py-4 text-center">STL</th>
+                <th className="px-2 py-4 text-center">BLK</th>
+                <th className="px-2 py-4 text-center">FG</th>
+                <th className="px-2 py-4 text-center">3P</th>
+                <th className="px-2 py-4 text-center">FT</th>
+                <th className="px-2 py-4 text-center">+/-</th>
+                <th className="px-2 py-4 text-center">TO</th>
               </tr>
-            ))}
-          </tbody>
-        </table>
+            </thead>
+            <tbody className="divide-y divide-slate-800/40">
+              {active.map(line => (
+                <tr key={line.playerId} className="hover:bg-slate-800/30 transition-colors">
+                  <td className="px-4 py-4 font-bold text-slate-200 uppercase tracking-tight">{line.name}</td>
+                  <td className="px-2 py-4 text-center font-mono">{line.min}</td>
+                  <td className="px-2 py-4 text-center font-display font-bold text-sm text-amber-500">{line.pts}</td>
+                  <td className="px-2 py-4 text-center font-mono">{line.reb}</td>
+                  <td className="px-2 py-4 text-center font-mono">{line.ast}</td>
+                  <td className="px-2 py-4 text-center font-mono text-slate-500">{line.stl}</td>
+                  <td className="px-2 py-4 text-center font-mono text-slate-500">{line.blk}</td>
+                  <td className="px-2 py-4 text-center font-mono text-[10px]">{line.fgm}-{line.fga}</td>
+                  <td className="px-2 py-4 text-center font-mono text-[10px] text-slate-400">{line.threepm}-{line.threepa}</td>
+                  <td className="px-2 py-4 text-center font-mono text-[10px] text-slate-400">{line.ftm}-{line.fta}</td>
+                  <td className={`px-2 py-4 text-center font-mono font-bold ${line.plusMinus > 0 ? 'text-emerald-500' : line.plusMinus < 0 ? 'text-rose-500' : 'text-slate-500'}`}>
+                    {line.plusMinus > 0 ? `+${line.plusMinus}` : line.plusMinus}
+                  </td>
+                  <td className="px-2 py-4 text-center font-mono text-rose-500/50">{line.tov}</td>
+                </tr>
+              ))}
+              {dnp.length > 0 && (
+                <>
+                  <tr className="border-t border-slate-700/50">
+                    <td colSpan={12} className="px-4 pt-3 pb-1 text-[9px] font-black uppercase tracking-[0.3em] text-slate-600">Did Not Play</td>
+                  </tr>
+                  {dnp.map(line => (
+                    <tr key={line.playerId} className="bg-rose-950/10">
+                      <td className="px-4 py-3 font-bold text-rose-500/70 uppercase tracking-tight">{line.name}</td>
+                      <td colSpan={11} className="px-2 py-3 text-[10px] font-black uppercase tracking-widest text-rose-500/50">
+                        DNP – {line.dnp}
+                      </td>
+                    </tr>
+                  ))}
+                </>
+              )}
+            </tbody>
+          </table>
+        </div>
       </div>
-    </div>
-  );
+    );
+  };
 
   return (
     <div className="fixed inset-0 z-[3000] bg-slate-950/90 backdrop-blur-xl flex items-center justify-center p-4 md:p-10 animate-in fade-in duration-300" onClick={onClose}>
