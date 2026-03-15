@@ -199,7 +199,7 @@ const LeagueConfiguration: React.FC<LeagueConfigurationProps> = ({ onConfirm, on
     const errs: Record<string, string> = {};
     if (!name.trim())          errs.name = 'League name is required.';
     else if (name.length > 30) errs.name = 'League name must be 30 characters or fewer.';
-    if (year < 2020 || year > 2050) errs.year = 'Starting year must be between 2020 and 2050.';
+    if (!year || year < 1900 || year > 2200) errs.year = 'Starting year must be between 1900 and 2200.';
     if (seasonLength < 20 || seasonLength > 82) errs.seasonLength = 'Season length must be between 20 and 82 games.';
     if (salaryCap < 80_000_000 || salaryCap > 300_000_000) errs.salaryCap = 'Salary cap must be $80M – $300M.';
     setErrors(errs);
@@ -315,7 +315,7 @@ const LeagueConfiguration: React.FC<LeagueConfigurationProps> = ({ onConfirm, on
 
         {/* Title */}
         <div className="text-center space-y-2">
-          <h2 className="text-5xl md:text-6xl font-display font-bold uppercase tracking-tight text-white">
+          <h2 className="text-3xl sm:text-5xl md:text-6xl font-display font-bold uppercase tracking-tight text-white break-words leading-tight">
             Initialize <span className="text-amber-500">Dynasty</span>
           </h2>
           <p className="text-slate-500 text-sm font-medium uppercase tracking-[0.2em]">Craft your basketball universe</p>
@@ -339,7 +339,7 @@ const LeagueConfiguration: React.FC<LeagueConfigurationProps> = ({ onConfirm, on
               className={`w-full bg-slate-950 border rounded-xl px-4 py-3 text-white font-display text-lg focus:outline-none focus:border-amber-500/50 transition-colors ${errors.name ? 'border-rose-500' : 'border-slate-800'}`} />
           </Field>
           <Field label="Starting Year" error={errors.year}>
-            <input type="number" value={year} min={2020} max={2050} onChange={e => setYear(parseInt(e.target.value) || 2025)}
+            <input type="number" value={year} min={1900} max={2200} onChange={e => setYear(parseInt(e.target.value) || 2025)}
               className={`w-full bg-slate-950 border rounded-xl px-4 py-3 text-white font-display text-lg focus:outline-none ${errors.year ? 'border-rose-500' : 'border-slate-800'}`} />
           </Field>
         </div>
