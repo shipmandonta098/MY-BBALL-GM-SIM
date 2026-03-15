@@ -446,8 +446,8 @@ const Players: React.FC<PlayersProps> = ({ league, onViewPlayer }) => {
                             <td className="px-1 py-2.5 text-center text-xs font-mono font-bold text-amber-400">{f1(ppg)}</td>
                             <td className="px-1 py-2.5 text-center text-xs font-mono">{f1(tpm / gp)}</td>
                             <td className="px-1 py-2.5 text-center text-xs font-mono">{f1(tpa / gp)}</td>
-                            <td className="px-1 py-2.5 text-center text-xs font-mono font-bold" title={tpa > 0 && (p.stats.gamesPlayed < 41 || tpa < p.stats.gamesPlayed * 2) ? 'Small sample' : undefined}>
-                              {tpa > 0 ? <>{pct(tpPct)}{(p.stats.gamesPlayed < 41 || tpa < p.stats.gamesPlayed * 2) ? <span className="text-slate-600 text-[9px] ml-0.5">*</span> : null}</> : '—'}
+                            <td className="px-1 py-2.5 text-center text-xs font-mono font-bold" title={tpa > 0 && (p.stats.gamesPlayed < 41 || tpa < p.stats.gamesPlayed * 2.5) ? 'Small sample' : undefined}>
+                              {tpa > 0 ? <>{pct(tpPct)}{(p.stats.gamesPlayed < 41 || tpa < p.stats.gamesPlayed * 2.5) ? <span className="text-slate-600 text-[9px] ml-0.5">*</span> : null}</> : '—'}
                             </td>
                             <td className="px-1 py-2.5 text-center text-xs font-mono">{f1(twom / gp)}</td>
                             <td className="px-1 py-2.5 text-center text-xs font-mono">{f1(twoa / gp)}</td>
@@ -685,8 +685,8 @@ function getSortVal(
     case 'efg':    return fga > 0 ? (fgm + 0.5 * tpm) / fga : 0;
     case 'tpmPg':  return tpm / gp;
     case 'tpaPg':  return tpa / gp;
-    // Qualify: ≥41 GP and ≥2 3PA/game so small samples don't dominate leaders
-    case 'tpPct':  return (p.stats.gamesPlayed >= 41 && tpa >= p.stats.gamesPlayed * 2) ? tpm / tpa : 0;
+    // Qualify: ≥41 GP and ≥2.5 3PA/game (≈205 total over 82g) to exclude low-volume flukes
+    case 'tpPct':  return (p.stats.gamesPlayed >= 41 && tpa >= p.stats.gamesPlayed * 2.5) ? tpm / tpa : 0;
     case 'twomPg': return (fgm - tpm) / gp;
     case 'twoaPg': return (fga - tpa) / gp;
     case 'twoPct': return (fga - tpa) > 0 ? (fgm - tpm) / (fga - tpa) : 0;

@@ -24,9 +24,18 @@ interface FreeAgencyProps {
 const fmt = (val: number) => `$${(val / 1_000_000).toFixed(1)}M`;
 const fmtFull = (val: number) => `$${(val / 1_000_000).toFixed(2)}M`;
 
-/** Compute a reasonable desired salary for a player if one isn't set */
-const computeDesiredSalary = (rating: number): number =>
-  Math.round((rating * 160_000 + 500_000) / 250_000) * 250_000;
+/** Compute a reasonable desired salary for a player if one isn't set.
+ *  Piecewise curve: 70-79 OVR → $7-16M, 80-87 → $16-26M, 88+ → $26-45M. */
+const computeDesiredSalary = (rating: number): number => {
+  let base: number;
+  if (rating >= 95)      base = 38_000_000 + (rating - 95) * 1_400_000;
+  else if (rating >= 88) base = 26_000_000 + (rating - 88) * 1_714_286;
+  else if (rating >= 80) base = 16_000_000 + (rating - 80) * 1_250_000;
+  else if (rating >= 70) base = 7_000_000  + (rating - 70) * 900_000;
+  else if (rating >= 60) base = 3_000_000  + (rating - 60) * 400_000;
+  else                   base = 1_500_000;
+  return Math.round(base / 250_000) * 250_000;
+};
 
 const computeDesiredYears = (age: number, rating: number): number => {
   if (rating >= 80) return 4;

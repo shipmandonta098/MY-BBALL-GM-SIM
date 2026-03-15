@@ -1113,7 +1113,13 @@ export const generatePlayer = (id: string, ageRange: [number, number] = [19, 38]
     rating,
     potential,
     attributes: pAttrs as Player['attributes'],
-    salary: Math.floor((rating / 100) * 45000000),
+    salary: Math.round((
+      rating >= 95 ? 38_000_000 + (rating - 95) * 1_400_000 :
+      rating >= 88 ? 26_000_000 + (rating - 88) * 1_714_286 :
+      rating >= 80 ? 16_000_000 + (rating - 80) * 1_250_000 :
+      rating >= 70 ? 7_000_000  + (rating - 70) * 900_000   :
+      rating >= 60 ? 3_000_000  + (rating - 60) * 400_000   : 1_500_000
+    ) * (0.85 + Math.random() * 0.30) / 250_000) * 250_000,
     contractYears: Math.floor(Math.random() * 5) + 1,
     stats: { 
       points: 0, rebounds: 0, offReb: 0, defReb: 0, assists: 0, steals: 0, blocks: 0, gamesPlayed: 0, gamesStarted: 0,
@@ -1159,7 +1165,13 @@ export const generateFreeAgentPool = (count: number, season: number, genderRatio
       contractYears: 0,
       desiredContract: {
         years: Math.floor(Math.random() * 3) + 1,
-        salary: Math.floor(p.rating * 150000 + Math.random() * 2000000)
+        salary: Math.round((
+          p.rating >= 95 ? 38_000_000 + (p.rating - 95) * 1_400_000 :
+          p.rating >= 88 ? 26_000_000 + (p.rating - 88) * 1_714_286 :
+          p.rating >= 80 ? 16_000_000 + (p.rating - 80) * 1_250_000 :
+          p.rating >= 70 ? 7_000_000  + (p.rating - 70) * 900_000   :
+          p.rating >= 60 ? 3_000_000  + (p.rating - 60) * 400_000   : 1_500_000
+        ) * (0.90 + Math.random() * 0.20) / 250_000) * 250_000
       },
       interestScore: 30 + Math.floor(Math.random() * 50)
     };
