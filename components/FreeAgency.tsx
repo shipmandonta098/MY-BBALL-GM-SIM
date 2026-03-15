@@ -65,6 +65,18 @@ const ratingColor = (r: number) => {
 
 type SortKey = 'rating' | 'age' | 'interest' | 'salary' | 'name';
 type NegotiationResult = 'accepted' | 'declined' | 'counter' | null;
+type InSeasonContractType = '10day' | 'rest-of-season' | 'minimum' | 'full';
+
+// Compute in-season contract offers for a player
+const getInSeasonContracts = (rating: number, gamesRemaining: number) => {
+  const restSalary = Math.round(Math.min(3_500_000, Math.max(600_000, gamesRemaining * 35_000)) / 250_000) * 250_000;
+  return [
+    { type: '10day' as const,         label: '10-Day',              salary: 600_000,   years: 1, eligible: rating < 82 },
+    { type: 'rest-of-season' as const, label: 'Rest-of-Season Min', salary: restSalary, years: 1, eligible: rating < 88 },
+    { type: 'minimum' as const,       label: 'Season Minimum',      salary: 3_000_000, years: 1, eligible: true },
+    { type: 'full' as const,          label: 'Full Offer',          salary: computeDesiredSalary(rating), years: 1, eligible: true },
+  ].filter(c => c.eligible);
+};
 
 // ── Component ────────────────────────────────────────────────────────────────
 const FreeAgency: React.FC<FreeAgencyProps> = ({
@@ -79,6 +91,10 @@ const FreeAgency: React.FC<FreeAgencyProps> = ({
   const [interestFilter, setInterestFilter] = useState<'ALL' | 'High' | 'Med' | 'Low'>('ALL');
   const [sortKey, setSortKey] = useState<SortKey>('rating');
   const [sortAsc, setSortAsc] = useState(false);
+
+  // ── In-season signing state ──
+  const [inSeasonPlayer, setInSeasonPlayer] = useState<Player | null>(null);
+  const [inSeasonResult, setInSeasonResult] = useState<{ accepted: boolean; contractType: string; salary: number } | null>(null);
 
   // ── Negotiation state ──
   const [negotiatingPlayer, setNegotiatingPlayer] = useState<Player | null>(null);
@@ -104,6 +120,68 @@ const FreeAgency: React.FC<FreeAgencyProps> = ({
 
   const moratoriumActive = league.offseasonDay < MORATORIUM_DAYS;
   const daysUntilOpen = Math.max(0, MORATORIUM_DAYS - league.offseasonDay);
+  const isInSeason = !league.isOffseason &&
+    league.seasonPhase !== 'Preseason' &&
+    league.seasonPhase !== 'Offseason';
+  const gamesRemaining = isInSeason
+    ? league.schedule.filter(g => !g.played).length
+    : 0;
+
+  // ── In-season signing handler ──
+  const handleInSeasonSign = (player: Player, contractType: InSeasonContractType, salary: number) => {
+    // Acceptance model: cheaper deals are accepted more readily by lower-rated players
+    const desired = computeDesiredSalary(player.rating);
+    const ratio = salary / desired;
+    let acceptBase = player.rating >= 85 ? 30 : player.rating >= 75 ? 55 : 75;
+    if (contractType === 'full') acceptBase += 25;
+    else if (contractType === 'minimum') acceptBase += 10;
+    else if (contractType === 'rest-of-season') acceptBase += 5;
+    // Stars resist 10-day deals
+    if (contractType === '10day' && player.rating >= 78) acceptBase -= 30;
+    const acceptChance = Math.min(90, Math.max(5, acceptBase + ratio * 20 + (player.interestScore ?? 50) * 0.2));
+    const accepted = Math.random() * 100 < acceptChance;
+
+    if (accepted) {
+      const contractLabel =
+        contractType === '10day' ? '10-day' :
+        contractType === 'rest-of-season' ? 'rest-of-season minimum' :
+        contractType === 'minimum' ? 'season minimum' : `${fmt(salary)}/yr`;
+      const signedPlayer: Player = {
+        ...player,
+        isFreeAgent: false,
+        inSeasonFA: false,
+        salary,
+        contractYears: 1,
+        morale: Math.min(100, (player.morale || 70) + 8),
+      };
+      const updatedTeams = league.teams.map(t =>
+        t.id === userTeam.id ? { ...t, roster: [...t.roster, signedPlayer] } : t
+      );
+      const updatedFAs = league.freeAgents.filter(p => p.id !== player.id);
+      const updatedTxs = recordTransaction(
+        league, 'signing', [userTeam.id],
+        `${userTeam.name} signed ${signedPlayer.name} to a ${contractLabel} deal.`,
+        [signedPlayer.id], salary
+      );
+      updateLeague({
+        teams: updatedTeams,
+        freeAgents: updatedFAs,
+        transactions: updatedTxs,
+        newsFeed: [{
+          id: `in-season-user-sign-${Date.now()}`,
+          category: 'transaction' as const,
+          headline: `✍️ SIGNED: ${player.name} (${contractLabel})`,
+          content: `The ${userTeam.name} signed ${player.name} (${player.position}, ${player.rating} OVR) to a ${contractLabel} deal worth ${fmt(salary)}.`,
+          timestamp: league.currentDay,
+          realTimestamp: Date.now(),
+          isBreaking: false,
+        }, ...league.newsFeed],
+      });
+      setInSeasonResult({ accepted: true, contractType: contractLabel, salary });
+    } else {
+      setInSeasonResult({ accepted: false, contractType: contractType, salary });
+    }
+  };
 
   // ── Filtered + sorted FA list ──
   const filteredFAs = useMemo(() => {
@@ -120,6 +198,11 @@ const FreeAgency: React.FC<FreeAgencyProps> = ({
     });
 
     list.sort((a, b) => {
+      // In-season: float waived players to top
+      if (isInSeason) {
+        if (a.inSeasonFA && !b.inSeasonFA) return -1;
+        if (!a.inSeasonFA && b.inSeasonFA) return 1;
+      }
       let av = 0, bv = 0;
       if (sortKey === 'rating') { av = a.rating; bv = b.rating; }
       else if (sortKey === 'age') { av = a.age; bv = b.age; }
@@ -382,8 +465,29 @@ const FreeAgency: React.FC<FreeAgencyProps> = ({
   return (
     <div className="space-y-6 animate-in fade-in duration-500 pb-40">
 
+      {/* ── In-Season Banner ── */}
+      {isInSeason && (
+        <div className="bg-orange-500/10 border border-orange-500/30 rounded-[2rem] p-5 flex flex-col sm:flex-row items-center justify-between gap-4">
+          <div>
+            <p className="text-[10px] font-black uppercase tracking-[0.4em] text-orange-400 mb-1">
+              🟠 In-Season FA Market
+            </p>
+            <h3 className="text-xl font-display font-bold text-white uppercase">
+              Waiver Wire &amp; Buyouts Open
+            </h3>
+            <p className="text-slate-500 text-xs mt-1">
+              Sign waived or buyout players on 10-day contracts, rest-of-season minimums, or season minimums. No moratorium.
+            </p>
+          </div>
+          <div className="shrink-0 text-center">
+            <p className="text-[10px] text-slate-500 uppercase font-bold mb-1">Games Left</p>
+            <p className="text-4xl font-display font-black text-orange-400">{gamesRemaining}</p>
+          </div>
+        </div>
+      )}
+
       {/* ── Moratorium Banner ── */}
-      {moratoriumActive && (
+      {!isInSeason && moratoriumActive && (
         <div className="bg-amber-500/10 border border-amber-500/30 rounded-[2rem] p-6 flex flex-col sm:flex-row items-center justify-between gap-4">
           <div>
             <p className="text-[10px] font-black uppercase tracking-[0.4em] text-amber-500 mb-1">
@@ -409,19 +513,25 @@ const FreeAgency: React.FC<FreeAgencyProps> = ({
 
       {/* ── Header ── */}
       <header className="bg-slate-900 border border-slate-800 rounded-[2.5rem] p-8 shadow-2xl relative overflow-hidden">
-        <div className="absolute top-0 right-0 w-80 h-80 bg-emerald-500/5 blur-[100px] rounded-full -mr-40 -mt-40" />
+        <div className={`absolute top-0 right-0 w-80 h-80 blur-[100px] rounded-full -mr-40 -mt-40 ${isInSeason ? 'bg-orange-500/5' : 'bg-emerald-500/5'}`} />
         <div className="relative z-10 flex flex-col md:flex-row items-center justify-between gap-6">
           <div>
             <h2 className="text-4xl font-display font-bold uppercase tracking-tight text-white mb-1">
-              Free Agency <span className="text-emerald-400">Hub</span>
+              {isInSeason ? <>Waiver <span className="text-orange-400">Wire</span></> : <>Free Agency <span className="text-emerald-400">Hub</span></>}
             </h2>
             <p className="text-slate-500 text-sm font-bold uppercase tracking-widest">
-              {moratoriumActive
-                ? <span className="text-amber-500">Moratorium Active</span>
-                : <span className="text-emerald-400">🟢 Signings Open — Day {league.offseasonDay}</span>
+              {isInSeason
+                ? <span className="text-orange-400">🟠 In-Season Signings Open</span>
+                : moratoriumActive
+                  ? <span className="text-amber-500">Moratorium Active</span>
+                  : <span className="text-emerald-400">🟢 Signings Open — Day {league.offseasonDay}</span>
               }
               <span className="ml-3 text-slate-700">·</span>
-              <span className="ml-3 text-slate-500">{filteredFAs.length} players available</span>
+              <span className="ml-3 text-slate-500">
+                {isInSeason
+                  ? `${filteredFAs.filter(p => p.inSeasonFA).length} waived · ${filteredFAs.filter(p => !p.inSeasonFA).length} free agents`
+                  : `${filteredFAs.length} players available`}
+              </span>
             </p>
           </div>
 
@@ -456,13 +566,15 @@ const FreeAgency: React.FC<FreeAgencyProps> = ({
               <p className="text-xl font-display font-bold text-slate-300">{fmt(currentSalary)}</p>
             </div>
 
-            {/* Advance Day */}
-            <button
-              onClick={advanceDay}
-              className="px-7 py-4 bg-amber-500 hover:bg-amber-400 text-slate-950 font-display font-bold uppercase rounded-xl transition-all shadow-xl shadow-amber-500/20 active:scale-95"
-            >
-              Advance Day →
-            </button>
+            {/* Advance Day — offseason only */}
+            {!isInSeason && (
+              <button
+                onClick={advanceDay}
+                className="px-7 py-4 bg-amber-500 hover:bg-amber-400 text-slate-950 font-display font-bold uppercase rounded-xl transition-all shadow-xl shadow-amber-500/20 active:scale-95"
+              >
+                Advance Day →
+              </button>
+            )}
           </div>
         </div>
 
@@ -590,6 +702,9 @@ const FreeAgency: React.FC<FreeAgencyProps> = ({
                             {p.name}
                           </p>
                           <p className="text-[10px] text-slate-600 font-bold uppercase mt-0.5">
+                            {p.inSeasonFA && (
+                              <span className="text-orange-400 mr-1.5">WAIVED ·</span>
+                            )}
                             {p.position} · {getFlag(p.country)}{p.hometown}
                             {p.lastTeamId
                               ? ` · ${league.teams.find(t => t.id === p.lastTeamId)?.name ?? 'FA'}`
@@ -631,19 +746,33 @@ const FreeAgency: React.FC<FreeAgencyProps> = ({
                       </td>
 
                       <td className="px-5 py-4 text-right" onClick={e => e.stopPropagation()}>
-                        <button
-                          onClick={() => openNegotiation(p)}
-                          disabled={moratoriumActive}
-                          className={`px-4 py-2 text-[10px] font-black uppercase rounded-lg transition-all ${
-                            moratoriumActive
-                              ? 'bg-slate-800 text-slate-700 cursor-not-allowed'
-                              : canSign
-                                ? 'bg-slate-800 hover:bg-emerald-500 text-slate-400 hover:text-slate-950'
-                                : 'bg-slate-800 hover:bg-amber-500/20 border border-slate-700 hover:border-amber-500/40 text-slate-500 hover:text-amber-400'
-                          }`}
-                        >
-                          {moratoriumActive ? 'Locked' : 'Negotiate'}
-                        </button>
+                        {isInSeason ? (
+                          <button
+                            onClick={() => { setInSeasonPlayer(p); setInSeasonResult(null); }}
+                            disabled={!canSign && capSpace < 600_000}
+                            className={`px-4 py-2 text-[10px] font-black uppercase rounded-lg transition-all ${
+                              capSpace < 600_000
+                                ? 'bg-slate-800 text-slate-700 cursor-not-allowed'
+                                : 'bg-slate-800 hover:bg-orange-500 text-slate-400 hover:text-slate-950'
+                            }`}
+                          >
+                            {p.inSeasonFA ? '🟠 Waived' : 'Sign'}
+                          </button>
+                        ) : (
+                          <button
+                            onClick={() => openNegotiation(p)}
+                            disabled={moratoriumActive}
+                            className={`px-4 py-2 text-[10px] font-black uppercase rounded-lg transition-all ${
+                              moratoriumActive
+                                ? 'bg-slate-800 text-slate-700 cursor-not-allowed'
+                                : canSign
+                                  ? 'bg-slate-800 hover:bg-emerald-500 text-slate-400 hover:text-slate-950'
+                                  : 'bg-slate-800 hover:bg-amber-500/20 border border-slate-700 hover:border-amber-500/40 text-slate-500 hover:text-amber-400'
+                            }`}
+                          >
+                            {moratoriumActive ? 'Locked' : 'Negotiate'}
+                          </button>
+                        )}
                       </td>
                     </tr>
                   );
@@ -653,6 +782,113 @@ const FreeAgency: React.FC<FreeAgencyProps> = ({
           </div>
         )}
       </div>
+
+      {/* ── In-Season Signing Modal ── */}
+      {inSeasonPlayer && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4"
+          onClick={e => { if (e.target === e.currentTarget) { setInSeasonPlayer(null); setInSeasonResult(null); }}}
+        >
+          <div className="bg-slate-900 border border-orange-500/20 rounded-3xl w-full max-w-lg shadow-2xl animate-in zoom-in-95 duration-300 overflow-hidden">
+
+            {/* Header */}
+            <div className="p-5 border-b border-slate-800 flex items-start justify-between gap-4">
+              <div>
+                <p className="text-[10px] font-black uppercase tracking-[0.4em] text-orange-400 mb-1">
+                  {inSeasonPlayer.inSeasonFA ? '🟠 Waiver Claim' : 'In-Season Signing'}
+                </p>
+                <h2 className="text-2xl font-display font-black uppercase text-white">{inSeasonPlayer.name}</h2>
+                <p className="text-sm text-slate-400 mt-1">
+                  <span className="text-orange-400 font-bold">{inSeasonPlayer.position}</span>
+                  {' · '}{inSeasonPlayer.age} yrs · {inSeasonPlayer.rating} OVR
+                </p>
+              </div>
+              <button
+                onClick={() => { setInSeasonPlayer(null); setInSeasonResult(null); }}
+                className="w-9 h-9 rounded-full bg-slate-800 hover:bg-slate-700 flex items-center justify-center text-slate-400 hover:text-white transition-all shrink-0"
+              >✕</button>
+            </div>
+
+            <div className="p-5 space-y-4">
+              {/* Result */}
+              {inSeasonResult && (
+                <div className={`rounded-2xl p-4 text-center animate-in zoom-in-95 border ${
+                  inSeasonResult.accepted
+                    ? 'bg-emerald-500/10 border-emerald-500/40'
+                    : 'bg-rose-500/10 border-rose-500/40'
+                }`}>
+                  <p className="text-2xl mb-1">{inSeasonResult.accepted ? '🤝' : '❌'}</p>
+                  <p className={`font-black uppercase text-sm ${inSeasonResult.accepted ? 'text-emerald-400' : 'text-rose-400'}`}>
+                    {inSeasonResult.accepted ? 'Contract Agreed!' : 'Player Declined'}
+                  </p>
+                  <p className="text-slate-400 text-xs mt-1">
+                    {inSeasonResult.accepted
+                      ? `${inSeasonPlayer.name} signed a ${inSeasonResult.contractType} deal for ${fmt(inSeasonResult.salary)}.`
+                      : `${inSeasonPlayer.name} is looking for a better offer. Try a higher contract tier.`}
+                  </p>
+                  <button
+                    onClick={() => { setInSeasonPlayer(null); setInSeasonResult(null); }}
+                    className="mt-4 px-6 py-2 bg-slate-700 hover:bg-slate-600 text-white font-black uppercase text-sm rounded-xl"
+                  >
+                    Close
+                  </button>
+                </div>
+              )}
+
+              {/* Contract options */}
+              {!inSeasonResult && (
+                <>
+                  <div className="bg-slate-950/60 border border-slate-800 rounded-2xl p-4 flex justify-between items-center">
+                    <div>
+                      <p className="text-[10px] text-slate-500 uppercase font-bold">Cap Space Available</p>
+                      <p className={`text-lg font-bold ${capSpace < 0 ? 'text-rose-400' : 'text-emerald-400'}`}>{fmt(Math.abs(capSpace))}{capSpace < 0 ? ' over cap' : ''}</p>
+                    </div>
+                    <div className="text-right">
+                      <p className="text-[10px] text-slate-500 uppercase font-bold">Games Remaining</p>
+                      <p className="text-lg font-bold text-orange-400">{gamesRemaining}</p>
+                    </div>
+                  </div>
+
+                  <div className="space-y-2">
+                    <p className="text-[10px] font-black uppercase text-slate-500 tracking-widest">Choose Contract Type</p>
+                    {getInSeasonContracts(inSeasonPlayer.rating, gamesRemaining).map(contract => {
+                      const affordable = contract.salary <= capSpace + (capSpace < 0 ? 0 : 0);
+                      return (
+                        <button
+                          key={contract.type}
+                          onClick={() => handleInSeasonSign(inSeasonPlayer, contract.type, contract.salary)}
+                          disabled={!affordable}
+                          className={`w-full flex items-center justify-between p-4 rounded-2xl border transition-all text-left ${
+                            affordable
+                              ? 'bg-slate-800/50 hover:bg-orange-500/10 border-slate-700 hover:border-orange-500/40 text-white hover:text-orange-300'
+                              : 'bg-slate-950/30 border-slate-800/50 text-slate-700 cursor-not-allowed'
+                          }`}
+                        >
+                          <div>
+                            <p className="text-sm font-black uppercase">{contract.label}</p>
+                            <p className="text-[10px] text-slate-500 mt-0.5">
+                              {contract.type === '10day' ? '10 game days · team option to convert' :
+                               contract.type === 'rest-of-season' ? `${gamesRemaining} games remaining` :
+                               contract.type === 'minimum' ? 'Full season minimum' : 'Full market value'}
+                            </p>
+                          </div>
+                          <div className="text-right shrink-0">
+                            <p className="font-black text-lg">{fmt(contract.salary)}</p>
+                            {!affordable && <p className="text-[10px] text-rose-500">Over cap</p>}
+                          </div>
+                        </button>
+                      );
+                    })}
+                  </div>
+                  <p className="text-[10px] text-slate-600 text-center">
+                    Player acceptance varies by rating and contract value. Stars may decline short-term deals.
+                  </p>
+                </>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* ── Negotiation Modal ── */}
       {negotiatingPlayer && (
