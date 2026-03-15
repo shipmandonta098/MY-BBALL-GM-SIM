@@ -23,6 +23,10 @@ const FIELD_HINTS: Record<string, string> = {
   injuryFrequency:      'Multiplier applied to all injury probability rolls throughout the season.',
   seasonLength:         'Between 20 – 82 games. Affects schedule, playoff timing, and per-game stat calcs.',
   salaryCap:            'Luxury tax auto-sets to cap × 1.15. Hard cap auto-sets to cap × 1.25.',
+  playoffFormat:        'Number of teams that qualify for the postseason bracket.',
+  tradeDeadline:        'Week the trade deadline falls. Disabled = no deadline restriction.',
+  draftRounds:          'How many rounds the annual draft contains. Affects prospect pool depth.',
+  expansionEnabled:     'Enable an expansion draft to add new franchises mid-career via the Expansion tab.',
 };
 
 const Section: React.FC<{ title: string; children?: React.ReactNode }> = ({ title, children }) => (
@@ -71,48 +75,114 @@ const BtnGroup: React.FC<{
   );
 };
 
+const Toggle: React.FC<{ label: string; sub?: string; checked: boolean; onChange: (v: boolean) => void }> = ({ label, sub, checked, onChange }) => (
+  <button type="button" onClick={() => onChange(!checked)}
+    className={`w-full flex items-center justify-between px-4 py-3 border rounded-xl transition-all ${checked ? 'bg-amber-500/10 border-amber-500/30' : 'bg-slate-950 border-slate-800'}`}>
+    <div className="text-left">
+      <span className="text-xs font-bold text-slate-400 uppercase">{label}</span>
+      {sub && <p className="text-[9px] text-slate-600 mt-0.5">{sub}</p>}
+    </div>
+    <div className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors shrink-0 ml-3 ${checked ? 'bg-amber-500' : 'bg-slate-700'}`}>
+      <span className={`inline-block h-3.5 w-3.5 transform rounded-full bg-white transition-transform ${checked ? 'translate-x-4' : 'translate-x-1'}`} />
+    </div>
+  </button>
+);
+
 const LeagueConfiguration: React.FC<LeagueConfigurationProps> = ({ onConfirm, onCancel }) => {
-  const [name, setName] = useState('Global Basketball Association');
-  const [year, setYear] = useState(2025);
-  const [expansionYearOffset, setExpansionYearOffset] = useState<number | null>(3);
-  const [playerGenderRatio, setPlayerGenderRatio] = useState(0);
-  const [coachGenderRatio, setCoachGenderRatio] = useState(10);
+  // ── Basic ─────────────────────────────────────────────────────────────────
+  const [name, setName]               = useState('Global Basketball Association');
+  const [year, setYear]               = useState(2025);
+
+  // ── Gender ────────────────────────────────────────────────────────────────
+  const [playerGenderRatio, setPlayerGenderRatio]         = useState(0);
+  const [coachGenderRatio, setCoachGenderRatio]           = useState(10);
   const [allowManualGenderEdits, setAllowManualGenderEdits] = useState(true);
-  const [difficulty, setDifficulty] = useState<LeagueSettings['difficulty']>('Pro');
+
+  // ── Core Sim Rules ────────────────────────────────────────────────────────
+  const [difficulty, setDifficulty]           = useState<LeagueSettings['difficulty']>('Pro');
   const [ownerMeterEnabled, setOwnerMeterEnabled] = useState(true);
   const [injuryFrequency, setInjuryFrequency] = useState<LeagueSettings['injuryFrequency']>('Medium');
   const [tradeDifficulty, setTradeDifficulty] = useState<LeagueSettings['tradeDifficulty']>('Realistic');
-  const [b2bFrequency, setB2bFrequency] = useState<LeagueSettings['b2bFrequency']>('Realistic');
+
+  // ── Gameplay Tweaks ───────────────────────────────────────────────────────
+  const [b2bFrequency, setB2bFrequency]           = useState<LeagueSettings['b2bFrequency']>('Realistic');
   const [rookieProgression, setRookieProgression] = useState<LeagueSettings['rookieProgressionRate']>('Normal');
   const [showAdvancedStats, setShowAdvancedStats] = useState(true);
-  const [godMode, setGodMode] = useState(false);
+
+  // ── Playoffs & Schedule ───────────────────────────────────────────────────
+  const [playoffFormat, setPlayoffFormat]       = useState<6|8|10|16>(8);
+  const [playoffSeeding, setPlayoffSeeding]     = useState<'Conference'|'League-wide'>('Conference');
+  const [playInTournament, setPlayInTournament] = useState(true);
+  const [homeCourt, setHomeCourt]               = useState(true);
+  const [tradeDeadline, setTradeDeadline]       = useState<LeagueSettings['tradeDeadline']>('Week 14');
+  const [hardCapAtDeadline, setHardCapAtDeadline] = useState(false);
+
+  // ── Contracts ─────────────────────────────────────────────────────────────
+  const [maxContractYears, setMaxContractYears]       = useState<2|3|4|5>(5);
+  const [rookieScaleContracts, setRookieScaleContracts] = useState(true);
+  const [maxPlayerSalaryPct, setMaxPlayerSalaryPct]   = useState<25|30|35>(35);
+  const [birdRights, setBirdRights]                   = useState(true);
+
+  // ── Draft ─────────────────────────────────────────────────────────────────
+  const [draftRounds, setDraftRounds]                   = useState<1|2|3>(2);
+  const [draftClassSize, setDraftClassSize]             = useState<'Small'|'Normal'|'Large'>('Normal');
+  const [internationalProspects, setInternationalProspects] = useState(true);
+  const [draftLottery, setDraftLottery]                 = useState(true);
+
+  // ── Expansion ─────────────────────────────────────────────────────────────
+  const [expansionEnabled, setExpansionEnabled]       = useState(false);
+  const [expansionTeamCount, setExpansionTeamCount]   = useState<1|2|4>(2);
+  const [expansionDraftRules, setExpansionDraftRules] = useState<'Standard'|'Protected'|'Open'>('Standard');
+
+  // ── Advanced ──────────────────────────────────────────────────────────────
+  const [godMode, setGodMode]         = useState(false);
   const [seasonLength, setSeasonLength] = useState(82);
-  const [salaryCap, setSalaryCap] = useState(140_000_000);
+  const [salaryCap, setSalaryCap]     = useState(140_000_000);
+  const [numTeams, setNumTeams]       = useState(30);
+
+  // ── UI ────────────────────────────────────────────────────────────────────
   const [showAdvanced, setShowAdvanced] = useState(false);
   const [saveAsDefault, setSaveAsDefault] = useState(false);
-  const [errors, setErrors] = useState<Record<string, string>>({});
-  const [numTeams, setNumTeams] = useState(30);
+  const [errors, setErrors]           = useState<Record<string, string>>({});
   const [godModeConfirm, setGodModeConfirm] = useState(false);
-  const [genderWarning, setGenderWarning] = useState(false);
+  const [genderWarning, setGenderWarning]   = useState(false);
 
+  // ── Load saved defaults ───────────────────────────────────────────────────
   useEffect(() => {
     const saved = localStorage.getItem(DEFAULT_SETTINGS_KEY);
     if (!saved) return;
     try {
       const p = JSON.parse(saved);
-      if (p.leagueName) setName(p.leagueName);
+      if (p.leagueName)                    setName(p.leagueName);
       if (p.playerGenderRatio !== undefined) setPlayerGenderRatio(p.playerGenderRatio);
-      if (p.coachGenderRatio !== undefined) setCoachGenderRatio(p.coachGenderRatio);
-      if (p.difficulty) setDifficulty(p.difficulty);
+      if (p.coachGenderRatio !== undefined)  setCoachGenderRatio(p.coachGenderRatio);
+      if (p.difficulty)                    setDifficulty(p.difficulty);
       if (p.ownerMeterEnabled !== undefined) setOwnerMeterEnabled(p.ownerMeterEnabled);
-      if (p.injuryFrequency) setInjuryFrequency(p.injuryFrequency);
-      if (p.tradeDifficulty) setTradeDifficulty(p.tradeDifficulty);
-      if (p.rookieProgressionRate) setRookieProgression(p.rookieProgressionRate);
+      if (p.injuryFrequency)               setInjuryFrequency(p.injuryFrequency);
+      if (p.tradeDifficulty)               setTradeDifficulty(p.tradeDifficulty);
+      if (p.rookieProgressionRate)         setRookieProgression(p.rookieProgressionRate);
       if (p.showAdvancedStats !== undefined) setShowAdvancedStats(p.showAdvancedStats);
-      if (p.seasonLength) setSeasonLength(p.seasonLength);
-      if (p.salaryCap) setSalaryCap(p.salaryCap);
-      if (p.b2bFrequency) setB2bFrequency(p.b2bFrequency);
-      if (p.numTeams) setNumTeams(p.numTeams);
+      if (p.seasonLength)                  setSeasonLength(p.seasonLength);
+      if (p.salaryCap)                     setSalaryCap(p.salaryCap);
+      if (p.b2bFrequency)                  setB2bFrequency(p.b2bFrequency);
+      if (p.numTeams)                      setNumTeams(p.numTeams);
+      if (p.playoffFormat)                 setPlayoffFormat(p.playoffFormat);
+      if (p.playoffSeeding)                setPlayoffSeeding(p.playoffSeeding);
+      if (p.playInTournament !== undefined)  setPlayInTournament(p.playInTournament);
+      if (p.homeCourt !== undefined)         setHomeCourt(p.homeCourt);
+      if (p.tradeDeadline)                 setTradeDeadline(p.tradeDeadline);
+      if (p.hardCapAtDeadline !== undefined) setHardCapAtDeadline(p.hardCapAtDeadline);
+      if (p.maxContractYears)              setMaxContractYears(p.maxContractYears);
+      if (p.rookieScaleContracts !== undefined) setRookieScaleContracts(p.rookieScaleContracts);
+      if (p.maxPlayerSalaryPct)            setMaxPlayerSalaryPct(p.maxPlayerSalaryPct);
+      if (p.birdRights !== undefined)        setBirdRights(p.birdRights);
+      if (p.draftRounds)                   setDraftRounds(p.draftRounds);
+      if (p.draftClassSize)                setDraftClassSize(p.draftClassSize);
+      if (p.internationalProspects !== undefined) setInternationalProspects(p.internationalProspects);
+      if (p.draftLottery !== undefined)      setDraftLottery(p.draftLottery);
+      if (p.expansionEnabled !== undefined)  setExpansionEnabled(p.expansionEnabled);
+      if (p.expansionTeamCount)            setExpansionTeamCount(p.expansionTeamCount);
+      if (p.expansionDraftRules)           setExpansionDraftRules(p.expansionDraftRules);
     } catch { /* ignore */ }
   }, []);
 
@@ -121,13 +191,13 @@ const LeagueConfiguration: React.FC<LeagueConfigurationProps> = ({ onConfirm, on
   }, [playerGenderRatio, coachGenderRatio]);
 
   const handleGodModeToggle = (checked: boolean) => {
-    if (checked) { setGodModeConfirm(true); }
-    else { setGodMode(false); }
+    if (checked) setGodModeConfirm(true);
+    else setGodMode(false);
   };
 
   const validate = (): boolean => {
     const errs: Record<string, string> = {};
-    if (!name.trim()) errs.name = 'League name is required.';
+    if (!name.trim())          errs.name = 'League name is required.';
     else if (name.length > 30) errs.name = 'League name must be 30 characters or fewer.';
     if (year < 2020 || year > 2050) errs.year = 'Starting year must be between 2020 and 2050.';
     if (seasonLength < 20 || seasonLength > 82) errs.seasonLength = 'Season length must be between 20 and 82 games.';
@@ -138,28 +208,53 @@ const LeagueConfiguration: React.FC<LeagueConfigurationProps> = ({ onConfirm, on
 
   const handleConfirm = () => {
     if (!validate()) return;
-    const expansionYear = expansionYearOffset != null ? year + expansionYearOffset - 1 : undefined;
     const settings: Partial<LeagueSettings> = {
+      // Basic
       franchiseName: name,
       startingYear: year,
+      // Core sim
       difficulty,
       ownerMeterEnabled,
-      expansionYear,
-      salaryCap,
-      luxuryTaxLine: Math.round(salaryCap * 1.15),
-      hardCap: Math.round(salaryCap * 1.25),
       injuryFrequency,
       tradeDifficulty,
+      // Gameplay
+      b2bFrequency,
       rookieProgressionRate: rookieProgression,
       vetDeclineRate: 100,
       simSpeed: 'Normal',
-      godMode,
-      seasonLength,
+      showAdvancedStats,
+      // Financial
+      salaryCap,
+      luxuryTaxLine: Math.round(salaryCap * 1.15),
+      hardCap: Math.round(salaryCap * 1.25),
+      // Gender
       playerGenderRatio,
       coachGenderRatio,
       allowManualGenderEdits,
-      b2bFrequency,
-      showAdvancedStats,
+      // Playoffs & schedule
+      playoffFormat,
+      playoffSeeding,
+      playInTournament,
+      homeCourt,
+      tradeDeadline,
+      hardCapAtDeadline,
+      // Contracts
+      maxContractYears,
+      rookieScaleContracts,
+      maxPlayerSalaryPct,
+      birdRights,
+      // Draft
+      draftRounds,
+      draftClassSize,
+      internationalProspects,
+      draftLottery,
+      // Expansion
+      expansionEnabled,
+      expansionTeamCount,
+      expansionDraftRules,
+      // Advanced
+      godMode,
+      seasonLength,
       numTeams,
     };
     if (saveAsDefault) {
@@ -168,6 +263,7 @@ const LeagueConfiguration: React.FC<LeagueConfigurationProps> = ({ onConfirm, on
     onConfirm(name, year, settings);
   };
 
+  // ── derived labels ────────────────────────────────────────────────────────
   const playerGenderLabel =
     playerGenderRatio === 0   ? 'All Male'    :
     playerGenderRatio === 100 ? 'All Female'  :
@@ -183,6 +279,7 @@ const LeagueConfiguration: React.FC<LeagueConfigurationProps> = ({ onConfirm, on
   const normTrade = (v: LeagueSettings['tradeDifficulty']): string =>
     v === 'Easy' ? 'Arcade' : v === 'Hard' ? 'Simulation' : v;
 
+  // ── render ────────────────────────────────────────────────────────────────
   return (
     <div className="fixed inset-0 bg-slate-950 flex items-center justify-center z-[110] p-4 md:p-10 animate-in fade-in zoom-in-95 duration-500 overflow-y-auto">
       <div className="absolute inset-0 pointer-events-none opacity-20">
@@ -235,8 +332,8 @@ const LeagueConfiguration: React.FC<LeagueConfigurationProps> = ({ onConfirm, on
           </div>
         )}
 
-        {/* Row 1: League Name, Year, Expansion */}
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+        {/* ── Row 1: Name + Year ──────────────────────────────────────────────── */}
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
           <Field label="League Name" error={errors.name}>
             <input type="text" value={name} maxLength={30} onChange={e => setName(e.target.value)}
               className={`w-full bg-slate-950 border rounded-xl px-4 py-3 text-white font-display text-lg focus:outline-none focus:border-amber-500/50 transition-colors ${errors.name ? 'border-rose-500' : 'border-slate-800'}`} />
@@ -245,29 +342,18 @@ const LeagueConfiguration: React.FC<LeagueConfigurationProps> = ({ onConfirm, on
             <input type="number" value={year} min={2020} max={2050} onChange={e => setYear(parseInt(e.target.value) || 2025)}
               className={`w-full bg-slate-950 border rounded-xl px-4 py-3 text-white font-display text-lg focus:outline-none ${errors.year ? 'border-rose-500' : 'border-slate-800'}`} />
           </Field>
-          <Field label="Scheduled Expansion">
-            <select value={expansionYearOffset ?? ''} onChange={e => setExpansionYearOffset(e.target.value ? parseInt(e.target.value) : null)}
-              className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-3 text-white font-bold appearance-none cursor-pointer">
-              <option value="">None</option>
-              <option value="2">Year 2</option>
-              <option value="3">Year 3 (Default)</option>
-              <option value="5">Year 5</option>
-              <option value="10">Year 10</option>
-            </select>
-          </Field>
         </div>
 
-        {/* Roster & Gender */}
+        {/* ── Roster & Gender ──────────────────────────────────────────────────── */}
         <Section title="Roster & Gender Options">
           <Field label="Player Gender Distribution">
             <div className="space-y-3">
               <select value={playerGenderLabel}
                 onChange={e => {
                   const v = e.target.value;
-                  if (v === 'All Male') setPlayerGenderRatio(0);
-                  else if (v === 'All Female') setPlayerGenderRatio(100);
+                  if (v === 'All Male')    setPlayerGenderRatio(0);
+                  else if (v === 'All Female')  setPlayerGenderRatio(100);
                   else if (v === 'Mixed 50/50') setPlayerGenderRatio(50);
-                  // Custom: keep the slider value as-is
                 }}
                 className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-3 text-white font-bold">
                 <option>All Male</option>
@@ -307,7 +393,7 @@ const LeagueConfiguration: React.FC<LeagueConfigurationProps> = ({ onConfirm, on
           </div>
         </Section>
 
-        {/* Core Sim Rules */}
+        {/* ── Core Sim Rules ───────────────────────────────────────────────────── */}
         <Section title="Core Sim Rules">
           <Field label="Difficulty Level">
             <BtnGroup options={['Rookie','Pro','All-Star','Legend']}
@@ -317,15 +403,8 @@ const LeagueConfiguration: React.FC<LeagueConfigurationProps> = ({ onConfirm, on
               tooltips={Object.fromEntries(Object.entries(DIFFICULTY_INFO).map(([k, v]) => [k, v.tooltip]))} />
           </Field>
           <Field label="Owner Patience Meter">
-            <button type="button" onClick={() => setOwnerMeterEnabled(v => !v)}
-              className={`w-full flex items-center justify-between px-4 py-3 border rounded-xl transition-all ${ownerMeterEnabled ? 'bg-amber-500/10 border-amber-500/30' : 'bg-slate-950 border-slate-800'}`}>
-              <span className="text-xs font-bold text-slate-400 uppercase leading-tight">
-                {ownerMeterEnabled ? 'Enabled — losing seasons trigger pressure events' : 'Disabled — no ownership risk'}
-              </span>
-              <div className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors ${ownerMeterEnabled ? 'bg-amber-500' : 'bg-slate-700'}`}>
-                <span className={`inline-block h-3.5 w-3.5 transform rounded-full bg-white transition-transform ${ownerMeterEnabled ? 'translate-x-4' : 'translate-x-1'}`} />
-              </div>
-            </button>
+            <Toggle label={ownerMeterEnabled ? 'Enabled — losing seasons trigger pressure events' : 'Disabled — no ownership risk'}
+              checked={ownerMeterEnabled} onChange={setOwnerMeterEnabled} />
           </Field>
           <Field label="Injury Frequency" hint={FIELD_HINTS.injuryFrequency}>
             <BtnGroup options={['None','Low','Medium','High']} value={injuryFrequency}
@@ -337,7 +416,7 @@ const LeagueConfiguration: React.FC<LeagueConfigurationProps> = ({ onConfirm, on
           </Field>
         </Section>
 
-        {/* Gameplay Tweaks */}
+        {/* ── Gameplay Tweaks ──────────────────────────────────────────────────── */}
         <Section title="Gameplay Tweaks">
           <Field label="Back-to-Back Frequency" hint={FIELD_HINTS.b2bFrequency}>
             <BtnGroup options={['None','Low','Realistic','Brutal']} value={normB2b(b2bFrequency)}
@@ -357,53 +436,177 @@ const LeagueConfiguration: React.FC<LeagueConfigurationProps> = ({ onConfirm, on
           </div>
         </Section>
 
-        {/* Advanced Settings */}
+        {/* ── Advanced Settings (collapsible) ──────────────────────────────────── */}
         <div className="border-t border-slate-800 pt-8">
           <button type="button" onClick={() => setShowAdvanced(v => !v)}
             className="text-[10px] font-black text-slate-500 uppercase tracking-[0.4em] flex items-center gap-2 hover:text-white transition-colors">
             {showAdvanced ? '▼' : '▶'} Advanced Settings
           </button>
+
           {showAdvanced && (
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mt-6 animate-in slide-in-from-top-4">
-              <Field label="Number of Teams" hint="How many franchises start in the league. Max 38 (all available). Must be even.">
-                <BtnGroup options={['20','24','28','30','32','38']}
-                  value={String(numTeams)}
-                  onChange={v => setNumTeams(parseInt(v))} />
-              </Field>
-              <Field label="Enable God Mode">
-                <div className={`flex items-start gap-3 px-4 py-3 border rounded-xl cursor-pointer transition-all ${godMode ? 'bg-rose-500/10 border-rose-500/30' : 'bg-slate-950 border-slate-800'}`}
-                  onClick={() => handleGodModeToggle(!godMode)}>
-                  <input type="checkbox" checked={godMode} readOnly className="w-5 h-5 accent-rose-500 pointer-events-none mt-0.5" />
-                  <div>
-                    <span className={`text-xs font-bold uppercase ${godMode ? 'text-rose-400' : 'text-slate-500'}`}>
-                      {godMode ? 'Unlocked — full override access' : 'Locked — standard rules enforce'}
-                    </span>
-                    <p className="text-[9px] text-slate-600 mt-0.5">Enabling God Mode may affect achievement tracking.</p>
-                  </div>
+            <div className="space-y-8 mt-6 animate-in slide-in-from-top-4">
+
+              {/* ── League Infrastructure ─────────────────────────────────────── */}
+              <div className="bg-slate-900/50 border border-slate-800 rounded-2xl p-6 space-y-6">
+                <h4 className="text-xs font-black text-amber-500 uppercase tracking-[0.3em] border-b border-slate-800 pb-3">League Infrastructure</h4>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+
+                  <Field label="Number of Teams" hint="How many franchises start in the league. Max 38 (all available). Must be even.">
+                    <BtnGroup options={['20','24','28','30','32','38']} value={String(numTeams)}
+                      onChange={v => setNumTeams(parseInt(v))} />
+                  </Field>
+                  <Field label="Custom Season Length" hint={FIELD_HINTS.seasonLength} error={errors.seasonLength}>
+                    <input type="number" value={seasonLength} min={20} max={82}
+                      onChange={e => setSeasonLength(parseInt(e.target.value) || 82)}
+                      className={`w-full bg-slate-950 border rounded-xl px-4 py-3 text-white font-mono focus:outline-none ${errors.seasonLength ? 'border-rose-500' : 'border-slate-800'}`} />
+                  </Field>
+                  <Field label="Salary Cap (Soft Limit)" hint={FIELD_HINTS.salaryCap} error={errors.salaryCap}>
+                    <div className="space-y-2">
+                      <input type="number" value={salaryCap} step={1_000_000} min={80_000_000} max={300_000_000}
+                        onChange={e => setSalaryCap(parseInt(e.target.value) || 140_000_000)}
+                        className={`w-full bg-slate-950 border rounded-xl px-4 py-3 text-white font-mono text-sm focus:outline-none ${errors.salaryCap ? 'border-rose-500' : 'border-slate-800'}`} />
+                      <div className="flex gap-4 text-[9px] font-black text-slate-600 uppercase">
+                        <span>Cap: {fmtM(salaryCap)}</span>
+                        <span>Luxury: {fmtM(Math.round(salaryCap * 1.15))}</span>
+                        <span>Hard Cap: {fmtM(Math.round(salaryCap * 1.25))}</span>
+                      </div>
+                    </div>
+                  </Field>
+                  <Field label="Enable God Mode">
+                    <div className={`flex items-start gap-3 px-4 py-3 border rounded-xl cursor-pointer transition-all ${godMode ? 'bg-rose-500/10 border-rose-500/30' : 'bg-slate-950 border-slate-800'}`}
+                      onClick={() => handleGodModeToggle(!godMode)}>
+                      <input type="checkbox" checked={godMode} readOnly className="w-5 h-5 accent-rose-500 pointer-events-none mt-0.5" />
+                      <div>
+                        <span className={`text-xs font-bold uppercase ${godMode ? 'text-rose-400' : 'text-slate-500'}`}>
+                          {godMode ? 'Unlocked — full override access' : 'Locked — standard rules enforce'}
+                        </span>
+                        <p className="text-[9px] text-slate-600 mt-0.5">Enabling God Mode may affect achievement tracking.</p>
+                      </div>
+                    </div>
+                  </Field>
+
                 </div>
-              </Field>
-              <Field label="Custom Season Length" hint={FIELD_HINTS.seasonLength} error={errors.seasonLength}>
-                <input type="number" value={seasonLength} min={20} max={82}
-                  onChange={e => setSeasonLength(parseInt(e.target.value) || 82)}
-                  className={`w-full bg-slate-950 border rounded-xl px-4 py-3 text-white font-mono focus:outline-none ${errors.seasonLength ? 'border-rose-500' : 'border-slate-800'}`} />
-              </Field>
-              <Field label="Salary Cap (Soft Limit)" hint={FIELD_HINTS.salaryCap} error={errors.salaryCap}>
-                <div className="space-y-2">
-                  <input type="number" value={salaryCap} step={1_000_000} min={80_000_000} max={300_000_000}
-                    onChange={e => setSalaryCap(parseInt(e.target.value) || 140_000_000)}
-                    className={`w-full bg-slate-950 border rounded-xl px-4 py-3 text-white font-mono text-sm focus:outline-none ${errors.salaryCap ? 'border-rose-500' : 'border-slate-800'}`} />
-                  <div className="flex gap-4 text-[9px] font-black text-slate-600 uppercase">
-                    <span>Cap: {fmtM(salaryCap)}</span>
-                    <span>Luxury: {fmtM(Math.round(salaryCap * 1.15))}</span>
-                    <span>Hard Cap: {fmtM(Math.round(salaryCap * 1.25))}</span>
-                  </div>
+              </div>
+
+              {/* ── Playoffs & Scheduling ─────────────────────────────────────── */}
+              <div className="bg-slate-900/50 border border-slate-800 rounded-2xl p-6 space-y-6">
+                <h4 className="text-xs font-black text-amber-500 uppercase tracking-[0.3em] border-b border-slate-800 pb-3">Playoffs & Scheduling</h4>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+
+                  <Field label="Playoff Format" hint={FIELD_HINTS.playoffFormat}>
+                    <BtnGroup options={['6','8','10','16']} value={String(playoffFormat)}
+                      onChange={v => setPlayoffFormat(parseInt(v) as 6|8|10|16)} />
+                  </Field>
+                  <Field label="Playoff Seeding">
+                    <BtnGroup options={['Conference','League-wide']} value={playoffSeeding}
+                      onChange={v => setPlayoffSeeding(v as 'Conference'|'League-wide')} />
+                  </Field>
+                  <Field label="Play-in Tournament">
+                    <Toggle label={playInTournament ? 'Enabled — seeds 7–10 compete for final spots' : 'Disabled — top N teams qualify directly'}
+                      checked={playInTournament} onChange={setPlayInTournament} />
+                  </Field>
+                  <Field label="Home Court Advantage">
+                    <Toggle label={homeCourt ? 'Enabled — home team gets FT and crowd boost' : 'Disabled — neutral venue sim'}
+                      checked={homeCourt} onChange={setHomeCourt} />
+                  </Field>
+                  <Field label="Trade Deadline" hint={FIELD_HINTS.tradeDeadline}>
+                    <BtnGroup options={['Disabled','Week 12','Week 14','Week 16']} value={tradeDeadline ?? 'Week 14'}
+                      onChange={v => setTradeDeadline(v as LeagueSettings['tradeDeadline'])} />
+                  </Field>
+                  <Field label="Hard Cap at Deadline">
+                    <Toggle label={hardCapAtDeadline ? 'Enabled — no moves that breach hard cap after deadline' : 'Disabled — soft cap only post-deadline'}
+                      checked={hardCapAtDeadline} onChange={setHardCapAtDeadline} />
+                  </Field>
+
                 </div>
-              </Field>
+              </div>
+
+              {/* ── Contracts ─────────────────────────────────────────────────── */}
+              <div className="bg-slate-900/50 border border-slate-800 rounded-2xl p-6 space-y-6">
+                <h4 className="text-xs font-black text-amber-500 uppercase tracking-[0.3em] border-b border-slate-800 pb-3">Contracts & Salary Rules</h4>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+
+                  <Field label="Max Contract Years">
+                    <BtnGroup options={['2','3','4','5']} value={String(maxContractYears)}
+                      onChange={v => setMaxContractYears(parseInt(v) as 2|3|4|5)} />
+                  </Field>
+                  <Field label="Max Player Salary %" hint="Max % of cap any single player can earn.">
+                    <BtnGroup options={['25%','30%','35%']} value={`${maxPlayerSalaryPct}%`}
+                      onChange={v => setMaxPlayerSalaryPct(parseInt(v) as 25|30|35)} />
+                  </Field>
+                  <Field label="Rookie Scale Contracts">
+                    <Toggle label={rookieScaleContracts ? 'Enabled — drafted players on fixed rookie scale' : 'Disabled — rookies negotiate freely'}
+                      checked={rookieScaleContracts} onChange={setRookieScaleContracts} />
+                  </Field>
+                  <Field label="Bird Rights">
+                    <Toggle label={birdRights ? 'Enabled — re-sign own players over cap' : 'Disabled — hard cap applies to re-signings'}
+                      checked={birdRights} onChange={setBirdRights} />
+                  </Field>
+
+                </div>
+              </div>
+
+              {/* ── Draft ─────────────────────────────────────────────────────── */}
+              <div className="bg-slate-900/50 border border-slate-800 rounded-2xl p-6 space-y-6">
+                <h4 className="text-xs font-black text-amber-500 uppercase tracking-[0.3em] border-b border-slate-800 pb-3">Draft Settings</h4>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+
+                  <Field label="Draft Rounds" hint={FIELD_HINTS.draftRounds}>
+                    <BtnGroup options={['1','2','3']} value={String(draftRounds)}
+                      onChange={v => setDraftRounds(parseInt(v) as 1|2|3)} />
+                  </Field>
+                  <Field label="Draft Class Size">
+                    <BtnGroup options={['Small','Normal','Large']} value={draftClassSize}
+                      onChange={v => setDraftClassSize(v as 'Small'|'Normal'|'Large')} />
+                  </Field>
+                  <Field label="Draft Lottery">
+                    <Toggle label={draftLottery ? 'Enabled — bottom teams get weighted lottery odds' : 'Disabled — strict reverse-standings order'}
+                      checked={draftLottery} onChange={setDraftLottery} />
+                  </Field>
+                  <Field label="International Prospects">
+                    <Toggle label={internationalProspects ? 'Enabled — overseas players enter draft pool' : 'Disabled — domestic prospects only'}
+                      checked={internationalProspects} onChange={setInternationalProspects} />
+                  </Field>
+
+                </div>
+              </div>
+
+              {/* ── Expansion ─────────────────────────────────────────────────── */}
+              <div className="bg-slate-900/50 border border-slate-800 rounded-2xl p-6 space-y-6">
+                <h4 className="text-xs font-black text-amber-500 uppercase tracking-[0.3em] border-b border-slate-800 pb-3">Expansion</h4>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+
+                  <Field label="Enable Expansion" hint={FIELD_HINTS.expansionEnabled}>
+                    <Toggle
+                      label={expansionEnabled ? 'Enabled — Expansion tab available in-career' : 'Disabled — no expansion draft'}
+                      sub={expansionEnabled ? 'Launch the draft any time from the Expansion tab.' : undefined}
+                      checked={expansionEnabled} onChange={setExpansionEnabled} />
+                  </Field>
+                  <Field label="Expansion Team Count">
+                    <BtnGroup options={['1','2','4']} value={String(expansionTeamCount)}
+                      onChange={v => setExpansionTeamCount(parseInt(v) as 1|2|4)} />
+                  </Field>
+                  <Field label="Expansion Draft Rules" hint="Standard: 8 protected. Protected: 11. Open: all players eligible.">
+                    <BtnGroup options={['Standard','Protected','Open']} value={expansionDraftRules}
+                      onChange={v => setExpansionDraftRules(v as 'Standard'|'Protected'|'Open')} />
+                  </Field>
+                  {expansionEnabled && (
+                    <div className="flex items-start gap-3 bg-orange-500/10 border border-orange-500/25 rounded-xl p-3">
+                      <span className="text-orange-400 mt-0.5 text-sm">🏀</span>
+                      <p className="text-[10px] text-orange-300 leading-relaxed">
+                        Expansion is on. During your career, open the <strong>Expansion</strong> tab to set up new franchises and run the draft whenever you're ready.
+                      </p>
+                    </div>
+                  )}
+
+                </div>
+              </div>
+
             </div>
           )}
         </div>
 
-        {/* Bottom */}
+        {/* ── Bottom ───────────────────────────────────────────────────────────── */}
         <div className="flex flex-col md:flex-row items-center justify-between gap-8 pt-6 border-t border-slate-800">
           <div className="flex items-center gap-3">
             <input type="checkbox" checked={saveAsDefault} onChange={e => setSaveAsDefault(e.target.checked)}
