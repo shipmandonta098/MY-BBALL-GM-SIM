@@ -448,20 +448,29 @@ const App: React.FC = () => {
       }
     }
     // Injury recovery — decrement days, auto-return when healed
+    const recovering: Array<{ player: Player; team: Team }> = [];
     newState = {
       ...newState,
       teams: newState.teams.map(t => ({
         ...t,
         roster: t.roster.map(p => {
-          if (p.status !== 'Injured') return p;
+          if (p.status !== 'Injured' && !(p.injuryDaysLeft != null && p.injuryDaysLeft > 0)) return p;
           const daysLeft = (p.injuryDaysLeft ?? 1) - 1;
           if (daysLeft <= 0) {
+            recovering.push({ player: p, team: t });
             return { ...p, status: 'Rotation' as PlayerStatus, injuryType: undefined, injuryDaysLeft: 0 };
           }
           return { ...p, injuryDaysLeft: daysLeft };
         })
       }))
     };
+    // News: player returns from injury
+    for (const { player, team } of recovering) {
+      newState = await addNewsItem(newState, 'injury', {
+        player, team,
+        detail: `${player.name} has been cleared and returns from ${player.injuryType ?? 'injury'}.`
+      }, false);
+    }
     // Rare practice/travel illness
     if (Math.random() > 0.97) {
       const active = newState.teams.flatMap(t => t.roster).filter(p => p.status !== 'Injured');

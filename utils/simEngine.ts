@@ -3540,17 +3540,21 @@ export const simulateGame = (
 
     return roster.map((p, i) => {
       let mins = 0;
-      if (team.rotation && team.rotation.minutes[p.id] !== undefined) {
-        mins = team.rotation.minutes[p.id];
-      } else {
-        const rank = ratingRank.get(p.id) ?? i;
-        if (i < 5) {
-          if (rank === 0)      mins = 37 + Math.floor(Math.random() * 4);  // 37–40 (star)
-          else if (rank === 1) mins = 34 + Math.floor(Math.random() * 4);  // 34–37 (co-star)
-          else if (rank === 2) mins = 30 + Math.floor(Math.random() * 4);  // 30–33
-          else                 mins = 26 + Math.floor(Math.random() * 5);  // 26–30
-        } else if (i < 9) mins = 14 + Math.floor(Math.random() * 10);
-        else if (i < 12)  mins = Math.floor(Math.random() * 6);
+      // Hard gate: injured players NEVER receive minutes regardless of saved rotation
+      const isInjured = p.status === 'Injured' || (p.injuryDaysLeft != null && p.injuryDaysLeft > 0);
+      if (!isInjured) {
+        if (team.rotation && team.rotation.minutes[p.id] !== undefined) {
+          mins = team.rotation.minutes[p.id];
+        } else {
+          const rank = ratingRank.get(p.id) ?? i;
+          if (i < 5) {
+            if (rank === 0)      mins = 37 + Math.floor(Math.random() * 4);
+            else if (rank === 1) mins = 34 + Math.floor(Math.random() * 4);
+            else if (rank === 2) mins = 30 + Math.floor(Math.random() * 4);
+            else                 mins = 26 + Math.floor(Math.random() * 5);
+          } else if (i < 9) mins = 14 + Math.floor(Math.random() * 10);
+          else if (i < 12)  mins = Math.floor(Math.random() * 6);
+        }
       }
       if (isGT) {
         if (i < 5) mins = Math.max(20, mins - 10);
