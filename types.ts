@@ -565,6 +565,7 @@ export interface LeagueSettings {
   scheduledExpansion?: 'Off' | 'Year 2' | 'Year 3' | 'Year 5';
   expansionTeamCount?: 1 | 2 | 4;
   expansionDraftRules?: 'Standard' | 'Protected' | 'Open';
+  expansionEnabled?: boolean;
   numTeams?: number;
 
   // ── Gameplay Tab additions ────────────────────────────────────────────────
@@ -695,10 +696,20 @@ export interface LeagueState {
   rivalryHistory?: RivalryStats[];
   expansionDraft?: {
     active: boolean;
-    phase: 'protection' | 'draft' | 'completed';
+    phase: 'setup' | 'protection' | 'draft' | 'completed';
     protectedPlayerIds: Record<string, string[]>;
     expansionTeamIds: string[];
     draftLog: string[];
+    pendingTeams?: {
+      id: string;
+      name: string;
+      city: string;
+      abbreviation: string;
+      gmName: string;
+      primaryColor: string;
+      secondaryColor: string;
+      logoUrl: string;
+    }[];
   };
   /** Populated when the human roster OVR ranks top-3 at season start (advisory only). */
   humanOvrAlert?: string;

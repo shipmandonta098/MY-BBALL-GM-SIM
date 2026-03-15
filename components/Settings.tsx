@@ -28,7 +28,7 @@ const DEFAULT_SETTINGS: Partial<LeagueSettings> = {
   tradeDeadline: 'Week 14', hardCapAtDeadline: false,
   maxContractYears: 5, rookieScaleContracts: true, maxPlayerSalaryPct: 35, birdRights: true,
   draftRounds: 2, draftClassSize: 'Normal', internationalProspects: true, draftLottery: true,
-  scheduledExpansion: 'Off', expansionTeamCount: 2, expansionDraftRules: 'Standard',
+  scheduledExpansion: 'Off', expansionTeamCount: 2, expansionDraftRules: 'Standard', expansionEnabled: false,
   fatigueImpact: 'Medium', b2bPenalty: 'Mild', loadManagement: true,
   injuryDuration: 'Realistic', practiceInjuries: false, careerEndingInjuries: true,
   teamChemistry: true, chemistryImpact: 'Medium', personalityClashPenalties: true,
@@ -110,7 +110,7 @@ const SEARCH_INDEX: { tab: SettingsTab; label: string }[] = [
   { tab: 'league', label: 'Max Player Salary %' }, { tab: 'league', label: 'Bird Rights' },
   { tab: 'league', label: 'Draft Rounds' }, { tab: 'league', label: 'Draft Class Size' },
   { tab: 'league', label: 'International Prospects' }, { tab: 'league', label: 'Draft Lottery' },
-  { tab: 'league', label: 'Scheduled Expansion' }, { tab: 'league', label: 'Expansion Team Count' },
+  { tab: 'league', label: 'Enable Expansion' }, { tab: 'league', label: 'Expansion Team Count' },
   { tab: 'league', label: 'Expansion Draft Rules' },
   // Gameplay
   { tab: 'gameplay', label: 'Fatigue Impact' }, { tab: 'gameplay', label: 'Back-to-Back Penalty' },
@@ -207,7 +207,7 @@ const Settings: React.FC<SettingsProps> = ({ league, updateLeague }) => {
   const resetTab = () => {
     const tabDefaults: Partial<LeagueSettings> = {};
     const tabMap: Record<SettingsTab, (keyof typeof DEFAULT_SETTINGS)[]> = {
-      league:     ['playoffFormat','playoffSeeding','playInTournament','homeCourt','tradeDeadline','hardCapAtDeadline','maxContractYears','rookieScaleContracts','maxPlayerSalaryPct','birdRights','draftRounds','draftClassSize','internationalProspects','draftLottery','scheduledExpansion','expansionTeamCount','expansionDraftRules'],
+      league:     ['playoffFormat','playoffSeeding','playInTournament','homeCourt','tradeDeadline','hardCapAtDeadline','maxContractYears','rookieScaleContracts','maxPlayerSalaryPct','birdRights','draftRounds','draftClassSize','internationalProspects','draftLottery','scheduledExpansion','expansionTeamCount','expansionDraftRules','expansionEnabled'],
       gameplay:   ['fatigueImpact','b2bPenalty','loadManagement','injuryDuration','practiceInjuries','careerEndingInjuries','teamChemistry','chemistryImpact','personalityClashPenalties','playerMorale','moraleAffectsAttributes','tradeRequestThreshold'],
       sliders:    ['sliderLayup','sliderMidRange','slider3pt','sliderFreeThrow','sliderFastBreak','sliderPostUp','sliderPickRoll','sliderSteal','sliderBlock','sliderFoul','sliderHelpDefense','sliderPerimeterDefense','sliderTimeout','sliderSubstitution','sliderTechFoul','sliderFlagrantFoul','sliderInjuryMultiplier'],
       simulation: ['pbpDetailLevel','aiDecisionSpeed','blowoutFrequency','comebackFrequency','overtimeFrequency','globalPaceOverride','shotClockLength','scoringEra','threePtFrequency','simBlockFrequency','turnoverFrequency'],
@@ -555,23 +555,26 @@ const Settings: React.FC<SettingsProps> = ({ league, updateLeague }) => {
               onChange={v => updateSettings({ draftLottery: v }, 'Draft Lottery')} />
 
             {/* Expansion */}
-            <SectionHeader title="Expansion" />
-            {inSeason ? (
-              <LockedField>
-                <SelectField label="Scheduled Expansion" value={s.scheduledExpansion ?? 'Off'}
-                  options={['Off','Year 2','Year 3','Year 5']}
-                  onChange={() => {}} />
-              </LockedField>
-            ) : (
-              <SelectField label="Scheduled Expansion" value={s.scheduledExpansion ?? 'Off'}
-                options={['Off','Year 2','Year 3','Year 5']}
-                onChange={v => updateSettings({ scheduledExpansion: v as any }, 'Scheduled Expansion')} />
-            )}
+            <SectionHeader title="Expansion"
+              sub="Enable to add new franchise(s) via expansion draft. Configure teams in the Expansion tab." />
+            <ToggleField label="Enable Expansion" value={s.expansionEnabled ?? false}
+              onChange={v => updateSettings({ expansionEnabled: v }, 'Enable Expansion')} />
             <ButtonField label="Expansion Team Count" options={[1,2,4]}
-              value={s.expansionTeamCount ?? 2} onChange={v => updateSettings({ expansionTeamCount: Number(v) as 1|2|4 }, 'Expansion Team Count')} />
+              value={s.expansionTeamCount ?? 2}
+              onChange={v => updateSettings({ expansionTeamCount: Number(v) as 1|2|4 }, 'Expansion Team Count')} />
             <SelectField label="Expansion Draft Rules" value={s.expansionDraftRules ?? 'Standard'}
-              options={['Standard','Protected','Open']}
-              onChange={v => updateSettings({ expansionDraftRules: v as any }, 'Expansion Draft Rules')} />
+              options={['Standard (8 protected)','Protected (11 protected)','Open (0 protected)']}
+              onChange={v => updateSettings({ expansionDraftRules: v.split(' ')[0] as any }, 'Expansion Draft Rules')} />
+            {(s.expansionEnabled) && (
+              <div className="md:col-span-2 flex items-center gap-3 bg-orange-500/10 border border-orange-500/30 rounded-2xl p-4">
+                <svg className="w-5 h-5 text-orange-400 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                </svg>
+                <p className="text-xs text-orange-300 font-bold">
+                  Expansion is enabled — head to the <span className="text-orange-400 uppercase tracking-widest">Expansion</span> tab to set up your new team(s) and run the draft.
+                </p>
+              </div>
+            )}
 
             {/* Export */}
             <div className="md:col-span-2 flex gap-3 pt-2">
