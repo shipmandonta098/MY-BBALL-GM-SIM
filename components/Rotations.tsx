@@ -42,21 +42,23 @@ interface RotationsProps {
 
 type RotationPreset = 'star-heavy' | 'defensive' | 'small-ball' | 'b2b-rest' | 'balanced';
 
-const SortablePlayerCard = ({ 
-  player, 
-  minutes, 
-  onMinutesChange, 
-  isStarter, 
+const SortablePlayerCard = ({
+  player,
+  minutes,
+  onMinutesChange,
+  isStarter,
   positionLabel,
   fatigueWarning
-}: { 
-  player: Player; 
-  minutes: number; 
+}: {
+  player: Player;
+  minutes: number;
   onMinutesChange: (val: number) => void;
   isStarter?: boolean;
   positionLabel?: string;
   fatigueWarning?: boolean;
 }) => {
+  const injured = player.status === 'Injured' || (player.injuryDaysLeft != null && player.injuryDaysLeft > 0);
+
   const {
     attributes,
     listeners,
@@ -64,7 +66,7 @@ const SortablePlayerCard = ({
     transform,
     transition,
     isDragging,
-  } = useSortable({ id: player.id });
+  } = useSortable({ id: player.id, disabled: injured });
 
   const style = {
     transform: CSS.Transform.toString(transform),
@@ -74,31 +76,45 @@ const SortablePlayerCard = ({
   };
 
   return (
-    <div 
-      ref={setNodeRef} 
+    <div
+      ref={setNodeRef}
       style={style}
-      className={`bg-slate-800/50 border ${isStarter ? 'border-amber-500/30' : 'border-slate-700/50'} rounded-2xl p-4 flex items-center gap-4 group transition-all hover:bg-slate-800`}
+      className={`border rounded-2xl p-4 flex items-center gap-4 group transition-all ${
+        injured
+          ? 'bg-rose-950/20 border-rose-500/30 opacity-70'
+          : `bg-slate-800/50 ${isStarter ? 'border-amber-500/30' : 'border-slate-700/50'} hover:bg-slate-800`
+      }`}
     >
-      <div {...attributes} {...listeners} className="cursor-grab active:cursor-grabbing text-slate-600 hover:text-slate-400 p-2">
+      <div {...(injured ? {} : { ...attributes, ...listeners })} className={`p-2 ${injured ? 'text-rose-800 cursor-not-allowed' : 'cursor-grab active:cursor-grabbing text-slate-600 hover:text-slate-400'}`}>
         <GripVertical size={20} />
       </div>
 
       <div className="flex-1 flex items-center gap-4">
         <div className="relative">
-          <div className="w-12 h-12 bg-slate-900 rounded-xl flex items-center justify-center font-display font-bold text-slate-500 border border-slate-800">
+          <div className={`w-12 h-12 rounded-xl flex items-center justify-center font-display font-bold border ${injured ? 'bg-rose-950/40 border-rose-500/30 text-rose-500' : 'bg-slate-900 border-slate-800 text-slate-500'}`}>
             {player.name.charAt(0)}
           </div>
-          {positionLabel && (
+          {positionLabel && !injured && (
             <div className="absolute -top-2 -left-2 bg-amber-500 text-slate-950 text-[10px] font-black px-1.5 py-0.5 rounded border border-slate-950">
               {positionLabel}
             </div>
           )}
+          {injured && (
+            <div className="absolute -top-2 -left-2 bg-rose-500 text-white text-[10px] font-black px-1.5 py-0.5 rounded border border-rose-900">
+              INJ
+            </div>
+          )}
         </div>
         <div className="flex-1">
-          <div className="flex items-center gap-2">
-            <span className="font-bold text-slate-200 uppercase tracking-tight text-sm">{player.name}</span>
+          <div className="flex items-center gap-2 flex-wrap">
+            <span className={`font-bold uppercase tracking-tight text-sm ${injured ? 'text-rose-400' : 'text-slate-200'}`}>{player.name}</span>
             <span className="text-[10px] font-black text-slate-500 uppercase px-1.5 py-0.5 bg-slate-900 rounded">{player.position}</span>
-            {fatigueWarning && (
+            {injured && (
+              <span className="text-[10px] font-black uppercase px-1.5 py-0.5 rounded bg-rose-500/10 text-rose-400 border border-rose-500/20 whitespace-nowrap">
+                🤕 DNP–Injured{player.injuryDaysLeft ? ` · ${player.injuryDaysLeft}d` : ''}
+              </span>
+            )}
+            {!injured && fatigueWarning && (
               <AlertTriangle size={14} className="text-rose-500 animate-pulse" />
             )}
           </div>
@@ -111,20 +127,26 @@ const SortablePlayerCard = ({
         </div>
       </div>
 
-      <div className="w-48 flex flex-col gap-1">
-        <div className="flex justify-between items-center px-1">
-          <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Minutes</span>
-          <span className={`text-xs font-mono font-bold ${minutes > 35 ? 'text-rose-500' : 'text-emerald-400'}`}>{minutes}m</span>
+      {injured ? (
+        <div className="w-48 flex items-center justify-center">
+          <span className="text-[10px] font-black uppercase tracking-widest text-rose-500/60">Unavailable</span>
         </div>
-        <input 
-          type="range"
-          min="0"
-          max="48"
-          value={minutes}
-          onChange={(e) => onMinutesChange(parseInt(e.target.value))}
-          className="w-full h-1.5 bg-slate-900 rounded-lg appearance-none cursor-pointer accent-amber-500"
-        />
-      </div>
+      ) : (
+        <div className="w-48 flex flex-col gap-1">
+          <div className="flex justify-between items-center px-1">
+            <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Minutes</span>
+            <span className={`text-xs font-mono font-bold ${minutes > 35 ? 'text-rose-500' : 'text-emerald-400'}`}>{minutes}m</span>
+          </div>
+          <input
+            type="range"
+            min="0"
+            max="48"
+            value={minutes}
+            onChange={(e) => onMinutesChange(parseInt(e.target.value))}
+            className="w-full h-1.5 bg-slate-900 rounded-lg appearance-none cursor-pointer accent-amber-500"
+          />
+        </div>
+      )}
     </div>
   );
 };
@@ -237,6 +259,15 @@ const Rotations: React.FC<RotationsProps> = ({ league, updateLeague }) => {
   };
 
   const saveRotation = () => {
+    // Force injured players to 0 minutes
+    const injuredIds = new Set<string>(
+      team.roster
+        .filter(p => p.status === 'Injured' || (p.injuryDaysLeft != null && p.injuryDaysLeft > 0))
+        .map(p => p.id)
+    );
+    const effectiveMinutes = { ...minutes };
+    injuredIds.forEach(id => { effectiveMinutes[id] = 0; });
+
     const newRotation: TeamRotation = {
       starters: {
         PG: playerOrder[0],
@@ -247,7 +278,7 @@ const Rotations: React.FC<RotationsProps> = ({ league, updateLeague }) => {
       },
       bench: playerOrder.slice(5, 10),
       reserves: playerOrder.slice(10),
-      minutes
+      minutes: effectiveMinutes
     };
 
     updateLeague((prev: any) => {
