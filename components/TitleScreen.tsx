@@ -30,15 +30,15 @@ const TitleScreen: React.FC<TitleScreenProps> = ({
   };
 
   const handleExport = (save: LeagueState) => {
-    const dataStr = JSON.stringify(save, null, 2);
-    const dataUri = 'data:application/json;charset=utf-8,'+ encodeURIComponent(dataStr);
-    const exportFileDefaultName = `${save.leagueName.replace(/\s+/g, '_')}_save.json`;
-    const linkElement = document.createElement('a');
-    linkElement.setAttribute('href', dataUri);
-    linkElement.setAttribute('download', exportFileDefaultName);
-    document.body.appendChild(linkElement);
-    linkElement.click();
-    document.body.removeChild(linkElement);
+    const blob = new Blob([JSON.stringify(save, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `${save.leagueName.replace(/\s+/g, '_')}_save.json`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
   };
 
   const handleImportClick = () => {
