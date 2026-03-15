@@ -2502,9 +2502,11 @@ const computeTendencyModifiers = (p: Player): TendencyModifiers => {
     threepaBoost: (( ot?.pullUpThree    ?? 50) - 50) / 100 * 0.40,
     insideBoost:  (( ot?.driveToBasket  ?? 50) - 50) / 100 * 0.30
                 + ((ot?.cutter         ?? 50) - 50) / 100 * 0.12,
-    usageBoost:   (( ot?.isoHeavy       ?? 50) - 50) / 100 * 0.28
-                - ((ot?.kickOutPasser   ?? 50) - 50) / 100 * 0.12
-                + ((ot?.drawFoul        ?? 50) - 50) / 100 * 0.06,
+    usageBoost:   (( ot?.isoHeavy       ?? 50) - 50) / 100 * 0.45   // primary scorer lever
+                + ((ot?.attackCloseOuts ?? 50) - 50) / 100 * 0.10   // off-ball creation
+                + ((ot?.pullUpOffPnr    ?? 50) - 50) / 100 * 0.08   // PnR volume
+                - ((ot?.kickOutPasser   ?? 50) - 50) / 100 * 0.08   // pass-first penalty
+                + ((ot?.drawFoul        ?? 50) - 50) / 100 * 0.08,  // FTA-getter = more touches
     astBoost:     (( ot?.kickOutPasser  ?? 50) - 50) / 100 * 0.35
                 + ((ot?.spotUp          ?? 50) - 50) / 100 * 0.08,
 
@@ -3512,9 +3514,10 @@ export const simulateGame = (
     const oppAvgInteriorStr = oppTopN.reduce((s, op) => s + (op.attributes.strength ?? 50), 0) / oppCount;
     const oppPostDefMod     = getPostDefenseMod(oppAvgInteriorDef, oppAvgInteriorStr, 'TEAM_BOX_SCORE_POST');
 
-    // Power-curve usage: (rating/avg)^3.5 so stars get disproportionately more FGA
+    // Power-curve usage: (rating/avg)^4.0 — sharper star concentration so a
+    // 90-rated star absorbs ~30 FGA while a 75-rated role player gets ~11.
     const avgRating     = totalRating / Math.max(1, roster.length);
-    const rawUsageArr   = roster.map(p => Math.pow(Math.max(1, p.rating) / avgRating, 3.5));
+    const rawUsageArr   = roster.map(p => Math.pow(Math.max(1, p.rating) / avgRating, 4.0));
     const totalRawUsage = rawUsageArr.reduce((s, u) => s + u, 0);
     const usageShares   = rawUsageArr.map(u => u / Math.max(1, totalRawUsage));
 
