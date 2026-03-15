@@ -3,7 +3,7 @@ import { LeagueState, Player, ContractOffer, Transaction, Position } from '../ty
 import { getFlag } from '../constants';
 
 // ── Constants ──────────────────────────────────────────────────────────────
-const MORATORIUM_DAYS = 3; // signing window opens after day 3
+const MORATORIUM_DAYS = 5; // signing window opens after day 5
 const AI_SIGNINGS_PER_DAY = 3;
 
 interface FreeAgencyProps {
@@ -102,11 +102,8 @@ const FreeAgency: React.FC<FreeAgencyProps> = ({
   const isOverCap = capSpace < 0;
   const isOverLux = currentSalary > luxuryTax;
 
-  const moratoriumActive =
-    league.draftPhase !== 'completed' || league.offseasonDay < MORATORIUM_DAYS;
-  const daysUntilOpen = league.draftPhase !== 'completed'
-    ? null
-    : Math.max(0, MORATORIUM_DAYS - league.offseasonDay);
+  const moratoriumActive = league.offseasonDay < MORATORIUM_DAYS;
+  const daysUntilOpen = Math.max(0, MORATORIUM_DAYS - league.offseasonDay);
 
   // ── Filtered + sorted FA list ──
   const filteredFAs = useMemo(() => {
@@ -291,14 +288,29 @@ const FreeAgency: React.FC<FreeAgencyProps> = ({
 
   // ── Advance Day / AI signings ──
   const advanceDay = () => {
-    if (league.draftPhase !== 'completed') return;
-
     let updatedFAs = [...league.freeAgents];
     const newNews: typeof league.newsFeed = [];
     const newTxs: Transaction[] = [];
     const aiTeams = league.teams.filter(t => t.id !== league.userTeamId);
+    const nextDay = league.offseasonDay + 1;
 
-    const signingsCount = Math.min(AI_SIGNINGS_PER_DAY + Math.floor(Math.random() * 3), updatedFAs.length);
+    // Announce when moratorium lifts
+    if (league.offseasonDay < MORATORIUM_DAYS && nextDay >= MORATORIUM_DAYS) {
+      newNews.push({
+        id: `fa-open-${Date.now()}`,
+        category: 'transaction',
+        headline: '🟢 Free Agency is Now Open!',
+        content: 'The moratorium has ended. Teams can now officially sign free agents.',
+        timestamp: league.currentDay,
+        realTimestamp: Date.now(),
+        isBreaking: true,
+      });
+    }
+
+    // No AI signings during moratorium
+    const signingsCount = nextDay <= MORATORIUM_DAYS
+      ? 0
+      : Math.min(AI_SIGNINGS_PER_DAY + Math.floor(Math.random() * 3), updatedFAs.length);
 
     for (let i = 0; i < signingsCount; i++) {
       if (updatedFAs.length === 0) break;
@@ -341,7 +353,7 @@ const FreeAgency: React.FC<FreeAgencyProps> = ({
 
     updateLeague({
       freeAgents: updatedFAs,
-      offseasonDay: league.offseasonDay + 1,
+      offseasonDay: nextDay,
       newsFeed: [...newNews, ...league.newsFeed],
       transactions: [...newTxs, ...(league.transactions || [])].slice(0, 1000),
     });
@@ -375,29 +387,23 @@ const FreeAgency: React.FC<FreeAgencyProps> = ({
         <div className="bg-amber-500/10 border border-amber-500/30 rounded-[2rem] p-6 flex flex-col sm:flex-row items-center justify-between gap-4">
           <div>
             <p className="text-[10px] font-black uppercase tracking-[0.4em] text-amber-500 mb-1">
-              {league.draftPhase !== 'completed' ? '⏳ Draft in Progress' : '🔒 Moratorium in Effect'}
+              🔒 Moratorium in Effect
             </p>
             <h3 className="text-xl font-display font-bold text-white uppercase">
-              {league.draftPhase !== 'completed'
-                ? 'Complete the Draft to begin Free Agency'
-                : daysUntilOpen! > 0
-                  ? `Signings open in ${daysUntilOpen} day${daysUntilOpen !== 1 ? 's' : ''}`
-                  : 'Free Agency is open'}
+              {daysUntilOpen > 0
+                ? `Signings open in ${daysUntilOpen} day${daysUntilOpen !== 1 ? 's' : ''}`
+                : 'Free Agency is open'}
             </h3>
             <p className="text-slate-500 text-xs mt-1">
-              {league.draftPhase !== 'completed'
-                ? 'Scout the market and plan your offers.'
-                : 'Teams may negotiate but cannot officially sign players yet. Use Advance Day to progress.'}
+              Teams may negotiate but cannot officially sign players yet. Use Advance Day to progress.
             </p>
           </div>
-          {league.draftPhase === 'completed' && (
-            <div className="shrink-0 text-center">
-              <p className="text-[10px] text-slate-500 uppercase font-bold mb-1">Moratorium Day</p>
-              <p className="text-4xl font-display font-black text-amber-500">
-                {league.offseasonDay}<span className="text-slate-600 text-xl">/{MORATORIUM_DAYS}</span>
-              </p>
-            </div>
-          )}
+          <div className="shrink-0 text-center">
+            <p className="text-[10px] text-slate-500 uppercase font-bold mb-1">Moratorium Day</p>
+            <p className="text-4xl font-display font-black text-amber-500">
+              {league.offseasonDay}<span className="text-slate-600 text-xl">/{MORATORIUM_DAYS}</span>
+            </p>
+          </div>
         </div>
       )}
 
@@ -451,14 +457,12 @@ const FreeAgency: React.FC<FreeAgencyProps> = ({
             </div>
 
             {/* Advance Day */}
-            {league.draftPhase === 'completed' && (
-              <button
-                onClick={advanceDay}
-                className="px-7 py-4 bg-amber-500 hover:bg-amber-400 text-slate-950 font-display font-bold uppercase rounded-xl transition-all shadow-xl shadow-amber-500/20 active:scale-95"
-              >
-                Advance Day →
-              </button>
-            )}
+            <button
+              onClick={advanceDay}
+              className="px-7 py-4 bg-amber-500 hover:bg-amber-400 text-slate-950 font-display font-bold uppercase rounded-xl transition-all shadow-xl shadow-amber-500/20 active:scale-95"
+            >
+              Advance Day →
+            </button>
           </div>
         </div>
 
