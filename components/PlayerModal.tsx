@@ -22,6 +22,12 @@ interface PlayerModalProps {
   careerAwards?: { label: string; year: number; icon: string }[];
   /** Current league season number — labels the "This Season" stats tab */
   currentSeason?: number;
+  /** League-level context for advanced stat calculations */
+  leagueContext?: {
+    allPlayers: Player[];
+    teamPlayers: Player[];
+    seasonLength: number;
+  };
 }
 
 const traitIcons: Record<PersonalityTrait, string> = {
@@ -54,9 +60,10 @@ const PlayerModal: React.FC<PlayerModalProps> = ({
   currentAllStarRole,
   careerAwards = [],
   currentSeason,
+  leagueContext,
 }) => {
   const [isEditing, setIsEditing] = React.useState(false);
-  const [statsTab, setStatsTab] = useState<'season' | 'career'>('season');
+  const [statsTab, setStatsTab] = useState<'season' | 'career' | 'advanced'>('season');
 
   const defaultAttributes = {
     shooting: 50, defense: 50, rebounding: 50, playmaking: 50, athleticism: 50,
@@ -1016,6 +1023,155 @@ const PlayerModal: React.FC<PlayerModalProps> = ({
               { label: '+/-', value: fmtPm(pmPg) },
             ];
 
+            // ── Advanced Stats ───────────────────────────────────────────────
+            const adv = (() => {
+              const lgCtx = leagueContext;
+              const PACE = 100; // sim default possessions per game
+              const SEASON = lgCtx?.seasonLength ?? 82;
+
+              // Team totals
+              const tm = lgCtx?.teamPlayers ?? [];
+              const tmGP   = tm.length ? Math.max(...tm.map(p => p.stats.gamesPlayed)) : Math.max(1, gp);
+              const tmMIN  = tm.reduce((a, p) => a + p.stats.minutes, 0) || (s.minutes * 5);
+              const tmFGM  = tm.reduce((a, p) => a + p.stats.fgm, 0) || s.fgm * 5;
+              const tmFGA  = tm.reduce((a, p) => a + p.stats.fga, 0) || s.fga * 5;
+              const tmFTA  = tm.reduce((a, p) => a + p.stats.fta, 0) || s.fta * 5;
+              const tmORB  = tm.reduce((a, p) => a + p.stats.offReb, 0) || s.offReb * 5;
+              const tmDRB  = tm.reduce((a, p) => a + p.stats.defReb, 0) || s.defReb * 5;
+              const tmAST  = tm.reduce((a, p) => a + p.stats.assists, 0) || s.assists * 5;
+              const tmSTL  = tm.reduce((a, p) => a + p.stats.steals, 0) || s.steals * 5;
+              const tmBLK  = tm.reduce((a, p) => a + p.stats.blocks, 0) || s.blocks * 5;
+              const tmTOV  = tm.reduce((a, p) => a + p.stats.tov, 0) || s.tov * 5;
+              const tmPTS  = tm.reduce((a, p) => a + p.stats.points, 0) || s.points * 5;
+
+              // League averages (qualified players with ≥5 GP)
+              const allQ = (lgCtx?.allPlayers ?? []).filter(p => p.stats.gamesPlayed >= 5);
+              const n    = Math.max(1, allQ.length);
+              const lgPPG  = allQ.reduce((a, p) => a + p.stats.points  / p.stats.gamesPlayed, 0) / n;
+              const lgMPG  = allQ.reduce((a, p) => a + p.stats.minutes / p.stats.gamesPlayed, 0) / n;
+              const lgORB  = allQ.reduce((a, p) => a + p.stats.offReb  / p.stats.gamesPlayed, 0) / n;
+              const lgDRB  = allQ.reduce((a, p) => a + p.stats.defReb  / p.stats.gamesPlayed, 0) / n;
+              const lgAST  = allQ.reduce((a, p) => a + p.stats.assists / p.stats.gamesPlayed, 0) / n;
+              const lgSTL  = allQ.reduce((a, p) => a + p.stats.steals  / p.stats.gamesPlayed, 0) / n;
+              const lgBLK  = allQ.reduce((a, p) => a + p.stats.blocks  / p.stats.gamesPlayed, 0) / n;
+              const lgTOV  = allQ.reduce((a, p) => a + p.stats.tov     / p.stats.gamesPlayed, 0) / n;
+              const lgFGA  = allQ.reduce((a, p) => a + p.stats.fga     / p.stats.gamesPlayed, 0) / n;
+              const lgFTA  = allQ.reduce((a, p) => a + p.stats.fta     / p.stats.gamesPlayed, 0) / n;
+              const lgFGM  = allQ.reduce((a, p) => a + p.stats.fgm     / p.stats.gamesPlayed, 0) / n;
+              const lgPoss = lgFGA + 0.44 * lgFTA + lgTOV; // approx per-player poss per game
+
+              // Approx opponent stats ≈ league avg (symmetric league)
+              const oppORBperGame = lgORB * (lgCtx?.teamPlayers.length ?? 10) / n * n;
+              const oppDRBperGame = lgDRB * (lgCtx?.teamPlayers.length ?? 10) / n * n;
+              // Actually just use per-team approx: opp ~= same as team
+              const oppORB = tmGP * lgORB * 5; // approx opp ORB = league avg per player × 5 players × games
+              const oppDRB = tmGP * lgDRB * 5;
+              const oppFGA = tmGP * lgFGA * 5;
+              const lg3PA  = lgCtx ? lgCtx.allPlayers.reduce((a,p)=>a+p.stats.threepa/Math.max(1,p.stats.gamesPlayed),0)/n : 5;
+              const opp3PA = tmGP * lg3PA;
+              const opp2PA = oppFGA - opp3PA;
+              const oppPoss = tmGP * PACE;
+
+              // Per-possession (total season)
+              const possUsed = Math.max(1, s.fga + 0.44 * s.fta + s.tov);
+
+              // ── Rate stats ──
+              const threePAr = s.fga > 0 ? s.threepa / s.fga : 0;
+              const FTr      = s.fga > 0 ? s.fta / s.fga : 0;
+              const TOVpct   = 100 * s.tov / possUsed;
+              const USGpct   = (tmFGA + 0.44*tmFTA + tmTOV) > 0
+                ? 100 * possUsed / (possUsed + ((tmFGA + 0.44*tmFTA + tmTOV) - possUsed) * (s.minutes / Math.max(1, tmMIN/5)))
+                : 0;
+              // Proper USG%: 100 * (FGA + 0.44*FTA + TOV) / ((MP/(TmMP/5)) * (TmFGA + 0.44*TmFTA + TmTOV))
+              const USGpctProper = (s.minutes > 0 && tmMIN > 0 && (tmFGA+0.44*tmFTA+tmTOV) > 0)
+                ? 100 * possUsed / ((s.minutes / (tmMIN / 5)) * (tmFGA + 0.44*tmFTA + tmTOV))
+                : USGpct;
+
+              // ── Rebound / rate percentages ──
+              const ORBpct = (s.minutes > 0 && (tmORB + oppDRB) > 0)
+                ? 100 * s.offReb * (tmMIN/5) / (s.minutes * (tmORB + oppDRB))
+                : 0;
+              const DRBpct = (s.minutes > 0 && (oppORB + tmDRB) > 0)
+                ? 100 * s.defReb * (tmMIN/5) / (s.minutes * (oppORB + tmDRB))
+                : 0;
+              const ASTpct = (s.minutes > 0 && tmFGM > 0)
+                ? 100 * s.assists / ((s.minutes / (tmMIN/5)) * tmFGM - s.fgm)
+                : 0;
+              const STLpct = (s.minutes > 0 && oppPoss > 0)
+                ? 100 * s.steals * (tmMIN/5) / (s.minutes * oppPoss)
+                : 0;
+              const BLKpct = (s.minutes > 0 && opp2PA > 0)
+                ? 100 * s.blocks * (tmMIN/5) / (s.minutes * opp2PA)
+                : 0;
+
+              // ── Offensive / Defensive Ratings ──
+              const ORtg = 100 * s.points / possUsed;
+              // League ORtg baseline from all qualified players
+              const lgPossPerPlayer = allQ.length
+                ? allQ.reduce((a, p) => a + (p.stats.fga+0.44*p.stats.fta+p.stats.tov)/Math.max(1,p.stats.gamesPlayed), 0) / n
+                : lgPoss;
+              const lgORtg = lgPossPerPlayer > 0
+                ? 100 * lgPPG / lgPossPerPlayer
+                : 110;
+              // Individual DRtg: league baseline adjusted for defensive contributions
+              const lgDRtg = lgORtg; // symmetric in equilibrium
+              const DRtg = lgDRtg
+                - 2.5 * (spg - lgSTL / Math.max(1, lgMPG) * mpg) / Math.max(0.1, mpg) * mpg
+                - 1.5 * (bpg - lgBLK / Math.max(1, lgMPG) * mpg) / Math.max(0.1, mpg) * mpg
+                - 0.5 * (s.defReb/gp - lgDRB / Math.max(1, lgMPG) * mpg) / Math.max(0.1, mpg) * mpg;
+
+              // ── Win Shares ──
+              const lgPtsPerPoss = lgORtg / 100;
+              const marginalOff  = (ORtg/100 - 0.92 * lgPtsPerPoss) * possUsed;
+              const OWS = marginalOff / 33.33;
+              const marginalDef  = (lgDRtg/100 - DRtg/100) * (s.minutes * PACE / 48);
+              const DWS = marginalDef / 33.33;
+              const WS  = OWS + DWS;
+              const WS48 = s.minutes > 0 ? WS * 48 / s.minutes : 0;
+
+              // ── EWA (Estimated Wins Added) ──
+              const EWA = (per - 11.5) * s.minutes / 67.5;
+
+              // ── BPM / VORP (simplified box score method) ──
+              // Based on normalized per-100-possession stats
+              const p100 = PACE > 0 && mpg > 0 ? 100 / (mpg / 48 * PACE) : 1;
+              const pts100  = ppg  * p100;
+              const reb100  = rpg  * p100;
+              const ast100  = apg  * p100;
+              const stl100  = spg  * p100;
+              const blk100  = bpg  * p100;
+              const tov100  = tpg  * p100;
+              const orb100  = (s.offReb/gp) * p100;
+
+              const OBPM = (-2.750)
+                + 0.190 * pts100
+                + 0.140 * ast100
+                + 0.050 * orb100
+                + 0.070 * (reb100 - orb100)
+                - 0.175 * tov100
+                + 0.050 * (USGpctProper/100 * 100 - 20)
+                + 0.120 * (ts * 100 - 55)
+                + 0.080 * threePAr * 100
+                - 0.050 * FTr * 100;
+              const DBPM = (-2.200)
+                + 0.140 * stl100
+                + 0.100 * blk100
+                + 0.060 * (reb100 - orb100)
+                - 0.040 * ast100
+                - 0.040 * tov100
+                - 0.030 * (USGpctProper/100 * 100 - 20);
+              const BPM  = OBPM + DBPM;
+              const VORP = (BPM - (-2.0)) * (s.minutes / 48) / SEASON;
+
+              return {
+                threePAr, FTr, TOVpct, USGpct: USGpctProper,
+                ORBpct, DRBpct, ASTpct, STLpct, BLKpct,
+                ORtg, DRtg, lgORtg, lgDRtg,
+                OWS, DWS, WS, WS48,
+                EWA, OBPM, DBPM, BPM, VORP,
+              };
+            })();
+
             return (
               <section className="space-y-5">
                 {/* Header + tab switcher */}
@@ -1027,24 +1183,36 @@ const PlayerModal: React.FC<PlayerModalProps> = ({
                         {currentSeason}–{String(currentSeason + 1).slice(2)} Season
                       </p>
                     )}
+                    {statsTab === 'advanced' && (
+                      <p className="text-[10px] text-slate-500 font-bold uppercase tracking-widest mt-0.5">Advanced Analytics</p>
+                    )}
                   </div>
-                  {hasCareer && (
-                    <div className="flex gap-1 bg-slate-900 border border-slate-800 rounded-full p-0.5">
-                      {(['season', 'career'] as const).map(tab => (
-                        <button
-                          key={tab}
-                          onClick={() => setStatsTab(tab)}
-                          className={`px-4 py-1 text-[10px] font-black uppercase rounded-full transition-all ${
-                            statsTab === tab
-                              ? 'bg-amber-500 text-slate-950'
-                              : 'text-slate-500 hover:text-white'
-                          }`}
-                        >
-                          {tab === 'season' ? (currentSeason ? `${currentSeason}–${String(currentSeason + 1).slice(2)}` : 'This Season') : 'Career'}
-                        </button>
-                      ))}
-                    </div>
-                  )}
+                  <div className="flex gap-1 bg-slate-900 border border-slate-800 rounded-full p-0.5">
+                    {hasCurr && (
+                      <button
+                        onClick={() => setStatsTab('season')}
+                        className={`px-3 py-1 text-[10px] font-black uppercase rounded-full transition-all ${statsTab === 'season' ? 'bg-amber-500 text-slate-950' : 'text-slate-500 hover:text-white'}`}
+                      >
+                        {currentSeason ? `${currentSeason}–${String(currentSeason + 1).slice(2)}` : 'Season'}
+                      </button>
+                    )}
+                    {hasCareer && (
+                      <button
+                        onClick={() => setStatsTab('career')}
+                        className={`px-3 py-1 text-[10px] font-black uppercase rounded-full transition-all ${statsTab === 'career' ? 'bg-amber-500 text-slate-950' : 'text-slate-500 hover:text-white'}`}
+                      >
+                        Career
+                      </button>
+                    )}
+                    {hasCurr && (
+                      <button
+                        onClick={() => setStatsTab('advanced')}
+                        className={`px-3 py-1 text-[10px] font-black uppercase rounded-full transition-all ${statsTab === 'advanced' ? 'bg-cyan-500 text-slate-950' : 'text-slate-500 hover:text-white'}`}
+                      >
+                        Advanced
+                      </button>
+                    )}
+                  </div>
                 </div>
 
                 {/* ── Season averages ─────────────────────────────────────────── */}
@@ -1083,6 +1251,122 @@ const PlayerModal: React.FC<PlayerModalProps> = ({
                     </div>
                   </div>
                 )}
+
+                {/* ── Advanced Stats ──────────────────────────────────────────── */}
+                {statsTab === 'advanced' && hasCurr && (() => {
+                  const f1  = (v: number) => isNaN(v) || !isFinite(v) ? '—' : v.toFixed(1);
+                  const f2  = (v: number) => isNaN(v) || !isFinite(v) ? '—' : v.toFixed(2);
+                  const f3  = (v: number) => isNaN(v) || !isFinite(v) ? '—' : (v * 100).toFixed(1) + '%';
+                  const fpm = (v: number) => isNaN(v) || !isFinite(v) ? '—' : (v >= 0 ? '+' : '') + v.toFixed(1);
+
+                  type AdvGroup = {
+                    title: string;
+                    color: string;
+                    desc: string;
+                    stats: { label: string; value: string; desc: string; hi?: boolean; lo?: boolean }[];
+                  };
+
+                  const groups: AdvGroup[] = [
+                    {
+                      title: 'Overall Value',
+                      color: 'amber',
+                      desc: 'Composite metrics estimating a player\'s total contribution',
+                      stats: [
+                        { label: 'PER',    value: f1(per),         desc: 'Player Efficiency Rating — per-minute production, lg avg 15',            hi: per >= 20, lo: per < 10 },
+                        { label: 'EWA',    value: f1(adv.EWA),    desc: 'Estimated Wins Added — wins contributed above replacement',              hi: adv.EWA >= 5, lo: adv.EWA < 0 },
+                        { label: 'WS',     value: f1(adv.WS),     desc: 'Win Shares — estimated wins a player contributed',                        hi: adv.WS >= 6, lo: adv.WS < 0 },
+                        { label: 'WS/48',  value: f2(adv.WS48),   desc: 'Win Shares per 48 minutes, lg avg ~0.10',                               hi: adv.WS48 >= 0.15, lo: adv.WS48 < 0.05 },
+                        { label: 'BPM',    value: fpm(adv.BPM),   desc: 'Box Plus/Minus — estimated pt differential per 100 poss vs avg player',  hi: adv.BPM >= 3, lo: adv.BPM < -2 },
+                        { label: 'VORP',   value: f2(adv.VORP),   desc: 'Value Over Replacement Player — cumulative BPM above replacement level', hi: adv.VORP >= 2, lo: adv.VORP < 0 },
+                      ],
+                    },
+                    {
+                      title: 'Shooting',
+                      color: 'orange',
+                      desc: 'Scoring efficiency and shot-selection tendencies',
+                      stats: [
+                        { label: 'TS%',   value: f3(ts),           desc: 'True Shooting % — accounts for 3-pointers and free throws',             hi: ts >= 0.58, lo: ts < 0.50 },
+                        { label: 'eFG%',  value: f3(eFG),          desc: 'Effective FG% — weights 3-pointers as 1.5× a 2-pointer',               hi: eFG >= 0.54, lo: eFG < 0.46 },
+                        { label: 'ORtg',  value: f1(adv.ORtg),    desc: `Offensive Rating — pts produced per 100 poss (lg avg ${f1(adv.lgORtg)})`, hi: adv.ORtg >= adv.lgORtg + 5, lo: adv.ORtg < adv.lgORtg - 5 },
+                        { label: '3PAr',  value: f3(adv.threePAr), desc: '3-Point Attempt Rate — fraction of FGA taken from 3',                  hi: adv.threePAr >= 0.45 },
+                        { label: 'FTr',   value: f3(adv.FTr),     desc: 'Free Throw Rate — FTA per FGA',                                          hi: adv.FTr >= 0.35 },
+                        { label: 'OBPM',  value: fpm(adv.OBPM),   desc: 'Offensive Box Plus/Minus — offensive contribution vs avg',              hi: adv.OBPM >= 2, lo: adv.OBPM < -1 },
+                      ],
+                    },
+                    {
+                      title: 'Defense',
+                      color: 'sky',
+                      desc: 'Defensive impact and protection metrics',
+                      stats: [
+                        { label: 'DRtg',  value: f1(adv.DRtg),    desc: `Def Rating — pts allowed per 100 poss (lower is better, lg ~${f1(adv.lgDRtg)})`, lo: adv.DRtg > adv.lgDRtg + 5, hi: adv.DRtg < adv.lgDRtg - 3 },
+                        { label: 'STL%',  value: f3(adv.STLpct/100), desc: 'Steal Percentage — % of opponent poss ending in a steal',             hi: adv.STLpct >= 2.5 },
+                        { label: 'BLK%',  value: f3(adv.BLKpct/100), desc: 'Block Percentage — % of opp 2PA blocked while on floor',              hi: adv.BLKpct >= 3.0 },
+                        { label: 'DRB%',  value: f3(adv.DRBpct/100), desc: 'Def Rebound % — % of available def rebounds grabbed while on floor',  hi: adv.DRBpct >= 25 },
+                        { label: 'OWS',   value: f1(adv.OWS),    desc: 'Offensive Win Shares',                                                   hi: adv.OWS >= 4 },
+                        { label: 'DWS',   value: f1(adv.DWS),    desc: 'Defensive Win Shares',                                                   hi: adv.DWS >= 3 },
+                        { label: 'DBPM',  value: fpm(adv.DBPM),  desc: 'Defensive Box Plus/Minus — defensive contribution vs avg',               hi: adv.DBPM >= 1, lo: adv.DBPM < -2 },
+                      ],
+                    },
+                    {
+                      title: 'Usage & Rates',
+                      color: 'violet',
+                      desc: 'How the player is used and their involvement rates while on the floor',
+                      stats: [
+                        { label: 'USG%',  value: f3(adv.USGpct/100),  desc: '% of team possessions used (FGA + 0.44*FTA + TOV) while on floor', hi: adv.USGpct >= 28, lo: adv.USGpct < 10 },
+                        { label: 'TOV%',  value: f3(adv.TOVpct/100),  desc: 'Turnover % — TOV per 100 possession attempts',                      lo: adv.TOVpct > 18 },
+                        { label: 'AST%',  value: f3(adv.ASTpct/100),  desc: '% of teammate FGMs assisted while on floor',                        hi: adv.ASTpct >= 30 },
+                        { label: 'ORB%',  value: f3(adv.ORBpct/100),  desc: '% of available offensive rebounds grabbed while on floor',           hi: adv.ORBpct >= 12 },
+                        { label: 'DRB%',  value: f3(adv.DRBpct/100),  desc: '% of available defensive rebounds grabbed while on floor',           hi: adv.DRBpct >= 25 },
+                        { label: '+/-',   value: fmtPm(pmPg),          desc: 'Net point differential per game while on floor',                    hi: pmPg >= 3, lo: pmPg <= -3 },
+                      ],
+                    },
+                  ];
+
+                  const colorMap: Record<string, { border: string; header: string; badge: string; badgeHi: string; badgeLo: string }> = {
+                    amber:  { border: 'border-amber-500/20',  header: 'text-amber-400',  badge: 'bg-slate-800 text-slate-300',      badgeHi: 'bg-amber-500/20 text-amber-300 border border-amber-500/30',     badgeLo: 'bg-rose-500/10 text-rose-400 border border-rose-500/20' },
+                    orange: { border: 'border-orange-500/20', header: 'text-orange-400', badge: 'bg-slate-800 text-slate-300',      badgeHi: 'bg-orange-500/20 text-orange-300 border border-orange-500/30',   badgeLo: 'bg-rose-500/10 text-rose-400 border border-rose-500/20' },
+                    sky:    { border: 'border-sky-500/20',    header: 'text-sky-400',    badge: 'bg-slate-800 text-slate-300',      badgeHi: 'bg-sky-500/20 text-sky-300 border border-sky-500/30',             badgeLo: 'bg-rose-500/10 text-rose-400 border border-rose-500/20' },
+                    violet: { border: 'border-violet-500/20', header: 'text-violet-400', badge: 'bg-slate-800 text-slate-300',      badgeHi: 'bg-violet-500/20 text-violet-300 border border-violet-500/30',   badgeLo: 'bg-rose-500/10 text-rose-400 border border-rose-500/20' },
+                  };
+
+                  return (
+                    <div className="space-y-5 animate-in fade-in duration-300">
+                      {groups.map(grp => {
+                        const c = colorMap[grp.color];
+                        return (
+                          <div key={grp.title} className={`bg-slate-950/50 border ${c.border} rounded-3xl overflow-hidden`}>
+                            <div className="px-5 py-3 border-b border-slate-800/60 flex items-center justify-between">
+                              <div>
+                                <h4 className={`text-[10px] font-black uppercase tracking-[0.3em] ${c.header}`}>{grp.title}</h4>
+                                <p className="text-[9px] text-slate-600 mt-0.5">{grp.desc}</p>
+                              </div>
+                            </div>
+                            <div className="grid grid-cols-2 sm:grid-cols-3 divide-x divide-y divide-slate-800/40">
+                              {grp.stats.map(st => {
+                                const badgeCls = st.hi ? c.badgeHi : st.lo ? c.badgeLo : c.badge;
+                                return (
+                                  <div key={st.label} className="p-4 group relative">
+                                    <div className="flex items-start justify-between gap-2">
+                                      <div className="text-[9px] font-black uppercase tracking-widest text-slate-600 mt-0.5 leading-tight">{st.label}</div>
+                                      <div className={`text-sm font-display font-bold tabular-nums px-2 py-0.5 rounded-lg ${badgeCls}`}>{st.value}</div>
+                                    </div>
+                                    {/* Hover tooltip */}
+                                    <div className="absolute bottom-full left-0 mb-1 z-50 hidden group-hover:block w-48 bg-slate-900 border border-slate-700 rounded-xl p-2 shadow-2xl pointer-events-none">
+                                      <p className="text-[9px] text-slate-400 leading-relaxed">{st.desc}</p>
+                                    </div>
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          </div>
+                        );
+                      })}
+                      <p className="text-[9px] text-slate-700 text-center italic">
+                        Estimates use season-to-date stats. Some metrics require league context and may vary from traditional calculations.
+                      </p>
+                    </div>
+                  );
+                })()}
 
                 {/* ── Career stats by season ──────────────────────────────────── */}
                 {statsTab === 'career' && hasCareer && (
