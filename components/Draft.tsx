@@ -190,6 +190,7 @@ const Draft: React.FC<DraftProps> = ({ league, updateLeague, onScout, scoutingRe
           scoutingReport={
             scoutingReport?.playerId === selectedProspect.id ? scoutingReport.report : undefined
           }
+          scoutBudget={league.teams.find(t => t.id === league.userTeamId)?.finances?.budgets?.scouting ?? 20}
         />
       )}
 

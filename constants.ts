@@ -4,6 +4,80 @@ export const POSITIONS: Position[] = ['PG', 'SG', 'SF', 'PF', 'C'];
 export const SCHEMES: CoachScheme[] = ['Balanced', 'Pace and Space', 'Grit and Grind', 'Triangle', 'Small Ball', 'Showtime'];
 export const COACH_ROLES: CoachRole[] = ['Head Coach', 'Assistant Offense', 'Assistant Defense', 'Assistant Dev', 'Trainer'];
 
+// ── Staff & Facilities Upgrade System ────────────────────────────────────────
+export type StaffType = 'coaching' | 'scouting' | 'medical' | 'facilities';
+
+export interface StaffTier {
+  /** Budget value stored in team.finances.budgets (20/40/60/80/100) */
+  level: number;
+  name: string;
+  /** One-time cost to upgrade TO this tier */
+  upgradeCost: number;
+  /** Annual maintenance cost added to team expenses */
+  annualCost: number;
+  /** Short effect description shown in tooltip */
+  effect: string;
+}
+
+export const STAFF_CONFIG: Record<StaffType, {
+  label: string;
+  icon: string;
+  tiers: StaffTier[];
+}> = {
+  coaching: {
+    label: 'Coaching Staff',
+    icon: '🧠',
+    tiers: [
+      { level: 20, name: 'Bare Minimum', upgradeCost: 0,          annualCost: 1_000_000,  effect: 'No bonus. Standard development rate.' },
+      { level: 40, name: 'Basic',        upgradeCost: 5_000_000,  annualCost: 3_000_000,  effect: '-8% injury duration. +8% player development.' },
+      { level: 60, name: 'Standard',     upgradeCost: 8_000_000,  annualCost: 6_000_000,  effect: '-15% injury duration. +16% player development.' },
+      { level: 80, name: 'Advanced',     upgradeCost: 12_000_000, annualCost: 10_000_000, effect: '-22% injury duration. +24% player development.' },
+      { level: 100, name: 'Elite',       upgradeCost: 18_000_000, annualCost: 15_000_000, effect: '-30% injury duration. +30% dev. -5% injury chance.' },
+    ],
+  },
+  scouting: {
+    label: 'Scouting Network',
+    icon: '🔭',
+    tiers: [
+      { level: 20, name: 'Bare Minimum', upgradeCost: 0,          annualCost: 500_000,    effect: 'Draft ratings hidden ±15. High bust risk.' },
+      { level: 40, name: 'Basic',        upgradeCost: 4_000_000,  annualCost: 2_000_000,  effect: 'Draft ratings ±10. Reduced bust risk.' },
+      { level: 60, name: 'Standard',     upgradeCost: 7_000_000,  annualCost: 4_000_000,  effect: 'Draft ratings ±6. Better draft accuracy.' },
+      { level: 80, name: 'Advanced',     upgradeCost: 10_000_000, annualCost: 7_000_000,  effect: 'Draft ratings ±3. Low bust risk.' },
+      { level: 100, name: 'Elite',       upgradeCost: 15_000_000, annualCost: 10_000_000, effect: 'Draft ratings ±1. Near-perfect prospect evaluation.' },
+    ],
+  },
+  medical: {
+    label: 'Medical Staff',
+    icon: '🩹',
+    tiers: [
+      { level: 20, name: 'Bare Minimum', upgradeCost: 0,          annualCost: 1_000_000,  effect: 'No bonus. Standard injury rates.' },
+      { level: 40, name: 'Basic',        upgradeCost: 5_000_000,  annualCost: 3_000_000,  effect: '-10% injury chance. +10% recovery speed.' },
+      { level: 60, name: 'Standard',     upgradeCost: 8_000_000,  annualCost: 6_000_000,  effect: '-20% injury chance. +20% recovery speed.' },
+      { level: 80, name: 'Advanced',     upgradeCost: 12_000_000, annualCost: 10_000_000, effect: '-30% injury chance. +30% recovery speed.' },
+      { level: 100, name: 'Elite',       upgradeCost: 18_000_000, annualCost: 15_000_000, effect: '-40% injury chance. +40% recovery. Minor injuries heal instantly.' },
+    ],
+  },
+  facilities: {
+    label: 'Facilities',
+    icon: '🏋️',
+    tiers: [
+      { level: 20, name: 'Bare Minimum', upgradeCost: 0,          annualCost: 1_500_000,  effect: 'No bonus. Average morale baseline.' },
+      { level: 40, name: 'Basic',        upgradeCost: 6_000_000,  annualCost: 4_000_000,  effect: '+5 morale baseline. +5% development speed.' },
+      { level: 60, name: 'Standard',     upgradeCost: 10_000_000, annualCost: 7_000_000,  effect: '+8 morale baseline. +8% development speed.' },
+      { level: 80, name: 'Advanced',     upgradeCost: 15_000_000, annualCost: 11_000_000, effect: '+12 morale baseline. +12% dev speed.' },
+      { level: 100, name: 'Elite',       upgradeCost: 20_000_000, annualCost: 16_000_000, effect: '+20 morale baseline. +15% dev. Boosts FA interest.' },
+    ],
+  },
+};
+
+/** Get the tier index (0-4) for a given budget value */
+export const getStaffTierIndex = (level: number): number =>
+  Math.max(0, Math.min(4, Math.round((level - 20) / 20)));
+
+/** Get the tier definition for a given budget value */
+export const getStaffTier = (type: StaffType, level: number): StaffTier =>
+  STAFF_CONFIG[type].tiers[getStaffTierIndex(level)];
+
 export const PERSONALITY_TRAITS: PersonalityTrait[] = [
   'Leader', 'Diva/Star', 'Loyal', 'Professional', 'Gym Rat', 
   'Lazy', 'Clutch', 'Tough/Alpha', 'Friendly/Team First', 'Money Hungry',
@@ -1391,10 +1465,10 @@ export const generateLeagueTeams = (genderRatio: number = 0, season: number = 20
         ownerPatience: 80,
         ownerGoal: ownerGoals[Math.floor(Math.random() * ownerGoals.length)],
         budgets: {
-          coaching: 70,
-          scouting: 70,
-          health: 70,
-          facilities: 70
+          coaching: 20,
+          scouting: 20,
+          health: 20,
+          facilities: 20
         }
       },
       primaryColor: data.primary,

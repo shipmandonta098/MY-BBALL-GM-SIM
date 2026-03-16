@@ -449,21 +449,27 @@ const App: React.FC = () => {
       }
     }
     // Injury recovery — decrement days, auto-return when healed
+    // Medical staff (budgets.health) grants a bonus recovery tick chance (0% at 20 → +40% at 100)
     const recovering: Array<{ player: Player; team: Team }> = [];
     newState = {
       ...newState,
-      teams: newState.teams.map(t => ({
-        ...t,
-        roster: t.roster.map(p => {
-          if (p.status !== 'Injured' && !(p.injuryDaysLeft != null && p.injuryDaysLeft > 0)) return p;
-          const daysLeft = (p.injuryDaysLeft ?? 1) - 1;
-          if (daysLeft <= 0) {
-            recovering.push({ player: p, team: t });
-            return { ...p, status: 'Rotation' as PlayerStatus, injuryType: undefined, injuryDaysLeft: 0 };
-          }
-          return { ...p, injuryDaysLeft: daysLeft };
-        })
-      }))
+      teams: newState.teams.map(t => {
+        const medBudget = t.finances?.budgets?.health ?? 20;
+        const bonusTickChance = ((medBudget - 20) / 80) * 0.40;
+        return {
+          ...t,
+          roster: t.roster.map(p => {
+            if (p.status !== 'Injured' && !(p.injuryDaysLeft != null && p.injuryDaysLeft > 0)) return p;
+            const bonusTick = Math.random() < bonusTickChance ? 1 : 0;
+            const daysLeft = (p.injuryDaysLeft ?? 1) - 1 - bonusTick;
+            if (daysLeft <= 0) {
+              recovering.push({ player: p, team: t });
+              return { ...p, status: 'Rotation' as PlayerStatus, injuryType: undefined, injuryDaysLeft: 0 };
+            }
+            return { ...p, injuryDaysLeft: daysLeft };
+          })
+        };
+      })
     };
     // News: player returns from injury
     for (const { player, team } of recovering) {
@@ -490,6 +496,24 @@ const App: React.FC = () => {
         };
         newState = await addNewsItem(newState, 'injury', { player: unlucky, team, detail: `${unlucky.name} is dealing with an illness — day-to-day, expected back in ${days} day${days !== 1 ? 's' : ''}.` }, false);
       }
+    }
+    // Facilities morale boost — elite facilities add up to +20 baseline morale per week
+    if (newState.currentDay % 7 === 0) {
+      newState = {
+        ...newState,
+        teams: newState.teams.map(t => {
+          const facBudget = t.finances?.budgets?.facilities ?? 20;
+          const moraleBoost = ((facBudget - 20) / 80) * 20; // 0 at tier1, up to +20 at elite
+          if (moraleBoost <= 0) return t;
+          return {
+            ...t,
+            roster: t.roster.map(p => ({
+              ...p,
+              morale: Math.min(100, (p.morale ?? 75) + moraleBoost)
+            }))
+          };
+        })
+      };
     }
     if (newState.currentDay % 15 === 0) {
       const newCoach = generateCoach(`gen-coach-${Date.now()}`, 'C', newState.settings.coachGenderRatio);
@@ -1060,7 +1084,12 @@ const App: React.FC = () => {
     });
 
     tempState.teams = tempState.teams.map(t => {
-      const devMultiplier = (t.staff.assistantDev?.ratingDevelopment || 60) / 75;
+      const coachBudget = t.finances?.budgets?.coaching ?? 20;
+      const facBudget   = t.finances?.budgets?.facilities ?? 20;
+      // Coaching: +30% dev speed at elite (100); Facilities: +15% dev speed at elite (100)
+      const coachBonus = ((coachBudget - 20) / 80) * 0.30;
+      const facBonus   = ((facBudget   - 20) / 80) * 0.15;
+      const devMultiplier = ((t.staff.assistantDev?.ratingDevelopment || 60) / 75) * (1 + coachBonus + facBonus);
       const POS_DEV_KEYS: Record<string, (keyof Player['attributes'])[]> = {
         PG: ['ballHandling','passing','shooting3pt','offensiveIQ','perimeterDef'],
         SG: ['shooting3pt','shooting','shootingMid','perimeterDef','speed'],
