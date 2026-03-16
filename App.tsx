@@ -1431,7 +1431,11 @@ const App: React.FC = () => {
           {activeTab === 'players' && <Players league={league} onViewPlayer={p => setSelectedPlayer(p)} />}
           {activeTab === 'finances' && <Finances league={league} updateLeague={updateLeagueState} />}
           {activeTab === 'trade' && <Trade league={league} updateLeague={updateLeagueState} recordTransaction={recordTransaction} />}
-          {activeTab === 'settings' && <Settings league={league} updateLeague={updateLeagueState} />}
+          {activeTab === 'settings' && <Settings league={league} updateLeague={updateLeagueState} onRegenerateSchedule={() => {
+            if (league.schedule.some(g => g.played)) return; // guard — should never reach here
+            const newSchedule = generateSeasonSchedule(league.teams, league.settings.seasonLength);
+            updateLeagueState({ schedule: newSchedule });
+          }} />}
         </div>
       </main>
       {selectedPlayer && (() => {
