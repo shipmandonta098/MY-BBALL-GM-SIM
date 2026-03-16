@@ -1,12 +1,14 @@
 import React, { useState, useMemo } from 'react';
 import { LeagueState, Transaction, TransactionType, Team } from '../types';
 import TeamBadge from './TeamBadge';
+import { useNavigation } from '../context/NavigationContext';
 
 interface TransactionsProps {
   league: LeagueState;
 }
 
 const Transactions: React.FC<TransactionsProps> = ({ league }) => {
+  const { viewTeam } = useNavigation();
   const [filterType, setFilterType] = useState<TransactionType | 'all'>('all');
   const [filterTeam, setFilterTeam] = useState<string>('all');
   const [searchTerm, setSearchTerm] = useState('');
@@ -165,7 +167,9 @@ const Transactions: React.FC<TransactionsProps> = ({ league }) => {
                   </div>
                   <div className="md:hidden flex -space-x-4">
                     {teams.map(t => (
-                       <TeamBadge key={t.id} team={t} size="sm" className="border-4 border-slate-900 rounded-full bg-slate-800" />
+                       <button key={t.id} type="button" onClick={e => { e.stopPropagation(); viewTeam(t.id); }} className="focus:outline-none hover:scale-110 transition-transform">
+                         <TeamBadge team={t} size="sm" className="border-4 border-slate-900 rounded-full bg-slate-800" />
+                       </button>
                     ))}
                   </div>
                </div>
@@ -182,12 +186,12 @@ const Transactions: React.FC<TransactionsProps> = ({ league }) => {
 
                <div className="hidden md:flex items-center -space-x-4">
                   {teams.map(t => (
-                    <div key={t.id} className="relative group">
+                    <button key={t.id} type="button" onClick={e => { e.stopPropagation(); viewTeam(t.id); }} className="relative group focus:outline-none">
                         <TeamBadge team={t} size="md" className="border-4 border-slate-900 rounded-full bg-slate-800 shadow-xl group-hover:scale-110 transition-transform" />
                        <div className="absolute -bottom-2 left-1/2 -translate-x-1/2 opacity-0 group-hover:opacity-100 transition-opacity bg-slate-800 text-[8px] font-black uppercase text-white px-2 py-0.5 rounded-full whitespace-nowrap shadow-2xl">
                          {t.name}
                        </div>
-                    </div>
+                    </button>
                   ))}
                </div>
             </div>

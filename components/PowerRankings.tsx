@@ -2,6 +2,7 @@ import React, { useState, useMemo, useEffect } from 'react';
 import { LeagueState, Team, PowerRankingEntry, PowerRankingSnapshot } from '../types';
 import TeamBadge from './TeamBadge';
 import { generateTeamComparisonInsight } from '../services/geminiService';
+import { PlayerLink } from '../context/NavigationContext';
 
 interface PowerRankingsProps {
   league: LeagueState;
@@ -103,7 +104,7 @@ const PowerRankings: React.FC<PowerRankingsProps> = ({ league, onViewRoster, onM
            <h4 className="text-[10px] font-black uppercase tracking-widest text-slate-600 border-b border-slate-800 pb-2">Franchise Core</h4>
            {top5.map(p => (
               <div key={p.id} className="flex justify-between items-center">
-                 <span className="text-sm font-bold text-slate-300 uppercase tracking-tight">{p.name}</span>
+                 <PlayerLink player={p} name={p.name} className="text-sm font-bold text-slate-300 uppercase tracking-tight" />
                  <span className="text-sm font-display font-bold text-amber-500">{p.rating}</span>
               </div>
            ))}

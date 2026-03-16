@@ -1,8 +1,9 @@
 
 import React, { useState, useMemo } from 'react';
 import { Team, Player, Position, TeamRotation } from '../types';
-import { 
-  DndContext, 
+import { PlayerLink } from '../context/NavigationContext';
+import {
+  DndContext,
   closestCenter,
   KeyboardSensor,
   PointerSensor,
@@ -107,7 +108,7 @@ const SortablePlayerCard = ({
         </div>
         <div className="flex-1">
           <div className="flex items-center gap-2 flex-wrap">
-            <span className={`font-bold uppercase tracking-tight text-sm ${injured ? 'text-rose-400' : 'text-slate-200'}`}>{player.name}</span>
+            <PlayerLink player={player} name={player.name} className={`font-bold uppercase tracking-tight text-sm ${injured ? 'text-rose-400' : 'text-slate-200'}`} />
             <span className="text-[10px] font-black text-slate-500 uppercase px-1.5 py-0.5 bg-slate-900 rounded">{player.position}</span>
             {injured && (
               <span className="text-[10px] font-black uppercase px-1.5 py-0.5 rounded bg-rose-500/10 text-rose-400 border border-rose-500/20 whitespace-nowrap">

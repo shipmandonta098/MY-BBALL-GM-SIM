@@ -7,6 +7,7 @@ import { generateGameRecap, generateScoutingReport, generateSeasonNarrative, gen
 import { generateAwards } from './utils/awardEngine';
 import { assignAIPersonalities, runAIGMOffseason, aiGMTradeDeadlineAction, aiGMInSeasonTrades, aiGMPreOffseasonAgreements } from './utils/aiGMEngine';
 import { db } from './db';
+import { NavigationProvider } from './context/NavigationContext';
 
 // Components
 import Sidebar from './components/Sidebar';
@@ -1330,7 +1331,17 @@ const App: React.FC = () => {
      );
   }
 
+  const navValue = {
+    viewPlayer: handleViewPlayer,
+    viewPlayerById: (id: string) => {
+      const p = league.teams.flatMap(t => t.roster).find(pl => pl.id === id);
+      if (p) handleViewPlayer(p);
+    },
+    viewTeam: handleManageTeam,
+  };
+
   return (
+    <NavigationProvider value={navValue}>
     <div className="flex h-screen overflow-hidden bg-slate-950 text-slate-50 relative">
       <Sidebar activeTab={activeTab} setActiveTab={setActiveTab} team={userTeam} onQuit={() => setStatus('title')} league={league} isExpansionActive={league.expansionDraft?.active} />
       <main className="flex-1 overflow-y-auto p-6 md:p-10 space-y-8 pb-32 transition-all duration-300 ease-in-out">
@@ -1545,6 +1556,7 @@ const App: React.FC = () => {
         />
       )}
     </div>
+    </NavigationProvider>
   );
 };
 

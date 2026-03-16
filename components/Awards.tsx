@@ -2,6 +2,7 @@
 import React, { useState, useMemo } from 'react';
 import { LeagueState, SeasonAwards, AwardWinner, Player, Coach, Team } from '../types';
 import TeamBadge from './TeamBadge';
+import { PlayerLink } from '../context/NavigationContext';
 
 interface AwardsProps {
   league: LeagueState;
@@ -149,7 +150,7 @@ const Awards: React.FC<AwardsProps> = ({ league, onScout, onScoutCoach, onManage
         </div>
         <div className="relative z-10">
           <h4 className="text-[10px] font-black uppercase tracking-[0.4em] text-slate-500 mb-4">{title}</h4>
-          <h3 className="text-3xl font-display font-bold text-white uppercase mb-1 group-hover:text-amber-500 transition-colors">{winner.name}</h3>
+          <PlayerLink playerId={winner.playerId} name={winner.name} className="text-3xl font-display font-bold text-white uppercase mb-1 group-hover:text-amber-500 transition-colors block" />
           <div className="flex items-center gap-2 mb-4">
              {team && <TeamBadge team={team} size="xs" />}
              <p className="text-xs font-bold text-slate-400 uppercase tracking-widest">{winner.teamName}</p>

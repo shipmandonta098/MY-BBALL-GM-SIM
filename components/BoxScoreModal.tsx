@@ -2,6 +2,7 @@
 import React, { useState } from 'react';
 import { GameResult, Team, GamePlayerLine } from '../types';
 import TeamBadge from './TeamBadge';
+import { PlayerLink, TeamLink } from '../context/NavigationContext';
 
 interface BoxScoreModalProps {
   result: GameResult;
@@ -21,7 +22,7 @@ const BoxScoreModal: React.FC<BoxScoreModalProps> = ({ result, homeTeam, awayTea
       <div className="space-y-4">
         <div className="flex items-center gap-4">
           <TeamBadge team={team} size="md" />
-          <h3 className="text-xl font-display font-bold uppercase text-white">{team.city} {team.name}</h3>
+          <TeamLink teamId={team.id} name={`${team.city} ${team.name}`} className="text-xl font-display font-bold uppercase text-white" />
         </div>
         <div className="overflow-x-auto rounded-2xl border border-slate-800">
           <table className="w-full text-left text-xs">
@@ -44,7 +45,9 @@ const BoxScoreModal: React.FC<BoxScoreModalProps> = ({ result, homeTeam, awayTea
             <tbody className="divide-y divide-slate-800/40">
               {active.map(line => (
                 <tr key={line.playerId} className="hover:bg-slate-800/30 transition-colors">
-                  <td className="px-4 py-4 font-bold text-slate-200 uppercase tracking-tight">{line.name}</td>
+                  <td className="px-4 py-4 font-bold text-slate-200 uppercase tracking-tight">
+                    <PlayerLink playerId={line.playerId} name={line.name} className="font-bold text-slate-200 uppercase tracking-tight" />
+                  </td>
                   <td className="px-2 py-4 text-center font-mono">{line.min}</td>
                   <td className="px-2 py-4 text-center font-display font-bold text-sm text-amber-500">{line.pts}</td>
                   <td className="px-2 py-4 text-center font-mono">{line.reb}</td>
@@ -67,7 +70,9 @@ const BoxScoreModal: React.FC<BoxScoreModalProps> = ({ result, homeTeam, awayTea
                   </tr>
                   {dnp.map(line => (
                     <tr key={line.playerId} className="bg-rose-950/10">
-                      <td className="px-4 py-3 font-bold text-rose-500/70 uppercase tracking-tight">{line.name}</td>
+                      <td className="px-4 py-3 font-bold text-rose-500/70 uppercase tracking-tight">
+                        <PlayerLink playerId={line.playerId} name={line.name} className="font-bold text-rose-500/70 uppercase tracking-tight" />
+                      </td>
                       <td colSpan={11} className="px-2 py-3 text-[10px] font-black uppercase tracking-widest text-rose-500/50">
                         DNP – {line.dnp}
                       </td>
