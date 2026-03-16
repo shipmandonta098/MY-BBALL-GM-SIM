@@ -1423,7 +1423,7 @@ const App: React.FC = () => {
               />
             )
           )}
-          {activeTab === 'standings' && <Standings teams={league.teams} userTeamId={league.userTeamId} onViewRoster={handleViewRoster} onManageTeam={handleManageTeam} />}
+          {activeTab === 'standings' && <Standings teams={league.teams} userTeamId={league.userTeamId} seasonLength={league.settings.seasonLength ?? 82} playoffFormat={league.settings.playoffFormat ?? 8} season={league.season} onViewRoster={handleViewRoster} onManageTeam={handleManageTeam} />}
           {activeTab === 'schedule' && <Schedule league={league} onSimulate={handleSimulate} onScout={handleViewPlayer} onWatchLive={handleWatchLive} onViewBoxScore={(res, home, away) => setViewingBoxScore({ result: res, home, away })} onManageTeam={handleManageTeam} />}
           {activeTab === 'draft' && <Draft league={league} updateLeague={updateLeagueState} onScout={handleScoutPlayer} scoutingReport={scoutingReport} onNavigateToFreeAgency={() => setActiveTab('free_agency')} />}
           {activeTab === 'coaching' && <Coaching league={league} updateLeague={updateLeagueState} />}
