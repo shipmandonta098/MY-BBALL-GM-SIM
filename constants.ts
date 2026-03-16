@@ -5,7 +5,7 @@ export const SCHEMES: CoachScheme[] = ['Balanced', 'Pace and Space', 'Grit and G
 export const COACH_ROLES: CoachRole[] = ['Head Coach', 'Assistant Offense', 'Assistant Defense', 'Assistant Dev', 'Trainer'];
 
 // ── Staff & Facilities Upgrade System ────────────────────────────────────────
-export type StaffType = 'coaching' | 'scouting' | 'medical' | 'facilities';
+export type StaffType = 'scouting' | 'medical' | 'facilities';
 
 export interface StaffTier {
   /** Budget value stored in team.finances.budgets (20/40/60/80/100) */
@@ -24,17 +24,6 @@ export const STAFF_CONFIG: Record<StaffType, {
   icon: string;
   tiers: StaffTier[];
 }> = {
-  coaching: {
-    label: 'Coaching Staff',
-    icon: '🧠',
-    tiers: [
-      { level: 20, name: 'Bare Minimum', upgradeCost: 0,          annualCost: 1_000_000,  effect: 'No bonus. Standard development rate.' },
-      { level: 40, name: 'Basic',        upgradeCost: 5_000_000,  annualCost: 3_000_000,  effect: '-8% injury duration. +8% player development.' },
-      { level: 60, name: 'Standard',     upgradeCost: 8_000_000,  annualCost: 6_000_000,  effect: '-15% injury duration. +16% player development.' },
-      { level: 80, name: 'Advanced',     upgradeCost: 12_000_000, annualCost: 10_000_000, effect: '-22% injury duration. +24% player development.' },
-      { level: 100, name: 'Elite',       upgradeCost: 18_000_000, annualCost: 15_000_000, effect: '-30% injury duration. +30% dev. -5% injury chance.' },
-    ],
-  },
   scouting: {
     label: 'Scouting Network',
     icon: '🔭',
@@ -1465,7 +1454,6 @@ export const generateLeagueTeams = (genderRatio: number = 0, season: number = 20
         ownerPatience: 80,
         ownerGoal: ownerGoals[Math.floor(Math.random() * ownerGoals.length)],
         budgets: {
-          coaching: 20,
           scouting: 20,
           health: 20,
           facilities: 20

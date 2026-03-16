@@ -390,7 +390,6 @@ export interface TeamFinances {
   ownerPatience: number;
   ownerGoal: OwnerGoal;
   budgets: {
-    coaching: number;
     scouting: number;
     health: number;
     facilities: number;

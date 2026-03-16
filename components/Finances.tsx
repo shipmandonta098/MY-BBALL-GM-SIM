@@ -279,8 +279,7 @@ const Finances: React.FC<FinancesProps> = ({ league, updateLeague }) => {
           <span>Staff &amp; Facilities</span>
           <span className="text-slate-700">— One-time upgrades, deducted from cash reserves</span>
         </h3>
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-          <StaffUpgradeCard type="coaching" />
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
           <StaffUpgradeCard type="scouting" />
           <StaffUpgradeCard type="medical" />
           <StaffUpgradeCard type="facilities" />

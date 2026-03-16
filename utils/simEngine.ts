@@ -3611,9 +3611,9 @@ export const simulateGame = (
   const rollForInjuries = (stats: GamePlayerLine[], isHome: boolean) => {
     const tm    = isHome ? home : away;
     const isB2B = isHome ? homeB2B : awayB2B;
-    const trainerRating = tm.staff.trainer?.ratingDevelopment ?? 0;
-    const medBudget   = tm.finances?.budgets?.health   ?? 20;
-    const coachBudget = tm.finances?.budgets?.coaching  ?? 20;
+    const trainerRating  = tm.staff.trainer?.ratingDevelopment ?? 0;
+    const hcDevRating    = tm.staff.headCoach?.ratingDevelopment ?? 50;
+    const medBudget      = tm.finances?.budgets?.health ?? 20;
     stats.forEach(p => {
       if (p.min < 5) return;
       const player = tm.roster.find(pl => pl.id === p.playerId);
@@ -3627,8 +3627,8 @@ export const simulateGame = (
       chance *= (1 - (trainerRating / 100) * 0.3);
       if (Math.random() < chance) {
         const { type, daysOut: rawDays, msg } = rollInjury(player.name);
-        // Coaching staff reduces injury duration (0% at tier 1 / 20, up to -30% at elite / 100)
-        const coachReduction = ((coachBudget - 20) / 80) * 0.30;
+        // Head coach dev rating reduces injury duration (50 = 0%, 100 = -30%)
+        const coachReduction = Math.max(0, (hcDevRating - 50) / 50) * 0.30;
         const daysOut = Math.max(1, Math.round(rawDays * (1 - coachReduction)));
         pbp.push({ time: `${Math.floor(Math.random() * 12)}:${String(Math.floor(Math.random() * 60)).padStart(2, '0')}`, text: msg, type: 'foul', quarter: Math.floor(Math.random() * 4) + 1 });
         gameInjuries.push({ playerId: player.id, playerName: player.name, injuryType: type, daysOut, teamId: tm.id });

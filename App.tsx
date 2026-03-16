@@ -1084,12 +1084,15 @@ const App: React.FC = () => {
     });
 
     tempState.teams = tempState.teams.map(t => {
-      const coachBudget = t.finances?.budgets?.coaching ?? 20;
-      const facBudget   = t.finances?.budgets?.facilities ?? 20;
-      // Coaching: +30% dev speed at elite (100); Facilities: +15% dev speed at elite (100)
-      const coachBonus = ((coachBudget - 20) / 80) * 0.30;
-      const facBonus   = ((facBudget   - 20) / 80) * 0.15;
-      const devMultiplier = ((t.staff.assistantDev?.ratingDevelopment || 60) / 75) * (1 + coachBonus + facBonus);
+      const facBudget     = t.finances?.budgets?.facilities ?? 20;
+      const hcDevRating   = t.staff.headCoach?.ratingDevelopment ?? 50;
+      const assistDevRating = t.staff.assistantDev?.ratingDevelopment ?? 60;
+      // Head coach dev rating: 50 = no bonus, 100 = +30% growth; average is 50 so typical bonus is 0–15%
+      const hcDevBonus  = Math.max(0, (hcDevRating - 50) / 50) * 0.30;
+      // Facilities: +15% dev speed at elite
+      const facBonus    = ((facBudget - 20) / 80) * 0.15;
+      // Assistant dev coach is the primary dev driver; HC and facilities stack on top
+      const devMultiplier = (assistDevRating / 75) * (1 + hcDevBonus + facBonus);
       const POS_DEV_KEYS: Record<string, (keyof Player['attributes'])[]> = {
         PG: ['ballHandling','passing','shooting3pt','offensiveIQ','perimeterDef'],
         SG: ['shooting3pt','shooting','shootingMid','perimeterDef','speed'],
