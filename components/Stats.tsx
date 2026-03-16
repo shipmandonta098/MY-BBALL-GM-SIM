@@ -54,62 +54,83 @@ const Stats: React.FC<StatsProps> = ({ league, onViewRoster, onManageTeam, onVie
       const stl = roster.reduce((s, p) => s + p.stats.steals, 0);
       const blk = roster.reduce((s, p) => s + p.stats.blocks, 0);
       const tov = roster.reduce((s, p) => s + p.stats.tov, 0);
-      const pf = roster.reduce((s, p) => s + p.stats.pf, 0);
+      const pf  = roster.reduce((s, p) => s + p.stats.pf, 0);
       const pts = roster.reduce((s, p) => s + p.stats.points, 0);
-      
+
       const games = t.wins + t.losses;
       const winPct = games > 0 ? t.wins / games : 0;
       const avgAge = roster.reduce((s, p) => s + p.age, 0) / (roster.length || 1);
-      
       const twopm = fgm - threepm;
       const twopa = fga - threepa;
-      
-      // Calculate MOV from league history
-      let ptsScored = 0;
-      let ptsAllowed = 0;
+
+      // Opponent box-score totals from game history
+      let ptsScored = 0, ptsAllowed = 0;
+      let oppFgm = 0, oppFga = 0, oppThreepm = 0, oppThreepa = 0;
+      let oppFtm = 0, oppFta = 0;
+      let oppOrb = 0, oppDrb = 0, oppTrb = 0;
+      let oppAst = 0, oppStl = 0, oppBlk = 0, oppTov = 0, oppPf = 0;
+
       league.history.forEach(g => {
+        let oppLines: typeof g.homePlayerStats;
         if (g.homeTeamId === t.id) {
-          ptsScored += g.homeScore;
-          ptsAllowed += g.awayScore;
+          ptsScored += g.homeScore; ptsAllowed += g.awayScore;
+          oppLines = g.awayPlayerStats;
         } else if (g.awayTeamId === t.id) {
-          ptsScored += g.awayScore;
-          ptsAllowed += g.homeScore;
-        }
+          ptsScored += g.awayScore; ptsAllowed += g.homeScore;
+          oppLines = g.homePlayerStats;
+        } else { return; }
+        (oppLines || []).forEach(p => {
+          if (p.dnp) return;
+          oppFgm += p.fgm; oppFga += p.fga;
+          oppThreepm += p.threepm; oppThreepa += p.threepa;
+          oppFtm += p.ftm; oppFta += p.fta;
+          oppOrb += p.offReb; oppDrb += p.defReb; oppTrb += p.reb;
+          oppAst += p.ast; oppStl += p.stl; oppBlk += p.blk;
+          oppTov += p.tov; oppPf += p.pf;
+        });
       });
+
       const mov = games > 0 ? (ptsScored - ptsAllowed) / games : 0;
-      
-      const gp = Math.max(1, games);
+      const gp  = Math.max(1, games);
+
+      // Possessions estimate (Hollinger): FGA - ORB + TOV + 0.44*FTA
+      const poss    = Math.max(1, fga - orb + tov + 0.44 * fta);
+      const oppPoss = Math.max(1, oppFga - oppOrb + oppTov + 0.44 * oppFta);
+      const ortg    = ptsScored  / poss    * 100;
+      const drtg    = ptsAllowed / oppPoss * 100;
+
       return {
-        id: t.id,
-        name: t.name,
-        logo: t.logo,
-        games,
-        wins: t.wins,
-        losses: t.losses,
-        winPct,
-        avgAge,
-        fgm: fgm / gp,
-        fga: fga / gp,
-        fgPct: fga > 0 ? fgm / fga : 0,
-        threepm: threepm / gp,
-        threepa: threepa / gp,
-        threePct: threepa > 0 ? threepm / threepa : 0,
-        twopm: twopm / gp,
-        twopa: twopa / gp,
-        twoPct: twopa > 0 ? twopm / twopa : 0,
-        ftm: ftm / gp,
-        fta: fta / gp,
-        ftPct: fta > 0 ? ftm / fta : 0,
-        orb: orb / gp,
-        drb: drb / gp,
-        trb: trb / gp,
-        ast: ast / gp,
-        stl: stl / gp,
-        blk: blk / gp,
-        tov: tov / gp,
-        pf: pf / gp,
-        pts: pts / gp,
-        mov
+        id: t.id, name: t.name, logo: t.logo,
+        games, wins: t.wins, losses: t.losses, winPct, avgAge,
+        // Traditional per-game
+        fgm: fgm / gp, fga: fga / gp, fgPct: fga > 0 ? fgm / fga : 0,
+        threepm: threepm / gp, threepa: threepa / gp, threePct: threepa > 0 ? threepm / threepa : 0,
+        twopm: twopm / gp, twopa: twopa / gp, twoPct: twopa > 0 ? twopm / twopa : 0,
+        ftm: ftm / gp, fta: fta / gp, ftPct: fta > 0 ? ftm / fta : 0,
+        orb: orb / gp, drb: drb / gp, trb: trb / gp,
+        ast: ast / gp, stl: stl / gp, blk: blk / gp,
+        tov: tov / gp, pf: pf / gp, pts: pts / gp, mov,
+        // Advanced
+        eFGPct:      fga > 0 ? (fgm + 0.5 * threepm) / fga : 0,
+        tsPct:       (fga + 0.44 * fta) > 0 ? pts / (2 * (fga + 0.44 * fta)) : 0,
+        pace:        (poss + oppPoss) / (2 * gp),
+        ortg,
+        drtg,
+        netRtg:      ortg - drtg,
+        tovPct:      (fga + 0.44 * fta + tov) > 0 ? tov / (fga + 0.44 * fta + tov) * 100 : 0,
+        astTov:      tov > 0 ? ast / tov : 0,
+        astPct:      fgm > 0 ? ast / fgm * 100 : 0,
+        orbPct:      (orb + oppDrb) > 0 ? orb / (orb + oppDrb) * 100 : 0,
+        drbPct:      (drb + oppOrb) > 0 ? drb / (drb + oppOrb) * 100 : 0,
+        // Opponent per-game
+        oppPts:      ptsAllowed / gp,
+        oppFgm:      oppFgm / gp, oppFga: oppFga / gp, oppFgPct: oppFga > 0 ? oppFgm / oppFga : 0,
+        oppThreepm:  oppThreepm / gp, oppThreepa: oppThreepa / gp,
+        oppThreePct: oppThreepa > 0 ? oppThreepm / oppThreepa : 0,
+        oppFtm:      oppFtm / gp, oppFta: oppFta / gp, oppFtPct: oppFta > 0 ? oppFtm / oppFta : 0,
+        oppOrb:      oppOrb / gp, oppDrb: oppDrb / gp, oppTrb: oppTrb / gp,
+        oppAst:      oppAst / gp, oppStl: oppStl / gp, oppBlk: oppBlk / gp,
+        oppTov:      oppTov / gp, oppPf: oppPf / gp,
       };
     });
   }, [league.teams, league.history]);
@@ -735,205 +756,335 @@ const Stats: React.FC<StatsProps> = ({ league, onViewRoster, onManageTeam, onVie
 
   // ─── TEAM STATS TABLE ────────────────────────────────────────────────────
   const TeamStatsTable = () => {
-    const [sortKey, setSortKey] = useState<keyof typeof teamStats[0]>('winPct');
+    type TeamSubTab = 'traditional' | 'advanced' | 'opponent';
+    const [teamSubTab, setTeamSubTab] = useState<TeamSubTab>('traditional');
+    const [sortKey, setSortKey] = useState<string>('winPct');
     const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc');
 
     const sortedTeams = useMemo(() => {
       return [...teamStats]
         .filter(t => t.name.toLowerCase().includes(searchTerm.toLowerCase()))
         .sort((a, b) => {
-          const aVal = a[sortKey];
-          const bVal = b[sortKey];
-          if (typeof aVal === 'string' || typeof bVal === 'string') {
-             return sortDir === 'asc' 
-               ? String(aVal).localeCompare(String(bVal))
-               : String(bVal).localeCompare(String(aVal));
-          }
+          const aVal = (a as Record<string, unknown>)[sortKey];
+          const bVal = (b as Record<string, unknown>)[sortKey];
+          if (typeof aVal === 'string' || typeof bVal === 'string')
+            return sortDir === 'asc' ? String(aVal).localeCompare(String(bVal)) : String(bVal).localeCompare(String(aVal));
           return sortDir === 'asc' ? (aVal as number) - (bVal as number) : (bVal as number) - (aVal as number);
         });
     }, [sortKey, sortDir, searchTerm]);
 
-    const avgRow = useMemo(() => {
-      const count = teamStats.length || 1;
-      const sum = (key: keyof typeof teamStats[0]) => teamStats.reduce((s, t) => s + (t[key] as number), 0);
-      
-      const fgm = sum('fgm') / count;
-      const fga = sum('fga') / count;
-      const threepm = sum('threepm') / count;
-      const threepa = sum('threepa') / count;
-      const twopm = sum('twopm') / count;
-      const twopa = sum('twopa') / count;
-      const ftm = sum('ftm') / count;
-      const fta = sum('fta') / count;
-      const orb = sum('orb') / count;
-      const drb = sum('drb') / count;
-      const trb = sum('trb') / count;
-      const ast = sum('ast') / count;
-      const stl = sum('stl') / count;
-      const blk = sum('blk') / count;
-      const tov = sum('tov') / count;
-      const pf = sum('pf') / count;
-      const pts = sum('pts') / count;
-      const mov = sum('mov') / count;
-
-      return {
-        games: sum('games') / count,
-        wins: sum('wins') / count,
-        losses: sum('losses') / count,
-        winPct: sum('winPct') / count,
-        avgAge: sum('avgAge') / count,
-        fgm,
-        fga,
-        fgPct: fga > 0 ? fgm / fga : 0,
-        threepm,
-        threepa,
-        threePct: threepa > 0 ? threepm / threepa : 0,
-        twopm,
-        twopa,
-        twoPct: twopa > 0 ? twopm / twopa : 0,
-        ftm,
-        fta,
-        ftPct: fta > 0 ? ftm / fta : 0,
-        orb,
-        drb,
-        trb,
-        ast,
-        stl,
-        blk,
-        tov,
-        pf,
-        pts,
-        mov
+    const avg = useMemo(() => {
+      const n = teamStats.length || 1;
+      const s = (k: string) => teamStats.reduce((acc, t) => acc + ((t as Record<string, unknown>)[k] as number), 0) / n;
+      return { games: s('games'), wins: s('wins'), losses: s('losses'), winPct: s('winPct'), avgAge: s('avgAge'),
+        fgm: s('fgm'), fga: s('fga'), fgPct: s('fgPct'), threepm: s('threepm'), threepa: s('threepa'), threePct: s('threePct'),
+        twopm: s('twopm'), twopa: s('twopa'), twoPct: s('twoPct'), ftm: s('ftm'), fta: s('fta'), ftPct: s('ftPct'),
+        orb: s('orb'), drb: s('drb'), trb: s('trb'), ast: s('ast'), stl: s('stl'), blk: s('blk'), tov: s('tov'), pf: s('pf'), pts: s('pts'), mov: s('mov'),
+        eFGPct: s('eFGPct'), tsPct: s('tsPct'), pace: s('pace'), ortg: s('ortg'), drtg: s('drtg'), netRtg: s('netRtg'),
+        tovPct: s('tovPct'), astTov: s('astTov'), astPct: s('astPct'), orbPct: s('orbPct'), drbPct: s('drbPct'),
+        oppPts: s('oppPts'), oppFgm: s('oppFgm'), oppFga: s('oppFga'), oppFgPct: s('oppFgPct'),
+        oppThreepm: s('oppThreepm'), oppThreepa: s('oppThreepa'), oppThreePct: s('oppThreePct'),
+        oppFtm: s('oppFtm'), oppFta: s('oppFta'), oppFtPct: s('oppFtPct'),
+        oppOrb: s('oppOrb'), oppDrb: s('oppDrb'), oppTrb: s('oppTrb'),
+        oppAst: s('oppAst'), oppStl: s('oppStl'), oppBlk: s('oppBlk'), oppTov: s('oppTov'), oppPf: s('oppPf'),
       };
     }, [teamStats]);
 
-    const handleSort = (key: keyof typeof teamStats[0]) => {
-      if (sortKey === key) setSortDir(sortDir === 'asc' ? 'desc' : 'asc');
-      else {
-        setSortKey(key);
-        setSortDir('desc');
-      }
+    const handleSort = (key: string) => {
+      if (sortKey === key) setSortDir(d => d === 'asc' ? 'desc' : 'asc');
+      else { setSortKey(key); setSortDir('desc'); }
     };
+    const Si = ({ k }: { k: string }) =>
+      sortKey !== k ? <span className="ml-1 opacity-20">↕</span> : <span className="ml-1 text-amber-500">{sortDir === 'asc' ? '↑' : '↓'}</span>;
 
-    const SortIcon = ({ k }: { k: keyof typeof teamStats[0] }) => {
-      if (sortKey !== k) return <span className="ml-1 opacity-20">↕</span>;
-      return <span className="ml-1 text-amber-500">{sortDir === 'asc' ? '↑' : '↓'}</span>;
-    };
+    // Shared leading columns (rank + team + G/W/L/%)
+    const LeadTh = () => <>
+      <th className="px-4 py-4 cursor-pointer hover:text-white" onClick={() => handleSort('winPct')}># <Si k="winPct" /></th>
+      <th className="px-4 py-4 cursor-pointer hover:text-white sticky left-0 bg-slate-950/90" onClick={() => handleSort('name')}>Team <Si k="name" /></th>
+      <th className="px-2 py-4 text-center cursor-pointer hover:text-white" onClick={() => handleSort('games')}>G <Si k="games" /></th>
+      <th className="px-2 py-4 text-center cursor-pointer hover:text-white" onClick={() => handleSort('wins')}>W <Si k="wins" /></th>
+      <th className="px-2 py-4 text-center cursor-pointer hover:text-white" onClick={() => handleSort('losses')}>L <Si k="losses" /></th>
+      <th className="px-2 py-4 text-center cursor-pointer hover:text-white" onClick={() => handleSort('winPct')}>% <Si k="winPct" /></th>
+    </>;
+    const LeadTd = ({ t, idx }: { t: typeof sortedTeams[0]; idx: number }) => <>
+      <td className="px-4 py-4 font-mono text-xs text-slate-500">{idx + 1}</td>
+      <td className="px-4 py-4 sticky left-0 bg-slate-900 group-hover:bg-slate-800/60 transition-colors">
+        <div className="flex items-center gap-3">
+          <TeamBadge team={t} size="xs" />
+          <span className="font-display font-bold text-slate-200 group-hover:text-amber-500 transition-colors uppercase">{t.name}</span>
+        </div>
+      </td>
+      <td className="px-2 py-4 text-center font-mono text-xs">{t.games}</td>
+      <td className="px-2 py-4 text-center font-mono text-xs text-emerald-400">{t.wins}</td>
+      <td className="px-2 py-4 text-center font-mono text-xs text-rose-400">{t.losses}</td>
+      <td className="px-2 py-4 text-center font-mono text-xs">{(t.winPct * 100).toFixed(1)}%</td>
+    </>;
+    const LeadAvg = () => <>
+      <td className="px-2 py-4 text-center font-mono text-xs">{avg.games.toFixed(1)}</td>
+      <td className="px-2 py-4 text-center font-mono text-xs">{avg.wins.toFixed(1)}</td>
+      <td className="px-2 py-4 text-center font-mono text-xs">{avg.losses.toFixed(1)}</td>
+      <td className="px-2 py-4 text-center font-mono text-xs">{(avg.winPct * 100).toFixed(1)}%</td>
+    </>;
+
+    const pct = (v: number) => `${(v * 100).toFixed(1)}%`;
+    const n1  = (v: number) => v.toFixed(1);
+    const n2  = (v: number) => v.toFixed(2);
 
     return (
-      <div className="bg-slate-900 border border-slate-800 rounded-3xl overflow-hidden shadow-2xl animate-in fade-in slide-in-from-bottom-4 duration-500">
-        <div className="overflow-x-auto">
-          <table className="w-full text-left border-collapse">
-            <thead>
-              <tr className="text-[10px] text-slate-500 font-black uppercase tracking-widest border-b border-slate-800 bg-slate-950/50">
-                <th className="px-4 py-4 cursor-pointer hover:text-white" onClick={() => handleSort('winPct')}># <SortIcon k="winPct" /></th>
-                <th className="px-4 py-4 cursor-pointer hover:text-white" onClick={() => handleSort('name')}>Team <SortIcon k="name" /></th>
-                <th className="px-2 py-4 text-center cursor-pointer hover:text-white" onClick={() => handleSort('games')}>G <SortIcon k="games" /></th>
-                <th className="px-2 py-4 text-center cursor-pointer hover:text-white" onClick={() => handleSort('wins')}>W <SortIcon k="wins" /></th>
-                <th className="px-2 py-4 text-center cursor-pointer hover:text-white" onClick={() => handleSort('losses')}>L <SortIcon k="losses" /></th>
-                <th className="px-2 py-4 text-center cursor-pointer hover:text-white" onClick={() => handleSort('winPct')}>% <SortIcon k="winPct" /></th>
-                <th className="px-2 py-4 text-center cursor-pointer hover:text-white" onClick={() => handleSort('avgAge')}>Age <SortIcon k="avgAge" /></th>
-                <th className="px-2 py-4 text-center cursor-pointer hover:text-white" onClick={() => handleSort('fgm')}>FG <SortIcon k="fgm" /></th>
-                <th className="px-2 py-4 text-center cursor-pointer hover:text-white" onClick={() => handleSort('fga')}>FGA <SortIcon k="fga" /></th>
-                <th className="px-2 py-4 text-center cursor-pointer hover:text-white" onClick={() => handleSort('fgPct')}>FG% <SortIcon k="fgPct" /></th>
-                <th className="px-2 py-4 text-center cursor-pointer hover:text-white" onClick={() => handleSort('threepm')}>3P <SortIcon k="threepm" /></th>
-                <th className="px-2 py-4 text-center cursor-pointer hover:text-white" onClick={() => handleSort('threepa')}>3PA <SortIcon k="threepa" /></th>
-                <th className="px-2 py-4 text-center cursor-pointer hover:text-white" onClick={() => handleSort('threePct')}>3P% <SortIcon k="threePct" /></th>
-                <th className="px-2 py-4 text-center cursor-pointer hover:text-white" onClick={() => handleSort('twopm')}>2P <SortIcon k="twopm" /></th>
-                <th className="px-2 py-4 text-center cursor-pointer hover:text-white" onClick={() => handleSort('twopa')}>2PA <SortIcon k="twopa" /></th>
-                <th className="px-2 py-4 text-center cursor-pointer hover:text-white" onClick={() => handleSort('twoPct')}>2P% <SortIcon k="twoPct" /></th>
-                <th className="px-2 py-4 text-center cursor-pointer hover:text-white" onClick={() => handleSort('ftm')}>FT <SortIcon k="ftm" /></th>
-                <th className="px-2 py-4 text-center cursor-pointer hover:text-white" onClick={() => handleSort('fta')}>FTA <SortIcon k="fta" /></th>
-                <th className="px-2 py-4 text-center cursor-pointer hover:text-white" onClick={() => handleSort('ftPct')}>FT% <SortIcon k="ftPct" /></th>
-                <th className="px-2 py-4 text-center cursor-pointer hover:text-white" onClick={() => handleSort('orb')}>ORB <SortIcon k="orb" /></th>
-                <th className="px-2 py-4 text-center cursor-pointer hover:text-white" onClick={() => handleSort('drb')}>DRB <SortIcon k="drb" /></th>
-                <th className="px-2 py-4 text-center cursor-pointer hover:text-white" onClick={() => handleSort('trb')}>TRB <SortIcon k="trb" /></th>
-                <th className="px-2 py-4 text-center cursor-pointer hover:text-white" onClick={() => handleSort('ast')}>AST <SortIcon k="ast" /></th>
-                <th className="px-2 py-4 text-center cursor-pointer hover:text-white" onClick={() => handleSort('tov')}>TOV <SortIcon k="tov" /></th>
-                <th className="px-2 py-4 text-center cursor-pointer hover:text-white" onClick={() => handleSort('stl')}>STL <SortIcon k="stl" /></th>
-                <th className="px-2 py-4 text-center cursor-pointer hover:text-white" onClick={() => handleSort('blk')}>BLK <SortIcon k="blk" /></th>
-                <th className="px-2 py-4 text-center cursor-pointer hover:text-white" onClick={() => handleSort('pf')}>PF <SortIcon k="pf" /></th>
-                <th className="px-2 py-4 text-center cursor-pointer hover:text-white" onClick={() => handleSort('pts')}>PTS <SortIcon k="pts" /></th>
-                <th className="px-2 py-4 text-center cursor-pointer hover:text-white" onClick={() => handleSort('mov')}>MOV <SortIcon k="mov" /></th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-slate-800/40">
-              {sortedTeams.map((t, idx) => (
-                <tr 
-                  key={t.id} 
-                  className="hover:bg-slate-800/30 transition-all cursor-pointer group"
-                  onClick={() => onManageTeam?.(t.id)}
-                >
-                  <td className="px-4 py-4 font-mono text-xs text-slate-500">{idx + 1}</td>
-                  <td className="px-4 py-4">
-                    <div className="flex items-center gap-3">
-                      <TeamBadge team={t} size="xs" />
-                      <span className="font-display font-bold text-slate-200 group-hover:text-amber-500 transition-colors uppercase">{t.name}</span>
-                    </div>
-                  </td>
-                  <td className="px-2 py-4 text-center font-mono text-xs">{t.games}</td>
-                  <td className="px-2 py-4 text-center font-mono text-xs text-emerald-400">{t.wins}</td>
-                  <td className="px-2 py-4 text-center font-mono text-xs text-rose-400">{t.losses}</td>
-                  <td className="px-2 py-4 text-center font-mono text-xs">{(t.winPct * 100).toFixed(1)}%</td>
-                  <td className="px-2 py-4 text-center font-mono text-xs">{t.avgAge.toFixed(1)}</td>
-                  <td className="px-2 py-4 text-center font-mono text-xs">{t.fgm.toFixed(1)}</td>
-                  <td className="px-2 py-4 text-center font-mono text-xs">{t.fga.toFixed(1)}</td>
-                  <td className={`px-2 py-4 text-center font-mono text-xs font-bold ${t.fgPct > 0.48 ? 'text-emerald-400' : 'text-rose-400'}`}>{(t.fgPct * 100).toFixed(1)}%</td>
-                  <td className="px-2 py-4 text-center font-mono text-xs">{t.threepm.toFixed(1)}</td>
-                  <td className="px-2 py-4 text-center font-mono text-xs">{t.threepa.toFixed(1)}</td>
-                  <td className={`px-2 py-4 text-center font-mono text-xs font-bold ${t.threePct > 0.38 ? 'text-emerald-400' : 'text-rose-400'}`}>{(t.threePct * 100).toFixed(1)}%</td>
-                  <td className="px-2 py-4 text-center font-mono text-xs">{t.twopm.toFixed(1)}</td>
-                  <td className="px-2 py-4 text-center font-mono text-xs">{t.twopa.toFixed(1)}</td>
-                  <td className={`px-2 py-4 text-center font-mono text-xs font-bold ${t.twoPct > 0.52 ? 'text-emerald-400' : 'text-rose-400'}`}>{(t.twoPct * 100).toFixed(1)}%</td>
-                  <td className="px-2 py-4 text-center font-mono text-xs">{t.ftm.toFixed(1)}</td>
-                  <td className="px-2 py-4 text-center font-mono text-xs">{t.fta.toFixed(1)}</td>
-                  <td className={`px-2 py-4 text-center font-mono text-xs font-bold ${t.ftPct > 0.8 ? 'text-emerald-400' : 'text-rose-400'}`}>{(t.ftPct * 100).toFixed(1)}%</td>
-                  <td className="px-2 py-4 text-center font-mono text-xs">{t.orb.toFixed(1)}</td>
-                  <td className="px-2 py-4 text-center font-mono text-xs">{t.drb.toFixed(1)}</td>
-                  <td className="px-2 py-4 text-center font-mono text-xs">{t.trb.toFixed(1)}</td>
-                  <td className="px-2 py-4 text-center font-mono text-xs">{t.ast.toFixed(1)}</td>
-                  <td className={`px-2 py-4 text-center font-mono text-xs font-bold ${t.tov < 12 ? 'text-emerald-400' : 'text-rose-400'}`}>{t.tov.toFixed(1)}</td>
-                  <td className="px-2 py-4 text-center font-mono text-xs">{t.stl.toFixed(1)}</td>
-                  <td className="px-2 py-4 text-center font-mono text-xs">{t.blk.toFixed(1)}</td>
-                  <td className="px-2 py-4 text-center font-mono text-xs">{t.pf.toFixed(1)}</td>
-                  <td className={`px-2 py-4 text-center font-mono text-xs font-bold ${t.pts > 110 ? 'text-emerald-400' : 'text-rose-400'}`}>{t.pts.toFixed(1)}</td>
-                  <td className={`px-2 py-4 text-center font-mono text-xs font-bold ${t.mov > 0 ? 'text-emerald-400' : 'text-rose-400'}`}>{t.mov.toFixed(1)}</td>
-                </tr>
-              ))}
-            </tbody>
-            <tfoot>
-              <tr className="bg-slate-950/80 font-black text-slate-400 border-t-2 border-slate-800">
-                <td className="px-4 py-4" colSpan={2}>League Average</td>
-                <td className="px-2 py-4 text-center font-mono text-xs">{avgRow.games.toFixed(1)}</td>
-                <td className="px-2 py-4 text-center font-mono text-xs">{avgRow.wins.toFixed(1)}</td>
-                <td className="px-2 py-4 text-center font-mono text-xs">{avgRow.losses.toFixed(1)}</td>
-                <td className="px-2 py-4 text-center font-mono text-xs">{(avgRow.winPct * 100).toFixed(1)}%</td>
-                <td className="px-2 py-4 text-center font-mono text-xs">{avgRow.avgAge.toFixed(1)}</td>
-                <td className="px-2 py-4 text-center font-mono text-xs">{avgRow.fgm.toFixed(1)}</td>
-                <td className="px-2 py-4 text-center font-mono text-xs">{avgRow.fga.toFixed(1)}</td>
-                <td className="px-2 py-4 text-center font-mono text-xs">{(avgRow.fgPct * 100).toFixed(1)}%</td>
-                <td className="px-2 py-4 text-center font-mono text-xs">{avgRow.threepm.toFixed(1)}</td>
-                <td className="px-2 py-4 text-center font-mono text-xs">{avgRow.threepa.toFixed(1)}</td>
-                <td className="px-2 py-4 text-center font-mono text-xs">{(avgRow.threePct * 100).toFixed(1)}%</td>
-                <td className="px-2 py-4 text-center font-mono text-xs">{avgRow.twopm.toFixed(1)}</td>
-                <td className="px-2 py-4 text-center font-mono text-xs">{avgRow.twopa.toFixed(1)}</td>
-                <td className="px-2 py-4 text-center font-mono text-xs">{(avgRow.twoPct * 100).toFixed(1)}%</td>
-                <td className="px-2 py-4 text-center font-mono text-xs">{avgRow.ftm.toFixed(1)}</td>
-                <td className="px-2 py-4 text-center font-mono text-xs">{avgRow.fta.toFixed(1)}</td>
-                <td className="px-2 py-4 text-center font-mono text-xs">{(avgRow.ftPct * 100).toFixed(1)}%</td>
-                <td className="px-2 py-4 text-center font-mono text-xs">{avgRow.orb.toFixed(1)}</td>
-                <td className="px-2 py-4 text-center font-mono text-xs">{avgRow.drb.toFixed(1)}</td>
-                <td className="px-2 py-4 text-center font-mono text-xs">{avgRow.trb.toFixed(1)}</td>
-                <td className="px-2 py-4 text-center font-mono text-xs">{avgRow.ast.toFixed(1)}</td>
-                <td className="px-2 py-4 text-center font-mono text-xs">{avgRow.tov.toFixed(1)}</td>
-                <td className="px-2 py-4 text-center font-mono text-xs">{avgRow.stl.toFixed(1)}</td>
-                <td className="px-2 py-4 text-center font-mono text-xs">{avgRow.blk.toFixed(1)}</td>
-                <td className="px-2 py-4 text-center font-mono text-xs">{avgRow.pf.toFixed(1)}</td>
-                <td className="px-2 py-4 text-center font-mono text-xs">{avgRow.pts.toFixed(1)}</td>
-                <td className="px-2 py-4 text-center font-mono text-xs">{avgRow.mov.toFixed(1)}</td>
-              </tr>
-            </tfoot>
-          </table>
+      <div className="space-y-4 animate-in fade-in slide-in-from-bottom-4 duration-500">
+        {/* Sub-tab pills */}
+        <div className="flex gap-2 flex-wrap">
+          {(['traditional', 'advanced', 'opponent'] as TeamSubTab[]).map(tab => (
+            <button
+              key={tab}
+              onClick={() => { setTeamSubTab(tab); setSortKey(tab === 'advanced' ? 'netRtg' : tab === 'opponent' ? 'oppPts' : 'winPct'); setSortDir('desc'); }}
+              className={`px-4 py-2 rounded-xl text-[11px] font-black uppercase tracking-widest transition-all border ${
+                teamSubTab === tab
+                  ? tab === 'advanced'  ? 'bg-purple-500 border-purple-400 text-white'
+                  : tab === 'opponent' ? 'bg-blue-500 border-blue-400 text-white'
+                  : 'bg-amber-500 border-amber-400 text-slate-950'
+                  : 'bg-slate-900 border-slate-800 text-slate-500 hover:text-white hover:border-slate-600'
+              }`}
+            >{tab}</button>
+          ))}
+        </div>
+
+        <div className="bg-slate-900 border border-slate-800 rounded-3xl overflow-hidden shadow-2xl">
+          <div className="overflow-x-auto">
+            {/* ── TRADITIONAL ─────────────────────────────────────────── */}
+            {teamSubTab === 'traditional' && (
+              <table className="w-full text-left border-collapse">
+                <thead>
+                  <tr className="text-[10px] text-slate-500 font-black uppercase tracking-widest border-b border-slate-800 bg-slate-950/50">
+                    <LeadTh />
+                    <th className="px-2 py-4 text-center cursor-pointer hover:text-white" onClick={() => handleSort('avgAge')}>Age <Si k="avgAge" /></th>
+                    <th className="px-2 py-4 text-center cursor-pointer hover:text-white" onClick={() => handleSort('fgm')}>FG <Si k="fgm" /></th>
+                    <th className="px-2 py-4 text-center cursor-pointer hover:text-white" onClick={() => handleSort('fga')}>FGA <Si k="fga" /></th>
+                    <th className="px-2 py-4 text-center cursor-pointer hover:text-white" onClick={() => handleSort('fgPct')}>FG% <Si k="fgPct" /></th>
+                    <th className="px-2 py-4 text-center cursor-pointer hover:text-white" onClick={() => handleSort('threepm')}>3P <Si k="threepm" /></th>
+                    <th className="px-2 py-4 text-center cursor-pointer hover:text-white" onClick={() => handleSort('threepa')}>3PA <Si k="threepa" /></th>
+                    <th className="px-2 py-4 text-center cursor-pointer hover:text-white" onClick={() => handleSort('threePct')}>3P% <Si k="threePct" /></th>
+                    <th className="px-2 py-4 text-center cursor-pointer hover:text-white" onClick={() => handleSort('twopm')}>2P <Si k="twopm" /></th>
+                    <th className="px-2 py-4 text-center cursor-pointer hover:text-white" onClick={() => handleSort('twopa')}>2PA <Si k="twopa" /></th>
+                    <th className="px-2 py-4 text-center cursor-pointer hover:text-white" onClick={() => handleSort('twoPct')}>2P% <Si k="twoPct" /></th>
+                    <th className="px-2 py-4 text-center cursor-pointer hover:text-white" onClick={() => handleSort('ftm')}>FT <Si k="ftm" /></th>
+                    <th className="px-2 py-4 text-center cursor-pointer hover:text-white" onClick={() => handleSort('fta')}>FTA <Si k="fta" /></th>
+                    <th className="px-2 py-4 text-center cursor-pointer hover:text-white" onClick={() => handleSort('ftPct')}>FT% <Si k="ftPct" /></th>
+                    <th className="px-2 py-4 text-center cursor-pointer hover:text-white" onClick={() => handleSort('orb')}>ORB <Si k="orb" /></th>
+                    <th className="px-2 py-4 text-center cursor-pointer hover:text-white" onClick={() => handleSort('drb')}>DRB <Si k="drb" /></th>
+                    <th className="px-2 py-4 text-center cursor-pointer hover:text-white" onClick={() => handleSort('trb')}>TRB <Si k="trb" /></th>
+                    <th className="px-2 py-4 text-center cursor-pointer hover:text-white" onClick={() => handleSort('ast')}>AST <Si k="ast" /></th>
+                    <th className="px-2 py-4 text-center cursor-pointer hover:text-white" onClick={() => handleSort('tov')}>TOV <Si k="tov" /></th>
+                    <th className="px-2 py-4 text-center cursor-pointer hover:text-white" onClick={() => handleSort('stl')}>STL <Si k="stl" /></th>
+                    <th className="px-2 py-4 text-center cursor-pointer hover:text-white" onClick={() => handleSort('blk')}>BLK <Si k="blk" /></th>
+                    <th className="px-2 py-4 text-center cursor-pointer hover:text-white" onClick={() => handleSort('pf')}>PF <Si k="pf" /></th>
+                    <th className="px-2 py-4 text-center cursor-pointer hover:text-white" onClick={() => handleSort('pts')}>PTS <Si k="pts" /></th>
+                    <th className="px-2 py-4 text-center cursor-pointer hover:text-white" onClick={() => handleSort('mov')}>MOV <Si k="mov" /></th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-800/40">
+                  {sortedTeams.map((t, idx) => (
+                    <tr key={t.id} className="hover:bg-slate-800/30 transition-all cursor-pointer group" onClick={() => onManageTeam?.(t.id)}>
+                      <LeadTd t={t} idx={idx} />
+                      <td className="px-2 py-4 text-center font-mono text-xs">{n1(t.avgAge)}</td>
+                      <td className="px-2 py-4 text-center font-mono text-xs">{n1(t.fgm)}</td>
+                      <td className="px-2 py-4 text-center font-mono text-xs">{n1(t.fga)}</td>
+                      <td className={`px-2 py-4 text-center font-mono text-xs font-bold ${t.fgPct > 0.48 ? 'text-emerald-400' : 'text-rose-400'}`}>{pct(t.fgPct)}</td>
+                      <td className="px-2 py-4 text-center font-mono text-xs">{n1(t.threepm)}</td>
+                      <td className="px-2 py-4 text-center font-mono text-xs">{n1(t.threepa)}</td>
+                      <td className={`px-2 py-4 text-center font-mono text-xs font-bold ${t.threePct > 0.38 ? 'text-emerald-400' : 'text-rose-400'}`}>{pct(t.threePct)}</td>
+                      <td className="px-2 py-4 text-center font-mono text-xs">{n1(t.twopm)}</td>
+                      <td className="px-2 py-4 text-center font-mono text-xs">{n1(t.twopa)}</td>
+                      <td className={`px-2 py-4 text-center font-mono text-xs font-bold ${t.twoPct > 0.52 ? 'text-emerald-400' : 'text-rose-400'}`}>{pct(t.twoPct)}</td>
+                      <td className="px-2 py-4 text-center font-mono text-xs">{n1(t.ftm)}</td>
+                      <td className="px-2 py-4 text-center font-mono text-xs">{n1(t.fta)}</td>
+                      <td className={`px-2 py-4 text-center font-mono text-xs font-bold ${t.ftPct > 0.8 ? 'text-emerald-400' : 'text-rose-400'}`}>{pct(t.ftPct)}</td>
+                      <td className="px-2 py-4 text-center font-mono text-xs">{n1(t.orb)}</td>
+                      <td className="px-2 py-4 text-center font-mono text-xs">{n1(t.drb)}</td>
+                      <td className="px-2 py-4 text-center font-mono text-xs">{n1(t.trb)}</td>
+                      <td className="px-2 py-4 text-center font-mono text-xs">{n1(t.ast)}</td>
+                      <td className={`px-2 py-4 text-center font-mono text-xs font-bold ${t.tov < 12 ? 'text-emerald-400' : 'text-rose-400'}`}>{n1(t.tov)}</td>
+                      <td className="px-2 py-4 text-center font-mono text-xs">{n1(t.stl)}</td>
+                      <td className="px-2 py-4 text-center font-mono text-xs">{n1(t.blk)}</td>
+                      <td className="px-2 py-4 text-center font-mono text-xs">{n1(t.pf)}</td>
+                      <td className={`px-2 py-4 text-center font-mono text-xs font-bold ${t.pts > 110 ? 'text-emerald-400' : 'text-rose-400'}`}>{n1(t.pts)}</td>
+                      <td className={`px-2 py-4 text-center font-mono text-xs font-bold ${t.mov > 0 ? 'text-emerald-400' : 'text-rose-400'}`}>{n1(t.mov)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+                <tfoot>
+                  <tr className="bg-slate-950/80 font-black text-slate-400 border-t-2 border-slate-800">
+                    <td className="px-4 py-4" colSpan={2}>League Avg</td>
+                    <LeadAvg />
+                    <td className="px-2 py-4 text-center font-mono text-xs">{n1(avg.avgAge)}</td>
+                    <td className="px-2 py-4 text-center font-mono text-xs">{n1(avg.fgm)}</td>
+                    <td className="px-2 py-4 text-center font-mono text-xs">{n1(avg.fga)}</td>
+                    <td className="px-2 py-4 text-center font-mono text-xs">{pct(avg.fgPct)}</td>
+                    <td className="px-2 py-4 text-center font-mono text-xs">{n1(avg.threepm)}</td>
+                    <td className="px-2 py-4 text-center font-mono text-xs">{n1(avg.threepa)}</td>
+                    <td className="px-2 py-4 text-center font-mono text-xs">{pct(avg.threePct)}</td>
+                    <td className="px-2 py-4 text-center font-mono text-xs">{n1(avg.twopm)}</td>
+                    <td className="px-2 py-4 text-center font-mono text-xs">{n1(avg.twopa)}</td>
+                    <td className="px-2 py-4 text-center font-mono text-xs">{pct(avg.twoPct)}</td>
+                    <td className="px-2 py-4 text-center font-mono text-xs">{n1(avg.ftm)}</td>
+                    <td className="px-2 py-4 text-center font-mono text-xs">{n1(avg.fta)}</td>
+                    <td className="px-2 py-4 text-center font-mono text-xs">{pct(avg.ftPct)}</td>
+                    <td className="px-2 py-4 text-center font-mono text-xs">{n1(avg.orb)}</td>
+                    <td className="px-2 py-4 text-center font-mono text-xs">{n1(avg.drb)}</td>
+                    <td className="px-2 py-4 text-center font-mono text-xs">{n1(avg.trb)}</td>
+                    <td className="px-2 py-4 text-center font-mono text-xs">{n1(avg.ast)}</td>
+                    <td className="px-2 py-4 text-center font-mono text-xs">{n1(avg.tov)}</td>
+                    <td className="px-2 py-4 text-center font-mono text-xs">{n1(avg.stl)}</td>
+                    <td className="px-2 py-4 text-center font-mono text-xs">{n1(avg.blk)}</td>
+                    <td className="px-2 py-4 text-center font-mono text-xs">{n1(avg.pf)}</td>
+                    <td className="px-2 py-4 text-center font-mono text-xs">{n1(avg.pts)}</td>
+                    <td className="px-2 py-4 text-center font-mono text-xs">{n1(avg.mov)}</td>
+                  </tr>
+                </tfoot>
+              </table>
+            )}
+
+            {/* ── ADVANCED ────────────────────────────────────────────── */}
+            {teamSubTab === 'advanced' && (
+              <table className="w-full text-left border-collapse">
+                <thead>
+                  <tr className="text-[10px] text-slate-500 font-black uppercase tracking-widest border-b border-slate-800 bg-slate-950/50">
+                    <LeadTh />
+                    <th className="px-2 py-4 text-center cursor-pointer hover:text-white" onClick={() => handleSort('pts')}>PTS <Si k="pts" /></th>
+                    <th className="px-2 py-4 text-center cursor-pointer hover:text-white" onClick={() => handleSort('pace')}>Pace <Si k="pace" /></th>
+                    <th className="px-2 py-4 text-center cursor-pointer hover:text-white" onClick={() => handleSort('ortg')}>ORtg <Si k="ortg" /></th>
+                    <th className="px-2 py-4 text-center cursor-pointer hover:text-white" onClick={() => handleSort('drtg')}>DRtg <Si k="drtg" /></th>
+                    <th className="px-2 py-4 text-center cursor-pointer hover:text-white" onClick={() => handleSort('netRtg')}>NetRtg <Si k="netRtg" /></th>
+                    <th className="px-2 py-4 text-center cursor-pointer hover:text-white" onClick={() => handleSort('eFGPct')}>eFG% <Si k="eFGPct" /></th>
+                    <th className="px-2 py-4 text-center cursor-pointer hover:text-white" onClick={() => handleSort('tsPct')}>TS% <Si k="tsPct" /></th>
+                    <th className="px-2 py-4 text-center cursor-pointer hover:text-white" onClick={() => handleSort('tovPct')}>TOV% <Si k="tovPct" /></th>
+                    <th className="px-2 py-4 text-center cursor-pointer hover:text-white" onClick={() => handleSort('astTov')}>AST/TO <Si k="astTov" /></th>
+                    <th className="px-2 py-4 text-center cursor-pointer hover:text-white" onClick={() => handleSort('astPct')}>AST% <Si k="astPct" /></th>
+                    <th className="px-2 py-4 text-center cursor-pointer hover:text-white" onClick={() => handleSort('orbPct')}>ORB% <Si k="orbPct" /></th>
+                    <th className="px-2 py-4 text-center cursor-pointer hover:text-white" onClick={() => handleSort('drbPct')}>DRB% <Si k="drbPct" /></th>
+                    <th className="px-2 py-4 text-center cursor-pointer hover:text-white" onClick={() => handleSort('mov')}>MOV <Si k="mov" /></th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-800/40">
+                  {sortedTeams.map((t, idx) => (
+                    <tr key={t.id} className="hover:bg-slate-800/30 transition-all cursor-pointer group" onClick={() => onManageTeam?.(t.id)}>
+                      <LeadTd t={t} idx={idx} />
+                      <td className={`px-2 py-4 text-center font-mono text-xs font-bold ${t.pts > avg.pts ? 'text-emerald-400' : 'text-rose-400'}`}>{n1(t.pts)}</td>
+                      <td className="px-2 py-4 text-center font-mono text-xs">{n1(t.pace)}</td>
+                      <td className={`px-2 py-4 text-center font-mono text-xs font-bold ${t.ortg > avg.ortg ? 'text-emerald-400' : 'text-rose-400'}`}>{n1(t.ortg)}</td>
+                      <td className={`px-2 py-4 text-center font-mono text-xs font-bold ${t.drtg < avg.drtg ? 'text-emerald-400' : 'text-rose-400'}`}>{n1(t.drtg)}</td>
+                      <td className={`px-2 py-4 text-center font-mono text-xs font-bold ${t.netRtg > 0 ? 'text-emerald-400' : 'text-rose-400'}`}>{t.netRtg > 0 ? '+' : ''}{n1(t.netRtg)}</td>
+                      <td className={`px-2 py-4 text-center font-mono text-xs font-bold ${t.eFGPct > avg.eFGPct ? 'text-emerald-400' : 'text-rose-400'}`}>{pct(t.eFGPct)}</td>
+                      <td className={`px-2 py-4 text-center font-mono text-xs font-bold ${t.tsPct > avg.tsPct ? 'text-emerald-400' : 'text-rose-400'}`}>{pct(t.tsPct)}</td>
+                      <td className={`px-2 py-4 text-center font-mono text-xs font-bold ${t.tovPct < avg.tovPct ? 'text-emerald-400' : 'text-rose-400'}`}>{n1(t.tovPct)}%</td>
+                      <td className={`px-2 py-4 text-center font-mono text-xs font-bold ${t.astTov > avg.astTov ? 'text-emerald-400' : 'text-rose-400'}`}>{n2(t.astTov)}</td>
+                      <td className="px-2 py-4 text-center font-mono text-xs">{n1(t.astPct)}%</td>
+                      <td className={`px-2 py-4 text-center font-mono text-xs font-bold ${t.orbPct > avg.orbPct ? 'text-emerald-400' : 'text-rose-400'}`}>{n1(t.orbPct)}%</td>
+                      <td className={`px-2 py-4 text-center font-mono text-xs font-bold ${t.drbPct > avg.drbPct ? 'text-emerald-400' : 'text-rose-400'}`}>{n1(t.drbPct)}%</td>
+                      <td className={`px-2 py-4 text-center font-mono text-xs font-bold ${t.mov > 0 ? 'text-emerald-400' : 'text-rose-400'}`}>{t.mov > 0 ? '+' : ''}{n1(t.mov)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+                <tfoot>
+                  <tr className="bg-slate-950/80 font-black text-slate-400 border-t-2 border-slate-800">
+                    <td className="px-4 py-4" colSpan={2}>League Avg</td>
+                    <LeadAvg />
+                    <td className="px-2 py-4 text-center font-mono text-xs">{n1(avg.pts)}</td>
+                    <td className="px-2 py-4 text-center font-mono text-xs">{n1(avg.pace)}</td>
+                    <td className="px-2 py-4 text-center font-mono text-xs">{n1(avg.ortg)}</td>
+                    <td className="px-2 py-4 text-center font-mono text-xs">{n1(avg.drtg)}</td>
+                    <td className="px-2 py-4 text-center font-mono text-xs">—</td>
+                    <td className="px-2 py-4 text-center font-mono text-xs">{pct(avg.eFGPct)}</td>
+                    <td className="px-2 py-4 text-center font-mono text-xs">{pct(avg.tsPct)}</td>
+                    <td className="px-2 py-4 text-center font-mono text-xs">{n1(avg.tovPct)}%</td>
+                    <td className="px-2 py-4 text-center font-mono text-xs">{n2(avg.astTov)}</td>
+                    <td className="px-2 py-4 text-center font-mono text-xs">{n1(avg.astPct)}%</td>
+                    <td className="px-2 py-4 text-center font-mono text-xs">{n1(avg.orbPct)}%</td>
+                    <td className="px-2 py-4 text-center font-mono text-xs">{n1(avg.drbPct)}%</td>
+                    <td className="px-2 py-4 text-center font-mono text-xs">—</td>
+                  </tr>
+                </tfoot>
+              </table>
+            )}
+
+            {/* ── OPPONENT ────────────────────────────────────────────── */}
+            {teamSubTab === 'opponent' && (
+              <table className="w-full text-left border-collapse">
+                <thead>
+                  <tr className="text-[10px] text-slate-500 font-black uppercase tracking-widest border-b border-slate-800 bg-slate-950/50">
+                    <LeadTh />
+                    <th className="px-2 py-4 text-center cursor-pointer hover:text-white" onClick={() => handleSort('oppPts')}>OppPTS <Si k="oppPts" /></th>
+                    <th className="px-2 py-4 text-center cursor-pointer hover:text-white" onClick={() => handleSort('oppFgm')}>OppFG <Si k="oppFgm" /></th>
+                    <th className="px-2 py-4 text-center cursor-pointer hover:text-white" onClick={() => handleSort('oppFga')}>OppFGA <Si k="oppFga" /></th>
+                    <th className="px-2 py-4 text-center cursor-pointer hover:text-white" onClick={() => handleSort('oppFgPct')}>OppFG% <Si k="oppFgPct" /></th>
+                    <th className="px-2 py-4 text-center cursor-pointer hover:text-white" onClick={() => handleSort('oppThreepm')}>Opp3P <Si k="oppThreepm" /></th>
+                    <th className="px-2 py-4 text-center cursor-pointer hover:text-white" onClick={() => handleSort('oppThreepa')}>Opp3PA <Si k="oppThreepa" /></th>
+                    <th className="px-2 py-4 text-center cursor-pointer hover:text-white" onClick={() => handleSort('oppThreePct')}>Opp3P% <Si k="oppThreePct" /></th>
+                    <th className="px-2 py-4 text-center cursor-pointer hover:text-white" onClick={() => handleSort('oppFtm')}>OppFT <Si k="oppFtm" /></th>
+                    <th className="px-2 py-4 text-center cursor-pointer hover:text-white" onClick={() => handleSort('oppFta')}>OppFTA <Si k="oppFta" /></th>
+                    <th className="px-2 py-4 text-center cursor-pointer hover:text-white" onClick={() => handleSort('oppFtPct')}>OppFT% <Si k="oppFtPct" /></th>
+                    <th className="px-2 py-4 text-center cursor-pointer hover:text-white" onClick={() => handleSort('oppOrb')}>OppORB <Si k="oppOrb" /></th>
+                    <th className="px-2 py-4 text-center cursor-pointer hover:text-white" onClick={() => handleSort('oppDrb')}>OppDRB <Si k="oppDrb" /></th>
+                    <th className="px-2 py-4 text-center cursor-pointer hover:text-white" onClick={() => handleSort('oppTrb')}>OppTRB <Si k="oppTrb" /></th>
+                    <th className="px-2 py-4 text-center cursor-pointer hover:text-white" onClick={() => handleSort('oppAst')}>OppAST <Si k="oppAst" /></th>
+                    <th className="px-2 py-4 text-center cursor-pointer hover:text-white" onClick={() => handleSort('oppTov')}>OppTOV <Si k="oppTov" /></th>
+                    <th className="px-2 py-4 text-center cursor-pointer hover:text-white" onClick={() => handleSort('oppStl')}>OppSTL <Si k="oppStl" /></th>
+                    <th className="px-2 py-4 text-center cursor-pointer hover:text-white" onClick={() => handleSort('oppBlk')}>OppBLK <Si k="oppBlk" /></th>
+                    <th className="px-2 py-4 text-center cursor-pointer hover:text-white" onClick={() => handleSort('drtg')}>DRtg <Si k="drtg" /></th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-800/40">
+                  {sortedTeams.map((t, idx) => (
+                    <tr key={t.id} className="hover:bg-slate-800/30 transition-all cursor-pointer group" onClick={() => onManageTeam?.(t.id)}>
+                      <LeadTd t={t} idx={idx} />
+                      <td className={`px-2 py-4 text-center font-mono text-xs font-bold ${t.oppPts < avg.oppPts ? 'text-emerald-400' : 'text-rose-400'}`}>{n1(t.oppPts)}</td>
+                      <td className="px-2 py-4 text-center font-mono text-xs">{n1(t.oppFgm)}</td>
+                      <td className="px-2 py-4 text-center font-mono text-xs">{n1(t.oppFga)}</td>
+                      <td className={`px-2 py-4 text-center font-mono text-xs font-bold ${t.oppFgPct < avg.oppFgPct ? 'text-emerald-400' : 'text-rose-400'}`}>{pct(t.oppFgPct)}</td>
+                      <td className="px-2 py-4 text-center font-mono text-xs">{n1(t.oppThreepm)}</td>
+                      <td className="px-2 py-4 text-center font-mono text-xs">{n1(t.oppThreepa)}</td>
+                      <td className={`px-2 py-4 text-center font-mono text-xs font-bold ${t.oppThreePct < avg.oppThreePct ? 'text-emerald-400' : 'text-rose-400'}`}>{pct(t.oppThreePct)}</td>
+                      <td className="px-2 py-4 text-center font-mono text-xs">{n1(t.oppFtm)}</td>
+                      <td className="px-2 py-4 text-center font-mono text-xs">{n1(t.oppFta)}</td>
+                      <td className={`px-2 py-4 text-center font-mono text-xs font-bold ${t.oppFtPct < avg.oppFtPct ? 'text-emerald-400' : 'text-rose-400'}`}>{pct(t.oppFtPct)}</td>
+                      <td className={`px-2 py-4 text-center font-mono text-xs font-bold ${t.oppOrb < avg.oppOrb ? 'text-emerald-400' : 'text-rose-400'}`}>{n1(t.oppOrb)}</td>
+                      <td className="px-2 py-4 text-center font-mono text-xs">{n1(t.oppDrb)}</td>
+                      <td className={`px-2 py-4 text-center font-mono text-xs font-bold ${t.oppTrb < avg.oppTrb ? 'text-emerald-400' : 'text-rose-400'}`}>{n1(t.oppTrb)}</td>
+                      <td className={`px-2 py-4 text-center font-mono text-xs font-bold ${t.oppAst < avg.oppAst ? 'text-emerald-400' : 'text-rose-400'}`}>{n1(t.oppAst)}</td>
+                      <td className={`px-2 py-4 text-center font-mono text-xs font-bold ${t.oppTov > avg.oppTov ? 'text-emerald-400' : 'text-rose-400'}`}>{n1(t.oppTov)}</td>
+                      <td className="px-2 py-4 text-center font-mono text-xs">{n1(t.oppStl)}</td>
+                      <td className="px-2 py-4 text-center font-mono text-xs">{n1(t.oppBlk)}</td>
+                      <td className={`px-2 py-4 text-center font-mono text-xs font-bold ${t.drtg < avg.drtg ? 'text-emerald-400' : 'text-rose-400'}`}>{n1(t.drtg)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+                <tfoot>
+                  <tr className="bg-slate-950/80 font-black text-slate-400 border-t-2 border-slate-800">
+                    <td className="px-4 py-4" colSpan={2}>League Avg</td>
+                    <LeadAvg />
+                    <td className="px-2 py-4 text-center font-mono text-xs">{n1(avg.oppPts)}</td>
+                    <td className="px-2 py-4 text-center font-mono text-xs">{n1(avg.oppFgm)}</td>
+                    <td className="px-2 py-4 text-center font-mono text-xs">{n1(avg.oppFga)}</td>
+                    <td className="px-2 py-4 text-center font-mono text-xs">{pct(avg.oppFgPct)}</td>
+                    <td className="px-2 py-4 text-center font-mono text-xs">{n1(avg.oppThreepm)}</td>
+                    <td className="px-2 py-4 text-center font-mono text-xs">{n1(avg.oppThreepa)}</td>
+                    <td className="px-2 py-4 text-center font-mono text-xs">{pct(avg.oppThreePct)}</td>
+                    <td className="px-2 py-4 text-center font-mono text-xs">{n1(avg.oppFtm)}</td>
+                    <td className="px-2 py-4 text-center font-mono text-xs">{n1(avg.oppFta)}</td>
+                    <td className="px-2 py-4 text-center font-mono text-xs">{pct(avg.oppFtPct)}</td>
+                    <td className="px-2 py-4 text-center font-mono text-xs">{n1(avg.oppOrb)}</td>
+                    <td className="px-2 py-4 text-center font-mono text-xs">{n1(avg.oppDrb)}</td>
+                    <td className="px-2 py-4 text-center font-mono text-xs">{n1(avg.oppTrb)}</td>
+                    <td className="px-2 py-4 text-center font-mono text-xs">{n1(avg.oppAst)}</td>
+                    <td className="px-2 py-4 text-center font-mono text-xs">{n1(avg.oppTov)}</td>
+                    <td className="px-2 py-4 text-center font-mono text-xs">{n1(avg.oppStl)}</td>
+                    <td className="px-2 py-4 text-center font-mono text-xs">{n1(avg.oppBlk)}</td>
+                    <td className="px-2 py-4 text-center font-mono text-xs">{n1(avg.drtg)}</td>
+                  </tr>
+                </tfoot>
+              </table>
+            )}
+          </div>
         </div>
       </div>
     );
