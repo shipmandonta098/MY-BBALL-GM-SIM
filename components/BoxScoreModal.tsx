@@ -26,12 +26,17 @@ const BoxScoreModal: React.FC<BoxScoreModalProps> = ({ result, homeTeam, awayTea
       threepm: sum('threepm'), threepa: sum('threepa'),
       ftm: sum('ftm'), fta: sum('fta'),
     };
+    const fgPct  = totals.fga  > 0 ? `${Math.round(totals.fgm  / totals.fga  * 100)}%` : '—';
+    const tpPct  = totals.threepa > 0 ? `${Math.round(totals.threepm / totals.threepa * 100)}%` : '—';
+    const ftPct  = totals.fta  > 0 ? `${Math.round(totals.ftm  / totals.fta  * 100)}%` : '—';
     return (
       <div className="space-y-4">
         <div className="flex items-center gap-4">
           <TeamBadge team={team} size="md" />
           <TeamLink teamId={team.id} name={`${team.city} ${team.name}`} className="text-xl font-display font-bold uppercase text-white" />
         </div>
+
+        {/* Player table — no totals row */}
         <div className="overflow-x-auto rounded-2xl border border-slate-800">
           <table className="w-full text-left text-xs">
             <thead className="bg-slate-950/50 border-b border-slate-800 text-[10px] font-black uppercase text-slate-500">
@@ -80,31 +85,6 @@ const BoxScoreModal: React.FC<BoxScoreModalProps> = ({ result, homeTeam, awayTea
                   <td className="px-2 py-4 text-center font-mono text-rose-500/50">{line.tov}</td>
                 </tr>
               ))}
-              {/* Totals row */}
-              <tr className="border-t-2 border-orange-500/30 bg-slate-950/60 font-black">
-                <td className="px-4 py-3 text-[10px] font-black uppercase tracking-widest text-orange-400">TOTALS</td>
-                <td className="px-2 py-3 text-center font-mono text-slate-300">{totals.min}</td>
-                <td className="px-2 py-3 text-center font-display font-bold text-sm text-amber-500">{totals.pts}</td>
-                <td className="px-2 py-3 text-center font-mono text-slate-300">{totals.reb}</td>
-                <td className="px-2 py-3 text-center font-mono text-slate-300">{totals.ast}</td>
-                <td className="px-2 py-3 text-center font-mono text-slate-300">{totals.stl}</td>
-                <td className="px-2 py-3 text-center font-mono text-slate-300">{totals.blk}</td>
-                <td className="px-2 py-3 text-center">
-                  <span className="block font-mono text-[10px] text-slate-200">{totals.fgm}-{totals.fga}</span>
-                  <span className="block font-mono text-[9px] text-orange-400">{totals.fga > 0 ? `${Math.round(totals.fgm / totals.fga * 100)}%` : '—'}</span>
-                </td>
-                <td className="px-2 py-3 text-center">
-                  <span className="block font-mono text-[10px] text-slate-200">{totals.threepm}-{totals.threepa}</span>
-                  <span className="block font-mono text-[9px] text-orange-400">{totals.threepa > 0 ? `${Math.round(totals.threepm / totals.threepa * 100)}%` : '—'}</span>
-                </td>
-                <td className="px-2 py-3 text-center">
-                  <span className="block font-mono text-[10px] text-slate-200">{totals.ftm}-{totals.fta}</span>
-                  <span className="block font-mono text-[9px] text-orange-400">{totals.fta > 0 ? `${Math.round(totals.ftm / totals.fta * 100)}%` : '—'}</span>
-                </td>
-                <td className="px-2 py-3 text-center font-mono text-slate-500">—</td>
-                <td className="px-2 py-3 text-center font-mono text-rose-500/70">{totals.tov}</td>
-              </tr>
-
               {dnp.length > 0 && (
                 <>
                   <tr className="border-t border-slate-700/50">
@@ -124,6 +104,32 @@ const BoxScoreModal: React.FC<BoxScoreModalProps> = ({ result, homeTeam, awayTea
               )}
             </tbody>
           </table>
+        </div>
+
+        {/* Team Totals card — separate from player rows */}
+        <div className="rounded-2xl border border-orange-500/30 bg-slate-950/60 overflow-hidden">
+          <div className="flex items-center gap-3 px-5 py-3 border-b border-orange-500/20 bg-orange-500/5">
+            <TeamBadge team={team} size="sm" />
+            <span className="text-[10px] font-black uppercase tracking-[0.3em] text-orange-400">Team Totals — {team.city} {team.name}</span>
+          </div>
+          <div className="flex flex-wrap gap-x-6 gap-y-3 px-5 py-4">
+            {[
+              { label: 'PTS', value: <span className="text-amber-500 font-bold">{totals.pts}</span> },
+              { label: 'REB', value: totals.reb },
+              { label: 'AST', value: totals.ast },
+              { label: 'STL', value: totals.stl },
+              { label: 'BLK', value: totals.blk },
+              { label: 'TO',  value: <span className="text-rose-400">{totals.tov}</span> },
+              { label: 'FG',  value: <>{totals.fgm}-{totals.fga} <span className="text-orange-400">{fgPct}</span></> },
+              { label: '3P',  value: <>{totals.threepm}-{totals.threepa} <span className="text-orange-400">{tpPct}</span></> },
+              { label: 'FT',  value: <>{totals.ftm}-{totals.fta} <span className="text-orange-400">{ftPct}</span></> },
+            ].map(({ label, value }) => (
+              <div key={label} className="flex items-baseline gap-2 min-w-[80px]">
+                <span className="text-[9px] font-black uppercase tracking-widest text-slate-500">{label}</span>
+                <span className="font-mono font-bold text-sm text-slate-200">{value}</span>
+              </div>
+            ))}
+          </div>
         </div>
       </div>
     );
