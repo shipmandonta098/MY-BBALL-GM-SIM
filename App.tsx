@@ -1492,6 +1492,8 @@ const App: React.FC = () => {
         }
         careerAwards.sort((a, b) => b.year - a.year);
 
+        const allLeaguePlayers = league.teams.flatMap(t => t.roster);
+        const playerTeam      = league.teams.find(t => t.roster.some(p => p.id === selectedPlayer.id));
         return (
           <PlayerModal
             player={selectedPlayer}
@@ -1507,6 +1509,11 @@ const App: React.FC = () => {
             currentAllStarRole={currentAllStarRole}
             careerAwards={careerAwards}
             currentSeason={league.season}
+            leagueContext={{
+              allPlayers: allLeaguePlayers,
+              teamPlayers: playerTeam?.roster ?? [],
+              seasonLength: league.settings.seasonLength ?? 82,
+            }}
           />
         );
       })()}
