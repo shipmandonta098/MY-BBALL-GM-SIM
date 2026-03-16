@@ -550,7 +550,7 @@ export interface LeagueSettings {
   hardCap?: number;
 
   // ── League Tab additions ──────────────────────────────────────────────────
-  playoffFormat?: 6 | 8 | 10 | 16;
+  playoffFormat?: 6 | 8 | 10 | 12 | 14 | 16;
   playoffSeeding?: 'Conference' | 'League-wide';
   playInTournament?: boolean;
   homeCourt?: boolean;
@@ -620,6 +620,18 @@ export interface LeagueSettings {
   sliderFlagrantFoul?: number;
   sliderInjuryMultiplier?: number;
 
+  // ── Season Structure additions ────────────────────────────────────────────
+  divisionGames?: number;          // default 16
+  conferenceGames?: number;        // default 36
+  tradeDeadlineFraction?: number;  // 0–1, default 0.6 (60% of season)
+  splitByConference?: boolean;     // default true
+  guaranteedPerDivision?: number;  // default 0
+  reseedRounds?: boolean;          // default false
+  ownerPatienceLevel?: 'Low' | 'Medium' | 'High'; // affects AI firing aggression
+  luxuryTaxMultiplier?: number;    // default 1.5
+  budgetThreshold?: boolean;       // default false
+  tradeSalaryMatchPct?: number;    // default 125
+
   // ── God Mode additions ────────────────────────────────────────────────────
   editAnyPlayer?: boolean;
   editAnyTeam?: boolean;
@@ -642,9 +654,15 @@ export interface GMProfile {
   name: string;
   avatarSeed: string;
   reputation: number; // 0-100
-  eoyWins: number[]; // List of years won
+  eoyWins: number[]; // List of years won Executive of the Year
   totalSeasons: number;
   milestones: GMMilestone[];
+  // Career stats
+  careerWins?: number;
+  careerLosses?: number;
+  finalsAppearances?: number;  // total Finals trips
+  coachOfYearWins?: number;    // Coach of the Year awards (if user doubled as coach)
+  preferredStyle?: 'Offense' | 'Defense' | 'Balanced';
 }
 
 export interface RivalryStats {

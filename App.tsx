@@ -37,6 +37,7 @@ import PlayerModal from './components/PlayerModal';
 import CoachModal from './components/CoachModal';
 import BoxScoreModal from './components/BoxScoreModal';
 import GMProfileView from './components/GMProfile';
+import Career from './components/Career';
 import LiveGameModal from './components/LiveGameModal';
 import FranchiseHistory from './components/FranchiseHistory';
 import Rotations from './components/Rotations';
@@ -51,7 +52,7 @@ type AppStatus = 'title' | 'config' | 'setup' | 'game';
 const App: React.FC = () => {
   const [status, setStatus] = useState<AppStatus>('title');
   const [league, setLeague] = useState<LeagueState | null>(null);
-  const [activeTab, setActiveTab] = useState<'dashboard' | 'news' | 'roster' | 'rotations' | 'free_agency' | 'results' | 'standings' | 'schedule' | 'draft' | 'coaching' | 'stats' | 'finances' | 'trade' | 'expansion' | 'settings' | 'coach_market' | 'awards' | 'playoffs' | 'transactions' | 'power_rankings' | 'gm_profile' | 'team_management' | 'players' | 'allstar'>('dashboard');
+  const [activeTab, setActiveTab] = useState<'dashboard' | 'news' | 'roster' | 'rotations' | 'free_agency' | 'results' | 'standings' | 'schedule' | 'draft' | 'coaching' | 'stats' | 'finances' | 'trade' | 'expansion' | 'settings' | 'coach_market' | 'awards' | 'playoffs' | 'transactions' | 'power_rankings' | 'gm_profile' | 'career' | 'team_management' | 'players' | 'allstar'>('dashboard');
   const [rosterTeamId, setRosterTeamId] = useState<string>('');
   const [teamManagementId, setTeamManagementId] = useState<string>('');
   const [loading, setLoading] = useState(false);
@@ -1473,6 +1474,7 @@ const App: React.FC = () => {
         <div key={activeTab} className="animate-in fade-in slide-in-from-bottom-2 duration-500">
           {activeTab === 'dashboard' && <Dashboard league={league} news={news} onSimulate={handleSimulate} onScout={handleViewPlayer} scoutingReport={scoutingReport} setActiveTab={setActiveTab} onViewRoster={handleViewRoster} onManageTeam={handleManageTeam} />}
           {activeTab === 'gm_profile' && <GMProfileView league={league} updateLeague={updateLeagueState} />}
+          {activeTab === 'career' && <Career league={league} updateLeague={updateLeagueState} />}
           {activeTab === 'team_management' && (
             <TeamManagement 
               league={league} 
