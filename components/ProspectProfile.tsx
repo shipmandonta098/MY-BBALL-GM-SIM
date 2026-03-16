@@ -8,6 +8,8 @@ interface ProspectProfileProps {
   onDraft?: () => void;
   onClose: () => void;
   scoutingReport?: string;
+  /** User team scouting budget (20–100). Controls rating noise shown to user. */
+  scoutBudget?: number;
 }
 
 const ATTR_GROUPS: Record<string, string[]> = {
@@ -63,13 +65,22 @@ const ProspectProfile: React.FC<ProspectProfileProps> = ({
   onDraft,
   onClose,
   scoutingReport,
+  scoutBudget = 20,
 }) => {
   const allAttrs = prospect.attributes as Record<string, number>;
   const attrEntries = Object.entries(allAttrs);
   const sortedAttrs = [...attrEntries].sort((a, b) => b[1] - a[1]);
   const strengths = sortedAttrs.slice(0, 3);
   const weaknesses = [...sortedAttrs].slice(-3).reverse();
-  const role = projectedRole(prospect.rating);
+
+  // Apply scouting noise: ±15 at Bare Minimum (20) → ±1 at Elite (100)
+  // Noise is deterministic per prospect so it doesn't flicker on re-render
+  const noiseRange = Math.max(1, Math.round(15 - ((scoutBudget - 20) / 80) * 14));
+  const seed = prospect.id.split('').reduce((acc, c) => acc + c.charCodeAt(0), 0);
+  const noiseOffset = (seed % (noiseRange * 2 + 1)) - noiseRange;
+  const displayRating = Math.min(99, Math.max(40, prospect.rating + noiseOffset));
+
+  const role = projectedRole(displayRating);
 
   return (
     <div
@@ -119,7 +130,8 @@ const ProspectProfile: React.FC<ProspectProfileProps> = ({
           <div className="grid grid-cols-3 gap-4">
             <div className="bg-slate-950/60 rounded-2xl p-4 text-center border border-slate-800">
               <p className="text-[10px] text-slate-500 uppercase font-black mb-1">Overall</p>
-              <p className="text-4xl font-display font-black text-white">{prospect.rating}</p>
+              <p className="text-4xl font-display font-black text-white">{displayRating}</p>
+              {noiseRange > 1 && <p className="text-[8px] text-slate-600 font-bold mt-0.5">±{noiseRange} accuracy</p>}
             </div>
             <div className="bg-slate-950/60 rounded-2xl p-4 text-center border border-slate-800">
               <p className="text-[10px] text-slate-500 uppercase font-black mb-1">Potential</p>

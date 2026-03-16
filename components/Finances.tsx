@@ -1,6 +1,7 @@
 
 import React, { useState, useMemo } from 'react';
 import { LeagueState, Team, Player, Coach } from '../types';
+import { STAFF_CONFIG, getStaffTierIndex, StaffType } from '../constants';
 
 interface FinancesProps {
   league: LeagueState;
@@ -26,13 +27,20 @@ const Finances: React.FC<FinancesProps> = ({ league, updateLeague }) => {
 
   const formatMoney = (val: number) => `$${(val / 1000000).toFixed(1)}M`;
 
-  // Fix: Simplified key type to string to avoid computed property index issues in older TS versions.
-  const handleSliderChange = (key: string, val: number) => {
+  const handleUpgrade = (type: StaffType) => {
+    const cfg = STAFF_CONFIG[type];
+    const budgetKey = type === 'medical' ? 'health' : type;
+    const currentLevel = (userTeam.finances.budgets as any)[budgetKey] ?? 20;
+    const currentIdx = getStaffTierIndex(currentLevel);
+    if (currentIdx >= 4) return; // already max
+    const nextTier = cfg.tiers[currentIdx + 1];
+    if (userTeam.finances.cash < nextTier.upgradeCost) return; // insufficient funds
     const updatedFinances = {
       ...userTeam.finances,
+      cash: userTeam.finances.cash - nextTier.upgradeCost,
       budgets: {
         ...userTeam.finances.budgets,
-        [key]: val
+        [budgetKey]: nextTier.level,
       }
     };
     const updatedTeams = league.teams.map(t => t.id === userTeam.id ? { ...t, finances: updatedFinances } : t);
@@ -45,30 +53,97 @@ const Finances: React.FC<FinancesProps> = ({ league, updateLeague }) => {
     updateLeague({ teams: updatedTeams });
   };
 
-  // Fix: Added explicit interface for BudgetSlider props to resolve 'unknown' argument assignment error on line 184.
-  const BudgetSlider = ({ label, value, icon, onChange, desc }: { label: string, value: number, icon: string, onChange: (v: number) => void, desc: string }) => (
-    <div className="bg-slate-950/40 border border-slate-800 p-6 rounded-2xl space-y-4">
-      <div className="flex justify-between items-center">
-        <div className="flex items-center gap-3">
-          <span className="text-2xl">{icon}</span>
-          <div>
-            <h4 className="text-sm font-bold text-white uppercase tracking-wider">{label}</h4>
-            <p className="text-[10px] text-slate-500 font-medium">{desc}</p>
+  const TIER_COLORS = ['text-slate-500', 'text-sky-400', 'text-emerald-400', 'text-amber-400', 'text-rose-400'];
+  const TIER_BG    = ['bg-slate-800/50', 'bg-sky-500/10', 'bg-emerald-500/10', 'bg-amber-500/10', 'bg-rose-500/10'];
+  const TIER_BORDER= ['border-slate-700', 'border-sky-500/30', 'border-emerald-500/30', 'border-amber-500/30', 'border-rose-500/30'];
+
+  const StaffUpgradeCard = ({ type }: { type: StaffType }) => {
+    const cfg = STAFF_CONFIG[type];
+    const budgetKey = type === 'medical' ? 'health' : type;
+    const currentLevel = (userTeam.finances.budgets as any)[budgetKey] ?? 20;
+    const currentIdx = getStaffTierIndex(currentLevel);
+    const currentTier = cfg.tiers[currentIdx];
+    const nextTier = currentIdx < 4 ? cfg.tiers[currentIdx + 1] : null;
+    const canAfford = nextTier ? userTeam.finances.cash >= nextTier.upgradeCost : false;
+    const [showTooltip, setShowTooltip] = useState(false);
+
+    return (
+      <div className={`relative bg-slate-950/40 border ${TIER_BORDER[currentIdx]} rounded-2xl p-5 space-y-4 transition-all`}>
+        {/* Header */}
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <span className="text-xl">{cfg.icon}</span>
+            <h4 className="text-xs font-black uppercase tracking-widest text-slate-300">{cfg.label}</h4>
           </div>
+          <button
+            type="button"
+            onMouseEnter={() => setShowTooltip(true)}
+            onMouseLeave={() => setShowTooltip(false)}
+            className="text-slate-500 hover:text-slate-300 transition-colors text-sm"
+          >ⓘ</button>
         </div>
-        <span className={`text-xl font-display font-bold ${value > 80 ? 'text-emerald-400' : value > 40 ? 'text-amber-500' : 'text-rose-500'}`}>{value}%</span>
+
+        {/* Tooltip */}
+        {showTooltip && (
+          <div className="absolute top-12 right-4 z-20 bg-slate-900 border border-slate-700 rounded-xl p-3 text-[10px] text-slate-300 w-56 shadow-2xl">
+            {cfg.tiers.map((tier, i) => (
+              <div key={i} className={`flex gap-2 mb-1.5 ${i === currentIdx ? 'font-bold text-white' : 'text-slate-500'}`}>
+                <span className={`font-black ${TIER_COLORS[i]}`}>{tier.name}:</span>
+                <span>{tier.effect}</span>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {/* Tier pips */}
+        <div className="flex gap-1.5">
+          {cfg.tiers.map((_, i) => (
+            <div
+              key={i}
+              className={`flex-1 h-1.5 rounded-full transition-all ${i <= currentIdx ? TIER_COLORS[currentIdx].replace('text-', 'bg-') : 'bg-slate-800'}`}
+            />
+          ))}
+        </div>
+
+        {/* Current tier badge */}
+        <div className={`inline-flex items-center gap-2 px-3 py-1.5 rounded-lg ${TIER_BG[currentIdx]} border ${TIER_BORDER[currentIdx]}`}>
+          <span className={`text-[10px] font-black uppercase tracking-widest ${TIER_COLORS[currentIdx]}`}>
+            {currentTier.name}
+          </span>
+        </div>
+
+        {/* Effect preview */}
+        <p className="text-[10px] text-slate-500 leading-relaxed">{currentTier.effect}</p>
+
+        {/* Upgrade button */}
+        {nextTier ? (
+          <button
+            type="button"
+            disabled={!canAfford}
+            onClick={() => handleUpgrade(type)}
+            className={`w-full py-2.5 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all border ${
+              canAfford
+                ? 'bg-amber-500/20 border-amber-500/40 text-amber-400 hover:bg-amber-500/30'
+                : 'bg-slate-800/50 border-slate-700 text-slate-600 cursor-not-allowed'
+            }`}
+          >
+            {canAfford
+              ? `Upgrade to ${nextTier.name} — $${(nextTier.upgradeCost / 1_000_000).toFixed(0)}M`
+              : `Need $${(nextTier.upgradeCost / 1_000_000).toFixed(0)}M to upgrade`}
+          </button>
+        ) : (
+          <div className="w-full py-2.5 rounded-xl text-[10px] font-black uppercase tracking-widest text-center bg-rose-500/10 border border-rose-500/20 text-rose-400">
+            Max Tier Reached
+          </div>
+        )}
+
+        {/* Annual cost note */}
+        <p className="text-[9px] text-slate-600 font-bold text-center">
+          Annual cost: ${(currentTier.annualCost / 1_000_000).toFixed(1)}M/yr
+        </p>
       </div>
-      <input 
-        type="range" min="1" max="100" value={value} 
-        onChange={(e) => onChange(parseInt(e.target.value))}
-        className="w-full h-1.5 bg-slate-800 rounded-lg appearance-none cursor-pointer accent-amber-500" 
-      />
-      <div className="flex justify-between text-[8px] text-slate-600 font-black uppercase tracking-widest">
-        <span>Bare Minimum</span>
-        <span>Elite Level</span>
-      </div>
-    </div>
-  );
+    );
+  };
 
   return (
     <div className="space-y-8 animate-in fade-in duration-500 pb-40">
@@ -198,28 +273,18 @@ const Finances: React.FC<FinancesProps> = ({ league, updateLeague }) => {
          </div>
       </div>
 
-      {/* Control Sliders Grid */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-        <BudgetSlider 
-          label="Coaching Staff" icon="🧠" value={userTeam.finances.budgets.coaching}
-          onChange={(v: number) => handleSliderChange('coaching', v)}
-          desc="Affects progression rate"
-        />
-        <BudgetSlider 
-          label="Scouting Network" icon="🔭" value={userTeam.finances.budgets.scouting}
-          onChange={(v: number) => handleSliderChange('scouting', v)}
-          desc="Accuracy of draft info"
-        />
-        <BudgetSlider 
-          label="Medical Staff" icon="🩹" value={userTeam.finances.budgets.health}
-          onChange={(v: number) => handleSliderChange('health', v)}
-          desc="Reduces injury duration"
-        />
-        <BudgetSlider 
-          label="Facilities" icon="🏋️" value={userTeam.finances.budgets.facilities}
-          onChange={(v: number) => handleSliderChange('facilities', v)}
-          desc="Boosts team morale"
-        />
+      {/* Staff & Facilities Upgrades */}
+      <div>
+        <h3 className="text-xs font-black uppercase tracking-widest text-slate-500 mb-4 flex items-center gap-2">
+          <span>Staff &amp; Facilities</span>
+          <span className="text-slate-700">— One-time upgrades, deducted from cash reserves</span>
+        </h3>
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+          <StaffUpgradeCard type="coaching" />
+          <StaffUpgradeCard type="scouting" />
+          <StaffUpgradeCard type="medical" />
+          <StaffUpgradeCard type="facilities" />
+        </div>
       </div>
 
       {/* Contract Table */}
