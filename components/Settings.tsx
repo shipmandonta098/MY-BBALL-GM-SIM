@@ -33,6 +33,10 @@ const DEFAULT_SETTINGS: Partial<LeagueSettings> = {
   budgetThreshold: false, tradeSalaryMatchPct: 125,
   maxContractYears: 5, rookieScaleContracts: true, maxPlayerSalaryPct: 35, birdRights: true,
   draftRounds: 2, draftClassSize: 'Normal', internationalProspects: true, draftLottery: true,
+  minRosterSize: 10, maxRosterSize: 18,
+  draftType: 'NBA 1994', customLotterySelections: 4,
+  customLotteryChances: [140,140,140,125,105,90,75,60,45,30,20,15,10,5,5],
+  tradableDraftPickSeasons: 4, prospectAgeMin: 19, prospectAgeMax: 22,
   scheduledExpansion: 'Off', expansionTeamCount: 2, expansionDraftRules: 'Standard', expansionEnabled: false,
   fatigueImpact: 'Medium', b2bPenalty: 'Mild', loadManagement: true,
   injuryDuration: 'Realistic', practiceInjuries: false, careerEndingInjuries: true,
@@ -115,6 +119,10 @@ const SEARCH_INDEX: { tab: SettingsTab; label: string }[] = [
   { tab: 'league', label: 'Max Player Salary %' }, { tab: 'league', label: 'Bird Rights' },
   { tab: 'league', label: 'Draft Rounds' }, { tab: 'league', label: 'Draft Class Size' },
   { tab: 'league', label: 'International Prospects' }, { tab: 'league', label: 'Draft Lottery' },
+  { tab: 'league', label: 'Min Roster Size' }, { tab: 'league', label: 'Max Roster Size' },
+  { tab: 'league', label: 'Draft Type' }, { tab: 'league', label: 'Custom Lottery Selections' },
+  { tab: 'league', label: 'Custom Lottery Chances' }, { tab: 'league', label: 'Tradable Draft Pick Seasons' },
+  { tab: 'league', label: 'Prospect Age Min' }, { tab: 'league', label: 'Prospect Age Max' },
   { tab: 'league', label: 'Enable Expansion' }, { tab: 'league', label: 'Expansion Team Count' },
   { tab: 'league', label: 'Expansion Draft Rules' },
   { tab: 'league', label: 'Division Games' }, { tab: 'league', label: 'Conference Games' },
@@ -221,7 +229,7 @@ const Settings: React.FC<SettingsProps> = ({ league, updateLeague, onRegenerateS
   const resetTab = () => {
     const tabDefaults: Partial<LeagueSettings> = {};
     const tabMap: Record<SettingsTab, (keyof typeof DEFAULT_SETTINGS)[]> = {
-      league:     ['playoffFormat','playoffSeeding','playInTournament','homeCourt','tradeDeadline','hardCapAtDeadline','maxContractYears','rookieScaleContracts','maxPlayerSalaryPct','birdRights','draftRounds','draftClassSize','internationalProspects','draftLottery','scheduledExpansion','expansionTeamCount','expansionDraftRules','expansionEnabled','divisionGames','conferenceGames','tradeDeadlineFraction','splitByConference','guaranteedPerDivision','reseedRounds','ownerPatienceLevel','luxuryTaxMultiplier','budgetThreshold','tradeSalaryMatchPct','seasonLength'],
+      league:     ['playoffFormat','playoffSeeding','playInTournament','homeCourt','tradeDeadline','hardCapAtDeadline','maxContractYears','rookieScaleContracts','maxPlayerSalaryPct','birdRights','draftRounds','draftClassSize','internationalProspects','draftLottery','scheduledExpansion','expansionTeamCount','expansionDraftRules','expansionEnabled','divisionGames','conferenceGames','tradeDeadlineFraction','splitByConference','guaranteedPerDivision','reseedRounds','ownerPatienceLevel','luxuryTaxMultiplier','budgetThreshold','tradeSalaryMatchPct','seasonLength','minRosterSize','maxRosterSize','draftType','customLotterySelections','tradableDraftPickSeasons','prospectAgeMin','prospectAgeMax'],
       gameplay:   ['fatigueImpact','b2bPenalty','loadManagement','injuryDuration','practiceInjuries','careerEndingInjuries','teamChemistry','chemistryImpact','personalityClashPenalties','playerMorale','moraleAffectsAttributes','tradeRequestThreshold'],
       sliders:    ['sliderLayup','sliderMidRange','slider3pt','sliderFreeThrow','sliderFastBreak','sliderPostUp','sliderPickRoll','sliderSteal','sliderBlock','sliderFoul','sliderHelpDefense','sliderPerimeterDefense','sliderTimeout','sliderSubstitution','sliderTechFoul','sliderFlagrantFoul','sliderInjuryMultiplier'],
       simulation: ['pbpDetailLevel','aiDecisionSpeed','blowoutFrequency','comebackFrequency','overtimeFrequency','globalPaceOverride','shotClockLength','scoringEra','threePtFrequency','simBlockFrequency','turnoverFrequency'],
@@ -652,10 +660,89 @@ const Settings: React.FC<SettingsProps> = ({ league, updateLeague, onRegenerateS
             <ToggleField label="Bird Rights" value={s.birdRights ?? true}
               onChange={v => updateSettings({ birdRights: v }, 'Bird Rights')} />
 
+            {/* Roster Rules */}
+            <SectionHeader title="Roster Rules" sub="Min/max active roster sizes" />
+            {inSeason ? (
+              <LockedField><NumberInputField label="Min Roster Size" value={s.minRosterSize ?? 10} min={5} max={20} onChange={() => {}} /></LockedField>
+            ) : (
+              <NumberInputField label="Min Roster Size" value={s.minRosterSize ?? 10} min={5} max={20}
+                onChange={v => updateSettings({ minRosterSize: v }, 'Min Roster Size')} unit="players" />
+            )}
+            {inSeason ? (
+              <LockedField><NumberInputField label="Max Roster Size" value={s.maxRosterSize ?? 18} min={10} max={30} onChange={() => {}} /></LockedField>
+            ) : (
+              <NumberInputField label="Max Roster Size" value={s.maxRosterSize ?? 18} min={10} max={30}
+                onChange={v => updateSettings({ maxRosterSize: v }, 'Max Roster Size')} unit="players" />
+            )}
+
             {/* Draft Settings */}
-            <SectionHeader title="Draft Settings" />
-            <ButtonField label="Draft Rounds" options={[1,2,3]}
-              value={s.draftRounds ?? 2} onChange={v => updateSettings({ draftRounds: Number(v) as 1|2|3 }, 'Draft Rounds')} />
+            <SectionHeader title="Draft Settings" sub="Lottery format, rounds, and prospect age range" />
+            {inSeason ? (
+              <LockedField><NumberInputField label="# Draft Rounds" value={s.draftRounds ?? 2} min={1} max={10} onChange={() => {}} /></LockedField>
+            ) : (
+              <NumberInputField label="# Draft Rounds" value={s.draftRounds ?? 2} min={1} max={10}
+                onChange={v => updateSettings({ draftRounds: v }, '# Draft Rounds')} />
+            )}
+            {inSeason ? (
+              <LockedField>
+                <SelectField label="Draft Type" value={s.draftType ?? 'NBA 1994'} options={['NBA 1994','Custom Lottery','Carry-Over (COLA)','Straight Pick']} onChange={() => {}} />
+              </LockedField>
+            ) : (
+              <SelectField label="Draft Type" value={s.draftType ?? 'NBA 1994'}
+                options={['NBA 1994','Custom Lottery','Carry-Over (COLA)','Straight Pick']}
+                onChange={v => updateSettings({ draftType: v as any }, 'Draft Type')} />
+            )}
+            {/* Custom lottery fields — only shown for Custom/COLA types */}
+            {(s.draftType === 'Custom Lottery' || s.draftType === 'Carry-Over (COLA)') && (
+              <>
+                {inSeason ? (
+                  <LockedField><NumberInputField label="Custom # Lottery Selections" value={s.customLotterySelections ?? 4} min={1} max={14} onChange={() => {}} /></LockedField>
+                ) : (
+                  <NumberInputField label="Custom # Lottery Selections" value={s.customLotterySelections ?? 4} min={1} max={14}
+                    onChange={v => updateSettings({ customLotterySelections: v }, 'Custom # Lottery Selections')} />
+                )}
+                <div className="space-y-3 bg-slate-950/40 p-5 rounded-2xl border border-slate-800">
+                  <div className="flex justify-between items-center">
+                    <label className="text-[10px] font-black uppercase text-slate-500 tracking-widest">Custom Lottery Chances</label>
+                    <span className="text-[9px] text-slate-600">JSON array · one per team slot</span>
+                  </div>
+                  <textarea
+                    rows={3}
+                    value={JSON.stringify(s.customLotteryChances ?? [140,140,140,125,105,90,75,60,45,30,20,15,10,5,5])}
+                    readOnly={inSeason}
+                    onChange={e => {
+                      try {
+                        const arr = JSON.parse(e.target.value);
+                        if (Array.isArray(arr) && arr.every(n => typeof n === 'number'))
+                          updateSettings({ customLotteryChances: arr }, 'Custom Lottery Chances');
+                      } catch { /* invalid JSON — don't update */ }
+                    }}
+                    className={`w-full bg-slate-900 border border-slate-700 rounded-xl px-4 py-3 text-amber-400 font-mono text-xs focus:outline-none focus:border-amber-500/50 resize-none ${inSeason ? 'opacity-40 cursor-not-allowed' : ''}`}
+                  />
+                  <p className="text-[9px] text-slate-600">Default: [140,140,140,125,105,90,75,60,45,30,20,15,10,5,5] — sums to 1000</p>
+                </div>
+              </>
+            )}
+            {inSeason ? (
+              <LockedField><NumberInputField label="# Tradable Draft Pick Seasons" value={s.tradableDraftPickSeasons ?? 4} min={1} max={7} onChange={() => {}} /></LockedField>
+            ) : (
+              <NumberInputField label="# Tradable Draft Pick Seasons" value={s.tradableDraftPickSeasons ?? 4} min={1} max={7}
+                onChange={v => updateSettings({ tradableDraftPickSeasons: v }, '# Tradable Draft Pick Seasons')} unit="seasons ahead" />
+            )}
+            <div className="md:col-span-2 grid grid-cols-2 gap-4">
+              {inSeason ? (
+                <LockedField><NumberInputField label="Prospect Age Min" value={s.prospectAgeMin ?? 19} min={16} max={30} onChange={() => {}} /></LockedField>
+              ) : (
+                <NumberInputField label="Prospect Age Min" value={s.prospectAgeMin ?? 19} min={16} max={30}
+                  onChange={v => updateSettings({ prospectAgeMin: Math.min(v, s.prospectAgeMax ?? 22) }, 'Prospect Age Min')} unit="yrs" />
+              )}
+              {inSeason ? (
+                <LockedField><NumberInputField label="Prospect Age Max" value={s.prospectAgeMax ?? 22} min={16} max={35} onChange={() => {}} /></LockedField>
+              ) : (
+                <NumberInputField label="Prospect Age Max" value={s.prospectAgeMax ?? 22} min={16} max={35}
+                  onChange={v => updateSettings({ prospectAgeMax: Math.max(v, s.prospectAgeMin ?? 19) }, 'Prospect Age Max')} unit="yrs" />
+              )}
+            </div>
             <SelectField label="Draft Class Size" value={s.draftClassSize ?? 'Normal'}
               options={['Small (45)','Normal (60)','Large (75)']}
               onChange={v => updateSettings({ draftClassSize: v.split(' ')[0] as any }, 'Draft Class Size')} />

@@ -560,7 +560,7 @@ export interface LeagueSettings {
   rookieScaleContracts?: boolean;
   maxPlayerSalaryPct?: 25 | 30 | 35;
   birdRights?: boolean;
-  draftRounds?: 1 | 2 | 3;
+  draftRounds?: number;           // default 2 (any positive integer)
   draftClassSize?: 'Small' | 'Normal' | 'Large';
   internationalProspects?: boolean;
   draftLottery?: boolean;
@@ -569,6 +569,16 @@ export interface LeagueSettings {
   expansionDraftRules?: 'Standard' | 'Protected' | 'Open';
   expansionEnabled?: boolean;
   numTeams?: number;
+
+  // ── Roster & Draft Extended ───────────────────────────────────────────────
+  minRosterSize?: number;          // default 10
+  maxRosterSize?: number;          // default 18
+  draftType?: 'NBA 1994' | 'Custom Lottery' | 'Carry-Over (COLA)' | 'Straight Pick';
+  customLotterySelections?: number; // default 4 — only for Custom/COLA
+  customLotteryChances?: number[];  // default [140,140,140,125,105,90,75,60,45,30,20,15,10,5,5]
+  tradableDraftPickSeasons?: number; // default 4
+  prospectAgeMin?: number;          // default 19
+  prospectAgeMax?: number;          // default 22
 
   // ── Gameplay Tab additions ────────────────────────────────────────────────
   fatigueImpact?: 'None' | 'Low' | 'Medium' | 'High';

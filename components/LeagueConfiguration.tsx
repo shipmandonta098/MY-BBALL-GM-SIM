@@ -133,10 +133,20 @@ const LeagueConfiguration: React.FC<LeagueConfigurationProps> = ({ onConfirm, on
   const [birdRights, setBirdRights]                   = useState(true);
 
   // ── Draft ─────────────────────────────────────────────────────────────────
-  const [draftRounds, setDraftRounds]                   = useState<1|2|3>(2);
+  const [draftRounds, setDraftRounds]                   = useState(2);
   const [draftClassSize, setDraftClassSize]             = useState<'Small'|'Normal'|'Large'>('Normal');
   const [internationalProspects, setInternationalProspects] = useState(true);
   const [draftLottery, setDraftLottery]                 = useState(true);
+  const [draftType, setDraftType]                       = useState<LeagueSettings['draftType']>('NBA 1994');
+  const [customLotterySelections, setCustomLotterySelections] = useState(4);
+  const [customLotteryChancesRaw, setCustomLotteryChancesRaw] = useState('[140,140,140,125,105,90,75,60,45,30,20,15,10,5,5]');
+  const [tradableDraftPickSeasons, setTradableDraftPickSeasons] = useState(4);
+  const [prospectAgeMin, setProspectAgeMin]             = useState(19);
+  const [prospectAgeMax, setProspectAgeMax]             = useState(22);
+
+  // ── Roster Rules ──────────────────────────────────────────────────────────
+  const [minRosterSize, setMinRosterSize] = useState(10);
+  const [maxRosterSize, setMaxRosterSize] = useState(18);
 
   // ── Expansion ─────────────────────────────────────────────────────────────
   const [expansionEnabled, setExpansionEnabled]       = useState(false);
@@ -189,6 +199,14 @@ const LeagueConfiguration: React.FC<LeagueConfigurationProps> = ({ onConfirm, on
       if (p.draftClassSize)                setDraftClassSize(p.draftClassSize);
       if (p.internationalProspects !== undefined) setInternationalProspects(p.internationalProspects);
       if (p.draftLottery !== undefined)      setDraftLottery(p.draftLottery);
+      if (p.draftType)                     setDraftType(p.draftType);
+      if (p.customLotterySelections)       setCustomLotterySelections(p.customLotterySelections);
+      if (p.customLotteryChances)          setCustomLotteryChancesRaw(JSON.stringify(p.customLotteryChances));
+      if (p.tradableDraftPickSeasons)      setTradableDraftPickSeasons(p.tradableDraftPickSeasons);
+      if (p.prospectAgeMin)                setProspectAgeMin(p.prospectAgeMin);
+      if (p.prospectAgeMax)                setProspectAgeMax(p.prospectAgeMax);
+      if (p.minRosterSize)                 setMinRosterSize(p.minRosterSize);
+      if (p.maxRosterSize)                 setMaxRosterSize(p.maxRosterSize);
       if (p.expansionEnabled !== undefined)  setExpansionEnabled(p.expansionEnabled);
       if (p.expansionTeamCount)            setExpansionTeamCount(p.expansionTeamCount);
       if (p.expansionDraftRules)           setExpansionDraftRules(p.expansionDraftRules);
@@ -265,6 +283,15 @@ const LeagueConfiguration: React.FC<LeagueConfigurationProps> = ({ onConfirm, on
       draftClassSize,
       internationalProspects,
       draftLottery,
+      draftType,
+      customLotterySelections,
+      customLotteryChances: (() => { try { const a = JSON.parse(customLotteryChancesRaw); return Array.isArray(a) ? a : undefined; } catch { return undefined; } })(),
+      tradableDraftPickSeasons,
+      prospectAgeMin,
+      prospectAgeMax,
+      // Roster
+      minRosterSize,
+      maxRosterSize,
       // Expansion
       expansionEnabled,
       expansionTeamCount,
@@ -630,15 +657,81 @@ const LeagueConfiguration: React.FC<LeagueConfigurationProps> = ({ onConfirm, on
                 </div>
               </div>
 
+              {/* ── Roster Rules ──────────────────────────────────────────────── */}
+              <div className="bg-slate-900/50 border border-slate-800 rounded-2xl p-6 space-y-6">
+                <h4 className="text-xs font-black text-amber-500 uppercase tracking-[0.3em] border-b border-slate-800 pb-3">Roster Rules</h4>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                  <Field label="Min Roster Size" hint="Minimum players required on an active roster.">
+                    <input type="number" value={minRosterSize} min={5} max={20}
+                      onChange={e => setMinRosterSize(Math.min(parseInt(e.target.value)||10, maxRosterSize))}
+                      className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-3 text-white font-mono focus:outline-none" />
+                  </Field>
+                  <Field label="Max Roster Size" hint="Maximum players allowed on an active roster.">
+                    <input type="number" value={maxRosterSize} min={10} max={30}
+                      onChange={e => setMaxRosterSize(Math.max(parseInt(e.target.value)||18, minRosterSize))}
+                      className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-3 text-white font-mono focus:outline-none" />
+                  </Field>
+                </div>
+              </div>
+
               {/* ── Draft ─────────────────────────────────────────────────────── */}
               <div className="bg-slate-900/50 border border-slate-800 rounded-2xl p-6 space-y-6">
                 <h4 className="text-xs font-black text-amber-500 uppercase tracking-[0.3em] border-b border-slate-800 pb-3">Draft Settings</h4>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
 
-                  <Field label="Draft Rounds" hint={FIELD_HINTS.draftRounds}>
-                    <BtnGroup options={['1','2','3']} value={String(draftRounds)}
-                      onChange={v => setDraftRounds(parseInt(v) as 1|2|3)} />
+                  <Field label="# Draft Rounds" hint={FIELD_HINTS.draftRounds}>
+                    <input type="number" value={draftRounds} min={1} max={10}
+                      onChange={e => setDraftRounds(Math.max(1, parseInt(e.target.value)||2))}
+                      className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-3 text-white font-mono focus:outline-none" />
                   </Field>
+                  <Field label="Draft Type" hint="Lottery format used to assign draft order.">
+                    <select value={draftType} onChange={e => setDraftType(e.target.value as any)}
+                      className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-3 text-white font-bold focus:outline-none">
+                      <option>NBA 1994</option>
+                      <option>Custom Lottery</option>
+                      <option>Carry-Over (COLA)</option>
+                      <option>Straight Pick</option>
+                    </select>
+                  </Field>
+
+                  {(draftType === 'Custom Lottery' || draftType === 'Carry-Over (COLA)') && (
+                    <>
+                      <Field label="Custom # Lottery Selections" hint="How many picks are decided by lottery (rest go in order).">
+                        <input type="number" value={customLotterySelections} min={1} max={14}
+                          onChange={e => setCustomLotterySelections(Math.max(1, parseInt(e.target.value)||4))}
+                          className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-3 text-white font-mono focus:outline-none" />
+                      </Field>
+                      <Field label="Custom Lottery Chances" hint="JSON array of weights per team slot (worst → best). Must sum to 1000.">
+                        <textarea rows={3} value={customLotteryChancesRaw}
+                          onChange={e => setCustomLotteryChancesRaw(e.target.value)}
+                          className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-3 text-amber-400 font-mono text-xs focus:outline-none resize-none" />
+                        <p className="text-[9px] text-slate-600 mt-1">Default: [140,140,140,125,105,90,75,60,45,30,20,15,10,5,5]</p>
+                      </Field>
+                    </>
+                  )}
+
+                  <Field label="# Tradable Draft Pick Seasons" hint="How many future seasons' picks can be traded at once.">
+                    <BtnGroup options={['1','2','3','4','5','7']} value={String(tradableDraftPickSeasons)}
+                      onChange={v => setTradableDraftPickSeasons(parseInt(v))} />
+                  </Field>
+                  <Field label="Age of Draft Prospects" hint="Min and max age of prospects entering the draft class.">
+                    <div className="flex gap-3 items-center">
+                      <div className="flex-1 space-y-1">
+                        <label className="text-[9px] font-black text-slate-600 uppercase tracking-widest">Min Age</label>
+                        <input type="number" value={prospectAgeMin} min={16} max={prospectAgeMax}
+                          onChange={e => setProspectAgeMin(Math.min(parseInt(e.target.value)||19, prospectAgeMax))}
+                          className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2.5 text-white font-mono focus:outline-none" />
+                      </div>
+                      <span className="text-slate-600 font-bold mt-5">–</span>
+                      <div className="flex-1 space-y-1">
+                        <label className="text-[9px] font-black text-slate-600 uppercase tracking-widest">Max Age</label>
+                        <input type="number" value={prospectAgeMax} min={prospectAgeMin} max={35}
+                          onChange={e => setProspectAgeMax(Math.max(parseInt(e.target.value)||22, prospectAgeMin))}
+                          className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2.5 text-white font-mono focus:outline-none" />
+                      </div>
+                    </div>
+                  </Field>
+
                   <Field label="Draft Class Size">
                     <BtnGroup options={['Small','Normal','Large']} value={draftClassSize}
                       onChange={v => setDraftClassSize(v as 'Small'|'Normal'|'Large')} />
