@@ -31,6 +31,8 @@ const DEFAULT_SETTINGS: Partial<LeagueSettings> = {
   splitByConference: true, guaranteedPerDivision: 0, reseedRounds: false,
   ownerPatienceLevel: 'Medium', luxuryTaxMultiplier: 1.5,
   budgetThreshold: false, tradeSalaryMatchPct: 125,
+  minPayroll: 46_650_000, luxuryTaxThreshold: 84_750_000, salaryCapType: 'Soft Cap',
+  pick1SalaryPct: 25, roundsAboveMin: 1, rookieContractLengths: [3, 2], canRefuseAfterRookie: false,
   maxContractYears: 5, rookieScaleContracts: true, maxPlayerSalaryPct: 35, birdRights: true,
   draftRounds: 2, draftClassSize: 'Normal', internationalProspects: true, draftLottery: true,
   minRosterSize: 10, maxRosterSize: 18,
@@ -130,6 +132,11 @@ const SEARCH_INDEX: { tab: SettingsTab; label: string }[] = [
   { tab: 'league', label: 'Guaranteed Per Division' }, { tab: 'league', label: 'Reseed Rounds' },
   { tab: 'league', label: 'Owner Patience Level' }, { tab: 'league', label: 'Luxury Tax Multiplier' },
   { tab: 'league', label: 'Budget Threshold' }, { tab: 'league', label: 'Trade Salary Match %' },
+  { tab: 'league', label: 'Minimum Payroll' }, { tab: 'league', label: 'Luxury Tax Threshold' },
+  { tab: 'league', label: 'Salary Cap Type' },
+  { tab: 'league', label: 'Rookie Salary Scale' }, { tab: 'league', label: '#1 Pick Salary %' },
+  { tab: 'league', label: 'Rounds With >Min Contracts' }, { tab: 'league', label: 'Rookie Contract Lengths' },
+  { tab: 'league', label: 'Can Refuse After Rookie Contract' },
   // Gameplay
   { tab: 'gameplay', label: 'Fatigue Impact' }, { tab: 'gameplay', label: 'Back-to-Back Penalty' },
   { tab: 'gameplay', label: 'Load Management' }, { tab: 'gameplay', label: 'Injury Frequency' },
@@ -229,7 +236,7 @@ const Settings: React.FC<SettingsProps> = ({ league, updateLeague, onRegenerateS
   const resetTab = () => {
     const tabDefaults: Partial<LeagueSettings> = {};
     const tabMap: Record<SettingsTab, (keyof typeof DEFAULT_SETTINGS)[]> = {
-      league:     ['playoffFormat','playoffSeeding','playInTournament','homeCourt','tradeDeadline','hardCapAtDeadline','maxContractYears','rookieScaleContracts','maxPlayerSalaryPct','birdRights','draftRounds','draftClassSize','internationalProspects','draftLottery','scheduledExpansion','expansionTeamCount','expansionDraftRules','expansionEnabled','divisionGames','conferenceGames','tradeDeadlineFraction','splitByConference','guaranteedPerDivision','reseedRounds','ownerPatienceLevel','luxuryTaxMultiplier','budgetThreshold','tradeSalaryMatchPct','seasonLength','minRosterSize','maxRosterSize','draftType','customLotterySelections','tradableDraftPickSeasons','prospectAgeMin','prospectAgeMax'],
+      league:     ['playoffFormat','playoffSeeding','playInTournament','homeCourt','tradeDeadline','hardCapAtDeadline','maxContractYears','rookieScaleContracts','maxPlayerSalaryPct','birdRights','draftRounds','draftClassSize','internationalProspects','draftLottery','scheduledExpansion','expansionTeamCount','expansionDraftRules','expansionEnabled','divisionGames','conferenceGames','tradeDeadlineFraction','splitByConference','guaranteedPerDivision','reseedRounds','ownerPatienceLevel','luxuryTaxMultiplier','budgetThreshold','tradeSalaryMatchPct','seasonLength','minRosterSize','maxRosterSize','draftType','customLotterySelections','tradableDraftPickSeasons','prospectAgeMin','prospectAgeMax','minPayroll','luxuryTaxThreshold','salaryCapType','pick1SalaryPct','roundsAboveMin','canRefuseAfterRookie'],
       gameplay:   ['fatigueImpact','b2bPenalty','loadManagement','injuryDuration','practiceInjuries','careerEndingInjuries','teamChemistry','chemistryImpact','personalityClashPenalties','playerMorale','moraleAffectsAttributes','tradeRequestThreshold'],
       sliders:    ['sliderLayup','sliderMidRange','slider3pt','sliderFreeThrow','sliderFastBreak','sliderPostUp','sliderPickRoll','sliderSteal','sliderBlock','sliderFoul','sliderHelpDefense','sliderPerimeterDefense','sliderTimeout','sliderSubstitution','sliderTechFoul','sliderFlagrantFoul','sliderInjuryMultiplier'],
       simulation: ['pbpDetailLevel','aiDecisionSpeed','blowoutFrequency','comebackFrequency','overtimeFrequency','globalPaceOverride','shotClockLength','scoringEra','threePtFrequency','simBlockFrequency','turnoverFrequency'],
@@ -608,11 +615,18 @@ const Settings: React.FC<SettingsProps> = ({ league, updateLeague, onRegenerateS
             )}
 
             {/* Financial Rules */}
-            <SectionHeader title="Financial Rules" sub="Cap, tax, and trade salary matching" />
+            <SectionHeader title="Financial Rules" sub="Cap, tax, payroll floor, and trade matching" />
+            <SelectField label="Salary Cap Type" value={s.salaryCapType ?? 'Soft Cap'}
+              options={['Soft Cap','Hard Cap']}
+              onChange={v => updateSettings({ salaryCapType: v as any }, 'Salary Cap Type')} />
             <SliderField label="Salary Cap" value={s.salaryCap} min={80_000_000} max={250_000_000} step={1_000_000}
               onChange={v => updateSettings({ salaryCap: v }, 'Salary Cap')} unit="$" />
             <SliderField label="Luxury Tax Line" value={s.luxuryTaxLine} min={100_000_000} max={300_000_000} step={1_000_000}
               onChange={v => updateSettings({ luxuryTaxLine: v }, 'Luxury Tax Line')} unit="$" />
+            <SliderField label="Luxury Tax Threshold" value={s.luxuryTaxThreshold ?? 84_750_000} min={30_000_000} max={200_000_000} step={250_000}
+              onChange={v => updateSettings({ luxuryTaxThreshold: v }, 'Luxury Tax Threshold')} unit="$" />
+            <SliderField label="Minimum Payroll" value={s.minPayroll ?? 46_650_000} min={20_000_000} max={120_000_000} step={250_000}
+              onChange={v => updateSettings({ minPayroll: v }, 'Minimum Payroll')} unit="$" />
             <SliderField label="Luxury Tax Multiplier" value={s.luxuryTaxMultiplier ?? 1.5} min={1.0} max={4.0} step={0.1}
               onChange={v => updateSettings({ luxuryTaxMultiplier: v }, 'Luxury Tax Multiplier')} unit="×" />
             <ToggleField label="Budget Threshold" value={s.budgetThreshold ?? false}
@@ -655,10 +669,51 @@ const Settings: React.FC<SettingsProps> = ({ league, updateLeague, onRegenerateS
             <ButtonField label="Max Player Salary %" options={['25%','30%','35%']}
               value={`${s.maxPlayerSalaryPct ?? 35}%`}
               onChange={v => updateSettings({ maxPlayerSalaryPct: Number(v.replace('%','')) as 25|30|35 }, 'Max Player Salary %')} />
-            <ToggleField label="Rookie Scale Contracts" value={s.rookieScaleContracts ?? true}
-              onChange={v => updateSettings({ rookieScaleContracts: v }, 'Rookie Scale Contracts')} />
             <ToggleField label="Bird Rights" value={s.birdRights ?? true}
               onChange={v => updateSettings({ birdRights: v }, 'Bird Rights')} />
+
+            {/* Rookie Contracts */}
+            <SectionHeader title="Rookie Contracts" sub="Scale, slot salaries, and length by round" />
+            <ToggleField label="Rookie Salary Scale" value={s.rookieScaleContracts ?? true}
+              onChange={v => updateSettings({ rookieScaleContracts: v }, 'Rookie Salary Scale')} />
+            {inSeason ? (
+              <LockedField>
+                <SliderField label="#1 Pick Salary, % of Max Contract" value={s.pick1SalaryPct ?? 25} min={10} max={50} onChange={() => {}} unit="%" />
+              </LockedField>
+            ) : (
+              <SliderField label="#1 Pick Salary, % of Max Contract" value={s.pick1SalaryPct ?? 25} min={10} max={50}
+                onChange={v => updateSettings({ pick1SalaryPct: v }, '#1 Pick Salary %')} unit="%" />
+            )}
+            {inSeason ? (
+              <LockedField>
+                <NumberInputField label="Rounds With >Min Contracts" value={s.roundsAboveMin ?? 1} min={0} max={10} onChange={() => {}} />
+              </LockedField>
+            ) : (
+              <NumberInputField label="Rounds With >Min Contracts" value={s.roundsAboveMin ?? 1} min={0} max={10}
+                onChange={v => updateSettings({ roundsAboveMin: v }, 'Rounds With >Min Contracts')} />
+            )}
+            <div className="space-y-3 bg-slate-950/40 p-5 rounded-2xl border border-slate-800">
+              <div className="flex justify-between items-center">
+                <label className="text-[10px] font-black uppercase text-slate-500 tracking-widest">Rookie Contract Lengths</label>
+                <span className="text-[9px] text-slate-600">JSON array · one length per round</span>
+              </div>
+              <textarea
+                rows={2}
+                value={JSON.stringify(s.rookieContractLengths ?? [3, 2])}
+                readOnly={inSeason}
+                onChange={e => {
+                  try {
+                    const arr = JSON.parse(e.target.value);
+                    if (Array.isArray(arr) && arr.every(n => typeof n === 'number' && n > 0))
+                      updateSettings({ rookieContractLengths: arr }, 'Rookie Contract Lengths');
+                  } catch { /* invalid JSON — don't update */ }
+                }}
+                className={`w-full bg-slate-900 border border-slate-700 rounded-xl px-4 py-3 text-amber-400 font-mono text-sm focus:outline-none focus:border-amber-500/50 resize-none ${inSeason ? 'opacity-40 cursor-not-allowed' : ''}`}
+              />
+              <p className="text-[9px] text-slate-600">e.g. [3,2] → round 1 = 3-year deal, round 2 = 2-year deal</p>
+            </div>
+            <ToggleField label="Can Refuse After Rookie Contract" value={s.canRefuseAfterRookie ?? false}
+              onChange={v => updateSettings({ canRefuseAfterRookie: v }, 'Can Refuse After Rookie Contract')} />
 
             {/* Roster Rules */}
             <SectionHeader title="Roster Rules" sub="Min/max active roster sizes" />
