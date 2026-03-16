@@ -18,6 +18,14 @@ const BoxScoreModal: React.FC<BoxScoreModalProps> = ({ result, homeTeam, awayTea
   const StatTable = ({ team, stats }: { team: Team, stats: GamePlayerLine[] }) => {
     const active = stats.filter(l => !l.dnp).sort((a, b) => b.pts - a.pts);
     const dnp    = stats.filter(l => !!l.dnp);
+    const sum = (key: keyof GamePlayerLine) => active.reduce((acc, l) => acc + ((l[key] as number) || 0), 0);
+    const totals = {
+      min: sum('min'), pts: sum('pts'), reb: sum('reb'), ast: sum('ast'),
+      stl: sum('stl'), blk: sum('blk'), tov: sum('tov'),
+      fgm: sum('fgm'), fga: sum('fga'),
+      threepm: sum('threepm'), threepa: sum('threepa'),
+      ftm: sum('ftm'), fta: sum('fta'),
+    };
     return (
       <div className="space-y-4">
         <div className="flex items-center gap-4">
@@ -72,6 +80,31 @@ const BoxScoreModal: React.FC<BoxScoreModalProps> = ({ result, homeTeam, awayTea
                   <td className="px-2 py-4 text-center font-mono text-rose-500/50">{line.tov}</td>
                 </tr>
               ))}
+              {/* Totals row */}
+              <tr className="border-t-2 border-orange-500/30 bg-slate-950/60 font-black">
+                <td className="px-4 py-3 text-[10px] font-black uppercase tracking-widest text-orange-400">TOTALS</td>
+                <td className="px-2 py-3 text-center font-mono text-slate-300">{totals.min}</td>
+                <td className="px-2 py-3 text-center font-display font-bold text-sm text-amber-500">{totals.pts}</td>
+                <td className="px-2 py-3 text-center font-mono text-slate-300">{totals.reb}</td>
+                <td className="px-2 py-3 text-center font-mono text-slate-300">{totals.ast}</td>
+                <td className="px-2 py-3 text-center font-mono text-slate-300">{totals.stl}</td>
+                <td className="px-2 py-3 text-center font-mono text-slate-300">{totals.blk}</td>
+                <td className="px-2 py-3 text-center">
+                  <span className="block font-mono text-[10px] text-slate-200">{totals.fgm}-{totals.fga}</span>
+                  <span className="block font-mono text-[9px] text-orange-400">{totals.fga > 0 ? `${Math.round(totals.fgm / totals.fga * 100)}%` : '—'}</span>
+                </td>
+                <td className="px-2 py-3 text-center">
+                  <span className="block font-mono text-[10px] text-slate-200">{totals.threepm}-{totals.threepa}</span>
+                  <span className="block font-mono text-[9px] text-orange-400">{totals.threepa > 0 ? `${Math.round(totals.threepm / totals.threepa * 100)}%` : '—'}</span>
+                </td>
+                <td className="px-2 py-3 text-center">
+                  <span className="block font-mono text-[10px] text-slate-200">{totals.ftm}-{totals.fta}</span>
+                  <span className="block font-mono text-[9px] text-orange-400">{totals.fta > 0 ? `${Math.round(totals.ftm / totals.fta * 100)}%` : '—'}</span>
+                </td>
+                <td className="px-2 py-3 text-center font-mono text-slate-500">—</td>
+                <td className="px-2 py-3 text-center font-mono text-rose-500/70">{totals.tov}</td>
+              </tr>
+
               {dnp.length > 0 && (
                 <>
                   <tr className="border-t border-slate-700/50">
