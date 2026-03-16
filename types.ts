@@ -641,6 +641,14 @@ export interface LeagueSettings {
   luxuryTaxMultiplier?: number;    // default 1.5
   budgetThreshold?: boolean;       // default false
   tradeSalaryMatchPct?: number;    // default 125
+  minPayroll?: number;             // default 46_650_000 (payroll floor)
+  luxuryTaxThreshold?: number;     // default 84_750_000 (second apron / tax line)
+  salaryCapType?: 'Soft Cap' | 'Hard Cap'; // default 'Soft Cap'
+  // Rookie Contracts
+  pick1SalaryPct?: number;         // default 25 — #1 pick salary as % of max contract
+  roundsAboveMin?: number;         // rounds with above-min contracts, default 1
+  rookieContractLengths?: number[]; // per-round lengths, default [3,2]
+  canRefuseAfterRookie?: boolean;  // player can refuse extension after rookie deal, default false
 
   // ── God Mode additions ────────────────────────────────────────────────────
   editAnyPlayer?: boolean;

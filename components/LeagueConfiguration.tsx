@@ -132,6 +132,17 @@ const LeagueConfiguration: React.FC<LeagueConfigurationProps> = ({ onConfirm, on
   const [maxPlayerSalaryPct, setMaxPlayerSalaryPct]   = useState<25|30|35>(35);
   const [birdRights, setBirdRights]                   = useState(true);
 
+  // ── Finances ──────────────────────────────────────────────────────────────
+  const [minPayroll, setMinPayroll]               = useState(46_650_000);
+  const [luxuryTaxThreshold, setLuxuryTaxThreshold] = useState(84_750_000);
+  const [salaryCapType, setSalaryCapType]         = useState<'Soft Cap'|'Hard Cap'>('Soft Cap');
+
+  // ── Rookie Contracts ──────────────────────────────────────────────────────
+  const [pick1SalaryPct, setPick1SalaryPct]           = useState(25);
+  const [roundsAboveMin, setRoundsAboveMin]           = useState(1);
+  const [rookieContractLengthsRaw, setRookieContractLengthsRaw] = useState('[3,2]');
+  const [canRefuseAfterRookie, setCanRefuseAfterRookie] = useState(false);
+
   // ── Draft ─────────────────────────────────────────────────────────────────
   const [draftRounds, setDraftRounds]                   = useState(2);
   const [draftClassSize, setDraftClassSize]             = useState<'Small'|'Normal'|'Large'>('Normal');
@@ -183,6 +194,13 @@ const LeagueConfiguration: React.FC<LeagueConfigurationProps> = ({ onConfirm, on
       if (p.showAdvancedStats !== undefined) setShowAdvancedStats(p.showAdvancedStats);
       if (p.seasonLength)                  setSeasonLength(p.seasonLength);
       if (p.salaryCap)                     setSalaryCap(p.salaryCap);
+      if (p.minPayroll)                    setMinPayroll(p.minPayroll);
+      if (p.luxuryTaxThreshold)            setLuxuryTaxThreshold(p.luxuryTaxThreshold);
+      if (p.salaryCapType)                 setSalaryCapType(p.salaryCapType);
+      if (p.pick1SalaryPct)                setPick1SalaryPct(p.pick1SalaryPct);
+      if (p.roundsAboveMin !== undefined)  setRoundsAboveMin(p.roundsAboveMin);
+      if (p.rookieContractLengths)         setRookieContractLengthsRaw(JSON.stringify(p.rookieContractLengths));
+      if (p.canRefuseAfterRookie !== undefined) setCanRefuseAfterRookie(p.canRefuseAfterRookie);
       if (p.b2bFrequency)                  setB2bFrequency(p.b2bFrequency);
       if (p.numTeams)                      setNumTeams(p.numTeams);
       if (p.playoffFormat)                 setPlayoffFormat(p.playoffFormat);
@@ -262,6 +280,14 @@ const LeagueConfiguration: React.FC<LeagueConfigurationProps> = ({ onConfirm, on
       salaryCap,
       luxuryTaxLine: Math.round(salaryCap * 1.15),
       hardCap: Math.round(salaryCap * 1.25),
+      minPayroll,
+      luxuryTaxThreshold,
+      salaryCapType,
+      // Rookie Contracts
+      pick1SalaryPct,
+      roundsAboveMin,
+      rookieContractLengths: (() => { try { const a = JSON.parse(rookieContractLengthsRaw); return Array.isArray(a) ? a : undefined; } catch { return undefined; } })(),
+      canRefuseAfterRookie,
       // Gender
       playerGenderRatio,
       coachGenderRatio,
@@ -632,6 +658,44 @@ const LeagueConfiguration: React.FC<LeagueConfigurationProps> = ({ onConfirm, on
                 </div>
               </div>
 
+              {/* ── Finances ──────────────────────────────────────────────────── */}
+              <div className="bg-slate-900/50 border border-slate-800 rounded-2xl p-6 space-y-6">
+                <h4 className="text-xs font-black text-amber-500 uppercase tracking-[0.3em] border-b border-slate-800 pb-3">Finances</h4>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+
+                  <Field label="Salary Cap Type">
+                    <BtnGroup options={['Soft Cap','Hard Cap']} value={salaryCapType}
+                      onChange={v => setSalaryCapType(v as 'Soft Cap'|'Hard Cap')}
+                      colors={{ 'Soft Cap': 'bg-amber-500', 'Hard Cap': 'bg-rose-500' }} />
+                  </Field>
+                  <Field label="Salary Cap (Soft Limit)" hint={FIELD_HINTS.salaryCap} error={errors.salaryCap}>
+                    <div className="space-y-2">
+                      <input type="number" value={salaryCap} step={1_000_000} min={80_000_000} max={300_000_000}
+                        onChange={e => setSalaryCap(parseInt(e.target.value) || 140_000_000)}
+                        className={`w-full bg-slate-950 border rounded-xl px-4 py-3 text-white font-mono text-sm focus:outline-none ${errors.salaryCap ? 'border-rose-500' : 'border-slate-800'}`} />
+                      <div className="flex gap-4 text-[9px] font-black text-slate-600 uppercase">
+                        <span>Cap: {fmtM(salaryCap)}</span>
+                        <span>Luxury: {fmtM(Math.round(salaryCap * 1.15))}</span>
+                        <span>Hard Cap: {fmtM(Math.round(salaryCap * 1.25))}</span>
+                      </div>
+                    </div>
+                  </Field>
+                  <Field label="Minimum Payroll" hint="Payroll floor — every team must spend at least this much.">
+                    <input type="number" value={minPayroll} step={250_000} min={20_000_000} max={120_000_000}
+                      onChange={e => setMinPayroll(parseInt(e.target.value) || 46_650_000)}
+                      className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-3 text-white font-mono text-sm focus:outline-none" />
+                    <p className="text-[9px] text-slate-600 mt-1">Default: {fmtM(46_650_000)}</p>
+                  </Field>
+                  <Field label="Luxury Tax Threshold" hint="Second apron / tax line — triggers enhanced penalties.">
+                    <input type="number" value={luxuryTaxThreshold} step={250_000} min={30_000_000} max={200_000_000}
+                      onChange={e => setLuxuryTaxThreshold(parseInt(e.target.value) || 84_750_000)}
+                      className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-3 text-white font-mono text-sm focus:outline-none" />
+                    <p className="text-[9px] text-slate-600 mt-1">Default: {fmtM(84_750_000)}</p>
+                  </Field>
+
+                </div>
+              </div>
+
               {/* ── Contracts ─────────────────────────────────────────────────── */}
               <div className="bg-slate-900/50 border border-slate-800 rounded-2xl p-6 space-y-6">
                 <h4 className="text-xs font-black text-amber-500 uppercase tracking-[0.3em] border-b border-slate-800 pb-3">Contracts & Salary Rules</h4>
@@ -645,13 +709,48 @@ const LeagueConfiguration: React.FC<LeagueConfigurationProps> = ({ onConfirm, on
                     <BtnGroup options={['25%','30%','35%']} value={`${maxPlayerSalaryPct}%`}
                       onChange={v => setMaxPlayerSalaryPct(parseInt(v) as 25|30|35)} />
                   </Field>
-                  <Field label="Rookie Scale Contracts">
-                    <Toggle label={rookieScaleContracts ? 'Enabled — drafted players on fixed rookie scale' : 'Disabled — rookies negotiate freely'}
-                      checked={rookieScaleContracts} onChange={setRookieScaleContracts} />
-                  </Field>
                   <Field label="Bird Rights">
                     <Toggle label={birdRights ? 'Enabled — re-sign own players over cap' : 'Disabled — hard cap applies to re-signings'}
                       checked={birdRights} onChange={setBirdRights} />
+                  </Field>
+
+                </div>
+              </div>
+
+              {/* ── Rookie Contracts ──────────────────────────────────────────── */}
+              <div className="bg-slate-900/50 border border-slate-800 rounded-2xl p-6 space-y-6">
+                <h4 className="text-xs font-black text-amber-500 uppercase tracking-[0.3em] border-b border-slate-800 pb-3">Rookie Contracts</h4>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+
+                  <Field label="Rookie Salary Scale">
+                    <Toggle label={rookieScaleContracts ? 'Enabled — drafted players on fixed rookie scale' : 'Disabled — rookies negotiate freely'}
+                      checked={rookieScaleContracts} onChange={setRookieScaleContracts} />
+                  </Field>
+                  <Field label="#1 Pick Salary, % of Max Contract" hint="Slot salary for the top pick as a % of the max contract.">
+                    <div className="space-y-2">
+                      <input type="range" min={10} max={50} step={1} value={pick1SalaryPct}
+                        onChange={e => setPick1SalaryPct(parseInt(e.target.value))}
+                        className="w-full h-1.5 accent-amber-500 bg-slate-800 rounded-lg appearance-none cursor-pointer" />
+                      <div className="flex justify-between text-[9px] font-black text-slate-500 uppercase">
+                        <span>10%</span>
+                        <span className="text-amber-400">{pick1SalaryPct}% of max</span>
+                        <span>50%</span>
+                      </div>
+                    </div>
+                  </Field>
+                  <Field label="Rounds With >Min Contracts" hint="How many draft rounds receive above-minimum salaries.">
+                    <BtnGroup options={['0','1','2','3']} value={String(roundsAboveMin)}
+                      onChange={v => setRoundsAboveMin(parseInt(v))} />
+                  </Field>
+                  <Field label="Rookie Contract Lengths" hint="JSON array — one length (years) per round. e.g. [3,2]">
+                    <textarea rows={2} value={rookieContractLengthsRaw}
+                      onChange={e => setRookieContractLengthsRaw(e.target.value)}
+                      className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-3 text-amber-400 font-mono text-sm focus:outline-none resize-none" />
+                    <p className="text-[9px] text-slate-600 mt-1">Default: [3,2] — round 1 = 3yr, round 2 = 2yr</p>
+                  </Field>
+                  <Field label="Can Refuse After Rookie Contract">
+                    <Toggle label={canRefuseAfterRookie ? 'Enabled — players can reject extensions after rookie deal expires' : 'Disabled — standard extension rules apply'}
+                      checked={canRefuseAfterRookie} onChange={setCanRefuseAfterRookie} />
                   </Field>
 
                 </div>
