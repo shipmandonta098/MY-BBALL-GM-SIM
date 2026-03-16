@@ -110,12 +110,21 @@ const LeagueConfiguration: React.FC<LeagueConfigurationProps> = ({ onConfirm, on
   const [showAdvancedStats, setShowAdvancedStats] = useState(true);
 
   // ── Playoffs & Schedule ───────────────────────────────────────────────────
-  const [playoffFormat, setPlayoffFormat]       = useState<6|8|10|16>(8);
+  const [playoffFormat, setPlayoffFormat]       = useState<6|8|10|12|14|16>(8);
   const [playoffSeeding, setPlayoffSeeding]     = useState<'Conference'|'League-wide'>('Conference');
   const [playInTournament, setPlayInTournament] = useState(true);
   const [homeCourt, setHomeCourt]               = useState(true);
   const [tradeDeadline, setTradeDeadline]       = useState<LeagueSettings['tradeDeadline']>('Week 14');
   const [hardCapAtDeadline, setHardCapAtDeadline] = useState(false);
+
+  // ── Season Structure ──────────────────────────────────────────────────────
+  const [divisionGames, setDivisionGames]             = useState(16);
+  const [conferenceGames, setConferenceGames]         = useState(36);
+  const [tradeDeadlineFraction, setTradeDeadlineFraction] = useState(0.6);
+  const [splitByConference, setSplitByConference]     = useState(true);
+  const [guaranteedPerDivision, setGuaranteedPerDivision] = useState(0);
+  const [reseedRounds, setReseedRounds]               = useState(false);
+  const [ownerPatienceLevel, setOwnerPatienceLevel]   = useState<'Low'|'Medium'|'High'>('Medium');
 
   // ── Contracts ─────────────────────────────────────────────────────────────
   const [maxContractYears, setMaxContractYears]       = useState<2|3|4|5>(5);
@@ -183,6 +192,14 @@ const LeagueConfiguration: React.FC<LeagueConfigurationProps> = ({ onConfirm, on
       if (p.expansionEnabled !== undefined)  setExpansionEnabled(p.expansionEnabled);
       if (p.expansionTeamCount)            setExpansionTeamCount(p.expansionTeamCount);
       if (p.expansionDraftRules)           setExpansionDraftRules(p.expansionDraftRules);
+      // Season Structure
+      if (p.divisionGames !== undefined)           setDivisionGames(p.divisionGames);
+      if (p.conferenceGames !== undefined)         setConferenceGames(p.conferenceGames);
+      if (p.tradeDeadlineFraction !== undefined)   setTradeDeadlineFraction(p.tradeDeadlineFraction);
+      if (p.splitByConference !== undefined)       setSplitByConference(p.splitByConference);
+      if (p.guaranteedPerDivision !== undefined)   setGuaranteedPerDivision(p.guaranteedPerDivision);
+      if (p.reseedRounds !== undefined)            setReseedRounds(p.reseedRounds);
+      if (p.ownerPatienceLevel)                    setOwnerPatienceLevel(p.ownerPatienceLevel);
     } catch { /* ignore */ }
   }, []);
 
@@ -252,6 +269,14 @@ const LeagueConfiguration: React.FC<LeagueConfigurationProps> = ({ onConfirm, on
       expansionEnabled,
       expansionTeamCount,
       expansionDraftRules,
+      // Season Structure
+      divisionGames,
+      conferenceGames,
+      tradeDeadlineFraction,
+      splitByConference,
+      guaranteedPerDivision,
+      reseedRounds,
+      ownerPatienceLevel,
       // Advanced
       godMode,
       seasonLength,
@@ -455,11 +480,6 @@ const LeagueConfiguration: React.FC<LeagueConfigurationProps> = ({ onConfirm, on
                     <BtnGroup options={['20','24','28','30','32','38']} value={String(numTeams)}
                       onChange={v => setNumTeams(parseInt(v))} />
                   </Field>
-                  <Field label="Custom Season Length" hint={FIELD_HINTS.seasonLength} error={errors.seasonLength}>
-                    <input type="number" value={seasonLength} min={20} max={82}
-                      onChange={e => setSeasonLength(parseInt(e.target.value) || 82)}
-                      className={`w-full bg-slate-950 border rounded-xl px-4 py-3 text-white font-mono focus:outline-none ${errors.seasonLength ? 'border-rose-500' : 'border-slate-800'}`} />
-                  </Field>
                   <Field label="Salary Cap (Soft Limit)" hint={FIELD_HINTS.salaryCap} error={errors.salaryCap}>
                     <div className="space-y-2">
                       <input type="number" value={salaryCap} step={1_000_000} min={80_000_000} max={300_000_000}
@@ -516,6 +536,70 @@ const LeagueConfiguration: React.FC<LeagueConfigurationProps> = ({ onConfirm, on
                   <Field label="Hard Cap at Deadline">
                     <Toggle label={hardCapAtDeadline ? 'Enabled — no moves that breach hard cap after deadline' : 'Disabled — soft cap only post-deadline'}
                       checked={hardCapAtDeadline} onChange={setHardCapAtDeadline} />
+                  </Field>
+
+                </div>
+              </div>
+
+              {/* ── Season Structure ──────────────────────────────────────────── */}
+              <div className="bg-slate-900/50 border border-slate-800 rounded-2xl p-6 space-y-6">
+                <h4 className="text-xs font-black text-amber-500 uppercase tracking-[0.3em] border-b border-slate-800 pb-3">Season Structure</h4>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+
+                  <Field label="Games Per Season" hint="Between 20–82 games. Affects schedule, playoff timing, and per-game stat calcs." error={errors.seasonLength}>
+                    <input type="number" value={seasonLength} min={20} max={82}
+                      onChange={e => setSeasonLength(parseInt(e.target.value) || 82)}
+                      className={`w-full bg-slate-950 border rounded-xl px-4 py-3 text-white font-mono focus:outline-none ${errors.seasonLength ? 'border-rose-500' : 'border-slate-800'}`} />
+                  </Field>
+
+                  <Field label="Division Games" hint="Games played vs. each team in own division. Leave 0 to treat like any conference game.">
+                    <input type="number" value={divisionGames} min={0} max={82}
+                      onChange={e => setDivisionGames(Math.max(0, parseInt(e.target.value) || 0))}
+                      className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-3 text-white font-mono focus:outline-none" />
+                  </Field>
+
+                  <Field label="Conference Games" hint="Total games played within own conference. Leave 0 for no special treatment.">
+                    <input type="number" value={conferenceGames} min={0} max={82}
+                      onChange={e => setConferenceGames(Math.max(0, parseInt(e.target.value) || 0))}
+                      className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-3 text-white font-mono focus:outline-none" />
+                  </Field>
+
+                  <Field label="Trade Deadline (% of Season)" hint="e.g. 0.60 = deadline falls at game 49 of an 82-game season.">
+                    <div className="space-y-2">
+                      <input type="range" min={30} max={85} step={1}
+                        value={Math.round(tradeDeadlineFraction * 100)}
+                        onChange={e => setTradeDeadlineFraction(parseInt(e.target.value) / 100)}
+                        className="w-full h-1.5 accent-amber-500 bg-slate-800 rounded-lg appearance-none cursor-pointer" />
+                      <div className="flex justify-between text-[9px] font-black text-slate-500 uppercase">
+                        <span>30%</span>
+                        <span className="text-amber-400">{Math.round(tradeDeadlineFraction * 100)}% — Game {Math.round(tradeDeadlineFraction * seasonLength)}</span>
+                        <span>85%</span>
+                      </div>
+                    </div>
+                  </Field>
+
+                  <Field label="Guaranteed Per Division" hint="Minimum playoff spots guaranteed to each division winner (0 = none guaranteed).">
+                    <BtnGroup options={['0','1','2']} value={String(guaranteedPerDivision)}
+                      onChange={v => setGuaranteedPerDivision(parseInt(v))} />
+                  </Field>
+
+                  <Field label="Owner Patience Level" hint="Low = owners fire coaches quickly. High = owners give coaches more time.">
+                    <BtnGroup
+                      options={['Low','Medium','High']}
+                      value={ownerPatienceLevel}
+                      onChange={v => setOwnerPatienceLevel(v as 'Low'|'Medium'|'High')}
+                      colors={{ Low: 'bg-rose-500', Medium: 'bg-amber-500', High: 'bg-emerald-500' }}
+                    />
+                  </Field>
+
+                  <Field label="Split By Conference">
+                    <Toggle label={splitByConference ? 'Enabled — playoffs split East/West brackets' : 'Disabled — league-wide bracket, best records advance'}
+                      checked={splitByConference} onChange={setSplitByConference} />
+                  </Field>
+
+                  <Field label="Reseed Rounds">
+                    <Toggle label={reseedRounds ? 'Enabled — remaining teams re-seeded each round' : 'Disabled — fixed bracket after seeding'}
+                      checked={reseedRounds} onChange={setReseedRounds} />
                   </Field>
 
                 </div>
