@@ -130,7 +130,8 @@ const SEARCH_INDEX: { tab: SettingsTab; label: string }[] = [
   { tab: 'gameplay', label: 'Chemistry Impact' }, { tab: 'gameplay', label: 'Personality Clash Penalties' },
   { tab: 'gameplay', label: 'Player Morale' }, { tab: 'gameplay', label: 'Morale Affects Attributes' },
   { tab: 'gameplay', label: 'Trade Request Threshold' }, { tab: 'gameplay', label: 'Trade Realism' },
-  { tab: 'gameplay', label: 'Simulation Engine Mode' }, { tab: 'gameplay', label: 'Season Length' },
+  { tab: 'gameplay', label: 'Simulation Engine Mode' },
+  { tab: 'league', label: 'Games Per Season' },
   // Sliders
   { tab: 'sliders', label: 'Overall Difficulty' }, { tab: 'sliders', label: 'Rookie Progression Speed' },
   { tab: 'sliders', label: 'Veteran Attribute Decline' },
@@ -220,7 +221,7 @@ const Settings: React.FC<SettingsProps> = ({ league, updateLeague, onRegenerateS
   const resetTab = () => {
     const tabDefaults: Partial<LeagueSettings> = {};
     const tabMap: Record<SettingsTab, (keyof typeof DEFAULT_SETTINGS)[]> = {
-      league:     ['playoffFormat','playoffSeeding','playInTournament','homeCourt','tradeDeadline','hardCapAtDeadline','maxContractYears','rookieScaleContracts','maxPlayerSalaryPct','birdRights','draftRounds','draftClassSize','internationalProspects','draftLottery','scheduledExpansion','expansionTeamCount','expansionDraftRules','expansionEnabled','divisionGames','conferenceGames','tradeDeadlineFraction','splitByConference','guaranteedPerDivision','reseedRounds','ownerPatienceLevel','luxuryTaxMultiplier','budgetThreshold','tradeSalaryMatchPct'],
+      league:     ['playoffFormat','playoffSeeding','playInTournament','homeCourt','tradeDeadline','hardCapAtDeadline','maxContractYears','rookieScaleContracts','maxPlayerSalaryPct','birdRights','draftRounds','draftClassSize','internationalProspects','draftLottery','scheduledExpansion','expansionTeamCount','expansionDraftRules','expansionEnabled','divisionGames','conferenceGames','tradeDeadlineFraction','splitByConference','guaranteedPerDivision','reseedRounds','ownerPatienceLevel','luxuryTaxMultiplier','budgetThreshold','tradeSalaryMatchPct','seasonLength'],
       gameplay:   ['fatigueImpact','b2bPenalty','loadManagement','injuryDuration','practiceInjuries','careerEndingInjuries','teamChemistry','chemistryImpact','personalityClashPenalties','playerMorale','moraleAffectsAttributes','tradeRequestThreshold'],
       sliders:    ['sliderLayup','sliderMidRange','slider3pt','sliderFreeThrow','sliderFastBreak','sliderPostUp','sliderPickRoll','sliderSteal','sliderBlock','sliderFoul','sliderHelpDefense','sliderPerimeterDefense','sliderTimeout','sliderSubstitution','sliderTechFoul','sliderFlagrantFoul','sliderInjuryMultiplier'],
       simulation: ['pbpDetailLevel','aiDecisionSpeed','blowoutFrequency','comebackFrequency','overtimeFrequency','globalPaceOverride','shotClockLength','scoringEra','threePtFrequency','simBlockFrequency','turnoverFrequency'],
@@ -565,6 +566,14 @@ const Settings: React.FC<SettingsProps> = ({ league, updateLeague, onRegenerateS
             <SectionHeader title="Season Structure" sub="Games per season and schedule composition" />
             {inSeason ? (
               <LockedField>
+                <SliderField label="Games Per Season" value={s.seasonLength} min={10} max={82} onChange={() => {}} />
+              </LockedField>
+            ) : (
+              <SliderField label="Games Per Season" value={s.seasonLength} min={10} max={82}
+                onChange={v => updateSettings({ seasonLength: v }, 'Season Length')} />
+            )}
+            {inSeason ? (
+              <LockedField>
                 <NumberInputField label="Division Games" value={s.divisionGames ?? 16} min={0} max={82} onChange={() => {}} />
               </LockedField>
             ) : (
@@ -776,15 +785,6 @@ const Settings: React.FC<SettingsProps> = ({ league, updateLeague, onRegenerateS
             <SelectField label="Simulation Engine Mode" value={s.simSpeed}
               options={['Normal','Smarter','Faster']}
               onChange={v => updateSettings({ simSpeed: v as any }, 'Simulation Engine Mode')} />
-            {inSeason ? (
-              <LockedField>
-                <SliderField label="Season Length (Games)" value={s.seasonLength} min={10} max={82}
-                  onChange={() => {}} />
-              </LockedField>
-            ) : (
-            <SliderField label="Season Length (Games)" value={s.seasonLength} min={10} max={82}
-              onChange={v => updateSettings({ seasonLength: v }, 'Season Length')} />
-            )}
           </div>
         )}
 
