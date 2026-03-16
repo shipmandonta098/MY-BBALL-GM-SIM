@@ -24,9 +24,18 @@ const Coaching: React.FC<CoachingProps> = ({ league, updateLeague }) => {
 
   const handleHire = (coach: Coach) => {
     if (!hiringRole) return;
-    const updatedStaff = { ...userTeam.staff, [hiringRole]: coach };
-    const updatedTeams = league.teams.map(t => 
-      t.id === userTeam.id ? { ...t, staff: updatedStaff } : t
+    // Always clear interim flag when explicitly hired — this is a permanent hire
+    const hiredCoach: Coach = { ...coach, isInterim: false };
+    const updatedStaff = { ...userTeam.staff, [hiringRole]: hiredCoach };
+    const updatedTeams = league.teams.map(t =>
+      t.id === userTeam.id
+        ? {
+            ...t,
+            staff: updatedStaff,
+            // Clear search flag when user manually fills the HC slot
+            ...(hiringRole === 'headCoach' ? { coachSearchDaysLeft: undefined } : {}),
+          }
+        : t,
     );
     const updatedPool = league.coachPool.filter(c => c.id !== coach.id);
     updateLeague({ teams: updatedTeams, coachPool: updatedPool });
@@ -49,10 +58,23 @@ const Coaching: React.FC<CoachingProps> = ({ league, updateLeague }) => {
   };
 
   const StaffCard = ({ role, coach, label }: { role: string, coach: Coach | null, label: string }) => (
-    <div className={`bg-slate-900 border rounded-2xl p-6 relative overflow-hidden transition-all ${coach ? 'border-slate-800' : 'border-dashed border-slate-700 bg-slate-950/40'}`}>
+    <div className={`bg-slate-900 border rounded-2xl p-6 relative overflow-hidden transition-all ${
+      coach?.isInterim
+        ? 'border-amber-500/40 bg-amber-500/5'
+        : coach
+          ? 'border-slate-800'
+          : 'border-dashed border-slate-700 bg-slate-950/40'
+    }`}>
        <div className="flex justify-between items-start mb-4">
           <div>
-             <p className="text-[10px] text-slate-500 font-black uppercase tracking-widest">{label}</p>
+             <div className="flex items-center gap-2 mb-0.5">
+               <p className="text-[10px] text-slate-500 font-black uppercase tracking-widest">{label}</p>
+               {coach?.isInterim && (
+                 <span className="px-1.5 py-0.5 bg-amber-500/20 border border-amber-500/50 rounded text-[9px] font-black text-amber-400 uppercase tracking-widest animate-pulse">
+                   Interim
+                 </span>
+               )}
+             </div>
              <h4 className="text-xl font-display font-bold text-white uppercase">{coach?.name || 'Vacant'}</h4>
           </div>
           {coach && (
@@ -159,12 +181,27 @@ const Coaching: React.FC<CoachingProps> = ({ league, updateLeague }) => {
         </div>
 
         {/* Center/Right: Staff Carousel */}
-        <div className="lg:col-span-2 grid grid-cols-1 md:grid-cols-2 gap-6">
+        <div className="lg:col-span-2 space-y-6">
+           {/* Interim / search banner */}
+           {userTeam.staff.headCoach?.isInterim && (
+             <div className="flex items-start gap-4 bg-amber-500/10 border border-amber-500/30 rounded-2xl px-5 py-4 animate-in fade-in duration-500">
+               <span className="text-2xl mt-0.5">🔍</span>
+               <div>
+                 <p className="text-xs font-black uppercase text-amber-400 tracking-widest">Permanent HC Search Active</p>
+                 <p className="text-[11px] text-amber-300/70 mt-0.5 leading-relaxed">
+                   <strong>{userTeam.staff.headCoach.name}</strong> is running the team on an interim basis.
+                   Head to the <strong>Coach Market</strong> or <strong>Hire Personnel</strong> on the HC card to appoint a permanent head coach.
+                 </p>
+               </div>
+             </div>
+           )}
+           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
            <StaffCard role="headCoach" coach={userTeam.staff.headCoach} label="Head Coach" />
            <StaffCard role="assistantOffense" coach={userTeam.staff.assistantOffense} label="Asst. Coach (OFF)" />
            <StaffCard role="assistantDefense" coach={userTeam.staff.assistantDefense} label="Asst. Coach (DEF)" />
            <StaffCard role="assistantDev" coach={userTeam.staff.assistantDev} label="Asst. Coach (DEV)" />
            <StaffCard role="trainer" coach={userTeam.staff.trainer} label="Head Trainer" />
+           </div>
         </div>
       </div>
 

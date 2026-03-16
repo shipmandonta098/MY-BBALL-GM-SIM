@@ -48,6 +48,57 @@ const SETTINGS_KEY = 'HOOPS_DYNASTY_SETTINGS_V1';
 
 type AppStatus = 'title' | 'config' | 'setup' | 'game';
 
+// ── Interim HC promotion helper ───────────────────────────────────────────────
+// Finds the best available assistant and promotes them to Interim Head Coach.
+// If no assistants exist a low-rated temporary coach is generated from scratch.
+function pickInterimCoach(
+  staff: import('./types').TeamStaff,
+  genderRatio: number,
+): { interim: import('./types').Coach; newStaff: import('./types').TeamStaff } {
+  const candidates = (
+    [
+      { slot: 'assistantDev',     coach: staff.assistantDev     },
+      { slot: 'assistantOffense', coach: staff.assistantOffense },
+      { slot: 'assistantDefense', coach: staff.assistantDefense },
+    ] as { slot: keyof import('./types').TeamStaff; coach: import('./types').Coach | null }[]
+  ).filter(a => a.coach != null) as { slot: keyof import('./types').TeamStaff; coach: import('./types').Coach }[];
+
+  if (candidates.length === 0) {
+    // No assistants — generate a low-rated temp
+    const temp = generateCoach(`interim-${Date.now()}`, 'C', genderRatio);
+    const interim: import('./types').Coach = {
+      ...temp,
+      ratingOffense:     Math.min(temp.ratingOffense, 52),
+      ratingDefense:     Math.min(temp.ratingDefense, 52),
+      ratingDevelopment: Math.min(temp.ratingDevelopment, 52),
+      salary:        1_500_000,
+      contractYears: 1,
+      role:      'Head Coach',
+      isInterim: true,
+    };
+    return { interim, newStaff: { ...staff, headCoach: interim } };
+  }
+
+  // Best assistant by combined rating total
+  const best = candidates.sort(
+    (a, b) =>
+      (b.coach.ratingDevelopment + b.coach.ratingOffense + b.coach.ratingDefense) -
+      (a.coach.ratingDevelopment + a.coach.ratingOffense + a.coach.ratingDefense),
+  )[0];
+
+  const interim: import('./types').Coach = {
+    ...best.coach,
+    role:      'Head Coach',
+    isInterim: true,
+    salary: Math.max(best.coach.salary, 1_500_000),
+  };
+
+  return {
+    interim,
+    newStaff: { ...staff, headCoach: interim, [best.slot]: null },
+  };
+}
+
 const App: React.FC = () => {
   const [status, setStatus] = useState<AppStatus>('title');
   const [league, setLeague] = useState<LeagueState | null>(null);
@@ -513,33 +564,31 @@ const App: React.FC = () => {
       newState = await addNewsItem(newState, 'firing', { team, coach: hc, detail: `Fired following ${fireReason}.` }, true);
       newState.transactions = recordTransaction(newState, 'firing', [team.id], `${team.name} fired Head Coach ${hc.name} following ${fireReason}.`);
 
-      // Released coach goes back to market
-      const releasedPool = [...newState.coachPool, { ...hc, desiredContract: { years: 2, salary: Math.floor(hc.salary * 0.9) }, interestScore: 50 }];
+      // Released coach returns to market
+      const releasedPool = [...newState.coachPool, { ...hc, isInterim: false, desiredContract: { years: 2, salary: Math.floor(hc.salary * 0.9) }, interestScore: 50 }];
       newState = { ...newState, coachPool: releasedPool };
 
-      // ── IMMEDIATE AUTO-HIRE (1–7 day search, flavour only — no vacancy left open) ──
-      const poolCandidates = newState.coachPool.filter(c => c.role === 'Head Coach' && c.id !== hc.id);
-      const hireDaysDelay  = 1 + Math.floor(Math.random() * 7);
-      // Prefer coaches whose scheme fits the team's needs; fall back to random pool pick or generated coach
-      const schemeMatch = poolCandidates.filter(c => c.scheme === hc.scheme);
-      const newHC = (schemeMatch.length > 0 ? schemeMatch : poolCandidates).sort(() => Math.random() - 0.5)[0]
-        ?? generateCoach(`ac-${Date.now()}-${team.id}`, 'C', newState.settings.coachGenderRatio);
+      // ── PROMOTE INTERIM HC ──
+      const currentTeamState = newState.teams.find(t => t.id === team.id)!;
+      const { interim, newStaff } = pickInterimCoach(currentTeamState.staff, newState.settings.coachGenderRatio ?? 10);
+      const searchDays = 7 + Math.floor(Math.random() * 8); // 7–14 days
 
-      const updatedTeams = newState.teams.map(t =>
-        t.id === team.id
-          ? { ...t, staff: { ...t.staff, headCoach: { ...newHC, salary: newHC.salary ?? 2_000_000, contractYears: 2 } }, finances: { ...t.finances, ownerPatience: 50 } }
-          : t
-      );
-      const trimmedPool = newState.coachPool.filter(c => c.id !== newHC.id);
-      newState = { ...newState, teams: updatedTeams, coachPool: trimmedPool };
+      newState = {
+        ...newState,
+        teams: newState.teams.map(t =>
+          t.id === team.id
+            ? { ...t, staff: newStaff, coachSearchDaysLeft: searchDays, finances: { ...t.finances, ownerPatience: 50 } }
+            : t
+        ),
+      };
 
       newState = await addNewsItem(
         newState, 'hiring',
-        { team: newState.teams.find(t => t.id === team.id) ?? team, coach: newHC,
-          detail: `${team.name} hired ${newHC.name} as Head Coach, ${hireDaysDelay} day${hireDaysDelay !== 1 ? 's' : ''} after parting ways with ${hc.name}.` },
-        false
+        { team: newState.teams.find(t => t.id === team.id) ?? team, coach: interim,
+          detail: `${interim.name} named Interim Head Coach while ${team.name} conduct their permanent coaching search.` },
+        false,
       );
-      newState.transactions = recordTransaction(newState, 'hiring', [team.id], `${team.name} hired ${newHC.name} as Head Coach.`);
+      newState.transactions = recordTransaction(newState, 'hiring', [team.id], `${team.name} named ${interim.name} Interim Head Coach.`);
     }
     // Injury recovery — decrement days, auto-return when healed
     // Medical staff (budgets.health) grants a bonus recovery tick chance (0% at 20 → +40% at 100)
@@ -625,6 +674,82 @@ const App: React.FC = () => {
       const snapshot = calculatePowerRankings(newState);
       newState.powerRankingHistory = [...(newState.powerRankingHistory || []), snapshot].slice(-20);
     }
+
+    // ── PERMANENT COACH SEARCH RESOLUTION ────────────────────────────────────
+    // Each sim day ticks the countdown. When it hits 0 the AI team either
+    // keeps the interim (40% chance if they're adequate) or hires from market.
+    for (const searchTeam of newState.teams.filter(
+      t => t.id !== newState.userTeamId && (t.coachSearchDaysLeft ?? 0) > 0,
+    )) {
+      const daysLeft = (searchTeam.coachSearchDaysLeft ?? 1) - 1;
+
+      if (daysLeft > 0) {
+        newState = {
+          ...newState,
+          teams: newState.teams.map(t =>
+            t.id === searchTeam.id ? { ...t, coachSearchDaysLeft: daysLeft } : t,
+          ),
+        };
+        continue;
+      }
+
+      // Search complete — decide: keep interim or hire from market
+      const currentInterim = newState.teams.find(t => t.id === searchTeam.id)!.staff.headCoach;
+      const keepInterim =
+        currentInterim?.isInterim &&
+        (currentInterim.ratingOffense + currentInterim.ratingDefense + currentInterim.ratingDevelopment) / 3 >= 60 &&
+        Math.random() > 0.55; // ~45% chance to promote if ratings are decent
+
+      if (keepInterim && currentInterim) {
+        const permanent: Coach = { ...currentInterim, isInterim: false };
+        newState = {
+          ...newState,
+          teams: newState.teams.map(t =>
+            t.id === searchTeam.id
+              ? { ...t, staff: { ...t.staff, headCoach: permanent }, coachSearchDaysLeft: undefined }
+              : t,
+          ),
+        };
+        newState = await addNewsItem(
+          newState, 'hiring',
+          { team: newState.teams.find(t => t.id === searchTeam.id) ?? searchTeam, coach: permanent,
+            detail: `${searchTeam.name} promoted interim ${permanent.name} to permanent Head Coach after an impressive run.` },
+          false,
+        );
+        newState.transactions = recordTransaction(newState, 'hiring', [searchTeam.id], `${searchTeam.name} promoted ${permanent.name} to permanent Head Coach.`);
+      } else {
+        // Hire from coach pool — prefer scheme match
+        const poolHCCandidates = newState.coachPool.filter(c => c.role === 'Head Coach');
+        const schemeHits = poolHCCandidates.filter(c => c.scheme === searchTeam.activeScheme);
+        const picked = (schemeHits.length > 0 ? schemeHits : poolHCCandidates).sort(() => Math.random() - 0.5)[0]
+          ?? generateCoach(`perm-${Date.now()}-${searchTeam.id}`, 'C', newState.settings.coachGenderRatio ?? 10);
+        const permanent: Coach = { ...picked, salary: picked.salary ?? 3_000_000, contractYears: 3, isInterim: false };
+
+        // Return old interim to pool if they were a promoted assistant
+        const oldInterim = newState.teams.find(t => t.id === searchTeam.id)!.staff.headCoach;
+        const poolAfterReturn = oldInterim?.isInterim
+          ? [...newState.coachPool.filter(c => c.id !== picked.id), { ...oldInterim, role: 'Assistant Offense' as const, isInterim: false, desiredContract: { years: 2, salary: Math.floor(oldInterim.salary * 0.85) }, interestScore: 55 }]
+          : newState.coachPool.filter(c => c.id !== picked.id);
+
+        newState = {
+          ...newState,
+          teams: newState.teams.map(t =>
+            t.id === searchTeam.id
+              ? { ...t, staff: { ...t.staff, headCoach: permanent }, coachSearchDaysLeft: undefined }
+              : t,
+          ),
+          coachPool: poolAfterReturn,
+        };
+        newState = await addNewsItem(
+          newState, 'hiring',
+          { team: newState.teams.find(t => t.id === searchTeam.id) ?? searchTeam, coach: permanent,
+            detail: `${searchTeam.name} officially hired ${permanent.name} as their new permanent Head Coach.` },
+          false,
+        );
+        newState.transactions = recordTransaction(newState, 'hiring', [searchTeam.id], `${searchTeam.name} hired ${permanent.name} as permanent Head Coach.`);
+      }
+    }
+
     return newState;
   };
 
@@ -1650,15 +1775,36 @@ const App: React.FC = () => {
         coachAwards.sort((a, b) => b.year - a.year);
         return (
          <CoachModal coach={selectedCoach} onClose={() => setSelectedCoach(null)} onScout={handleGenerateCoachIntelligence} scoutingReport={coachScoutingReport} godMode={league.settings.godMode} onUpdateCoach={handleUpdateCoach} careerAwards={coachAwards} isUserTeam={(Object.values(userTeam.staff) as (Coach | null)[]).some(s => s?.id === selectedCoach.id)} onFire={(id) => {
-               const updatedStaff = { ...userTeam.staff };
-               const oldCoachName = (Object.values(updatedStaff) as (Coach | null)[]).find(s => s?.id === id)?.name;
-               if (updatedStaff.headCoach?.id === id) updatedStaff.headCoach = null;
-               else if (updatedStaff.assistantOffense?.id === id) updatedStaff.assistantOffense = null;
-               else if (updatedStaff.assistantDefense?.id === id) updatedStaff.assistantDefense = null;
-               else if (updatedStaff.assistantDev?.id === id) updatedStaff.assistantDev = null;
-               else if (updatedStaff.trainer?.id === id) updatedStaff.trainer = null;
-               const updatedTransactions = recordTransaction(league, 'firing', [userTeam.id], `${userTeam.name} parted ways with ${oldCoachName || 'staff member'}.`);
-               updateLeagueState({ teams: league.teams.map(t => t.id === userTeam.id ? { ...t, staff: updatedStaff } : t), transactions: updatedTransactions });
+               const firingCoach = (Object.values(userTeam.staff) as (Coach | null)[]).find(s => s?.id === id);
+               const oldCoachName = firingCoach?.name ?? 'staff member';
+               const isFiringHC = userTeam.staff.headCoach?.id === id;
+
+               if (isFiringHC && firingCoach) {
+                 // Promote best assistant to interim; leave coachSearchDaysLeft=0
+                 // so the user can hire a permanent replacement at their own pace
+                 const { interim, newStaff } = pickInterimCoach(userTeam.staff, league.settings.coachGenderRatio ?? 10);
+                 const releasedPool = [
+                   ...league.coachPool,
+                   { ...firingCoach, isInterim: false, desiredContract: { years: 2, salary: Math.floor((firingCoach.salary ?? 2_000_000) * 0.9) }, interestScore: 50 },
+                 ];
+                 const txns = recordTransaction(league, 'firing', [userTeam.id], `${userTeam.name} fired Head Coach ${oldCoachName}.`);
+                 updateLeagueState({
+                   teams: league.teams.map(t =>
+                     t.id === userTeam.id ? { ...t, staff: newStaff, coachSearchDaysLeft: 0 } : t,
+                   ),
+                   coachPool: releasedPool,
+                   transactions: txns,
+                 });
+               } else {
+                 // Firing an assistant / trainer — original direct-removal logic
+                 const updatedStaff = { ...userTeam.staff };
+                 if (updatedStaff.assistantOffense?.id === id) updatedStaff.assistantOffense = null;
+                 else if (updatedStaff.assistantDefense?.id === id) updatedStaff.assistantDefense = null;
+                 else if (updatedStaff.assistantDev?.id === id) updatedStaff.assistantDev = null;
+                 else if (updatedStaff.trainer?.id === id) updatedStaff.trainer = null;
+                 const txns = recordTransaction(league, 'firing', [userTeam.id], `${userTeam.name} parted ways with ${oldCoachName}.`);
+                 updateLeagueState({ teams: league.teams.map(t => t.id === userTeam.id ? { ...t, staff: updatedStaff } : t), transactions: txns });
+               }
                setSelectedCoach(null);
             }} />
         );
