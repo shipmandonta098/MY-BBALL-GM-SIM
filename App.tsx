@@ -433,19 +433,64 @@ const App: React.FC = () => {
       if (team.id === newState.userTeamId) continue;
       const hc = team.staff.headCoach;
       if (!hc) continue;
-      const streakThreshold = -5;
-      const ownerPatienceFire = team.finances.ownerPatience < 15;
-      const streakFire = team.streak <= streakThreshold && Math.random() > 0.8;
-      
-      if (ownerPatienceFire || streakFire) {
-        const reason = ownerPatienceFire ? "lack of faith from the board" : `a disappointing ${Math.abs(team.streak)} game slide`;
+
+      const gamesPlayed = team.wins + team.losses;
+      const seasonLen   = newState.settings.seasonLength ?? 82;
+
+      // ── FIRING GATES: never fire in first 20 games; increasingly possible after that ──
+      if (gamesPlayed < 20) continue; // too early — no matter how bad the streak
+
+      const winPct            = gamesPlayed > 0 ? team.wins / gamesPlayed : 0.5;
+      const expectedWinPct    = 0.5; // neutral baseline
+      const gamesAboveExpected = Math.round((winPct - expectedWinPct) * gamesPlayed);
+
+      // Patience collapses only after sustained bad play: < 10 patience AND losing pace
+      const ownerPatienceFire = team.finances.ownerPatience < 10 && winPct < 0.35;
+
+      // Streak fire: need a severe ≥ -8 skid AND past mid-season (game 35+) AND rare random
+      const streakFire = team.streak <= -8 && gamesPlayed >= 35 && Math.random() > 0.92;
+
+      // Early mid-season window (20–34 games): only fire if utterly hopeless (≤ 2 wins in 20 games)
+      const earlyDesperation = gamesPlayed >= 20 && gamesPlayed < 35 && team.wins <= 2 && Math.random() > 0.85;
+
+      if (ownerPatienceFire || streakFire || earlyDesperation) {
+        const reason = ownerPatienceFire
+          ? `a ${team.wins}-${team.losses} record and loss of board confidence`
+          : streakFire
+          ? `a brutal ${Math.abs(team.streak)}-game losing streak`
+          : `a dismal ${team.wins}-${team.losses} start`;
+
         newState = await addNewsItem(newState, 'firing', { team, coach: hc, detail: `Fired due to ${reason}.` }, true);
         newState.transactions = recordTransaction(newState, 'firing', [team.id], `${team.name} fired Head Coach ${hc.name} following ${reason}.`);
-        const updatedTeams = newState.teams.map(t => 
-          t.id === team.id ? { ...t, staff: { ...t.staff, headCoach: null }, finances: { ...t.finances, ownerPatience: 50 } } : t
+
+        // Put fired coach back in the pool
+        const releasedPool = [...newState.coachPool, { ...hc, desiredContract: { years: 2, salary: Math.floor(hc.salary * 0.9) }, interestScore: 50 }];
+        newState = { ...newState, coachPool: releasedPool };
+
+        // ── IMMEDIATE AUTO-HIRE: AI never leaves post vacant ──
+        // Pick a head-coach-tier candidate from the pool, or generate one
+        const poolCandidates = newState.coachPool.filter(c => c.role === 'Head Coach' && c.id !== hc.id);
+        const hireDaysDelay = 1 + Math.floor(Math.random() * 7); // 1–7 day search (flavour only)
+        let newHC = poolCandidates.length > 0
+          ? poolCandidates.sort(() => Math.random() - 0.5)[0]
+          : generateCoach(`ac-${Date.now()}-${team.id}`, 'C', newState.settings.coachGenderRatio);
+
+        const updatedTeams = newState.teams.map(t =>
+          t.id === team.id
+            ? { ...t, staff: { ...t.staff, headCoach: { ...newHC, salary: newHC.salary ?? 2_000_000, contractYears: 2 } }, finances: { ...t.finances, ownerPatience: 50 } }
+            : t
         );
-        const updatedPool = [...newState.coachPool, { ...hc, desiredContract: { years: 2, salary: Math.floor(hc.salary * 0.9) }, interestScore: 50 }];
-        newState = { ...newState, teams: updatedTeams, coachPool: updatedPool };
+        // Remove hired coach from pool
+        const trimmedPool = newState.coachPool.filter(c => c.id !== newHC.id);
+        newState = { ...newState, teams: updatedTeams, coachPool: trimmedPool };
+
+        newState = await addNewsItem(
+          newState, 'hiring',
+          { team: newState.teams.find(t => t.id === team.id) ?? team, coach: newHC,
+            detail: `${team.name} hired ${newHC.name} as Head Coach, ${hireDaysDelay} day${hireDaysDelay !== 1 ? 's' : ''} after parting ways with ${hc.name}.` },
+          false
+        );
+        newState.transactions = recordTransaction(newState, 'hiring', [team.id], `${team.name} hired ${newHC.name} as Head Coach.`);
       }
     }
     // Injury recovery — decrement days, auto-return when healed
