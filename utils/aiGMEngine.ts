@@ -447,10 +447,10 @@ export function runAIGMOffseason(
         ));
         txs.push(makeTransaction(s, 'firing', [t.id], `${t.name} fired Head Coach ${hc.name}.`));
 
-        // Hire a new coach based on personality
+        // Hire a new coach based on personality (offseason — permanent hire, no interim needed)
         const preferredBadge: CoachBadge = getPreferredCoachBadge(personality);
         const newCoach = generateCoach(`ai-coach-${Date.now()}-${t.id}`, 'C', s.settings.coachGenderRatio);
-        const hiredCoach: typeof newCoach = { ...newCoach, badges: [preferredBadge, ...newCoach.badges.slice(0, 1)] };
+        const hiredCoach: typeof newCoach = { ...newCoach, badges: [preferredBadge, ...newCoach.badges.slice(0, 1)], isInterim: false };
 
         s = {
           ...s,

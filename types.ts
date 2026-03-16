@@ -206,6 +206,8 @@ export interface Coach {
     salary: number;
   };
   interestScore?: number;
+  /** True while this coach is serving as interim HC pending a permanent hire */
+  isInterim?: boolean;
 }
 
 export interface PlayerStats {
@@ -440,6 +442,8 @@ export interface Team {
   /** Team pace rating 60-100. Controls possessions per game via tier table.
    *  Defaults to scheme-based value if not set. */
   paceRating?: number;
+  /** Days remaining in the permanent HC search. undefined = not searching. 0 = user-team vacancy (user hires manually). */
+  coachSearchDaysLeft?: number;
 }
 
 export interface TradePiece {
