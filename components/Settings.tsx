@@ -5,6 +5,7 @@ import { LeagueState, LeagueSettings } from '../types';
 interface SettingsProps {
   league: LeagueState;
   updateLeague: (updated: Partial<LeagueState>) => void;
+  onRegenerateSchedule?: () => void;
 }
 
 type SettingsTab = 'league' | 'gameplay' | 'sliders' | 'simulation' | 'godmode';
@@ -152,15 +153,16 @@ const TAB_LABELS: Record<SettingsTab, string> = {
   simulation: 'Simulation', godmode: 'God Mode',
 };
 
-const Settings: React.FC<SettingsProps> = ({ league, updateLeague }) => {
+const Settings: React.FC<SettingsProps> = ({ league, updateLeague, onRegenerateSchedule }) => {
   const [activeTab, setActiveTab] = useState<SettingsTab>('league');
   const [searchQuery, setSearchQuery] = useState('');
   const [changeLog, setChangeLog]     = useState<ChangeEntry[]>([]);
   const [customPresets, setCustomPresets] = useState<Preset[]>([]);
-  const [showChangeLog, setShowChangeLog]       = useState(false);
-  const [resetConfirm, setResetConfirm]         = useState<'tab' | 'all' | null>(null);
-  const [showSavePreset, setShowSavePreset]     = useState(false);
-  const [presetName, setPresetName]             = useState('');
+  const [showChangeLog, setShowChangeLog]           = useState(false);
+  const [resetConfirm, setResetConfirm]             = useState<'tab' | 'all' | null>(null);
+  const [showSavePreset, setShowSavePreset]         = useState(false);
+  const [presetName, setPresetName]                 = useState('');
+  const [regenConfirm, setRegenConfirm]             = useState(false);
 
   const updateSettings = (updates: Partial<LeagueSettings>, label = '') => {
     const entries: ChangeEntry[] = Object.entries(updates).map(([k, v]) => ({
@@ -174,6 +176,8 @@ const Settings: React.FC<SettingsProps> = ({ league, updateLeague }) => {
 
   const s = league.settings;
   const inSeason = !league.isOffseason;
+  // True once any game has been played — schedule can no longer be regenerated
+  const anyGamePlayed = league.schedule.some(g => g.played);
 
   // ── Locked mid-season field wrapper ──────────────────────────────────────
   const LockedField: React.FC<{ children: React.ReactNode }> = ({ children }) => (
@@ -225,6 +229,11 @@ const Settings: React.FC<SettingsProps> = ({ league, updateLeague }) => {
     updateLeague({ settings: full });
     setChangeLog(prev => [{ field: 'ALL', label: 'Reset All Settings', oldVal: '', newVal: 'defaults', ts: Date.now() }, ...prev]);
     setResetConfirm(null);
+  };
+
+  const handleRegen = () => {
+    setRegenConfirm(false);
+    onRegenerateSchedule?.();
   };
 
   // ── Cross-tab search ──────────────────────────────────────────────────────
@@ -438,6 +447,22 @@ const Settings: React.FC<SettingsProps> = ({ league, updateLeague }) => {
         </div>
       )}
 
+      {/* ── Regen schedule confirm dialog ── */}
+      {regenConfirm && (
+        <div className="bg-amber-950/60 border border-amber-500/40 rounded-2xl p-5 flex items-center justify-between gap-4 animate-in slide-in-from-top-1">
+          <div>
+            <p className="text-sm text-amber-300 font-bold">Regenerate the full season schedule?</p>
+            <p className="text-xs text-amber-500/70 mt-1">All unplayed games will be reshuffled. This cannot be undone.</p>
+          </div>
+          <div className="flex gap-2 shrink-0">
+            <button onClick={handleRegen}
+              className="px-5 py-2 bg-amber-500 text-slate-950 rounded-xl text-[10px] font-black uppercase">Confirm</button>
+            <button onClick={() => setRegenConfirm(false)}
+              className="px-5 py-2 bg-slate-700 text-slate-300 rounded-xl text-[10px] font-black uppercase">Cancel</button>
+          </div>
+        </div>
+      )}
+
       {/* ── Change log ── */}
       {showChangeLog && (
         <div className="bg-slate-900 border border-slate-700 rounded-2xl p-5 space-y-2 animate-in slide-in-from-top-1">
@@ -586,6 +611,36 @@ const Settings: React.FC<SettingsProps> = ({ league, updateLeague }) => {
                 Export Full Save Data
               </button>
             </div>
+
+            {/* Regenerate Schedule */}
+            {inSeason && onRegenerateSchedule && (
+              <div className="md:col-span-2 space-y-2">
+                <div className="flex items-center gap-3 bg-slate-950/40 border border-slate-800 rounded-2xl p-5">
+                  <div className="flex-1 min-w-0">
+                    <p className="text-[10px] font-black uppercase text-slate-400 tracking-widest">Regenerate Season Schedule</p>
+                    <p className="text-xs text-slate-600 mt-1">
+                      {anyGamePlayed
+                        ? 'Locked — at least one game has already been played.'
+                        : 'Reshuffle all matchups and game dates for the current season. Only available before any game is played.'}
+                    </p>
+                  </div>
+                  <button
+                    disabled={anyGamePlayed}
+                    onClick={() => setRegenConfirm(true)}
+                    className={`shrink-0 px-5 py-3 rounded-2xl text-[10px] font-black uppercase tracking-widest transition-all flex items-center gap-2 ${
+                      anyGamePlayed
+                        ? 'bg-slate-800 text-slate-600 cursor-not-allowed border border-slate-700'
+                        : 'bg-amber-500/20 text-amber-400 border border-amber-500/30 hover:bg-amber-500/30'
+                    }`}
+                  >
+                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                    </svg>
+                    {anyGamePlayed ? 'Locked' : 'Regenerate'}
+                  </button>
+                </div>
+              </div>
+            )}
           </div>
         )}
 
