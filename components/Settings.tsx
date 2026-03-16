@@ -27,6 +27,10 @@ interface Preset {
 const DEFAULT_SETTINGS: Partial<LeagueSettings> = {
   playoffFormat: 8, playoffSeeding: 'Conference', playInTournament: true, homeCourt: true,
   tradeDeadline: 'Week 14', hardCapAtDeadline: false,
+  divisionGames: 16, conferenceGames: 36, tradeDeadlineFraction: 0.6,
+  splitByConference: true, guaranteedPerDivision: 0, reseedRounds: false,
+  ownerPatienceLevel: 'Medium', luxuryTaxMultiplier: 1.5,
+  budgetThreshold: false, tradeSalaryMatchPct: 125,
   maxContractYears: 5, rookieScaleContracts: true, maxPlayerSalaryPct: 35, birdRights: true,
   draftRounds: 2, draftClassSize: 'Normal', internationalProspects: true, draftLottery: true,
   scheduledExpansion: 'Off', expansionTeamCount: 2, expansionDraftRules: 'Standard', expansionEnabled: false,
@@ -113,6 +117,11 @@ const SEARCH_INDEX: { tab: SettingsTab; label: string }[] = [
   { tab: 'league', label: 'International Prospects' }, { tab: 'league', label: 'Draft Lottery' },
   { tab: 'league', label: 'Enable Expansion' }, { tab: 'league', label: 'Expansion Team Count' },
   { tab: 'league', label: 'Expansion Draft Rules' },
+  { tab: 'league', label: 'Division Games' }, { tab: 'league', label: 'Conference Games' },
+  { tab: 'league', label: 'Trade Deadline Fraction' }, { tab: 'league', label: 'Split By Conference' },
+  { tab: 'league', label: 'Guaranteed Per Division' }, { tab: 'league', label: 'Reseed Rounds' },
+  { tab: 'league', label: 'Owner Patience Level' }, { tab: 'league', label: 'Luxury Tax Multiplier' },
+  { tab: 'league', label: 'Budget Threshold' }, { tab: 'league', label: 'Trade Salary Match %' },
   // Gameplay
   { tab: 'gameplay', label: 'Fatigue Impact' }, { tab: 'gameplay', label: 'Back-to-Back Penalty' },
   { tab: 'gameplay', label: 'Load Management' }, { tab: 'gameplay', label: 'Injury Frequency' },
@@ -211,7 +220,7 @@ const Settings: React.FC<SettingsProps> = ({ league, updateLeague, onRegenerateS
   const resetTab = () => {
     const tabDefaults: Partial<LeagueSettings> = {};
     const tabMap: Record<SettingsTab, (keyof typeof DEFAULT_SETTINGS)[]> = {
-      league:     ['playoffFormat','playoffSeeding','playInTournament','homeCourt','tradeDeadline','hardCapAtDeadline','maxContractYears','rookieScaleContracts','maxPlayerSalaryPct','birdRights','draftRounds','draftClassSize','internationalProspects','draftLottery','scheduledExpansion','expansionTeamCount','expansionDraftRules','expansionEnabled'],
+      league:     ['playoffFormat','playoffSeeding','playInTournament','homeCourt','tradeDeadline','hardCapAtDeadline','maxContractYears','rookieScaleContracts','maxPlayerSalaryPct','birdRights','draftRounds','draftClassSize','internationalProspects','draftLottery','scheduledExpansion','expansionTeamCount','expansionDraftRules','expansionEnabled','divisionGames','conferenceGames','tradeDeadlineFraction','splitByConference','guaranteedPerDivision','reseedRounds','ownerPatienceLevel','luxuryTaxMultiplier','budgetThreshold','tradeSalaryMatchPct'],
       gameplay:   ['fatigueImpact','b2bPenalty','loadManagement','injuryDuration','practiceInjuries','careerEndingInjuries','teamChemistry','chemistryImpact','personalityClashPenalties','playerMorale','moraleAffectsAttributes','tradeRequestThreshold'],
       sliders:    ['sliderLayup','sliderMidRange','slider3pt','sliderFreeThrow','sliderFastBreak','sliderPostUp','sliderPickRoll','sliderSteal','sliderBlock','sliderFoul','sliderHelpDefense','sliderPerimeterDefense','sliderTimeout','sliderSubstitution','sliderTechFoul','sliderFlagrantFoul','sliderInjuryMultiplier'],
       simulation: ['pbpDetailLevel','aiDecisionSpeed','blowoutFrequency','comebackFrequency','overtimeFrequency','globalPaceOverride','shotClockLength','scoringEra','threePtFrequency','simBlockFrequency','turnoverFrequency'],
@@ -316,6 +325,24 @@ const Settings: React.FC<SettingsProps> = ({ league, updateLeague, onRegenerateS
           </button>
         ))}
       </div>
+    </div>
+  );
+
+  const NumberInputField = ({ label, value, min, max, step = 1, onChange, unit = '', placeholder = '' }: {
+    label: string; value: number; min: number; max: number; step?: number;
+    onChange: (v: number) => void; unit?: string; placeholder?: string;
+  }) => (
+    <div className="space-y-3 bg-slate-950/40 p-5 rounded-2xl border border-slate-800">
+      <div className="flex justify-between items-center">
+        <label className="text-[10px] font-black uppercase text-slate-500 tracking-widest">{label}</label>
+        {unit && <span className="text-xs text-slate-500 font-bold">{unit}</span>}
+      </div>
+      <input
+        type="number" min={min} max={max} step={step} value={value || ''}
+        placeholder={placeholder}
+        onChange={e => { const n = parseFloat(e.target.value); if (!isNaN(n)) onChange(Math.min(max, Math.max(min, n))); }}
+        className="w-full bg-slate-900 border border-slate-700 rounded-xl px-4 py-3 text-amber-400 font-display font-bold text-xl focus:outline-none focus:border-amber-500/50"
+      />
     </div>
   );
 
@@ -530,20 +557,69 @@ const Settings: React.FC<SettingsProps> = ({ league, updateLeague, onRegenerateS
             )}
             <ToggleField label="Owner Patience Meter" value={s.ownerMeterEnabled}
               onChange={v => updateSettings({ ownerMeterEnabled: v }, 'Owner Patience Meter')} />
+            <SelectField label="Owner Patience Level" value={s.ownerPatienceLevel ?? 'Medium'}
+              options={['Low','Medium','High']}
+              onChange={v => updateSettings({ ownerPatienceLevel: v as any }, 'Owner Patience Level')} />
+
+            {/* Season Structure */}
+            <SectionHeader title="Season Structure" sub="Games per season and schedule composition" />
+            {inSeason ? (
+              <LockedField>
+                <NumberInputField label="Division Games" value={s.divisionGames ?? 16} min={0} max={82} onChange={() => {}} />
+              </LockedField>
+            ) : (
+              <NumberInputField label="Division Games" value={s.divisionGames ?? 16} min={0} max={82}
+                onChange={v => updateSettings({ divisionGames: v }, 'Division Games')} placeholder="16" />
+            )}
+            {inSeason ? (
+              <LockedField>
+                <NumberInputField label="Conference Games" value={s.conferenceGames ?? 36} min={0} max={82} onChange={() => {}} />
+              </LockedField>
+            ) : (
+              <NumberInputField label="Conference Games" value={s.conferenceGames ?? 36} min={0} max={82}
+                onChange={v => updateSettings({ conferenceGames: v }, 'Conference Games')} placeholder="36 (blank = no treatment)" />
+            )}
+            {inSeason ? (
+              <LockedField>
+                <SliderField label="Trade Deadline (% of Season)" value={Math.round((s.tradeDeadlineFraction ?? 0.6) * 100)}
+                  min={30} max={85} onChange={() => {}} unit="%" />
+              </LockedField>
+            ) : (
+              <SliderField label="Trade Deadline (% of Season)" value={Math.round((s.tradeDeadlineFraction ?? 0.6) * 100)}
+                min={30} max={85}
+                onChange={v => updateSettings({ tradeDeadlineFraction: v / 100 }, 'Trade Deadline Fraction')} unit="%" />
+            )}
+
+            {/* Financial Rules */}
+            <SectionHeader title="Financial Rules" sub="Cap, tax, and trade salary matching" />
             <SliderField label="Salary Cap" value={s.salaryCap} min={80_000_000} max={250_000_000} step={1_000_000}
               onChange={v => updateSettings({ salaryCap: v }, 'Salary Cap')} unit="$" />
             <SliderField label="Luxury Tax Line" value={s.luxuryTaxLine} min={100_000_000} max={300_000_000} step={1_000_000}
               onChange={v => updateSettings({ luxuryTaxLine: v }, 'Luxury Tax Line')} unit="$" />
+            <SliderField label="Luxury Tax Multiplier" value={s.luxuryTaxMultiplier ?? 1.5} min={1.0} max={4.0} step={0.1}
+              onChange={v => updateSettings({ luxuryTaxMultiplier: v }, 'Luxury Tax Multiplier')} unit="×" />
+            <ToggleField label="Budget Threshold" value={s.budgetThreshold ?? false}
+              onChange={v => updateSettings({ budgetThreshold: v }, 'Budget Threshold')} />
+            <SliderField label="Trade Salary Match %" value={s.tradeSalaryMatchPct ?? 125} min={100} max={200} step={5}
+              onChange={v => updateSettings({ tradeSalaryMatchPct: v }, 'Trade Salary Match %')} unit="%" />
 
             {/* Playoff Format */}
             <SectionHeader title="Playoff Format" />
-            <ButtonField label="Playoff Format (Teams)" options={[6,8,10,16]}
-              value={s.playoffFormat ?? 8} onChange={v => updateSettings({ playoffFormat: Number(v) as 6|8|10|16 }, 'Playoff Format')} />
+            <SelectField label="Playoff Format (Teams)" value={s.playoffFormat ?? 8}
+              options={[6,8,10,12,14,16]}
+              onChange={v => updateSettings({ playoffFormat: Number(v) as any }, 'Playoff Format')} />
             <SelectField label="Playoff Seeding" value={s.playoffSeeding ?? 'Conference'}
               options={['Conference','League-wide']}
               onChange={v => updateSettings({ playoffSeeding: v as any }, 'Playoff Seeding')} />
             <ToggleField label="Play-in Tournament" value={s.playInTournament ?? true}
               onChange={v => updateSettings({ playInTournament: v }, 'Play-in Tournament')} />
+            <ToggleField label="Split By Conference" value={s.splitByConference ?? true}
+              onChange={v => updateSettings({ splitByConference: v }, 'Split By Conference')} />
+            <ToggleField label="Reseed Rounds" value={s.reseedRounds ?? false}
+              onChange={v => updateSettings({ reseedRounds: v }, 'Reseed Rounds')} />
+            <NumberInputField label="Guaranteed Per Division" value={s.guaranteedPerDivision ?? 0} min={0} max={4}
+              onChange={v => updateSettings({ guaranteedPerDivision: v }, 'Guaranteed Per Division')}
+              unit="teams" placeholder="0" />
             <ToggleField label="Home Court Advantage" value={s.homeCourt ?? true}
               onChange={v => updateSettings({ homeCourt: v }, 'Home Court Advantage')} />
 
