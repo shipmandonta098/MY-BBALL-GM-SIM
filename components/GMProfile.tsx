@@ -277,43 +277,7 @@ const GMProfileView: React.FC<GMProfileProps> = ({ league, updateLeague }) => {
         </div>
       </div>
 
-      {/* ── Season Structure Summary ───────────────────────────────────────── */}
-      <div>
-        <h2 className="text-[10px] font-black uppercase text-slate-500 tracking-widest mb-4 px-1">Season Structure</h2>
-        <div className="bg-slate-900/60 border border-slate-800 rounded-3xl p-6">
-          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-4">
-            {[
-              { label: 'Games / Season',   value: league.settings.seasonLength ?? 82 },
-              { label: 'Division Games',   value: league.settings.divisionGames ?? 16 },
-              { label: 'Conference Games', value: league.settings.conferenceGames ?? 36 },
-              { label: 'Trade Deadline',   value: `${Math.round((league.settings.tradeDeadlineFraction ?? 0.6) * 100)}%` },
-              { label: 'Playoff Teams',    value: league.settings.playoffFormat ?? 8 },
-              { label: 'Guaranteed / Div', value: league.settings.guaranteedPerDivision ?? 0 },
-            ].map(({ label, value }) => (
-              <div key={label} className="flex flex-col gap-1">
-                <span className="text-[9px] font-black uppercase text-slate-600 tracking-widest">{label}</span>
-                <span className="text-2xl font-display font-bold text-amber-400 leading-none">{value}</span>
-              </div>
-            ))}
-          </div>
-          <div className="mt-5 flex flex-wrap gap-3 border-t border-slate-800 pt-4">
-            {[
-              { label: 'Split by Conference', on: league.settings.splitByConference ?? true },
-              { label: 'Play-in Tournament',  on: league.settings.playInTournament  ?? true },
-              { label: 'Reseed Rounds',       on: league.settings.reseedRounds      ?? false },
-              { label: 'Home Court Adv.',     on: league.settings.homeCourt         ?? true },
-            ].map(({ label, on }) => (
-              <div key={label}
-                className={`flex items-center gap-2 px-3 py-1.5 rounded-xl border text-[10px] font-black uppercase tracking-wider ${
-                  on ? 'bg-amber-500/10 border-amber-500/30 text-amber-400' : 'bg-slate-800/60 border-slate-700 text-slate-600'
-                }`}>
-                <span className={`w-1.5 h-1.5 rounded-full ${on ? 'bg-amber-400' : 'bg-slate-700'}`} />
-                {label}
-              </div>
-            ))}
-          </div>
-        </div>
-      </div>
+      {/* ── Season Structure Summary removed ── */}
 
     </div>
   );
