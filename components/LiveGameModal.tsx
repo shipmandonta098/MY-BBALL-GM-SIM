@@ -1,6 +1,6 @@
 
 import React, { useState, useEffect, useRef, useMemo } from 'react';
-import { ScheduleGame, Team, GameResult, GamePlayerLine, Player, LeagueState, PlayByPlayEvent } from '../types';
+import { ScheduleGame, Team, GameResult, GamePlayerLine, Player, LeagueState, PlayByPlayEvent, InjuryType } from '../types';
 import TeamBadge from './TeamBadge';
 import { Play, Pause, FastForward, X, Trophy, TrendingUp, Clock } from 'lucide-react';
 
@@ -73,7 +73,10 @@ const LiveGameModal: React.FC<LiveGameModalProps> = ({
   const quarterBreakPending = useRef(false);
   // Tendencies system refs
   const coachFrustrationRef = useRef<{ home: number; away: number }>({ home: 0, away: 0 });
-  const streakRef = useRef<Record<string, { consecutive: number; lastMade: boolean }>>({}); 
+  const streakRef = useRef<Record<string, { consecutive: number; lastMade: boolean }>>({});
+  // In-game injury tracking
+  const inGameInjuriesRef  = useRef<Array<{ playerId: string; playerName: string; injuryType: InjuryType; daysOut: number; teamId: string }>>([]);
+  const injuredInGameRef   = useRef<Set<string>>(new Set()); // player IDs injured this game — excluded from lineups 
 
   // Persistence
   useEffect(() => {
@@ -207,6 +210,62 @@ const LiveGameModal: React.FC<LiveGameModalProps> = ({
   const posGroup = (pos: string): 'Guard' | 'Wing' | 'Big' =>
     (pos === 'PG' || pos === 'SG') ? 'Guard' : pos === 'C' ? 'Big' : 'Wing';
 
+  // ── In-game injury system ────────────────────────────────────────────────
+  type LiveInjuryEntry = { type: InjuryType; minDays: number; maxDays: number; weight: number; msgs: string[] };
+  const LIVE_INJURY_TABLE: LiveInjuryEntry[] = [
+    { type: 'Ankle Sprain',        minDays: 7,   maxDays: 14,  weight: 30, msgs: ['{n} is down and holding the ankle after that hard landing!', '{n} steps on a foot and goes down — trainers rushing out!', '{n} rolls the ankle driving to the rim — he\'s hobbling badly.'] },
+    { type: 'Hamstring Strain',    minDays: 10,  maxDays: 21,  weight: 20, msgs: ['{n} pulls up grabbing the back of the leg — he\'s done for tonight.', '{n} is hobbling down the floor — trainers checking him now.', '{n} sprints and immediately pulls up — hamstring issue.'] },
+    { type: 'Knee Sprain',         minDays: 14,  maxDays: 28,  weight: 12, msgs: ['{n} clutches the knee after that collision — he\'s staying down.', '{n} grimaces after landing — trainers out immediately.', '{n} is helped off the floor — knee issue.'] },
+    { type: 'Patellofemoral Pain', minDays: 21,  maxDays: 42,  weight: 6,  msgs: ['{n} cannot continue — he\'s heading to the locker room.'] },
+    { type: 'Lumbar Strain',       minDays: 7,   maxDays: 21,  weight: 8,  msgs: ['{n} clutches his lower back after taking an elbow — in visible pain.'] },
+    { type: 'Finger/Hand Injury',  minDays: 5,   maxDays: 21,  weight: 10, msgs: ['{n} jams a finger on the play — going to the bench to get it checked.', '{n} is shaking the hand out — trainers wrapping it up.'] },
+    { type: 'Concussion',          minDays: 5,   maxDays: 14,  weight: 4,  msgs: ['{n} takes a hard elbow to the head — concussion protocol underway.', '{n} is dazed after that collision — trainers conducting tests.'] },
+    { type: 'ACL Tear',            minDays: 270, maxDays: 365, weight: 1,  msgs: ['{n} lands awkwardly and goes down immediately — the arena goes silent.', '{n} drops to the floor in agony — this looks very serious.'] },
+    { type: 'Achilles Rupture',    minDays: 270, maxDays: 365, weight: 1,  msgs: ['{n} pulls up and immediately clutches the Achilles — a devastating moment.'] },
+  ];
+  const rollLiveInjury = (player: Player, isHome: boolean, batchEvts: GameEvent[], currentTime: number) => {
+    const total = LIVE_INJURY_TABLE.reduce((s, e) => s + e.weight, 0);
+    let r = Math.random() * total;
+    let entry = LIVE_INJURY_TABLE[0];
+    for (const e of LIVE_INJURY_TABLE) { r -= e.weight; if (r <= 0) { entry = e; break; } }
+    const daysOut = entry.minDays + Math.floor(Math.random() * (entry.maxDays - entry.minDays + 1));
+    const rawMsg = entry.msgs[Math.floor(Math.random() * entry.msgs.length)].replace(/{n}/g, abbrev(player.name));
+    const team = isHome ? homeTeam : awayTeam;
+    const severity = daysOut <= 5 ? 'minor' : daysOut <= 21 ? 'moderate' : 'severe';
+    const daysLabel = daysOut >= 270 ? 'season-ending' : `Est. ${daysOut} day${daysOut !== 1 ? 's' : ''}`;
+
+    // Injury PBP event (red = foul type so it renders in the injury color)
+    batchEvts.push({ time: formatTime(currentTime), quarter, text: `🚨 ${rawMsg}`, type: 'foul', teamId: team.id, possessionBefore: possessionRef.current, possessionAfter: possessionRef.current });
+
+    // Find a backup to sub in
+    const lineup = isHome ? lineupRef.current.home : lineupRef.current.away;
+    const group = posGroup(player.position);
+    const backup = team.roster.find(p => !lineup.includes(p.id) && !injuredInGameRef.current.has(p.id) && posGroup(p.position) === group)
+      ?? team.roster.find(p => !lineup.includes(p.id) && !injuredInGameRef.current.has(p.id));
+
+    if (backup) {
+      const newLineup = lineup.map(id => id === player.id ? backup.id : id);
+      if (isHome) lineupRef.current = { ...lineupRef.current, home: newLineup };
+      else        lineupRef.current = { ...lineupRef.current, away: newLineup };
+      if (fatigueRef.current[player.id])  fatigueRef.current[player.id].isOnFloor  = false;
+      if (!fatigueRef.current[backup.id]) fatigueRef.current[backup.id] = { minutesPlayed: 0, fatigueLevel: 0, isOnFloor: false, consecutiveMinutes: 0 };
+      fatigueRef.current[backup.id].isOnFloor = true;
+      batchEvts.push({ time: formatTime(currentTime), quarter, text: `${abbrev(backup.name)} checks in for ${abbrev(player.name)} (Injury)`, type: 'info', teamId: team.id, possessionBefore: possessionRef.current, possessionAfter: possessionRef.current });
+    }
+
+    // Mark as injured — excluded from all future lineups this game
+    injuredInGameRef.current.add(player.id);
+    inGameInjuriesRef.current.push({ playerId: player.id, playerName: player.name, injuryType: entry.type, daysOut, teamId: team.id });
+
+    // Mark their live stat entry as DNP
+    const setter = isHome ? setHomeStats : setAwayStats;
+    setter(prev => ({ ...prev, [player.id]: { ...prev[player.id], dnp: 'Injured' } }));
+
+    // News-feed style follow-up line
+    batchEvts.push({ time: formatTime(currentTime), quarter, text: `${player.name} OUT — ${entry.type} (${daysLabel}, ${severity})`, type: 'foul', teamId: team.id, possessionBefore: possessionRef.current, possessionAfter: possessionRef.current });
+    return { type: entry.type, daysOut };
+  };
+
   const generatePlay = () => {
     // Use tracked possession; fall back to random only before jump ball resolves
     const possessionTeamId = possessionRef.current || (Math.random() > 0.5 ? homeTeam.id : awayTeam.id);
@@ -218,15 +277,16 @@ const LiveGameModal: React.FC<LiveGameModalProps> = ({
     const offTeam = isHomePossession ? homeTeam : awayTeam;
     const defTeam = isHomePossession ? awayTeam : homeTeam;
     
-    // Use live lineup (updated by substitutions) rather than static roster order
+    // Use live lineup — filter out anyone injured during this game
+    const injured = injuredInGameRef.current;
     const liveHomeIds = lineupRef.current.home.length === 5 ? lineupRef.current.home : homeTeam.roster.slice(0, 5).map(p => p.id);
     const liveAwayIds = lineupRef.current.away.length === 5 ? lineupRef.current.away : awayTeam.roster.slice(0, 5).map(p => p.id);
     const offPlayers = (isHomePossession ? liveHomeIds : liveAwayIds)
       .map(id => offTeam.roster.find(p => p.id === id))
-      .filter(Boolean) as Player[];
+      .filter((p): p is Player => !!p && !injured.has(p.id));
     const defPlayers = (isHomePossession ? liveAwayIds : liveHomeIds)
       .map(id => defTeam.roster.find(p => p.id === id))
-      .filter(Boolean) as Player[];
+      .filter((p): p is Player => !!p && !injured.has(p.id));
     if (!offPlayers.length || !defPlayers.length) return;
     const shooter = offPlayers[Math.floor(Math.random() * offPlayers.length)];
     const defender = defPlayers[Math.floor(Math.random() * defPlayers.length)];
@@ -636,6 +696,15 @@ const LiveGameModal: React.FC<LiveGameModalProps> = ({
         const pts = isThree ? 3 : 2;
         const isDunk = (shooter.attributes?.jumping ?? 0) > 85 && !isThree && Math.random() > 0.7;
         const shotType = isDunk ? 'Slam Dunk' : isThree ? pick(shot3_types_make) : pick(shot2_types_make);
+        // Injury roll: dunks have elevated landing risk; drives have contact risk
+        {
+          const isDrive = shot2_types_make.some(t => ['Driving Layup', 'Running Layup'].includes(t) && shotType === t);
+          let injChance = isDunk ? 0.006 : isDrive ? 0.005 : 0.002;
+          if (game.homeB2B || game.awayB2B) injChance *= 1.3;
+          const fd = fatigueRef.current[shooter.id];
+          if (fd && fd.minutesPlayed > 30) injChance *= 1.4;
+          if (Math.random() < injChance) rollLiveInjury(shooter, isHomePossession, batchEvents, newTime);
+        }
         const newPts = getStat(isHomePossession, shooter.id, 'pts') + pts;
         // BUG 3 FIX: Catch-and-Shoot & Corner 3 always award an assist on a make
         if (shotType === 'Catch-and-Shoot 3' || shotType === 'Corner 3-pointer') {
@@ -666,6 +735,15 @@ const LiveGameModal: React.FC<LiveGameModalProps> = ({
         possessionAfter = defTeam.id; // made basket → possession switches
         tryTech(isHomePossession);
       } else { // Miss
+        // Injury roll on hard-contact miss (drives, contact shots)
+        {
+          const contactMiss = ['Driving Layup', 'Running Floater', 'Running Layup'].some(t => t === (isThree ? '' : pick(shot2_types_miss)));
+          let injChance = contactMiss ? 0.004 : 0.001;
+          if (game.homeB2B || game.awayB2B) injChance *= 1.3;
+          const fd = fatigueRef.current[shooter.id];
+          if (fd && fd.minutesPlayed > 30) injChance *= 1.4;
+          if (Math.random() < injChance) rollLiveInjury(shooter, isHomePossession, batchEvents, newTime);
+        }
         // Defensive Guru: block probability +10% (threshold 80→75, random check 0.80→0.70)
         const blockAttrThresh = badge.defGuru ? 75 : 80;
         const blockRandThresh = badge.defGuru ? 0.70 : 0.80;
@@ -834,7 +912,7 @@ const LiveGameModal: React.FC<LiveGameModalProps> = ({
     const onFloor  = currentLineup
       .map(id => team.roster.find(p => p.id === id))
       .filter(Boolean) as Player[];
-    const offBench = team.roster.filter(p => !currentLineup.includes(p.id));
+    const offBench = team.roster.filter(p => !currentLineup.includes(p.id) && !injuredInGameRef.current.has(p.id));
 
     type SubOp = { out: Player; in: Player; reason: SubReason };
     const ops: SubOp[]         = [];
@@ -1035,7 +1113,8 @@ const LiveGameModal: React.FC<LiveGameModalProps> = ({
       isOvertime: currentQuarter > 4,
       isBuzzerBeater: Math.abs(currentHomeScore - currentAwayScore) <= 2 && Math.random() < 0.2,
       isComeback: false,
-      isChippy: isChippy
+      isChippy: isChippy,
+      gameInjuries: inGameInjuriesRef.current
     };
     onComplete(res);
   };
@@ -1128,7 +1207,8 @@ const LiveGameModal: React.FC<LiveGameModalProps> = ({
       isOvertime: quarter > 4,
       isBuzzerBeater,
       isComeback,
-      isChippy: isChippy
+      isChippy: isChippy,
+      gameInjuries: inGameInjuriesRef.current
     };
     onComplete(res);
   };
