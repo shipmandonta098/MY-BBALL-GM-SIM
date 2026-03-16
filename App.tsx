@@ -434,64 +434,112 @@ const App: React.FC = () => {
       const hc = team.staff.headCoach;
       if (!hc) continue;
 
-      const gamesPlayed = team.wins + team.losses;
-      const seasonLen   = newState.settings.seasonLength ?? 82;
+      const gamesPlayed  = team.wins + team.losses;
+      const seasonLen    = newState.settings.seasonLength ?? 82;
+      const tradeDeadline = Math.round(seasonLen * 0.50); // ~game 41 in an 82-game season
+      const lateSeasonMark = Math.round(seasonLen * 0.75); // ~game 62
 
-      // ── FIRING GATES: never fire in first 20 games; increasingly possible after that ──
-      if (gamesPlayed < 20) continue; // too early — no matter how bad the streak
+      // Never evaluate a firing before game 15
+      if (gamesPlayed < 15) continue;
 
-      const winPct            = gamesPlayed > 0 ? team.wins / gamesPlayed : 0.5;
-      const expectedWinPct    = 0.5; // neutral baseline
-      const gamesAboveExpected = Math.round((winPct - expectedWinPct) * gamesPlayed);
+      const winPct         = team.wins / gamesPlayed;
+      const expectedWins   = gamesPlayed * 0.5;
+      const winDeficit     = expectedWins - team.wins; // positive = underperforming
 
-      // Patience collapses only after sustained bad play: < 10 patience AND losing pace
-      const ownerPatienceFire = team.finances.ownerPatience < 10 && winPct < 0.35;
+      // Proxy for team morale / coach approval — average roster morale
+      const rosterMorale   = team.roster.length > 0
+        ? team.roster.reduce((s, p) => s + (p.morale ?? 50), 0) / team.roster.length
+        : 50;
+      const starMutiny     = team.roster.some(p => (p.morale ?? 50) < 45 && p.personalityTraits?.includes('Diva/Star'));
+      const patience       = team.finances.ownerPatience;
 
-      // Streak fire: need a severe ≥ -8 skid AND past mid-season (game 35+) AND rare random
-      const streakFire = team.streak <= -8 && gamesPlayed >= 35 && Math.random() > 0.92;
+      // ── Phase 1: Early season (games 15–30) — fire only in extreme crisis ──
+      // Threshold: win% < .200 AND (avg morale < 30 OR patience < 20 OR star mutiny)
+      // Daily roll: 0.8% chance when ALL extreme flags met
+      let fireChance = 0;
+      let fireReason = '';
 
-      // Early mid-season window (20–34 games): only fire if utterly hopeless (≤ 2 wins in 20 games)
-      const earlyDesperation = gamesPlayed >= 20 && gamesPlayed < 35 && team.wins <= 2 && Math.random() > 0.85;
+      if (gamesPlayed <= 30) {
+        const extremeRecord  = winPct < 0.200;
+        const extremeMorale  = rosterMorale < 30;
+        const extremePatience = patience < 20;
+        if (extremeRecord && (extremeMorale || extremePatience || starMutiny)) {
+          fireChance = 0.008; // ~0.8% per day — fires roughly once per 125 days at peak
+          fireReason = `a catastrophic ${team.wins}-${team.losses} start and complete locker room breakdown`;
+        }
 
-      if (ownerPatienceFire || streakFire || earlyDesperation) {
-        const reason = ownerPatienceFire
-          ? `a ${team.wins}-${team.losses} record and loss of board confidence`
-          : streakFire
-          ? `a brutal ${Math.abs(team.streak)}-game losing streak`
-          : `a dismal ${team.wins}-${team.losses} start`;
+      // ── Phase 2: Mid-season (games 31 – trade deadline) ──
+      // Threshold: 10+ games below pace, morale < 50, streak ≤ -8 or patience < 40
+      } else if (gamesPlayed <= tradeDeadline) {
+        const behindPace     = winDeficit >= 10;
+        const lowMorale      = rosterMorale < 50;
+        const badStreak      = team.streak <= -8;
+        const impatientOwner = patience < 40;
+        if (behindPace && (lowMorale || badStreak) && impatientOwner) {
+          fireChance = 0.10;
+          fireReason = `falling ${Math.round(winDeficit)} games behind pace with a ${team.wins}-${team.losses} record`;
+        } else if (starMutiny && behindPace) {
+          fireChance = 0.06;
+          fireReason = `star player unrest and a disappointing ${team.wins}-${team.losses} record`;
+        }
 
-        newState = await addNewsItem(newState, 'firing', { team, coach: hc, detail: `Fired due to ${reason}.` }, true);
-        newState.transactions = recordTransaction(newState, 'firing', [team.id], `${team.name} fired Head Coach ${hc.name} following ${reason}.`);
+      // ── Phase 3: Post-trade-deadline to late season (games tradeDeadline+1 – lateSeasonMark) ──
+      // Threshold: win% < .400, patience < 35, morale < 55 or streak ≤ -6
+      } else if (gamesPlayed <= lateSeasonMark) {
+        const missingPlayoffs = winPct < 0.400;
+        const impatientOwner  = patience < 35;
+        const badStreak       = team.streak <= -6;
+        const lowMorale       = rosterMorale < 55;
+        if (missingPlayoffs && impatientOwner && (badStreak || lowMorale || starMutiny)) {
+          fireChance = 0.13;
+          fireReason = `a ${team.wins}-${team.losses} record and fading playoff hopes`;
+        }
 
-        // Put fired coach back in the pool
-        const releasedPool = [...newState.coachPool, { ...hc, desiredContract: { years: 2, salary: Math.floor(hc.salary * 0.9) }, interestScore: 50 }];
-        newState = { ...newState, coachPool: releasedPool };
-
-        // ── IMMEDIATE AUTO-HIRE: AI never leaves post vacant ──
-        // Pick a head-coach-tier candidate from the pool, or generate one
-        const poolCandidates = newState.coachPool.filter(c => c.role === 'Head Coach' && c.id !== hc.id);
-        const hireDaysDelay = 1 + Math.floor(Math.random() * 7); // 1–7 day search (flavour only)
-        let newHC = poolCandidates.length > 0
-          ? poolCandidates.sort(() => Math.random() - 0.5)[0]
-          : generateCoach(`ac-${Date.now()}-${team.id}`, 'C', newState.settings.coachGenderRatio);
-
-        const updatedTeams = newState.teams.map(t =>
-          t.id === team.id
-            ? { ...t, staff: { ...t.staff, headCoach: { ...newHC, salary: newHC.salary ?? 2_000_000, contractYears: 2 } }, finances: { ...t.finances, ownerPatience: 50 } }
-            : t
-        );
-        // Remove hired coach from pool
-        const trimmedPool = newState.coachPool.filter(c => c.id !== newHC.id);
-        newState = { ...newState, teams: updatedTeams, coachPool: trimmedPool };
-
-        newState = await addNewsItem(
-          newState, 'hiring',
-          { team: newState.teams.find(t => t.id === team.id) ?? team, coach: newHC,
-            detail: `${team.name} hired ${newHC.name} as Head Coach, ${hireDaysDelay} day${hireDaysDelay !== 1 ? 's' : ''} after parting ways with ${hc.name}.` },
-          false
-        );
-        newState.transactions = recordTransaction(newState, 'hiring', [team.id], `${team.name} hired ${newHC.name} as Head Coach.`);
+      // ── Phase 4: Late season (games lateSeasonMark+ ) ──
+      // Aggressive: win% < .400 + patience < 30; or complete disaster win% < .300
+      } else {
+        if (winPct < 0.300 && patience < 40) {
+          fireChance = 0.20;
+          fireReason = `a dismal ${team.wins}-${team.losses} record in a lost season`;
+        } else if (winPct < 0.400 && patience < 30 && team.streak <= -5) {
+          fireChance = 0.15;
+          fireReason = `missing the playoffs and a ${Math.abs(team.streak)}-game skid`;
+        }
       }
+
+      if (fireChance === 0 || Math.random() >= fireChance) continue;
+
+      // ── FIRE ──
+      newState = await addNewsItem(newState, 'firing', { team, coach: hc, detail: `Fired following ${fireReason}.` }, true);
+      newState.transactions = recordTransaction(newState, 'firing', [team.id], `${team.name} fired Head Coach ${hc.name} following ${fireReason}.`);
+
+      // Released coach goes back to market
+      const releasedPool = [...newState.coachPool, { ...hc, desiredContract: { years: 2, salary: Math.floor(hc.salary * 0.9) }, interestScore: 50 }];
+      newState = { ...newState, coachPool: releasedPool };
+
+      // ── IMMEDIATE AUTO-HIRE (1–7 day search, flavour only — no vacancy left open) ──
+      const poolCandidates = newState.coachPool.filter(c => c.role === 'Head Coach' && c.id !== hc.id);
+      const hireDaysDelay  = 1 + Math.floor(Math.random() * 7);
+      // Prefer coaches whose scheme fits the team's needs; fall back to random pool pick or generated coach
+      const schemeMatch = poolCandidates.filter(c => c.scheme === hc.scheme);
+      const newHC = (schemeMatch.length > 0 ? schemeMatch : poolCandidates).sort(() => Math.random() - 0.5)[0]
+        ?? generateCoach(`ac-${Date.now()}-${team.id}`, 'C', newState.settings.coachGenderRatio);
+
+      const updatedTeams = newState.teams.map(t =>
+        t.id === team.id
+          ? { ...t, staff: { ...t.staff, headCoach: { ...newHC, salary: newHC.salary ?? 2_000_000, contractYears: 2 } }, finances: { ...t.finances, ownerPatience: 50 } }
+          : t
+      );
+      const trimmedPool = newState.coachPool.filter(c => c.id !== newHC.id);
+      newState = { ...newState, teams: updatedTeams, coachPool: trimmedPool };
+
+      newState = await addNewsItem(
+        newState, 'hiring',
+        { team: newState.teams.find(t => t.id === team.id) ?? team, coach: newHC,
+          detail: `${team.name} hired ${newHC.name} as Head Coach, ${hireDaysDelay} day${hireDaysDelay !== 1 ? 's' : ''} after parting ways with ${hc.name}.` },
+        false
+      );
+      newState.transactions = recordTransaction(newState, 'hiring', [team.id], `${team.name} hired ${newHC.name} as Head Coach.`);
     }
     // Injury recovery — decrement days, auto-return when healed
     // Medical staff (budgets.health) grants a bonus recovery tick chance (0% at 20 → +40% at 100)
