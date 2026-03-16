@@ -1,6 +1,7 @@
 import React, { useState, useMemo } from 'react';
 import { GameResult, Team, LeagueState } from '../types';
 import TeamBadge from './TeamBadge';
+import { PlayerLink, TeamLink } from '../context/NavigationContext';
 
 interface ResultsProps {
   history: GameResult[];
@@ -74,7 +75,7 @@ const Results: React.FC<ResultsProps> = ({ history, teams, userTeamId, onViewBox
            <div className="flex items-center gap-8 flex-1">
               <div className="text-center">
                   <TeamBadge team={home} size="md" className="mx-auto mb-2" />
-                 <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest">{home.name}</p>
+                 <TeamLink teamId={home.id} name={home.name} className="text-[10px] font-black text-slate-500 uppercase tracking-widest" />
               </div>
               <div className="text-center">
                  <p className="text-3xl font-display font-black text-white">{game.homeScore} - {game.awayScore}</p>
@@ -82,7 +83,7 @@ const Results: React.FC<ResultsProps> = ({ history, teams, userTeamId, onViewBox
               </div>
               <div className="text-center">
                   <TeamBadge team={away} size="md" className="mx-auto mb-2" />
-                 <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest">{away.name}</p>
+                 <TeamLink teamId={away.id} name={away.name} className="text-[10px] font-black text-slate-500 uppercase tracking-widest" />
               </div>
            </div>
 
@@ -90,7 +91,9 @@ const Results: React.FC<ResultsProps> = ({ history, teams, userTeamId, onViewBox
               <div className="w-10 h-10 bg-amber-500/10 rounded-full flex items-center justify-center text-xl shrink-0">🏀</div>
               <div>
                  <p className="text-[10px] text-slate-500 font-black uppercase tracking-widest mb-0.5">Top Performer</p>
-                 <p className="font-bold text-slate-200 text-sm whitespace-nowrap">{topPlayer?.name}</p>
+                 {topPlayer
+                   ? <PlayerLink player={topPlayer} name={topPlayer.name} className="font-bold text-slate-200 text-sm whitespace-nowrap" />
+                   : <p className="font-bold text-slate-200 text-sm whitespace-nowrap">—</p>}
                  <p className="text-xs font-mono text-amber-500">{topPerformer.points} PTS • {topPerformer.rebounds} REB</p>
               </div>
            </div>

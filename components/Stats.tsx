@@ -1,6 +1,7 @@
 import React, { useState, useMemo } from 'react';
 import { LeagueState, Player, Team, Position } from '../types';
 import TeamBadge from './TeamBadge';
+import { PlayerLink } from '../context/NavigationContext';
 
 interface StatsProps {
   league: LeagueState;
@@ -183,7 +184,7 @@ const Stats: React.FC<StatsProps> = ({ league, onViewRoster, onManageTeam, onVie
                   <tr key={p.id} className="hover:bg-slate-800/30 transition-all">
                     <td className="px-6 py-4 font-display font-bold text-slate-600">#{idx + 1}</td>
                     <td className="px-6 py-4 flex items-center gap-3">
-                       <span className="font-bold text-slate-200 uppercase tracking-tight">{p.name}</span>
+                       <PlayerLink playerId={p.id} name={p.name} className="font-bold text-slate-200 uppercase tracking-tight" />
                        <button onClick={() => toggleCompare(p.id)} className={`text-[10px] p-1 rounded ${compareList.includes(p.id) ? 'bg-amber-500 text-slate-950' : 'bg-slate-800 text-slate-500'} hover:scale-105 transition-all`}>Compare</button>
                     </td>
                     <td className="px-6 py-4">
@@ -232,7 +233,7 @@ const Stats: React.FC<StatsProps> = ({ league, onViewRoster, onManageTeam, onVie
                         size="lg"
                       />
                     </div>
-                    <h4 className="text-2xl font-display font-bold text-white uppercase">{p.name}</h4>
+                    <PlayerLink playerId={p.id} name={p.name} className="text-2xl font-display font-bold text-white uppercase" />
                     <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest">{p.teamName} • {p.position}</p>
                  </div>
                  <div className="space-y-4">

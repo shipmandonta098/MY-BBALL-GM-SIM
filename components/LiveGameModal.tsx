@@ -1,6 +1,7 @@
 
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { ScheduleGame, Team, GameResult, GamePlayerLine, Player, LeagueState, PlayByPlayEvent, InjuryType } from '../types';
+import { PlayerLink } from '../context/NavigationContext';
 import TeamBadge from './TeamBadge';
 import { Play, Pause, FastForward, X, Trophy, TrendingUp, Clock } from 'lucide-react';
 
@@ -1278,7 +1279,7 @@ const LiveGameModal: React.FC<LiveGameModalProps> = ({
         >
           <td className="sticky left-0 bg-inherit py-1.5 pl-2 pr-2 min-w-[82px] max-w-[82px]">
             <div className={`truncate text-[9px] font-bold leading-tight ${isTop ? 'text-amber-300' : isDNP ? 'text-slate-600' : 'text-slate-200'}`}>
-              {abbrev(pl.name)}
+              <PlayerLink playerId={pl.id} name={abbrev(pl.name)} className={`text-[9px] font-bold leading-tight ${isTop ? 'text-amber-300' : isDNP ? 'text-slate-600' : 'text-slate-200'}`} />
             </div>
             <div className="flex items-center gap-1 mt-0.5">
               {/* On-floor pill */}
