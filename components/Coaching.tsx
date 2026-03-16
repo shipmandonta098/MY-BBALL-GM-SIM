@@ -15,8 +15,12 @@ const Coaching: React.FC<CoachingProps> = ({ league, updateLeague }) => {
   const currentStaffCost = (Object.values(userTeam.staff) as (Coach | null)[])
     .reduce((sum, coach) => sum + (coach?.salary || 0), 0);
 
-  const avgDev = (userTeam.staff.assistantDev?.ratingDevelopment || 60);
-  const rookieGrowthBoost = Math.max(0, (avgDev - 60) * 0.5).toFixed(1);
+  const assistDevRating = userTeam.staff.assistantDev?.ratingDevelopment ?? 60;
+  const hcDevRating     = userTeam.staff.headCoach?.ratingDevelopment ?? 50;
+  // Mirror the formula in App.tsx offseason dev: HC dev (50→100 = 0→+30%) + assistDev (base /75)
+  const hcBonus    = Math.max(0, (hcDevRating - 50) / 50) * 30;
+  const assistBase = Math.max(0, (assistDevRating - 60) * 0.5);
+  const rookieGrowthBoost = (hcBonus + assistBase).toFixed(1);
 
   const handleHire = (coach: Coach) => {
     if (!hiringRole) return;
@@ -105,14 +109,21 @@ const Coaching: React.FC<CoachingProps> = ({ league, updateLeague }) => {
             </p>
           </div>
           
-          <div className="flex gap-6">
-             <div className="bg-slate-950/50 p-4 rounded-2xl border border-slate-800 text-center">
-                <p className="text-[10px] text-slate-500 uppercase font-black mb-1">Rookie Growth XP</p>
-                <p className="text-2xl font-display font-bold text-emerald-400">+{rookieGrowthBoost}%</p>
+          <div className="flex flex-wrap gap-4">
+             <div className="bg-orange-500/10 border border-orange-500/20 p-4 rounded-2xl text-center min-w-[120px]">
+                <p className="text-[9px] text-orange-400 uppercase font-black mb-1 tracking-widest">Dev Boost</p>
+                <p className="text-2xl font-display font-bold text-orange-400">+{rookieGrowthBoost}%</p>
+                <p className="text-[8px] text-slate-600 mt-0.5">HC + Dev Asst</p>
              </div>
-             <div className="bg-slate-950/50 p-4 rounded-2xl border border-slate-800 text-center">
-                <p className="text-[10px] text-slate-500 uppercase font-black mb-1">B2B Fatigue Cut</p>
-                <p className="text-2xl font-display font-bold text-amber-500">-3%</p>
+             <div className="bg-slate-950/50 p-4 rounded-2xl border border-slate-800 text-center min-w-[120px]">
+                <p className="text-[9px] text-slate-500 uppercase font-black mb-1 tracking-widest">HC Dev Rtg</p>
+                <p className={`text-2xl font-display font-bold ${hcDevRating >= 80 ? 'text-orange-400' : hcDevRating >= 65 ? 'text-amber-500' : 'text-slate-400'}`}>{hcDevRating}</p>
+                <p className="text-[8px] text-slate-600 mt-0.5">Inj Duration</p>
+             </div>
+             <div className="bg-slate-950/50 p-4 rounded-2xl border border-slate-800 text-center min-w-[120px]">
+                <p className="text-[9px] text-slate-500 uppercase font-black mb-1 tracking-widest">Asst Dev Rtg</p>
+                <p className={`text-2xl font-display font-bold ${assistDevRating >= 80 ? 'text-emerald-400' : assistDevRating >= 65 ? 'text-amber-500' : 'text-slate-400'}`}>{assistDevRating}</p>
+                <p className="text-[8px] text-slate-600 mt-0.5">Growth Base</p>
              </div>
           </div>
         </div>
