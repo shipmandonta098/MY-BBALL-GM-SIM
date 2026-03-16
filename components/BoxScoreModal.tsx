@@ -35,9 +35,9 @@ const BoxScoreModal: React.FC<BoxScoreModalProps> = ({ result, homeTeam, awayTea
                 <th className="px-2 py-4 text-center">AST</th>
                 <th className="px-2 py-4 text-center">STL</th>
                 <th className="px-2 py-4 text-center">BLK</th>
-                <th className="px-2 py-4 text-center">FG</th>
-                <th className="px-2 py-4 text-center">3P</th>
-                <th className="px-2 py-4 text-center">FT</th>
+                <th className="px-2 py-4 text-center">FG%</th>
+                <th className="px-2 py-4 text-center">3P%</th>
+                <th className="px-2 py-4 text-center">FT%</th>
                 <th className="px-2 py-4 text-center">+/-</th>
                 <th className="px-2 py-4 text-center">TO</th>
               </tr>
@@ -54,9 +54,18 @@ const BoxScoreModal: React.FC<BoxScoreModalProps> = ({ result, homeTeam, awayTea
                   <td className="px-2 py-4 text-center font-mono">{line.ast}</td>
                   <td className="px-2 py-4 text-center font-mono text-slate-500">{line.stl}</td>
                   <td className="px-2 py-4 text-center font-mono text-slate-500">{line.blk}</td>
-                  <td className="px-2 py-4 text-center font-mono text-[10px]">{line.fgm}-{line.fga}</td>
-                  <td className="px-2 py-4 text-center font-mono text-[10px] text-slate-400">{line.threepm}-{line.threepa}</td>
-                  <td className="px-2 py-4 text-center font-mono text-[10px] text-slate-400">{line.ftm}-{line.fta}</td>
+                  <td className="px-2 py-4 text-center">
+                    <span className="block font-mono text-[10px] text-slate-200">{line.fgm}-{line.fga}</span>
+                    <span className="block font-mono text-[9px] text-orange-400">{line.fga > 0 ? `${Math.round(line.fgm / line.fga * 100)}%` : '—'}</span>
+                  </td>
+                  <td className="px-2 py-4 text-center">
+                    <span className="block font-mono text-[10px] text-slate-400">{line.threepm}-{line.threepa}</span>
+                    <span className="block font-mono text-[9px] text-orange-400">{line.threepa > 0 ? `${Math.round(line.threepm / line.threepa * 100)}%` : '—'}</span>
+                  </td>
+                  <td className="px-2 py-4 text-center">
+                    <span className="block font-mono text-[10px] text-slate-400">{line.ftm}-{line.fta}</span>
+                    <span className="block font-mono text-[9px] text-orange-400">{line.fta > 0 ? `${Math.round(line.ftm / line.fta * 100)}%` : '—'}</span>
+                  </td>
                   <td className={`px-2 py-4 text-center font-mono font-bold ${line.plusMinus > 0 ? 'text-emerald-500' : line.plusMinus < 0 ? 'text-rose-500' : 'text-slate-500'}`}>
                     {line.plusMinus > 0 ? `+${line.plusMinus}` : line.plusMinus}
                   </td>
