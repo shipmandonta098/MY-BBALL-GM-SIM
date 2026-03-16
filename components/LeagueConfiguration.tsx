@@ -359,7 +359,7 @@ const LeagueConfiguration: React.FC<LeagueConfigurationProps> = ({ onConfirm, on
 
   // ── render ────────────────────────────────────────────────────────────────
   return (
-    <div className="fixed inset-0 bg-slate-950 flex items-center justify-center z-[110] p-4 md:p-10 animate-in fade-in zoom-in-95 duration-500 overflow-y-auto">
+    <div className="fixed inset-0 bg-slate-950 z-[110] overflow-y-auto animate-in fade-in zoom-in-95 duration-500 flex flex-col items-center py-8 px-4 md:py-12 md:px-10">
       <div className="absolute inset-0 pointer-events-none opacity-20">
         <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[800px] h-[800px] bg-amber-500/10 rounded-full blur-[120px]" />
       </div>
@@ -389,7 +389,7 @@ const LeagueConfiguration: React.FC<LeagueConfigurationProps> = ({ onConfirm, on
         </div>
       )}
 
-      <div className="relative w-full max-w-4xl bg-slate-900 border border-slate-800 rounded-[3rem] p-6 md:p-12 shadow-2xl space-y-10 my-10">
+      <div className="relative w-full max-w-4xl bg-slate-900 border border-slate-800 rounded-[3rem] p-6 md:p-12 shadow-2xl space-y-10">
 
         {/* Title */}
         <div className="text-center space-y-2">
@@ -514,15 +514,35 @@ const LeagueConfiguration: React.FC<LeagueConfigurationProps> = ({ onConfirm, on
           </div>
         </Section>
 
-        {/* ── Advanced Settings (collapsible) ──────────────────────────────────── */}
+        {/* ── Advanced Settings trigger ────────────────────────────────────────── */}
         <div className="border-t border-slate-800 pt-8">
-          <button type="button" onClick={() => setShowAdvanced(v => !v)}
+          <button type="button" onClick={() => setShowAdvanced(true)}
             className="text-[10px] font-black text-slate-500 uppercase tracking-[0.4em] flex items-center gap-2 hover:text-white transition-colors">
-            {showAdvanced ? '▼' : '▶'} Advanced Settings
+            ▶ Advanced Settings
           </button>
+        </div>
 
-          {showAdvanced && (
-            <div className="space-y-8 mt-6 animate-in slide-in-from-top-4">
+        {/* ── Advanced Settings modal (bottom-sheet on mobile, dialog on desktop) ─ */}
+        {showAdvanced && (
+          <div className="fixed inset-0 z-[150] flex flex-col justify-end sm:items-center sm:justify-center sm:p-4">
+            {/* Backdrop */}
+            <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={() => setShowAdvanced(false)} />
+            {/* Panel */}
+            <div className="relative w-full sm:max-w-4xl max-h-[92vh] sm:max-h-[88vh] bg-slate-900 border border-slate-800 rounded-t-3xl sm:rounded-3xl flex flex-col shadow-2xl animate-in slide-in-from-bottom-4 sm:zoom-in-95 duration-300">
+              {/* Sticky header with close button */}
+              <div className="sticky top-0 z-10 flex items-center justify-between px-6 py-4 bg-slate-900/95 backdrop-blur border-b border-slate-800 rounded-t-3xl shrink-0">
+                <h3 className="text-xs font-black text-amber-500 uppercase tracking-[0.4em]">Advanced Settings</h3>
+                <button
+                  type="button"
+                  onClick={() => setShowAdvanced(false)}
+                  className="w-9 h-9 flex items-center justify-center bg-slate-800 hover:bg-slate-700 rounded-full text-slate-400 hover:text-white transition-all text-base font-bold shrink-0"
+                  aria-label="Close Advanced Settings"
+                >
+                  ✕
+                </button>
+              </div>
+              {/* Scrollable content */}
+              <div className="overflow-y-auto flex-1 p-4 sm:p-6 space-y-8">
 
               {/* ── League Infrastructure ─────────────────────────────────────── */}
               <div className="bg-slate-900/50 border border-slate-800 rounded-2xl p-6 space-y-6">
@@ -878,9 +898,10 @@ const LeagueConfiguration: React.FC<LeagueConfigurationProps> = ({ onConfirm, on
                 </div>
               </div>
 
+              </div>
             </div>
-          )}
-        </div>
+          </div>
+        )}
 
         {/* ── Bottom ───────────────────────────────────────────────────────────── */}
         <div className="flex flex-col md:flex-row items-center justify-between gap-8 pt-6 border-t border-slate-800">
