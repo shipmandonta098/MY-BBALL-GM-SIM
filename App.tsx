@@ -1562,7 +1562,7 @@ const App: React.FC = () => {
 
   if (status === 'title') return <TitleScreen onNewLeague={handleNewLeague} onLoadSave={handleLoadSave} onDeleteSave={handleDeleteSave} onRenameSave={handleRenameSave} onImportSave={handleImportSave} saves={allSaves} />;
   if (status === 'config') return <LeagueConfiguration onConfirm={handleConfigLeague} onCancel={() => setStatus('title')} />;
-  if (status === 'setup' && league) return <TeamSelection teams={league.teams} onSelectTeam={handleSelectTeam} onEditTeam={(teamId, updates) => {
+  if (status === 'setup' && league) return <TeamSelection teams={league.teams} onSelectTeam={handleSelectTeam} onBack={() => setStatus('config')} onEditTeam={(teamId, updates) => {
     setLeague(prev => prev ? { ...prev, teams: prev.teams.map(t => t.id === teamId ? { ...t, ...updates } : t) } : prev);
   }} />;
   if (!league || !league.userTeamId) return null;

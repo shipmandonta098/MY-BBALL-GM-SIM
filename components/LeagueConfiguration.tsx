@@ -782,12 +782,14 @@ const LeagueConfiguration: React.FC<LeagueConfigurationProps> = ({ onConfirm, on
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                   <Field label="Min Roster Size" hint="Minimum players required on an active roster.">
                     <input type="number" value={minRosterSize} min={5} max={20}
-                      onChange={e => setMinRosterSize(Math.min(parseInt(e.target.value)||10, maxRosterSize))}
+                      onChange={e => { const v = parseInt(e.target.value); if (!isNaN(v)) setMinRosterSize(v); }}
+                      onBlur={() => setMinRosterSize(v => Math.max(5, Math.min(v, maxRosterSize)))}
                       className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-3 text-white font-mono focus:outline-none" />
                   </Field>
                   <Field label="Max Roster Size" hint="Maximum players allowed on an active roster.">
                     <input type="number" value={maxRosterSize} min={10} max={30}
-                      onChange={e => setMaxRosterSize(Math.max(parseInt(e.target.value)||18, minRosterSize))}
+                      onChange={e => { const v = parseInt(e.target.value); if (!isNaN(v)) setMaxRosterSize(v); }}
+                      onBlur={() => setMaxRosterSize(v => Math.max(v, minRosterSize, 10))}
                       className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-3 text-white font-mono focus:outline-none" />
                   </Field>
                 </div>
