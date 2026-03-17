@@ -81,6 +81,38 @@ const Schedule: React.FC<ScheduleProps> = ({ league, onSimulate, onScout, onWatc
     }
   }, [teamSchedule, viewMode]);
 
+  // ── Betting line / spread calculator ─────────────────────────────────────
+  // Line expressed from home team perspective: negative = home favored.
+  const calcSpread = (home: Team, away: Team) => {
+    const healthyOVR = (t: Team) => {
+      const active = t.roster.filter(p => p.status !== 'Injured');
+      return active.length > 0
+        ? active.reduce((s, p) => s + p.rating, 0) / active.length
+        : t.roster.reduce((s, p) => s + p.rating, 0) / (t.roster.length || 1);
+    };
+    const ovrDiff   = healthyOVR(home) - healthyOVR(away);
+    const formPct   = (t: Team) => t.lastTen.length > 0 ? t.lastTen.filter(r => r === 'W').length / t.lastTen.length : 0.5;
+    const formAdv   = (formPct(home) - formPct(away)) * 4;   // up to ±4 pts
+    const HOME_ADV  = 3.5;
+    const raw       = ovrDiff * 0.38 + formAdv + HOME_ADV;
+    const clamped   = Math.max(-28, Math.min(28, raw));
+    const line      = Math.round(clamped * 2) / 2;           // nearest 0.5
+    const homeFav   = line >= 0;
+    const abs       = Math.abs(line);
+    return {
+      line,
+      homeFavored: homeFav,
+      homeSpread: line === 0 ? 'PK' : homeFav ? `-${abs}` : `+${abs}`,
+      awaySpread:  line === 0 ? 'PK' : homeFav ? `+${abs}` : `-${abs}`,
+      // Did the favourite cover once the game is played?
+      covered: (result: { homeScore: number; awayScore: number } | null) => {
+        if (!result) return null;
+        const margin = result.homeScore - result.awayScore;
+        return homeFav ? margin > abs : (-margin) > abs;
+      },
+    };
+  };
+
   const getRivalryLevel = (stats: RivalryStats | undefined) => {
     if (!stats || stats.totalGames <= 2) return { label: 'Ice Cold', icon: '❄️', color: 'text-blue-400', bg: 'bg-blue-500/10', border: 'border-blue-500/20' };
     
@@ -105,8 +137,13 @@ const Schedule: React.FC<ScheduleProps> = ({ league, onSimulate, onScout, onWatc
     const awayTeam = league.teams.find(t => t.id === game.awayTeamId)!;
     const focusTeam = league.teams.find(t => t.id === displayTeamId)!;
     const opp = isHome ? awayTeam : homeTeam;
-    
+
     const result = game.played ? league.history.find(h => h.id === game.id) : null;
+    const spread  = calcSpread(homeTeam, awayTeam);
+    // From focus-team perspective
+    const focusFavored  = isHome ? spread.homeFavored : !spread.homeFavored;
+    const focusSpread   = isHome ? spread.homeSpread   : spread.awaySpread;
+    const covered       = spread.covered(result ?? null);
     const isWin = result ? (isHome ? result.homeScore > result.awayScore : result.awayScore > result.homeScore) : null;
     const isB2B = isHome ? game.homeB2B : game.awayB2B;
     const b2bNum = isHome ? game.homeB2BCount : game.awayB2BCount;
@@ -251,6 +288,34 @@ const Schedule: React.FC<ScheduleProps> = ({ league, onSimulate, onScout, onWatc
                 </div>
               </div>
 
+              {/* ── Betting Line ─────────────────────────────────── */}
+              <div className="flex flex-col items-center gap-1.5 shrink-0 min-w-[90px]">
+                <div className={`px-3 py-1 rounded-xl border text-[10px] font-black uppercase tracking-widest ${
+                  focusFavored
+                    ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400'
+                    : 'bg-orange-500/10 border-orange-500/30 text-orange-400'
+                }`}>
+                  {focusFavored ? '▲ FAV' : '▼ DOG'}
+                </div>
+                <span className={`font-mono text-xl font-black ${focusFavored ? 'text-emerald-400' : 'text-orange-400'}`}>
+                  {focusSpread}
+                </span>
+                <span className="text-[9px] text-slate-600 font-bold uppercase tracking-widest">
+                  {spread.homeFavored
+                    ? `${homeTeam.abbreviation} fav`
+                    : `${awayTeam.abbreviation} fav`}
+                </span>
+                {game.played && covered !== null && (
+                  <span className={`mt-0.5 px-2 py-0.5 rounded-full text-[9px] font-black uppercase tracking-widest border ${
+                    covered
+                      ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400'
+                      : 'bg-rose-500/10  border-rose-500/30  text-rose-400'
+                  }`}>
+                    {covered ? '✓ Cover' : '✗ No Cover'}
+                  </span>
+                )}
+              </div>
+
               <div className="flex flex-col items-center sm:items-end w-full sm:w-auto">
                 {game.played && result ? (
                   <div className="flex flex-col items-center sm:items-end gap-2">
@@ -393,47 +458,76 @@ const Schedule: React.FC<ScheduleProps> = ({ league, onSimulate, onScout, onWatc
                     const away = league.teams.find(t => t.id === game.awayTeamId)!;
                     const result = game.played ? league.history.find(h => h.id === game.id) : null;
                     const isUserGame = game.homeTeamId === league.userTeamId || game.awayTeamId === league.userTeamId;
+                    const sp = calcSpread(home, away);
                     return (
                       <div
                         key={game.id}
-                        className={`flex items-center gap-2 px-3 py-2.5 rounded-2xl border transition-all ${isUserGame ? 'bg-amber-500/5 border-amber-500/30' : 'bg-slate-950/50 border-slate-800'}`}
+                        className={`flex flex-col gap-1.5 px-3 py-2.5 rounded-2xl border transition-all ${isUserGame ? 'bg-amber-500/5 border-amber-500/30' : 'bg-slate-950/50 border-slate-800'}`}
                       >
-                        {/* Away Team */}
-                        <div className="flex items-center gap-2 flex-1 min-w-0">
-                          <div className="w-8 h-8 bg-slate-800 rounded-lg flex items-center justify-center border border-slate-700 shrink-0">
-                            <TeamBadge team={away} size="sm" />
-                          </div>
-                          <div className="min-w-0">
-                            <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest leading-none mb-0.5">🛫 Away</p>
-                            <p className="text-xs font-bold text-slate-200 truncate">{away.city} <span className="text-slate-400">{away.name}</span></p>
-                            <p className="text-[9px] text-slate-600 font-bold">{away.wins}-{away.losses}</p>
-                          </div>
-                        </div>
-
-                        {/* Score or VS */}
-                        <div className="shrink-0 text-center px-1">
-                          {result ? (
-                            <div className="text-center">
-                              <p className="text-[10px] font-black font-mono text-white leading-tight">{result.awayScore}</p>
-                              <p className="text-[8px] text-slate-600 font-bold">—</p>
-                              <p className="text-[10px] font-black font-mono text-white leading-tight">{result.homeScore}</p>
+                        <div className="flex items-center gap-2">
+                          {/* Away Team */}
+                          <div className="flex items-center gap-2 flex-1 min-w-0">
+                            <div className="w-8 h-8 bg-slate-800 rounded-lg flex items-center justify-center border border-slate-700 shrink-0">
+                              <TeamBadge team={away} size="sm" />
                             </div>
-                          ) : (
-                            <span className="text-[9px] font-black text-slate-600 uppercase">@</span>
-                          )}
+                            <div className="min-w-0">
+                              <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest leading-none mb-0.5">🛫 Away</p>
+                              <p className="text-xs font-bold text-slate-200 truncate">{away.city} <span className="text-slate-400">{away.name}</span></p>
+                              <p className={`text-[9px] font-bold ${!sp.homeFavored ? 'text-emerald-500' : 'text-slate-600'}`}>
+                                {away.wins}-{away.losses}{!sp.homeFavored ? ` ${sp.awaySpread}` : ''}
+                              </p>
+                            </div>
+                          </div>
+
+                          {/* Score or spread/VS */}
+                          <div className="shrink-0 text-center px-1">
+                            {result ? (
+                              <div className="text-center">
+                                <p className="text-[10px] font-black font-mono text-white leading-tight">{result.awayScore}</p>
+                                <p className="text-[8px] text-slate-600 font-bold">—</p>
+                                <p className="text-[10px] font-black font-mono text-white leading-tight">{result.homeScore}</p>
+                              </div>
+                            ) : (
+                              <div className="text-center">
+                                <p className="text-[9px] font-black text-slate-600 uppercase">@</p>
+                                <p className={`text-[9px] font-black font-mono ${sp.homeFavored ? 'text-emerald-500' : 'text-orange-400'}`}>
+                                  {sp.homeFavored ? sp.homeSpread : sp.awaySpread}
+                                </p>
+                              </div>
+                            )}
+                          </div>
+
+                          {/* Home Team */}
+                          <div className="flex items-center gap-2 flex-1 min-w-0 flex-row-reverse text-right">
+                            <div className="w-8 h-8 bg-slate-800 rounded-lg flex items-center justify-center border border-slate-700 shrink-0" style={{ borderColor: home.primaryColor + '40' }}>
+                              <TeamBadge team={home} size="sm" />
+                            </div>
+                            <div className="min-w-0">
+                              <p className="text-[10px] font-black text-emerald-500 uppercase tracking-widest leading-none mb-0.5">🏠 Home</p>
+                              <p className="text-xs font-bold text-slate-200 truncate"><span className="text-slate-400">{home.city}</span> <span className="font-black" style={{ color: home.primaryColor }}>{home.name}</span></p>
+                              <p className={`text-[9px] font-bold ${sp.homeFavored ? 'text-emerald-500' : 'text-slate-600'}`}>
+                                {home.wins}-{home.losses}{sp.homeFavored ? ` ${sp.homeSpread}` : ''}
+                              </p>
+                            </div>
+                          </div>
                         </div>
 
-                        {/* Home Team */}
-                        <div className="flex items-center gap-2 flex-1 min-w-0 flex-row-reverse text-right">
-                          <div className="w-8 h-8 bg-slate-800 rounded-lg flex items-center justify-center border border-slate-700 shrink-0" style={{ borderColor: home.primaryColor + '40' }}>
-                            <TeamBadge team={home} size="sm" />
-                          </div>
-                          <div className="min-w-0">
-                            <p className="text-[10px] font-black text-emerald-500 uppercase tracking-widest leading-none mb-0.5">🏠 Home</p>
-                            <p className="text-xs font-bold text-slate-200 truncate"><span className="text-slate-400">{home.city}</span> <span className="font-black" style={{ color: home.primaryColor }}>{home.name}</span></p>
-                            <p className="text-[9px] text-slate-600 font-bold">{home.wins}-{home.losses}</p>
-                          </div>
-                        </div>
+                        {/* Cover result for played games */}
+                        {result && (() => {
+                          const cov = sp.covered(result);
+                          const favAbbr = sp.homeFavored ? home.abbreviation : away.abbreviation;
+                          return (
+                            <div className="flex justify-center">
+                              <span className={`px-2 py-0.5 rounded-full text-[8px] font-black uppercase tracking-widest border ${
+                                cov
+                                  ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400'
+                                  : 'bg-rose-500/10  border-rose-500/30  text-rose-400'
+                              }`}>
+                                {favAbbr} {cov ? '✓ cover' : '✗ no cover'}
+                              </span>
+                            </div>
+                          );
+                        })()}
                       </div>
                     );
                   })}
