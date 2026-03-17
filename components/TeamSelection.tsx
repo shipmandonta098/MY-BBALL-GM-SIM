@@ -14,9 +14,10 @@ interface TeamSelectionProps {
   teams: Team[];
   onSelectTeam: (teamId: string) => void;
   onEditTeam?: (teamId: string, updates: Partial<TeamEditDraft>) => void;
+  onBack?: () => void;
 }
 
-const TeamSelection: React.FC<TeamSelectionProps> = ({ teams, onSelectTeam, onEditTeam }) => {
+const TeamSelection: React.FC<TeamSelectionProps> = ({ teams, onSelectTeam, onEditTeam, onBack }) => {
   const [hoveredTeam, setHoveredTeam] = useState<string | null>(null);
   const [editingTeamId, setEditingTeamId] = useState<string | null>(null);
   const [editDraft, setEditDraft] = useState<TeamEditDraft | null>(null);
@@ -60,6 +61,14 @@ const TeamSelection: React.FC<TeamSelectionProps> = ({ teams, onSelectTeam, onEd
     <div className="fixed inset-0 bg-slate-950 overflow-y-auto p-8 z-[110] animate-in fade-in duration-700">
       <div className="max-w-[1600px] mx-auto">
         <header className="mb-12 text-center sticky top-0 bg-slate-950/90 backdrop-blur-md py-6 z-20 border-b border-slate-800/50">
+          {onBack && (
+            <button
+              onClick={onBack}
+              className="absolute left-4 top-1/2 -translate-y-1/2 flex items-center gap-2 px-4 py-2 bg-slate-900 hover:bg-slate-800 border border-slate-800 hover:border-slate-600 text-slate-400 hover:text-white rounded-xl text-xs font-black uppercase tracking-widest transition-all"
+            >
+              ← Back
+            </button>
+          )}
           <h2 className="text-6xl font-display font-bold uppercase tracking-tighter text-white mb-2">
             Select Your <span className="text-amber-500">Franchise</span>
           </h2>
