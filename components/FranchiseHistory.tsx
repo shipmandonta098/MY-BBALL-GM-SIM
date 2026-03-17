@@ -1,5 +1,5 @@
 import React, { useState, useMemo } from 'react';
-import { LeagueState, Team, GameResult, ChampionshipRecord } from '../types';
+import { LeagueState, Team, GameResult, ChampionshipRecord, SeasonAwards, AwardWinner } from '../types';
 import TeamBadge from './TeamBadge';
 import { Trophy, Calendar, Target, TrendingUp, ChevronDown, ChevronUp, History as HistoryIcon } from 'lucide-react';
 
@@ -125,6 +125,56 @@ const FranchiseHistory: React.FC<FranchiseHistoryProps> = ({ league, initialTeam
       years: `${seasonRecords.length}; ${startYear}-${(startYear+1).toString().slice(-2)} to ${endYear}-${(endYear+1).toString().slice(-2)}`
     };
   }, [seasonRecords, league.season]);
+
+  // Awards won by this franchise
+  const teamAwards = useMemo(() => {
+    const awardDefs: { key: keyof SeasonAwards; label: string; icon: string }[] = [
+      { key: 'mvp',       label: 'MVP',              icon: '🏆' },
+      { key: 'dpoy',      label: 'Def. Player of Year', icon: '🛡️' },
+      { key: 'roy',       label: 'Rookie of Year',   icon: '🌟' },
+      { key: 'sixthMan',  label: '6th Man of Year',  icon: '⚡' },
+      { key: 'mip',       label: 'Most Improved',    icon: '📈' },
+      { key: 'coy',       label: 'Coach of Year',    icon: '🎯' },
+    ];
+    return (league.awardHistory ?? []).flatMap(season =>
+      awardDefs.flatMap(({ key, label, icon }) => {
+        const winner = season[key] as AwardWinner | undefined;
+        if (!winner || winner.teamId !== selectedTeamId) return [];
+        return [{ year: season.year, award: label, icon, name: winner.name, statsLabel: winner.statsLabel ?? '' }];
+      })
+    ).sort((a, b) => b.year - a.year);
+  }, [league.awardHistory, selectedTeamId]);
+
+  // Coach hirings & firings for this franchise (from transactions log)
+  const coachHistory = useMemo(() => {
+    return (league.transactions ?? [])
+      .filter(tx => (tx.type === 'hiring' || tx.type === 'firing') && tx.teamIds.includes(selectedTeamId))
+      .sort((a, b) => b.timestamp - a.timestamp);
+  }, [league.transactions, selectedTeamId]);
+
+  // Key events timeline — championships, finals, awards, coach changes combined
+  const keyTimeline = useMemo(() => {
+    type TimelineEvent = { day: number; icon: string; label: string; colour: string };
+    const events: TimelineEvent[] = [];
+
+    (league.championshipHistory ?? []).forEach(c => {
+      const day = c.year * 82; // approximate
+      if (c.championId === selectedTeamId)
+        events.push({ day, icon: '🏆', label: `Season ${c.year} — Won Championship (${c.seriesScore} vs ${c.runnerUpName})`, colour: 'text-amber-400' });
+      else if (c.runnerUpId === selectedTeamId)
+        events.push({ day, icon: '🥈', label: `Season ${c.year} — Lost Finals vs ${c.championName}`, colour: 'text-slate-300' });
+    });
+
+    teamAwards.forEach(a =>
+      events.push({ day: a.year * 82, icon: a.icon, label: `Season ${a.year} — ${a.name} wins ${a.award} (${a.statsLabel})`, colour: 'text-slate-300' })
+    );
+
+    coachHistory.forEach(tx =>
+      events.push({ day: tx.timestamp, icon: tx.type === 'hiring' ? '✅' : '🚫', label: tx.description, colour: tx.type === 'hiring' ? 'text-emerald-400' : 'text-rose-400' })
+    );
+
+    return events.sort((a, b) => b.day - a.day);
+  }, [league.championshipHistory, teamAwards, coachHistory, selectedTeamId]);
 
   const handleSort = (key: keyof SeasonRecord) => {
     setSortConfig(prev => ({
@@ -265,6 +315,67 @@ const FranchiseHistory: React.FC<FranchiseHistoryProps> = ({ league, initialTeam
           </table>
         </div>
       </div>
+
+      {/* Awards Won */}
+      {teamAwards.length > 0 && (
+        <div className="bg-slate-900 border border-slate-800 rounded-[2.5rem] overflow-hidden shadow-2xl">
+          <div className="p-8 border-b border-slate-800 flex items-center gap-3 bg-slate-900/50">
+            <Trophy className="text-amber-500" size={20} />
+            <h3 className="text-xl font-display font-bold text-white uppercase tracking-tight">Awards &amp; Honours</h3>
+          </div>
+          <div className="divide-y divide-slate-800/40">
+            {teamAwards.map((a, i) => (
+              <div key={i} className="flex items-center gap-5 px-8 py-4 hover:bg-slate-800/20 transition-colors">
+                <span className="text-2xl w-8 text-center">{a.icon}</span>
+                <div className="flex-1">
+                  <p className="font-display font-bold text-white uppercase text-sm">{a.name}</p>
+                  <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest">{a.award} · {a.statsLabel}</p>
+                </div>
+                <span className="font-mono text-xs text-amber-500 font-bold">Season {a.year}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Coach History */}
+      {coachHistory.length > 0 && (
+        <div className="bg-slate-900 border border-slate-800 rounded-[2.5rem] overflow-hidden shadow-2xl">
+          <div className="p-8 border-b border-slate-800 flex items-center gap-3 bg-slate-900/50">
+            <HistoryIcon className="text-blue-400" size={20} />
+            <h3 className="text-xl font-display font-bold text-white uppercase tracking-tight">Coach History</h3>
+          </div>
+          <div className="divide-y divide-slate-800/40">
+            {coachHistory.map(tx => (
+              <div key={tx.id} className="flex items-start gap-5 px-8 py-4 hover:bg-slate-800/20 transition-colors">
+                <span className="text-lg mt-0.5">{tx.type === 'hiring' ? '✅' : '🚫'}</span>
+                <p className={`text-sm flex-1 ${tx.type === 'hiring' ? 'text-emerald-300' : 'text-rose-300'}`}>{tx.description}</p>
+                <span className="font-mono text-[10px] text-slate-600 whitespace-nowrap">Day {tx.timestamp}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Key Events Timeline */}
+      {keyTimeline.length > 0 && (
+        <div className="bg-slate-900 border border-slate-800 rounded-[2.5rem] overflow-hidden shadow-2xl">
+          <div className="p-8 border-b border-slate-800 flex items-center gap-3 bg-slate-900/50">
+            <TrendingUp className="text-purple-400" size={20} />
+            <h3 className="text-xl font-display font-bold text-white uppercase tracking-tight">Franchise Timeline</h3>
+          </div>
+          <div className="relative px-8 py-6 space-y-4">
+            <div className="absolute left-[3.5rem] top-0 bottom-0 w-px bg-slate-800 pointer-events-none" />
+            {keyTimeline.map((ev, i) => (
+              <div key={i} className="flex items-start gap-5 relative">
+                <span className="z-10 text-lg w-8 text-center shrink-0">{ev.icon}</span>
+                <p className={`text-sm leading-relaxed ${ev.colour}`}>{ev.label}</p>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
     </div>
   );
 };
