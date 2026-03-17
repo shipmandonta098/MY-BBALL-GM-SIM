@@ -966,7 +966,7 @@ const App: React.FC = () => {
       const awayTeam = newState.teams.find(t => t.id === game.awayTeamId)!;
       const rivalry = newState.rivalryHistory?.find(r => (r.team1Id === homeTeam.id && r.team2Id === awayTeam.id) || (r.team1Id === awayTeam.id && r.team2Id === homeTeam.id));
       const rivalryLevel = getRivalryLevel(rivalry);
-      const result = simulateGame(homeTeam, awayTeam, newState.currentDay, newState.season, game.homeB2B, game.awayB2B, rivalryLevel);
+      const result = simulateGame(homeTeam, awayTeam, newState.currentDay, newState.season, game.homeB2B, game.awayB2B, rivalryLevel, newState.settings);
       result.id = game.id;
       if (homeTeam.id === state.userTeamId || awayTeam.id === state.userTeamId) dayResults.push(result);
       newState = await finalizeGameResult(newState, game.id, result);
@@ -1070,7 +1070,7 @@ const App: React.FC = () => {
       const away = league.teams.find(t => t.id === game.awayTeamId)!;
       const rivalry = league.rivalryHistory?.find(r => (r.team1Id === home.id && r.team2Id === away.id) || (r.team1Id === away.id && r.team2Id === home.id));
       const rivalryLevel = getRivalryLevel(rivalry);
-      const result = simulateGame(home, away, league.currentDay, league.season, game.homeB2B, game.awayB2B, rivalryLevel);
+      const result = simulateGame(home, away, league.currentDay, league.season, game.homeB2B, game.awayB2B, rivalryLevel, league.settings);
       result.id = game.id;
       const recap = await generateGameRecap(result, home, away);
       result.aiRecap = recap;
@@ -1135,8 +1135,13 @@ const App: React.FC = () => {
       const playedGames = tempState.schedule.filter(g => g.played).length;
       const pct = totalGames > 0 ? playedGames / totalGames : 0;
 
-      // Trade Deadline: triggers once at ~49% games played (≈game 40 of 82)
-      if (!tempState.tradeDeadlinePassed && pct >= 0.49 && pct < 0.75) {
+      // Trade Deadline: timing controlled by settings.tradeDeadline
+      const tdSetting = tempState.settings.tradeDeadline;
+      const deadlinePct = tdSetting === 'Disabled' ? null
+        : tdSetting === 'Week 14' ? 0.56
+        : tdSetting === 'Week 16' ? 0.63
+        : 0.49; // 'Week 12' or undefined → default
+      if (!tempState.tradeDeadlinePassed && deadlinePct !== null && pct >= deadlinePct && pct < deadlinePct + 0.15) {
         tempState = { ...tempState, tradeDeadlinePassed: true, seasonPhase: 'Trade Deadline' as SeasonPhase };
         try {
           const aiDeadlineResult = aiGMTradeDeadlineAction(tempState);
@@ -1185,7 +1190,7 @@ const App: React.FC = () => {
       if (tempState.allStarWeekend?.completed && tempState.seasonPhase === 'All-Star Weekend') {
         tempState = { ...tempState, seasonPhase: 'Regular Season' as SeasonPhase };
       }
-      if (!tempState.tradeDeadlinePassed && pct > 0 && pct < 0.49) {
+      if (!tempState.tradeDeadlinePassed && pct > 0 && (deadlinePct === null || pct < deadlinePct)) {
         tempState = { ...tempState, seasonPhase: 'Regular Season' as SeasonPhase };
       }
       if (pct === 0) {

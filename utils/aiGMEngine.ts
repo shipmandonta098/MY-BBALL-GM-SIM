@@ -622,7 +622,8 @@ export function evaluateTrade(
   receiving: TradePackage,
   sending: TradePackage,
   personality: AIGMPersonality,
-  totalTeams: number
+  totalTeams: number,
+  tradeDifficulty?: string,
 ): boolean {
   const valueOf = (pkg: TradePackage) => {
     const pVal = pkg.players.reduce((s, p) => s + playerTradeValue(p, personality), 0);
@@ -639,8 +640,17 @@ export function evaluateTrade(
     if (hasStar) return true;
   }
 
-  // Accept if receiving at least 90% of what you're sending
-  return recVal >= senVal * 0.9;
+  // Fairness threshold scales with trade difficulty setting
+  const thresholdMap: Record<string, number> = {
+    Arcade:     0.70,  // almost anything goes
+    Easy:       0.80,
+    Realistic:  0.90,  // default NBA-like
+    Hard:       0.96,
+    Simulation: 1.00,  // must receive equal value
+  };
+  const threshold = thresholdMap[tradeDifficulty ?? 'Realistic'] ?? 0.90;
+
+  return recVal >= senVal * threshold;
 }
 
 // ─── Deadline logic (mid-season) ────────────────────────────
@@ -772,8 +782,8 @@ export function aiGMInSeasonTrades(
       const buyerSends: TradePackage = { players: [returnPlayer], picks: [] };
 
       if (
-        evaluateTrade(rebuilderGets, rebuilderSends, personality, s.teams.length) &&
-        evaluateTrade(buyerGets, buyerSends, buyer.aiGM!.personality, s.teams.length)
+        evaluateTrade(rebuilderGets, rebuilderSends, personality, s.teams.length, s.settings?.tradeDifficulty) &&
+        evaluateTrade(buyerGets, buyerSends, buyer.aiGM!.personality, s.teams.length, s.settings?.tradeDifficulty)
       ) {
         const rebuilderTeam = s.teams.find(t => t.id === team.id)!;
         const buyerTeam = s.teams.find(t => t.id === buyer.id)!;
@@ -839,8 +849,8 @@ export function aiGMInSeasonTrades(
       const contenderSends: TradePackage = { players: [returnPlayer], picks: [] };
 
       if (
-        evaluateTrade(sellerGets, sellerSends, sellerData.aiGM?.personality ?? 'Balanced', s.teams.length) &&
-        evaluateTrade(contenderGets, contenderSends, personality, s.teams.length)
+        evaluateTrade(sellerGets, sellerSends, sellerData.aiGM?.personality ?? 'Balanced', s.teams.length, s.settings?.tradeDifficulty) &&
+        evaluateTrade(contenderGets, contenderSends, personality, s.teams.length, s.settings?.tradeDifficulty)
       ) {
         s = {
           ...s,
