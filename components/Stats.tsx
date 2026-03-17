@@ -514,7 +514,7 @@ const Stats: React.FC<StatsProps> = ({ league, onViewRoster, onManageTeam, onVie
           </div>
           {/* Sub-tabs */}
           <div className="flex gap-2 flex-wrap">
-            {(['traditional', 'advanced', 'per36', 'shooting', 'totals'] as PlayerSubTab[]).map(t => (
+            {(['traditional', 'advanced', 'per36', 'shooting', 'totals'] as PlayerSubTab[]).filter(t => t !== 'advanced' || league.settings.showAdvancedStats !== false).map(t => (
               <button
                 key={t}
                 onClick={() => {

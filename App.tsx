@@ -377,8 +377,8 @@ const App: React.FC = () => {
     const freshTeams = generateLeagueTeams(genderRatio, year).slice(0, requestedTeams).map(t => ({
       ...t, needs: ['PG', 'C', 'SG', 'PF', 'SF'].sort(() => 0.5 - Math.random()).slice(0, 2) as Position[]
     }));
-    const freshSchedule = generateSeasonSchedule(freshTeams, finalSettings.seasonLength);
-    const freshProspects = generateProspects(year, 100, genderRatio);
+    const freshSchedule = generateSeasonSchedule(freshTeams, finalSettings.seasonLength, finalSettings.divisionGames, finalSettings.conferenceGames);
+    const freshProspects = generateProspects(year, 100, genderRatio, finalSettings.prospectAgeMin ?? 19, finalSettings.prospectAgeMax ?? 21);
     const initialFAs = generateFreeAgentPool(25, year, genderRatio);
     const coachPool = generateCoachPool(30, finalSettings.coachGenderRatio);
     // Assign AI GM personalities to all non-user teams (userTeamId assigned at team selection)
@@ -836,10 +836,15 @@ const App: React.FC = () => {
              patienceDelta = isWinner ? 0.5 : -1.0;
            } else if (t.finances.ownerGoal === 'Profit') {
              patienceDelta = t.finances.revenue > t.finances.expenses ? 0.2 : -0.5;
-           } else { 
+           } else {
              const rookiePlaying = t.roster.filter(p => p.age < 22).length;
              patienceDelta = rookiePlaying > 2 ? 0.3 : -0.2;
            }
+           // ownerPatienceLevel scales how fast patience moves
+           const patienceFactor = state.settings.ownerPatienceLevel === 'Low' ? 2.0
+             : state.settings.ownerPatienceLevel === 'High' ? 0.5
+             : 1.0;
+           patienceDelta *= patienceFactor;
          }
          return {
           ...t, wins: isWinner ? t.wins + 1 : t.wins, losses: isWinner ? t.losses : t.losses + 1, homeWins: isHome && isWinner ? t.homeWins + 1 : t.homeWins, homeLosses: isHome && !isWinner ? t.homeLosses + 1 : t.homeLosses, roadWins: !isHome && isWinner ? t.roadWins + 1 : t.roadWins, roadLosses: !isHome && !isWinner ? t.roadLosses + 1 : t.roadLosses, confWins: isConfGame && isWinner ? (t.confWins || 0) + 1 : (t.confWins || 0), confLosses: isConfGame && !isWinner ? (t.confLosses || 0) + 1 : (t.confLosses || 0), lastTen, streak: isWinner ? (t.streak >= 0 ? t.streak + 1 : 1) : (t.streak <= 0 ? t.streak - 1 : -1), finances: { ...t.finances, ownerPatience: state.settings.ownerMeterEnabled ? Math.min(100, Math.max(0, t.finances.ownerPatience + patienceDelta)) : 100, cash: t.finances.cash + (isHome ? 250000 : 0) }
@@ -1359,7 +1364,7 @@ const App: React.FC = () => {
     // Generate fresh draft class for the new season
     const classSize = tempState.settings.draftClassSize === 'Small' ? 60
       : tempState.settings.draftClassSize === 'Large' ? 120 : 90;
-    tempState.prospects = generateProspects(tempState.season, classSize, tempState.settings.playerGenderRatio);
+    tempState.prospects = generateProspects(tempState.season, classSize, tempState.settings.playerGenderRatio, tempState.settings.prospectAgeMin ?? 19, tempState.settings.prospectAgeMax ?? 21);
     tempState.draftPicks = []; // Clear old picks; lottery will populate
 
     // ── Pre-offseason agreements (moratorium window, Day 0) ─
@@ -1699,7 +1704,7 @@ const App: React.FC = () => {
           {activeTab === 'trade' && <Trade league={league} updateLeague={updateLeagueState} recordTransaction={recordTransaction} />}
           {activeTab === 'settings' && <Settings league={league} updateLeague={updateLeagueState} onRegenerateSchedule={() => {
             if (league.schedule.some(g => g.played)) return; // guard — should never reach here
-            const newSchedule = generateSeasonSchedule(league.teams, league.settings.seasonLength);
+            const newSchedule = generateSeasonSchedule(league.teams, league.settings.seasonLength, league.settings.divisionGames, league.settings.conferenceGames);
             updateLeagueState({ schedule: newSchedule });
           }} />}
         </div>

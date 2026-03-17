@@ -50,7 +50,7 @@ const Draft: React.FC<DraftProps> = ({ league, updateLeague, onScout, scoutingRe
     const newPlayer: Player = {
       ...prospect,
       salary: Math.floor((prospect.rating / 100) * 8_000_000),
-      contractYears: 4,
+      contractYears: Math.min(4, league.settings.maxContractYears ?? 4),
       status: 'Rotation',
       morale: 85,
       stats: {
@@ -66,7 +66,9 @@ const Draft: React.FC<DraftProps> = ({ league, updateLeague, onScout, scoutingRe
     );
     const pickNum = currentPickIndex + 1;
     const round = (league.draftPicks?.[currentPickIndex]?.round) ?? 1;
-    const label = round === 1 ? `Round 1, Pick #${pickNum}` : `Round 2, Pick #${pickNum - 30}`;
+    const teamsCount = league.teams.length;
+    const pickInRound = round === 1 ? pickNum : pickNum - (round - 1) * teamsCount;
+    const label = `Round ${round}, Pick #${pickInRound}`;
 
     setDraftLog(prev => [
       `${label}: The ${team.name} select ${prospect.name} (${prospect.position}) — ${prospect.school}`,
@@ -290,7 +292,7 @@ const Draft: React.FC<DraftProps> = ({ league, updateLeague, onScout, scoutingRe
           <div className="flex-1">
             <p className="text-[10px] font-black uppercase tracking-[0.4em] text-amber-500 mb-1">You Are On The Clock</p>
             <p className="text-lg font-display font-bold text-white uppercase">
-              {currentPick?.round === 2 ? 'Round 2' : 'Round 1'}, Pick #{currentPickIndex + 1} — Select a prospect below
+              Round {currentPick?.round ?? 1}, Pick #{currentPickIndex + 1} — Select a prospect below
             </p>
           </div>
         </div>
@@ -452,7 +454,7 @@ const Draft: React.FC<DraftProps> = ({ league, updateLeague, onScout, scoutingRe
                     >
                       <div>
                         <p className="text-[10px] font-black uppercase text-slate-500">
-                          R{pick.round} · #{pick.round === 1 ? pick.pick : pick.pick - 30}
+                          R{pick.round} · #{pick.round === 1 ? pick.pick : pick.pick - (pick.round - 1) * league.teams.length}
                         </p>
                         {made && rookie && (
                           <p className="text-xs font-bold text-emerald-400">{rookie.name}</p>
