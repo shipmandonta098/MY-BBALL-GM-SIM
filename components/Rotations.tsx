@@ -1,6 +1,6 @@
 
 import React, { useState, useMemo } from 'react';
-import { Team, Player, Position, TeamRotation } from '../types';
+import { Team, Player, Position, TeamRotation, CoachScheme, CoachBadge } from '../types';
 import { PlayerLink } from '../context/NavigationContext';
 import {
   DndContext,
@@ -19,18 +19,138 @@ import {
   useSortable,
 } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
-import { 
-  GripVertical, 
-  AlertTriangle, 
-  TrendingUp, 
-  Zap, 
-  Shield, 
-  Maximize2, 
+import {
+  GripVertical,
+  AlertTriangle,
+  TrendingUp,
+  Zap,
+  Shield,
+  Maximize2,
   Moon,
   Save,
-  RotateCcw
+  RotateCcw,
+  ChevronDown,
+  ChevronUp,
+  CheckCircle2,
+  Swords,
+  Activity,
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
+
+// ─── Lineup Recommendation Engine ───────────────────────────────────────────
+
+function playerOffScore(p: Player): number {
+  const a = p.attributes;
+  return (
+    a.shooting    * 0.20 +
+    a.shooting3pt * 0.14 +
+    a.shootingMid * 0.08 +
+    a.playmaking  * 0.14 +
+    a.passing     * 0.10 +
+    a.athleticism * 0.08 +
+    a.offensiveIQ * 0.12 +
+    a.layups      * 0.07 +
+    a.ballHandling* 0.07
+  );
+}
+
+function playerDefScore(p: Player): number {
+  const a = p.attributes;
+  return (
+    a.defense      * 0.28 +
+    a.perimeterDef * 0.18 +
+    a.interiorDef  * 0.14 +
+    a.steals       * 0.14 +
+    a.blocks       * 0.10 +
+    a.defensiveIQ  * 0.10 +
+    a.strength     * 0.06
+  );
+}
+
+function traitLineupBonus(players: Player[]): { off: number; def: number } {
+  let off = 0, def = 0;
+  for (const p of players) {
+    for (const trait of (p.personalityTraits || [])) {
+      if      (trait === 'Friendly/Team First') { off += 1.5; def += 1.5; }
+      else if (trait === 'Leader')              { off += 1.0; def += 1.0; }
+      else if (trait === 'Clutch')              { off += 0.8; def += 0.8; }
+      else if (trait === 'Workhorse')           { def += 1.0; }
+      else if (trait === 'Gym Rat')             { off += 0.5; def += 0.5; }
+      else if (trait === 'Tough/Alpha')         { def += 1.2; }
+      else if (trait === 'Diva/Star')           { off -= 1.0; def -= 1.5; }
+      else if (trait === 'Lazy')                { off -= 2.0; def -= 2.0; }
+      else if (trait === 'Hot Head')            { def -= 1.0; }
+    }
+  }
+  return { off, def };
+}
+
+function schemeLineupBonus(scheme: CoachScheme, badges: CoachBadge[]): { off: number; def: number } {
+  const b = { off: 0, def: 0 };
+  if (scheme === 'Pace and Space') { b.off += 3.5; }
+  if (scheme === 'Showtime')       { b.off += 3.0; }
+  if (scheme === 'Small Ball')     { b.off += 2.0; }
+  if (scheme === 'Grit and Grind') { b.def += 4.0; }
+  if (scheme === 'Triangle')       { b.off += 1.0; b.def += 1.0; }
+  if (badges.includes('Offensive Architect')) b.off += 2.5;
+  if (badges.includes('Defensive Guru'))      b.def += 3.0;
+  if (badges.includes('Pace Master'))         b.off += 1.5;
+  return b;
+}
+
+export interface LineupRec {
+  starters: Player[];
+  bench: Player[];
+  ortg: number;   // projected offensive rating (higher = better)
+  drtg: number;   // projected defensive rating (lower = better)
+  net: number;    // ortg - drtg
+  traitBonus: { off: number; def: number };
+}
+
+function generateLineupRecs(
+  pool: Player[],
+  scheme: CoachScheme,
+  badges: CoachBadge[],
+): { offense: LineupRec[]; defense: LineupRec[]; balanced: LineupRec[] } {
+  if (pool.length < 5) return { offense: [], defense: [], balanced: [] };
+  const schemeMod = schemeLineupBonus(scheme, badges);
+  const n = pool.length;
+
+  interface Scored { idxs: number[]; ortg: number; drtg: number; net: number; bonus: { off: number; def: number } }
+  const scored: Scored[] = [];
+
+  for (let i = 0; i < n - 4; i++)
+    for (let j = i + 1; j < n - 3; j++)
+      for (let k = j + 1; k < n - 2; k++)
+        for (let l = k + 1; l < n - 1; l++)
+          for (let m = l + 1; m < n; m++) {
+            const players = [pool[i], pool[j], pool[k], pool[l], pool[m]];
+            const avgOff = players.reduce((s, p) => s + playerOffScore(p), 0) / 5;
+            const avgDef = players.reduce((s, p) => s + playerDefScore(p), 0) / 5;
+            const bonus  = traitLineupBonus(players);
+            const effOff = avgOff + schemeMod.off + bonus.off;
+            const effDef = avgDef + schemeMod.def + bonus.def;
+            const ortg   = Math.round(95 + (effOff / 100) * 20);
+            const drtg   = Math.round(115 - (effDef / 100) * 20);
+            scored.push({ idxs: [i, j, k, l, m], ortg, drtg, net: ortg - drtg, bonus });
+          }
+
+  const top3 = (cmp: (a: Scored, b: Scored) => number): LineupRec[] =>
+    [...scored].sort(cmp).slice(0, 3).map(c => {
+      const starters = c.idxs.map(i => pool[i]);
+      const starterSet = new Set(starters.map(p => p.id));
+      const bench = pool.filter(p => !starterSet.has(p.id));
+      return { starters, bench, ortg: c.ortg, drtg: c.drtg, net: c.net, traitBonus: c.bonus };
+    });
+
+  return {
+    offense:  top3((a, b) => b.ortg - a.ortg),
+    defense:  top3((a, b) => a.drtg - b.drtg),
+    balanced: top3((a, b) => b.net  - a.net),
+  };
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 
 interface RotationsProps {
   league: {
@@ -174,6 +294,21 @@ const Rotations: React.FC<RotationsProps> = ({ league, updateLeague }) => {
   const [minutes, setMinutes] = useState<Record<string, number>>(team.rotation?.minutes || {});
   const [hasChanges, setHasChanges] = useState(false);
 
+  // ── Best Lineups ──────────────────────────────────────────────────────────
+  const [showBestLineups, setShowBestLineups]   = useState(true);
+  const [lineupCategory, setLineupCategory]     = useState<'offense' | 'defense' | 'balanced'>('balanced');
+  const [excludeInjured, setExcludeInjured]     = useState(true);
+
+  const scheme = team.activeScheme ?? team.staff?.headCoach?.scheme ?? 'Balanced';
+  const badges = team.staff?.headCoach?.badges ?? [];
+
+  const recommendedLineups = useMemo(() => {
+    let pool = [...team.roster].sort((a, b) => b.rating - a.rating);
+    if (excludeInjured) pool = pool.filter(p => !(p.status === 'Injured' || (p.injuryDaysLeft != null && p.injuryDaysLeft > 0)));
+    // Cap pool at 12 for performance
+    return generateLineupRecs(pool.slice(0, 12), scheme as CoachScheme, badges as CoachBadge[]);
+  }, [team.roster, excludeInjured, scheme, badges]);
+
   const totalMinutes = useMemo(() => 
     Object.values(minutes).reduce((sum: number, m: number) => sum + m, 0)
   , [minutes]);
@@ -308,6 +443,31 @@ const Rotations: React.FC<RotationsProps> = ({ league, updateLeague }) => {
     const recentGames = player.gameLog.slice(-3);
     const avgMin = recentGames.length > 0 ? recentGames.reduce((s, g) => s + g.min, 0) / recentGames.length : 0;
     return avgMin > 35 || (minutes[playerId] || 0) > 38;
+  };
+
+  const applyLineup = (rec: LineupRec) => {
+    const newOrder = [
+      ...rec.starters.map(p => p.id),
+      ...rec.bench.map(p => p.id),
+    ];
+    // Distribute minutes: starters 34, first 5 bench 14, rest 0 — then normalize
+    const raw: Record<string, number> = {};
+    newOrder.forEach((id, i) => {
+      if (i < 5) raw[id] = 34;
+      else if (i < 10) raw[id] = 14;
+      else raw[id] = 0;
+    });
+    const total = Object.values(raw).reduce((s, v) => s + v, 0);
+    const factor = total > 0 ? 240 / total : 1;
+    const newMins: Record<string, number> = {};
+    newOrder.forEach(id => { newMins[id] = Math.round(raw[id] * factor); });
+    // Fix rounding drift
+    const drift = 240 - Object.values(newMins).reduce((s, v) => s + v, 0);
+    if (drift !== 0 && newOrder[0]) newMins[newOrder[0]] = (newMins[newOrder[0]] || 0) + drift;
+
+    setPlayerOrder(newOrder);
+    setMinutes(newMins);
+    setHasChanges(true);
   };
 
   const expectedBoost = useMemo(() => {
@@ -449,6 +609,137 @@ const Rotations: React.FC<RotationsProps> = ({ league, updateLeague }) => {
                 </div>
                 <TrendingUp className={parseFloat(expectedBoost) >= 0 ? 'text-emerald-500' : 'text-rose-500'} />
               </div>
+            </div>
+
+            {/* ── Best Lineups ── */}
+            <div className="space-y-4">
+              <button
+                onClick={() => setShowBestLineups(v => !v)}
+                className="w-full flex items-center justify-between group"
+              >
+                <h3 className="text-[10px] font-black text-amber-500 uppercase tracking-widest flex items-center gap-2">
+                  <Activity size={12} />
+                  Best Lineups
+                </h3>
+                {showBestLineups ? <ChevronUp size={14} className="text-slate-500" /> : <ChevronDown size={14} className="text-slate-500" />}
+              </button>
+
+              {showBestLineups && (
+                <div className="space-y-3">
+                  {/* Filters */}
+                  <label className="flex items-center gap-2 cursor-pointer select-none">
+                    <input
+                      type="checkbox"
+                      checked={excludeInjured}
+                      onChange={e => setExcludeInjured(e.target.checked)}
+                      className="accent-amber-500 w-3 h-3"
+                    />
+                    <span className="text-[10px] text-slate-500 font-bold uppercase">Exclude Injured</span>
+                  </label>
+
+                  {/* Category tabs */}
+                  <div className="flex rounded-xl overflow-hidden border border-slate-800 text-[10px] font-black uppercase">
+                    {([
+                      { id: 'offense',  label: 'OFF', icon: <Zap size={10} /> },
+                      { id: 'defense',  label: 'DEF', icon: <Shield size={10} /> },
+                      { id: 'balanced', label: 'NET', icon: <Swords size={10} /> },
+                    ] as const).map(tab => (
+                      <button
+                        key={tab.id}
+                        onClick={() => setLineupCategory(tab.id)}
+                        className={`flex-1 flex items-center justify-center gap-1 py-2 transition-all ${
+                          lineupCategory === tab.id
+                            ? 'bg-amber-500 text-slate-950'
+                            : 'bg-slate-950 text-slate-500 hover:text-white'
+                        }`}
+                      >
+                        {tab.icon}{tab.label}
+                      </button>
+                    ))}
+                  </div>
+
+                  {/* Lineup cards */}
+                  {(() => {
+                    const recs = recommendedLineups[lineupCategory];
+                    if (recs.length === 0) return (
+                      <p className="text-[10px] text-slate-600 text-center py-4 font-bold uppercase">
+                        Not enough healthy players
+                      </p>
+                    );
+                    return recs.map((rec, i) => {
+                      const netStr = rec.net >= 0 ? `+${rec.net}` : `${rec.net}`;
+                      const isApplied = rec.starters.map(p => p.id).every((id, idx) => playerOrder[idx] === id);
+                      return (
+                        <div
+                          key={i}
+                          className={`rounded-2xl border p-4 space-y-3 transition-all ${
+                            isApplied
+                              ? 'border-amber-500/40 bg-amber-500/5'
+                              : 'border-slate-800 bg-slate-950/60 hover:border-slate-700'
+                          }`}
+                        >
+                          {/* Header stats */}
+                          <div className="flex items-center justify-between">
+                            <span className="text-[10px] font-black text-slate-500 uppercase">Lineup #{i + 1}</span>
+                            <div className="flex gap-2 text-[10px] font-mono font-bold">
+                              <span className="text-orange-400">OFF {rec.ortg}</span>
+                              <span className="text-blue-400">DEF {rec.drtg}</span>
+                              <span className={rec.net >= 0 ? 'text-emerald-400' : 'text-rose-400'}>{netStr}</span>
+                            </div>
+                          </div>
+
+                          {/* Starters */}
+                          <div className="space-y-1">
+                            {rec.starters.map((p, si) => {
+                              const posLabel = ['PG','SG','SF','PF','C'][si];
+                              return (
+                                <div key={p.id} className="flex items-center gap-2 text-[10px]">
+                                  <span className="w-6 text-slate-600 font-black uppercase shrink-0">{posLabel}</span>
+                                  <span className="text-slate-300 font-bold truncate flex-1">{p.name}</span>
+                                  <span className="text-slate-600 font-mono shrink-0">{p.rating}</span>
+                                </div>
+                              );
+                            })}
+                          </div>
+
+                          {/* Bench preview */}
+                          {rec.bench.length > 0 && (
+                            <div className="border-t border-slate-800 pt-2">
+                              <p className="text-[10px] text-slate-700 font-black uppercase mb-1">Bench</p>
+                              <p className="text-[10px] text-slate-500 truncate">
+                                {rec.bench.slice(0, 5).map(p => p.name.split(' ')[1] || p.name).join(' · ')}
+                              </p>
+                            </div>
+                          )}
+
+                          {/* Chemistry note */}
+                          {(rec.traitBonus.off !== 0 || rec.traitBonus.def !== 0) && (
+                            <p className="text-[10px] text-slate-600 italic">
+                              Chemistry:{' '}
+                              {rec.traitBonus.off > 0 ? <span className="text-emerald-600">OFF +{rec.traitBonus.off.toFixed(1)}</span> : <span className="text-rose-600">OFF {rec.traitBonus.off.toFixed(1)}</span>}
+                              {' '}
+                              {rec.traitBonus.def > 0 ? <span className="text-emerald-600">DEF +{rec.traitBonus.def.toFixed(1)}</span> : <span className="text-rose-600">DEF {rec.traitBonus.def.toFixed(1)}</span>}
+                            </p>
+                          )}
+
+                          {/* Apply button */}
+                          <button
+                            onClick={() => applyLineup(rec)}
+                            disabled={isApplied}
+                            className={`w-full flex items-center justify-center gap-2 py-2 rounded-xl text-[10px] font-black uppercase transition-all ${
+                              isApplied
+                                ? 'bg-amber-500/10 text-amber-500 border border-amber-500/30 cursor-default'
+                                : 'bg-slate-900 border border-slate-700 text-slate-400 hover:bg-amber-500 hover:text-slate-950 hover:border-amber-500'
+                            }`}
+                          >
+                            {isApplied ? <><CheckCircle2 size={10} /> Applied</> : 'Apply Lineup'}
+                          </button>
+                        </div>
+                      );
+                    });
+                  })()}
+                </div>
+              )}
             </div>
 
             <div className="space-y-4">
