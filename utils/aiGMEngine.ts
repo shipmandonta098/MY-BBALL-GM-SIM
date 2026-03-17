@@ -339,8 +339,9 @@ export function runAIGMOffseason(
     let currentRoster = [...t.roster];
     const released: Player[] = [];
 
+    const minRoster = s.settings.minRosterSize ?? 10;
     currentRoster = currentRoster.filter(p => {
-      if (currentRoster.length <= 10) return true; // never below 10
+      if (currentRoster.length <= minRoster) return true; // never below minimum
       if (personality === 'Loyalist' && p.morale >= 60) return true; // loyalist keeps happy players
       if (shouldRelease(p, p.salary, personality)) {
         released.push(p);
@@ -402,14 +403,22 @@ export function runAIGMOffseason(
         topFAIds.has(fa.id)
       );
 
-      if (currentSalary + offerAmt > salaryCap * 1.1 && personality !== 'Win Now') continue;
+      // Hard cap: never exceed cap; soft cap: allow slight overage for Win Now
+      const isHardCap = s.settings.salaryCapType === 'Hard Cap';
+      if (isHardCap && currentSalary + offerAmt > salaryCap) continue;
+      if (!isHardCap && currentSalary + offerAmt > salaryCap * 1.1 && personality !== 'Win Now') continue;
+
+      // Enforce max roster size
+      if (currentRoster.length >= (s.settings.maxRosterSize ?? 15)) continue;
 
       // Sign the player
+      const maxYears = s.settings.maxContractYears ?? 5;
+      const rawYears = personality === 'Win Now' ? 3 + Math.floor(Math.random() * 2) : 1 + Math.floor(Math.random() * 3);
       const signedPlayer: Player = {
         ...fa,
         isFreeAgent: false,
         salary: offerAmt,
-        contractYears: personality === 'Win Now' ? 3 + Math.floor(Math.random() * 2) : 1 + Math.floor(Math.random() * 3),
+        contractYears: Math.min(rawYears, maxYears),
         status: 'Rotation' as PlayerStatus,
         morale: 70 + Math.floor(Math.random() * 20),
       };
@@ -515,6 +524,28 @@ export function runAIGMOffseason(
       return t;
     }),
   };
+
+  // ── MINIMUM PAYROLL FLOOR ──────────────────────────────────────────────────
+  // If minPayroll is set, teams spending less must sign cheap FAs to reach the floor.
+  const payrollFloor = s.settings.minPayroll;
+  if (payrollFloor && payrollFloor > 0) {
+    for (let teamIdx = 0; teamIdx < s.teams.length; teamIdx++) {
+      const t = s.teams[teamIdx];
+      if (t.id === s.userTeamId) continue;
+      let teamSalary = rosterSalary(t);
+      let currentRoster = [...t.roster];
+      while (teamSalary < payrollFloor && faPool.length > 0 && currentRoster.length < (s.settings.maxRosterSize ?? 15)) {
+        // Sign cheapest available FA to fill up to floor
+        faPool.sort((a, b) => (a.desiredContract?.salary ?? 500_000) - (b.desiredContract?.salary ?? 500_000));
+        const fa = faPool.shift()!;
+        const minSalary = fa.desiredContract?.salary ?? 750_000;
+        const sp: Player = { ...fa, isFreeAgent: false, salary: minSalary, contractYears: 1, status: 'Bench' as PlayerStatus };
+        currentRoster.push(sp);
+        teamSalary += minSalary;
+      }
+      s = { ...s, teams: s.teams.map(tm => tm.id === t.id ? { ...tm, roster: currentRoster } : tm) };
+    }
+  }
 
   // Update FA pool in state
   s = { ...s, freeAgents: faPool };
@@ -622,7 +653,8 @@ export function evaluateTrade(
   receiving: TradePackage,
   sending: TradePackage,
   personality: AIGMPersonality,
-  totalTeams: number
+  totalTeams: number,
+  tradeDifficulty?: string,
 ): boolean {
   const valueOf = (pkg: TradePackage) => {
     const pVal = pkg.players.reduce((s, p) => s + playerTradeValue(p, personality), 0);
@@ -639,8 +671,17 @@ export function evaluateTrade(
     if (hasStar) return true;
   }
 
-  // Accept if receiving at least 90% of what you're sending
-  return recVal >= senVal * 0.9;
+  // Fairness threshold scales with trade difficulty setting
+  const thresholdMap: Record<string, number> = {
+    Arcade:     0.70,  // almost anything goes
+    Easy:       0.80,
+    Realistic:  0.90,  // default NBA-like
+    Hard:       0.96,
+    Simulation: 1.00,  // must receive equal value
+  };
+  const threshold = thresholdMap[tradeDifficulty ?? 'Realistic'] ?? 0.90;
+
+  return recVal >= senVal * threshold;
 }
 
 // ─── Deadline logic (mid-season) ────────────────────────────
@@ -772,8 +813,8 @@ export function aiGMInSeasonTrades(
       const buyerSends: TradePackage = { players: [returnPlayer], picks: [] };
 
       if (
-        evaluateTrade(rebuilderGets, rebuilderSends, personality, s.teams.length) &&
-        evaluateTrade(buyerGets, buyerSends, buyer.aiGM!.personality, s.teams.length)
+        evaluateTrade(rebuilderGets, rebuilderSends, personality, s.teams.length, s.settings?.tradeDifficulty) &&
+        evaluateTrade(buyerGets, buyerSends, buyer.aiGM!.personality, s.teams.length, s.settings?.tradeDifficulty)
       ) {
         const rebuilderTeam = s.teams.find(t => t.id === team.id)!;
         const buyerTeam = s.teams.find(t => t.id === buyer.id)!;
@@ -839,8 +880,8 @@ export function aiGMInSeasonTrades(
       const contenderSends: TradePackage = { players: [returnPlayer], picks: [] };
 
       if (
-        evaluateTrade(sellerGets, sellerSends, sellerData.aiGM?.personality ?? 'Balanced', s.teams.length) &&
-        evaluateTrade(contenderGets, contenderSends, personality, s.teams.length)
+        evaluateTrade(sellerGets, sellerSends, sellerData.aiGM?.personality ?? 'Balanced', s.teams.length, s.settings?.tradeDifficulty) &&
+        evaluateTrade(contenderGets, contenderSends, personality, s.teams.length, s.settings?.tradeDifficulty)
       ) {
         s = {
           ...s,
@@ -923,7 +964,8 @@ export function aiGMPreOffseasonAgreements(
 
     const desired = fa.desiredContract?.salary ?? 5_000_000;
     const offerSalary = Math.round(Math.min(teamCap * 0.8, desired * (0.90 + Math.random() * 0.15)) / 250_000) * 250_000;
-    const offerYears = personality === 'Win Now' ? 3 : 2;
+    const maxYrs = state.settings.maxContractYears ?? 5;
+    const offerYears = Math.min(personality === 'Win Now' ? 3 : 2, maxYrs);
 
     const signedPlayer: Player = {
       ...fa,

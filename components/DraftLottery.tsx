@@ -72,11 +72,19 @@ const DraftLottery: React.FC<DraftLotteryProps> = ({ league, updateLeague }) => 
         results.push({ round: 1, pick: results.length + 1, originalTeamId: t.id, currentTeamId: t.id });
       });
 
-    // Round 2: reverse order of round 1 (champion picks last in R2)
-    const r1Copy = results.slice(0, 30);
-    [...r1Copy].reverse().forEach((p, idx) => {
-      results.push({ round: 2, pick: 31 + idx, originalTeamId: p.originalTeamId, currentTeamId: p.currentTeamId });
-    });
+    // Additional rounds (2+): reverse order of round 1 for each round
+    const numRounds = league.settings.draftRounds ?? 2;
+    const r1Copy = results.slice(0, league.teams.length);
+    for (let round = 2; round <= numRounds; round++) {
+      [...r1Copy].reverse().forEach((p, idx) => {
+        results.push({
+          round,
+          pick: (round - 1) * league.teams.length + idx + 1,
+          originalTeamId: p.originalTeamId,
+          currentTeamId: p.currentTeamId,
+        });
+      });
+    }
 
     return results;
   };

@@ -1,4 +1,4 @@
-import { Team, GameResult, Player, GamePlayerLine, CoachScheme, PlayByPlayEvent, InjuryType, LeagueState, QuarterDetail } from '../types';
+import { Team, GameResult, Player, GamePlayerLine, CoachScheme, PlayByPlayEvent, InjuryType, LeagueState, QuarterDetail, LeagueSettings } from '../types';
 
 // ─── Constants ───────────────────────────────────────────────────────────────
 const BASE_PPP       = 1.12;
@@ -3244,7 +3244,14 @@ export const simulateGame = (
   homeB2B = false,
   awayB2B = false,
   rivalryLevel = 'Ice Cold',
+  settings?: Pick<LeagueSettings, 'injuryFrequency' | 'homeCourt' | 'b2bFrequency'>,
 ): GameResult => {
+  // ── Settings-driven constants ──────────────────────────────────────────────
+  const homeCourtAdv = settings?.homeCourt === false ? 0 : HOME_COURT_ADV;
+  const injuryMult: Record<string, number> = { None: 0, Low: 0.5, Medium: 1.0, High: 2.0 };
+  const injuryMultiplier = injuryMult[settings?.injuryFrequency ?? 'Medium'] ?? 1.0;
+  const b2bMap: Record<string, number> = { None: 1.0, Low: 0.97, Realistic: 0.93, High: 0.90, Brutal: 0.87 };
+  const b2bPenalty = b2bMap[settings?.b2bFrequency ?? 'Realistic'] ?? 0.93;
 
   // ── 1. Player Variance Rolls (tip-off) ────────────────────────────────────
   const playerVariance = new Map<string, number>();
@@ -3283,7 +3290,7 @@ export const simulateGame = (
 
   const calcBasePPP = (off: number, def: number, isB2B: boolean) => {
     let ppp = BASE_PPP + (off - def) / 100 * 0.5;
-    if (isB2B) ppp *= 0.93;
+    if (isB2B) ppp *= b2bPenalty;
     return ppp + (Math.random() * SCORE_VARIANCE * 2 - SCORE_VARIANCE);
   };
   const homePPP = calcBasePPP(homeBaseOff, homeDef, homeB2B);
@@ -3352,7 +3359,7 @@ export const simulateGame = (
     const qGamePace = Math.round((homeQPaceScore + awayQPaceScore) / 2);
 
     // ── Situational PPP modifiers ─────────────────────────────────────────
-    let homeOff = HOME_COURT_ADV;
+    let homeOff = homeCourtAdv;
     let awayOff = -VISIT_TOV_PEN;
 
     if (absScoreDiff >= 10 && absScoreDiff < 20) {
@@ -3618,7 +3625,8 @@ export const simulateGame = (
       if (p.min < 5) return;
       const player = tm.roster.find(pl => pl.id === p.playerId);
       if (!player || player.status === 'Injured') return;
-      let chance = 0.004;
+      if (injuryMultiplier === 0) return; // 'None' — injuries disabled
+      let chance = 0.004 * injuryMultiplier;
       if (p.min > 35) chance *= 1.5;
       if (isB2B)      chance *= 1.3;
       // Medical staff reduces injury chance (0% at tier 1 / 20, up to -40% at elite / 100)
@@ -3651,7 +3659,7 @@ export const simulateGame = (
     // 8-10 possessions per team per OT period; urgency boosts scoring slightly
     const otPoss  = 8 + Math.floor(Math.random() * 3);
     const otBoost = 0.05; // PPP lift from urgency
-    const otH = Math.max(6, Math.round(otPoss * (homePPP + HOME_COURT_ADV + otBoost)));
+    const otH = Math.max(6, Math.round(otPoss * (homePPP + homeCourtAdv + otBoost)));
     const otA = Math.max(6, Math.round(otPoss * (awayPPP + otBoost)));
 
     totalHome += otH;

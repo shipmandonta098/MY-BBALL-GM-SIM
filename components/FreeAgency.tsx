@@ -130,6 +130,12 @@ const FreeAgency: React.FC<FreeAgencyProps> = ({
 
   // ── In-season signing handler ──
   const handleInSeasonSign = (player: Player, contractType: InSeasonContractType, salary: number) => {
+    // Enforce max roster size
+    const maxRoster = league.settings.maxRosterSize ?? 15;
+    if (userTeam.roster.length >= maxRoster) {
+      alert(`Roster full (max ${maxRoster}). Release a player before signing.`);
+      return;
+    }
     // Acceptance model: cheaper deals are accepted more readily by lower-rated players
     const desired = computeDesiredSalary(player.rating);
     const ratio = salary / desired;
@@ -218,6 +224,11 @@ const FreeAgency: React.FC<FreeAgencyProps> = ({
 
   // ── Open negotiation ──
   const openNegotiation = (player: Player) => {
+    const maxRoster = league.settings.maxRosterSize ?? 15;
+    if (userTeam.roster.length >= maxRoster) {
+      alert(`Roster full (max ${maxRoster}). Release a player before signing.`);
+      return;
+    }
     const desired = getDesired(player);
     setNegotiatingPlayer(player);
     setOffer({
@@ -265,7 +276,7 @@ const FreeAgency: React.FC<FreeAgencyProps> = ({
         ...negotiatingPlayer,
         isFreeAgent: false,
         salary: offer.salary,
-        contractYears: offer.years,
+        contractYears: Math.min(offer.years, league.settings.maxContractYears ?? 5),
         morale: Math.min(100, (negotiatingPlayer.morale || 80) + 10),
       };
 
@@ -1031,7 +1042,7 @@ const FreeAgency: React.FC<FreeAgencyProps> = ({
                         onChange={e => setOffer({ ...offer, years: parseInt(e.target.value) })}
                         className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-3 text-white text-sm focus:outline-none focus:border-amber-500 transition-colors"
                       >
-                        {[1, 2, 3, 4, 5].map(y => (
+                        {Array.from({ length: league.settings.maxContractYears ?? 5 }, (_, i) => i + 1).map(y => (
                           <option key={y} value={y}>{y} Year{y > 1 ? 's' : ''}</option>
                         ))}
                       </select>

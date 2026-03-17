@@ -1241,7 +1241,7 @@ export const generateFreeAgentPool = (count: number, season: number, genderRatio
   });
 };
 
-export const generateProspects = (year: number, count: number = 100, genderRatio: number = 0): Prospect[] => {
+export const generateProspects = (year: number, count: number = 100, genderRatio: number = 0, ageMin = 19, ageMax = 21): Prospect[] => {
   return Array.from({ length: count }).map((_, i) => {
     const gender = getRandomGender(genderRatio);
     
@@ -1315,7 +1315,7 @@ export const generateProspects = (year: number, count: number = 100, genderRatio
       id,
       name: `${firstNames[Math.floor(Math.random() * firstNames.length)]} ${lastNames[Math.floor(Math.random() * lastNames.length)]}`,
       gender,
-      age: 19 + Math.floor(Math.random() * 3),
+      age: ageMin + Math.floor(Math.random() * (Math.max(ageMin, ageMax) - ageMin + 1)),
       position: pos,
       rating,
       potential,
@@ -1471,7 +1471,12 @@ export const generateLeagueTeams = (genderRatio: number = 0, season: number = 20
   });
 };
 
-export const generateSeasonSchedule = (teams: Team[], numGames: number = 82): ScheduleGame[] => {
+export const generateSeasonSchedule = (
+  teams: Team[],
+  numGames: number = 82,
+  divisionGamesCount?: number,
+  conferenceGamesCount?: number,
+): ScheduleGame[] => {
   const schedule: ScheduleGame[] = [];
   const teamGamesCountTotal: Record<string, number> = {};
   const teamGamesScheduled: Record<string, number> = {};
@@ -1507,8 +1512,10 @@ export const generateSeasonSchedule = (teams: Team[], numGames: number = 82): Sc
       const t2 = teams[j];
       let count = 0;
       if (numGames >= 80) {
-        if (t1.division === t2.division) count = 4;
-        else if (t1.conference === t2.conference) count = 3;
+        const divG  = divisionGamesCount  ?? 4;
+        const confG = conferenceGamesCount ?? 3;
+        if (t1.division === t2.division) count = divG;
+        else if (t1.conference === t2.conference) count = Math.max(1, confG);
         else count = 2;
       } else {
         count = 1;
