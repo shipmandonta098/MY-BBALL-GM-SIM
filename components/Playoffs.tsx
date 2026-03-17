@@ -1,5 +1,5 @@
 import React, { useState, useMemo } from 'react';
-import { LeagueState, Team, PlayoffBracket, PlayoffSeries, GameResult, Player, AwardWinner, RivalryStats } from '../types';
+import { LeagueState, Team, PlayoffBracket, PlayoffSeries, GameResult, Player, AwardWinner, RivalryStats, ChampionshipRecord } from '../types';
 import TeamBadge from './TeamBadge';
 import { simulateGame } from '../utils/simEngine';
 
@@ -219,7 +219,7 @@ const Playoffs: React.FC<PlayoffsProps> = ({ league, updateLeague, onStartOffsea
        const champion = state.teams.find(t => t.id === championId)!;
        nextBracket.championId = championId;
        nextBracket.isCompleted = true;
-       
+
        const finalsGames = [result, ...state.history].filter(h => newSeries.games.includes(h.id));
        const finalsStats = finalsGames.flatMap(g => g.homeTeamId === championId ? g.homePlayerStats : g.awayPlayerStats);
        const mvpEntry = finalsStats.reduce((acc: any, curr) => {
@@ -229,13 +229,37 @@ const Playoffs: React.FC<PlayoffsProps> = ({ league, updateLeague, onStartOffsea
           return acc;
        }, {});
        const mvpId = Object.keys(mvpEntry).sort((a,b) => (mvpEntry[b].pts/mvpEntry[b].gp) - (mvpEntry[a].pts/mvpEntry[a].gp))[0];
-       
+
        nextBracket.finalsMvp = {
           playerId: mvpId,
           name: mvpEntry[mvpId].name,
           teamId: championId,
           teamName: champion.name,
           statsLabel: `${(mvpEntry[mvpId].pts/mvpEntry[mvpId].gp).toFixed(1)} PPG in Finals`
+       };
+
+       // Persist championship record for league history
+       const runnerUpId = newSeries.team1Id === championId ? newSeries.team2Id : newSeries.team1Id;
+       const runnerUp = state.teams.find(t => t.id === runnerUpId)!;
+       const champWins = newSeries.team1Id === championId ? newSeries.team1Wins : newSeries.team2Wins;
+       const ruWins   = newSeries.team1Id === championId ? newSeries.team2Wins : newSeries.team1Wins;
+       const champRecord: ChampionshipRecord = {
+          year: state.season,
+          championId,
+          championName: `${champion.city} ${champion.name}`,
+          runnerUpId,
+          runnerUpName: `${runnerUp.city} ${runnerUp.name}`,
+          seriesScore: `${champWins}-${ruWins}`,
+          finalsMvp: mvpEntry[mvpId]?.name ?? '—',
+       };
+       return {
+          ...state,
+          playoffBracket: nextBracket,
+          championshipHistory: [champRecord, ...(state.championshipHistory || [])],
+          history: [result, ...state.history],
+          rivalryHistory: history,
+          teams: updatedTeams,
+          newsFeed,
        };
     }
 
