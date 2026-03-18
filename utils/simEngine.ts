@@ -1,4 +1,4 @@
-import { Team, GameResult, Player, GamePlayerLine, CoachScheme, PlayByPlayEvent, InjuryType, LeagueState, QuarterDetail, LeagueSettings } from '../types';
+import { Team, GameResult, Player, GamePlayerLine, ClutchGameLine, CoachScheme, PlayByPlayEvent, InjuryType, LeagueState, QuarterDetail, LeagueSettings } from '../types';
 
 // ─── Constants ───────────────────────────────────────────────────────────────
 const BASE_PPP       = 1.12;
@@ -3813,6 +3813,88 @@ export const simulateGame = (
     }
   })();
 
+  // ── 12. Clutch Stats Injection ────────────────────────────────────────────
+  // Clutch = last 5 min of Q4/OT when score diff ≤ 5 at game end.
+  // Since we use box-score sim (not per-possession), clutch stats are synthetically derived.
+  const hasClutchSituation = Math.abs(margin) <= 5;
+  let clutchHomeScore = 0;
+  let clutchAwayScore = 0;
+
+  if (hasClutchSituation) {
+    const q4Home = homeQScores[3] ?? 0;
+    const q4Away = awayQScores[3] ?? 0;
+    // Last 5 of 12 min quarter ≈ 41.7% of Q4 scoring
+    const clutchFraction = 5 / 12;
+    clutchHomeScore = Math.max(0, Math.round(q4Home * clutchFraction + (Math.random() * 2 - 1)));
+    clutchAwayScore = Math.max(0, Math.round(q4Away * clutchFraction + (Math.random() * 2 - 1)));
+
+    const injectClutchStats = (
+      stats: GamePlayerLine[],
+      team: Team,
+      teamClutchPts: number,
+      clutchMarginSign: number,
+    ): GamePlayerLine[] => {
+      const active = stats.filter(s => !s.dnp && s.min > 0);
+      if (active.length === 0 || teamClutchPts <= 0) return stats;
+
+      // Weight = minuteShare × clutchShotTaker tendency (default 50 → weight 1.0)
+      const weights = active.map(s => {
+        const p = team.roster.find(r => r.id === s.playerId);
+        const clutchTendency = p?.tendencies?.situationalTendencies?.clutchShotTaker ?? 50;
+        return (s.min / 48) * (clutchTendency / 50);
+      });
+      const totalWeight = weights.reduce((a, b) => a + b, 0);
+      const normWeights = weights.map(w => w / Math.max(totalWeight, 0.001));
+
+      const withClutch = active.map((s, i) => {
+        const share = normWeights[i];
+        const cPts = Math.max(0, Math.round(teamClutchPts * share));
+        // Derive shooting ratios from player's overall game line
+        const fgPct      = s.fga  > 0 ? s.fgm  / s.fga  : 0.45;
+        const threePct   = s.threepa > 0 ? s.threepm / s.threepa : 0.35;
+        const ftPct      = s.fta  > 0 ? s.ftm  / s.fta  : 0.75;
+        // Allocate pts: ~25% FT, ~20% 3pt, rest 2pt
+        const cFta       = Math.max(0, Math.round(cPts * 0.25));
+        const cFtm       = Math.max(0, Math.round(cFta * ftPct));
+        const cThreepa   = Math.max(0, Math.round(cPts * 0.20 / 3));
+        const cThreepm   = Math.max(0, Math.round(cThreepa * threePct));
+        const rem        = Math.max(0, cPts - cFtm - cThreepm * 3);
+        const cFga2      = Math.max(0, Math.round(rem / 2));
+        const cFgm2      = Math.max(0, Math.round(cFga2 * fgPct));
+        const cFgm       = cFgm2 + cThreepm;
+        const cFga       = cFga2 + cThreepa;
+        const cReb       = Math.max(0, Math.round(s.reb  * share * 0.5));
+        const cAst       = Math.max(0, Math.round(s.ast  * share * 0.5));
+        const cMin       = Math.min(5, Math.max(0, Math.round(s.min * (5 / 48) * 1.5)));
+        const cPlusMinus = clutchMarginSign * Math.max(0, Math.round(Math.abs(s.plusMinus) * share));
+        const clutchStats: ClutchGameLine = {
+          clutchMin:      cMin,
+          clutchPts:      cPts,
+          clutchReb:      cReb,
+          clutchAst:      cAst,
+          clutchFgm:      cFgm,
+          clutchFga:      Math.max(cFgm, cFga),
+          clutchThreepm:  cThreepm,
+          clutchThreepa:  Math.max(cThreepm, cThreepa),
+          clutchFtm:      cFtm,
+          clutchFta:      Math.max(cFtm, cFta),
+          clutchPlusMinus: cPlusMinus,
+        };
+        return { ...s, clutchStats };
+      });
+
+      const clutchById = new Map(withClutch.map(s => [s.playerId, s.clutchStats!]));
+      return stats.map(s => {
+        const cs = clutchById.get(s.playerId);
+        return cs ? { ...s, clutchStats: cs } : s;
+      });
+    };
+
+    const homeWonClutch = clutchHomeScore >= clutchAwayScore ? 1 : -1;
+    homePlayerStats = injectClutchStats(homePlayerStats, home, clutchHomeScore, homeWonClutch);
+    awayPlayerStats = injectClutchStats(awayPlayerStats, away, clutchAwayScore, -homeWonClutch);
+  }
+
   const allLines = [...homePlayerStats, ...awayPlayerStats].sort((a, b) => b.pts - a.pts);
 
   return {
@@ -3823,6 +3905,9 @@ export const simulateGame = (
     awayScore:    totalAway,
     quarterScores: { home: homeQScores, away: awayQScores },
     quarterDetails,
+    hasClutchSituation,
+    clutchHomeScore,
+    clutchAwayScore,
     homePlayerStats,
     awayPlayerStats,
     topPerformers: allLines.slice(0, 3).map(l => ({ playerId: l.playerId, points: l.pts, rebounds: l.reb, assists: l.ast })),

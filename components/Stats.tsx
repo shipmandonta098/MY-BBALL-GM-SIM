@@ -11,7 +11,7 @@ interface StatsProps {
 }
 
 type StatTab = 'leaderboards' | 'advanced' | 'compare' | 'teams' | 'players';
-type PlayerSubTab = 'traditional' | 'advanced' | 'per36' | 'shooting' | 'totals';
+type PlayerSubTab = 'traditional' | 'advanced' | 'per36' | 'shooting' | 'totals' | 'clutch';
 type PlayerStatsView = 'season' | 'career';
 
 const Stats: React.FC<StatsProps> = ({ league, onViewRoster, onManageTeam, onViewPlayer }) => {
@@ -26,6 +26,7 @@ const Stats: React.FC<StatsProps> = ({ league, onViewRoster, onManageTeam, onVie
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc');
   const [page, setPage] = useState(0);
   const [playerStatsView, setPlayerStatsView] = useState<PlayerStatsView>('season');
+  const [minClutchMin, setMinClutchMin] = useState(10);
 
   const allPlayers = useMemo(() => {
     return league.teams.flatMap(t => t.roster.map(p => ({
@@ -417,16 +418,69 @@ const Stats: React.FC<StatsProps> = ({ league, onViewRoster, onManageTeam, onVie
       );
     }, [league.teams, playerStatsView]);
 
+    // Aggregate clutch stats from game history per player
+    const clutchByPlayer = useMemo(() => {
+      const map = new Map<string, { clutchGames: number; clutchPts: number; clutchReb: number; clutchAst: number; clutchFgm: number; clutchFga: number; clutchThreepm: number; clutchThreepa: number; clutchFtm: number; clutchFta: number; clutchPlusMinus: number; clutchMin: number; }>();
+      league.history.forEach(g => {
+        if (!g.hasClutchSituation) return;
+        [...g.homePlayerStats, ...g.awayPlayerStats].forEach(pl => {
+          if (!pl.clutchStats || pl.dnp) return;
+          const cs = pl.clutchStats;
+          const prev = map.get(pl.playerId) ?? { clutchGames: 0, clutchPts: 0, clutchReb: 0, clutchAst: 0, clutchFgm: 0, clutchFga: 0, clutchThreepm: 0, clutchThreepa: 0, clutchFtm: 0, clutchFta: 0, clutchPlusMinus: 0, clutchMin: 0 };
+          map.set(pl.playerId, {
+            clutchGames:     prev.clutchGames     + 1,
+            clutchPts:       prev.clutchPts       + cs.clutchPts,
+            clutchReb:       prev.clutchReb       + cs.clutchReb,
+            clutchAst:       prev.clutchAst       + cs.clutchAst,
+            clutchFgm:       prev.clutchFgm       + cs.clutchFgm,
+            clutchFga:       prev.clutchFga       + cs.clutchFga,
+            clutchThreepm:   prev.clutchThreepm   + cs.clutchThreepm,
+            clutchThreepa:   prev.clutchThreepa   + cs.clutchThreepa,
+            clutchFtm:       prev.clutchFtm       + cs.clutchFtm,
+            clutchFta:       prev.clutchFta       + cs.clutchFta,
+            clutchPlusMinus: prev.clutchPlusMinus + cs.clutchPlusMinus,
+            clutchMin:       prev.clutchMin       + cs.clutchMin,
+          });
+        });
+      });
+      return map;
+    }, [league.history]);
+
+    // Merge clutch fields into player rows
+    const playerRowsWithClutch = useMemo(() => {
+      return playerRows.map(r => {
+        const cs = clutchByPlayer.get(r.id);
+        if (!cs || cs.clutchGames === 0) {
+          return { ...r, clutchGames: 0, clutchMin: 0, clutchPpg: 0, clutchRpg: 0, clutchApg: 0, clutchFgPct: 0, clutchThreePct: 0, clutchFtPct: 0, clutchFtmPg: 0, clutchPmPg: 0 };
+        }
+        const cg = cs.clutchGames;
+        return {
+          ...r,
+          clutchGames:    cg,
+          clutchMin:      cs.clutchMin,
+          clutchPpg:      cs.clutchPts       / cg,
+          clutchRpg:      cs.clutchReb       / cg,
+          clutchApg:      cs.clutchAst       / cg,
+          clutchFgPct:    cs.clutchFga  > 0 ? cs.clutchFgm      / cs.clutchFga      : 0,
+          clutchThreePct: cs.clutchThreepa > 0 ? cs.clutchThreepm / cs.clutchThreepa : 0,
+          clutchFtPct:    cs.clutchFta  > 0 ? cs.clutchFtm      / cs.clutchFta      : 0,
+          clutchFtmPg:    cs.clutchFtm       / cg,
+          clutchPmPg:     cs.clutchPlusMinus / cg,
+        };
+      });
+    }, [playerRows, clutchByPlayer]);
+
     // Filter
     const filtered = useMemo(() => {
-      return playerRows.filter(r => {
+      return playerRowsWithClutch.filter(r => {
         if (r.gp < minGames) return false;
         if (searchTerm && !r.name.toLowerCase().includes(searchTerm.toLowerCase())) return false;
         if (teamFilter !== 'ALL' && r.teamId !== teamFilter) return false;
         if (posFilter !== 'ALL' && r.pos !== posFilter) return false;
+        if (playerSubTab === 'clutch' && r.clutchMin < minClutchMin) return false;
         return true;
       });
-    }, [playerRows, minGames, searchTerm, teamFilter, posFilter]);
+    }, [playerRowsWithClutch, minGames, searchTerm, teamFilter, posFilter, playerSubTab, minClutchMin]);
 
     // Sort
     const sorted = useMemo(() => {
@@ -514,12 +568,12 @@ const Stats: React.FC<StatsProps> = ({ league, onViewRoster, onManageTeam, onVie
           </div>
           {/* Sub-tabs */}
           <div className="flex gap-2 flex-wrap">
-            {(['traditional', 'advanced', 'per36', 'shooting', 'totals'] as PlayerSubTab[]).filter(t => t !== 'advanced' || league.settings.showAdvancedStats !== false).map(t => (
+            {(['traditional', 'advanced', 'per36', 'shooting', 'totals', 'clutch'] as PlayerSubTab[]).filter(t => t !== 'advanced' || league.settings.showAdvancedStats !== false).map(t => (
               <button
                 key={t}
                 onClick={() => {
                   setPlayerSubTab(t);
-                  setSortKey(t === 'advanced' ? 'per' : t === 'shooting' ? 'fgPct' : t === 'totals' ? 'totalPts' : 'ppg');
+                  setSortKey(t === 'advanced' ? 'per' : t === 'shooting' ? 'fgPct' : t === 'totals' ? 'totalPts' : t === 'clutch' ? 'clutchPpg' : 'ppg');
                   setSortDir('desc');
                   setPage(0);
                 }}
@@ -532,6 +586,23 @@ const Stats: React.FC<StatsProps> = ({ league, onViewRoster, onManageTeam, onVie
             ))}
           </div>
         </div>
+
+        {/* Clutch filter + note */}
+        {playerSubTab === 'clutch' && (
+          <div className="flex items-center justify-between flex-wrap gap-3 px-1">
+            <div className="flex items-center gap-3 bg-slate-900 border border-amber-500/30 rounded-xl px-4 py-2">
+              <span className="text-[10px] font-black text-slate-500 uppercase">Min Clutch Min</span>
+              <input
+                type="number"
+                className="bg-transparent text-amber-500 font-display font-bold w-12 focus:outline-none"
+                value={minClutchMin}
+                min={0}
+                onChange={e => { setMinClutchMin(parseInt(e.target.value) || 0); setPage(0); }}
+              />
+            </div>
+            <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Clutch situations only (last 5 min, ±5 pts)</span>
+          </div>
+        )}
 
         {/* Table */}
         <div className="bg-slate-900 border border-slate-800 rounded-3xl overflow-hidden shadow-2xl">
@@ -594,6 +665,18 @@ const Stats: React.FC<StatsProps> = ({ league, onViewRoster, onManageTeam, onVie
                     <Th k="ftmPg"  label="FTM" />
                     <Th k="ftaPg"  label="FTA" />
                     <Th k="ftPct"  label="FT%" />
+                  </>)}
+                  {playerSubTab === 'clutch' && (<>
+                    <Th k="clutchGames"    label="CG" />
+                    <Th k="clutchMin"      label="CMIN" />
+                    <Th k="clutchPpg"      label="PPG" />
+                    <Th k="clutchRpg"      label="RPG" />
+                    <Th k="clutchApg"      label="APG" />
+                    <Th k="clutchFgPct"    label="FG%" />
+                    <Th k="clutchThreePct" label="3P%" />
+                    <Th k="clutchFtPct"    label="FT%" />
+                    <Th k="clutchFtmPg"    label="FTM" />
+                    <Th k="clutchPmPg"     label="+/-" />
                   </>)}
                   {playerSubTab === 'totals' && (<>
                     <Th k="gs"       label="GS" />
@@ -689,6 +772,18 @@ const Stats: React.FC<StatsProps> = ({ league, onViewRoster, onManageTeam, onVie
                         <td className="px-2 py-3 text-center font-mono">{fix1(r.ftaPg)}</td>
                         <td className="px-2 py-3 text-center font-mono">{r.fta > 0 ? pct(r.ftPct) : '—'}</td>
                       </>)}
+                      {playerSubTab === 'clutch' && (<>
+                        <td className="px-2 py-3 text-center font-mono">{r.clutchGames}</td>
+                        <td className="px-2 py-3 text-center font-mono text-slate-400">{r.clutchMin}</td>
+                        <td className="px-2 py-3 text-center font-mono font-bold text-amber-400">{fix1(r.clutchPpg)}</td>
+                        <td className="px-2 py-3 text-center font-mono">{fix1(r.clutchRpg)}</td>
+                        <td className="px-2 py-3 text-center font-mono">{fix1(r.clutchApg)}</td>
+                        <td className="px-2 py-3 text-center font-mono">{r.clutchGames > 0 ? pct(r.clutchFgPct) : '—'}</td>
+                        <td className="px-2 py-3 text-center font-mono">{r.clutchGames > 0 ? pct(r.clutchThreePct) : '—'}</td>
+                        <td className="px-2 py-3 text-center font-mono">{r.clutchGames > 0 ? pct(r.clutchFtPct) : '—'}</td>
+                        <td className="px-2 py-3 text-center font-mono">{fix1(r.clutchFtmPg)}</td>
+                        <td className={`px-2 py-3 text-center font-mono font-bold ${r.clutchPmPg >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>{r.clutchPmPg >= 0 ? '+' : ''}{fix1(r.clutchPmPg)}</td>
+                      </>)}
                       {playerSubTab === 'totals' && (<>
                         <td className="px-2 py-3 text-center font-mono text-slate-400">{r.gs}</td>
                         <td className="px-2 py-3 text-center font-mono">{r.totalMin}</td>
@@ -756,7 +851,7 @@ const Stats: React.FC<StatsProps> = ({ league, onViewRoster, onManageTeam, onVie
 
   // ─── TEAM STATS TABLE ────────────────────────────────────────────────────
   const TeamStatsTable = () => {
-    type TeamSubTab = 'traditional' | 'advanced' | 'opponent';
+    type TeamSubTab = 'traditional' | 'advanced' | 'opponent' | 'clutch';
     const [teamSubTab, setTeamSubTab] = useState<TeamSubTab>('traditional');
     const [sortKey, setSortKey] = useState<string>('winPct');
     const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc');
@@ -789,6 +884,81 @@ const Stats: React.FC<StatsProps> = ({ league, onViewRoster, onManageTeam, onVie
         oppAst: s('oppAst'), oppStl: s('oppStl'), oppBlk: s('oppBlk'), oppTov: s('oppTov'), oppPf: s('oppPf'),
       };
     }, [teamStats]);
+
+    // Aggregate team clutch stats from game history
+    const teamClutchStats = useMemo(() => {
+      const map = new Map<string, { clutchWins: number; clutchLosses: number; clutchPts: number; clutchOppPts: number; clutchMin: number; clutchFga: number; clutchFgm: number; clutchOppFga: number; clutchOppFgm: number; }>();
+      league.teams.forEach(t => map.set(t.id, { clutchWins: 0, clutchLosses: 0, clutchPts: 0, clutchOppPts: 0, clutchMin: 0, clutchFga: 0, clutchFgm: 0, clutchOppFga: 0, clutchOppFgm: 0 }));
+      league.history.forEach(g => {
+        if (!g.hasClutchSituation) return;
+        const homeEntry = map.get(g.homeTeamId);
+        const awayEntry = map.get(g.awayTeamId);
+        const homePts = g.clutchHomeScore ?? 0;
+        const awayPts = g.clutchAwayScore ?? 0;
+        const homeWonClutch = homePts >= awayPts;
+        // Aggregate team-level FGM/FGA from player clutch lines
+        let homeFgm = 0, homeFga = 0, awayFgm = 0, awayFga = 0, clutchMins = 0;
+        g.homePlayerStats.forEach(p => { if (p.clutchStats) { homeFgm += p.clutchStats.clutchFgm; homeFga += p.clutchStats.clutchFga; clutchMins = Math.max(clutchMins, p.clutchStats.clutchMin); } });
+        g.awayPlayerStats.forEach(p => { if (p.clutchStats) { awayFgm += p.clutchStats.clutchFgm; awayFga += p.clutchStats.clutchFga; } });
+        if (homeEntry) {
+          homeEntry.clutchWins   += homeWonClutch ? 1 : 0;
+          homeEntry.clutchLosses += homeWonClutch ? 0 : 1;
+          homeEntry.clutchPts    += homePts;
+          homeEntry.clutchOppPts += awayPts;
+          homeEntry.clutchMin    += clutchMins || 5;
+          homeEntry.clutchFgm    += homeFgm;
+          homeEntry.clutchFga    += homeFga;
+          homeEntry.clutchOppFgm += awayFgm;
+          homeEntry.clutchOppFga += awayFga;
+        }
+        if (awayEntry) {
+          awayEntry.clutchWins   += homeWonClutch ? 0 : 1;
+          awayEntry.clutchLosses += homeWonClutch ? 1 : 0;
+          awayEntry.clutchPts    += awayPts;
+          awayEntry.clutchOppPts += homePts;
+          awayEntry.clutchMin    += clutchMins || 5;
+          awayEntry.clutchFgm    += awayFgm;
+          awayEntry.clutchFga    += awayFga;
+          awayEntry.clutchOppFgm += homeFgm;
+          awayEntry.clutchOppFga += homeFga;
+        }
+      });
+      // Compute derived rates
+      return league.teams.map(t => {
+        const c = map.get(t.id)!;
+        const cg = Math.max(1, c.clutchWins + c.clutchLosses);
+        const cm = Math.max(1, c.clutchMin);
+        const clutchOrtg = (c.clutchPts    / cm) * 100;
+        const clutchDrtg = (c.clutchOppPts / cm) * 100;
+        return {
+          teamId:         t.id,
+          teamName:       t.name,
+          team:           t,
+          clutchWins:     c.clutchWins,
+          clutchLosses:   c.clutchLosses,
+          clutchGames:    cg,
+          clutchWinPct:   c.clutchWins / cg,
+          clutchPtsPer:   c.clutchPts    / cm * 5, // pts per 5 clutch min
+          clutchOppPtsPer: c.clutchOppPts / cm * 5,
+          clutchOrtg,
+          clutchDrtg,
+          clutchNetRtg:   clutchOrtg - clutchDrtg,
+        };
+      });
+    }, [league.history, league.teams]);
+
+    // Sorted clutch teams
+    const sortedClutchTeams = useMemo(() => {
+      return [...teamClutchStats]
+        .filter(t => t.teamName.toLowerCase().includes(searchTerm.toLowerCase()))
+        .sort((a, b) => {
+          const av = (a as Record<string, unknown>)[sortKey];
+          const bv = (b as Record<string, unknown>)[sortKey];
+          if (typeof av === 'number' && typeof bv === 'number')
+            return sortDir === 'desc' ? bv - av : av - bv;
+          return 0;
+        });
+    }, [teamClutchStats, sortKey, sortDir, searchTerm]);
 
     const handleSort = (key: string) => {
       if (sortKey === key) setSortDir(d => d === 'asc' ? 'desc' : 'asc');
@@ -834,14 +1004,15 @@ const Stats: React.FC<StatsProps> = ({ league, onViewRoster, onManageTeam, onVie
       <div className="space-y-4 animate-in fade-in slide-in-from-bottom-4 duration-500">
         {/* Sub-tab pills */}
         <div className="flex gap-2 flex-wrap">
-          {(['traditional', 'advanced', 'opponent'] as TeamSubTab[]).map(tab => (
+          {(['traditional', 'advanced', 'opponent', 'clutch'] as TeamSubTab[]).map(tab => (
             <button
               key={tab}
-              onClick={() => { setTeamSubTab(tab); setSortKey(tab === 'advanced' ? 'netRtg' : tab === 'opponent' ? 'oppPts' : 'winPct'); setSortDir('desc'); }}
+              onClick={() => { setTeamSubTab(tab); setSortKey(tab === 'advanced' ? 'netRtg' : tab === 'opponent' ? 'oppPts' : tab === 'clutch' ? 'clutchNetRtg' : 'winPct'); setSortDir('desc'); }}
               className={`px-4 py-2 rounded-xl text-[11px] font-black uppercase tracking-widest transition-all border ${
                 teamSubTab === tab
                   ? tab === 'advanced'  ? 'bg-purple-500 border-purple-400 text-white'
                   : tab === 'opponent' ? 'bg-blue-500 border-blue-400 text-white'
+                  : tab === 'clutch'   ? 'bg-amber-500 border-amber-400 text-slate-950'
                   : 'bg-amber-500 border-amber-400 text-slate-950'
                   : 'bg-slate-900 border-slate-800 text-slate-500 hover:text-white hover:border-slate-600'
               }`}
@@ -1084,8 +1255,59 @@ const Stats: React.FC<StatsProps> = ({ league, onViewRoster, onManageTeam, onVie
                 </tfoot>
               </table>
             )}
+
+            {/* ── CLUTCH ──────────────────────────────────────────────── */}
+            {teamSubTab === 'clutch' && (
+              <table className="w-full text-left border-collapse">
+                <thead>
+                  <tr className="text-[10px] text-slate-500 font-black uppercase tracking-widest border-b border-slate-800 bg-slate-950/50">
+                    <th className="px-4 py-4 cursor-pointer hover:text-white" onClick={() => handleSort('clutchWins')}># <Si k="clutchWins" /></th>
+                    <th className="px-4 py-4 cursor-pointer hover:text-white sticky left-0 bg-slate-950/90" onClick={() => handleSort('teamName')}>Team <Si k="teamName" /></th>
+                    <th className="px-2 py-4 text-center cursor-pointer hover:text-white" onClick={() => handleSort('clutchGames')}>CG <Si k="clutchGames" /></th>
+                    <th className="px-2 py-4 text-center cursor-pointer hover:text-white" onClick={() => handleSort('clutchWins')}>CW <Si k="clutchWins" /></th>
+                    <th className="px-2 py-4 text-center cursor-pointer hover:text-white" onClick={() => handleSort('clutchLosses')}>CL <Si k="clutchLosses" /></th>
+                    <th className="px-2 py-4 text-center cursor-pointer hover:text-white" onClick={() => handleSort('clutchWinPct')}>C% <Si k="clutchWinPct" /></th>
+                    <th className="px-2 py-4 text-center cursor-pointer hover:text-white" onClick={() => handleSort('clutchPtsPer')}>CPts/5m <Si k="clutchPtsPer" /></th>
+                    <th className="px-2 py-4 text-center cursor-pointer hover:text-white" onClick={() => handleSort('clutchOppPtsPer')}>COppPts/5m <Si k="clutchOppPtsPer" /></th>
+                    <th className="px-2 py-4 text-center cursor-pointer hover:text-white" onClick={() => handleSort('clutchOrtg')}>CORtg <Si k="clutchOrtg" /></th>
+                    <th className="px-2 py-4 text-center cursor-pointer hover:text-white" onClick={() => handleSort('clutchDrtg')}>CDRtg <Si k="clutchDrtg" /></th>
+                    <th className="px-2 py-4 text-center cursor-pointer hover:text-white" onClick={() => handleSort('clutchNetRtg')}>CNetRtg <Si k="clutchNetRtg" /></th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-800/40">
+                  {sortedClutchTeams.map((t, idx) => (
+                    <tr key={t.teamId} className="hover:bg-slate-800/30 transition-all cursor-pointer group" onClick={() => onManageTeam?.(t.teamId)}>
+                      <td className="px-4 py-4 font-mono text-xs text-slate-500">{idx + 1}</td>
+                      <td className="px-4 py-4 sticky left-0 bg-slate-900 group-hover:bg-slate-800/60 transition-colors">
+                        <div className="flex items-center gap-3">
+                          <TeamBadge team={t.team} size="xs" />
+                          <span className="font-display font-bold text-slate-200 group-hover:text-amber-500 transition-colors uppercase">{t.teamName}</span>
+                        </div>
+                      </td>
+                      <td className="px-2 py-4 text-center font-mono text-xs">{t.clutchGames}</td>
+                      <td className="px-2 py-4 text-center font-mono text-xs text-emerald-400">{t.clutchWins}</td>
+                      <td className="px-2 py-4 text-center font-mono text-xs text-rose-400">{t.clutchLosses}</td>
+                      <td className="px-2 py-4 text-center font-mono text-xs font-bold">{(t.clutchWinPct * 100).toFixed(1)}%</td>
+                      <td className="px-2 py-4 text-center font-mono text-xs">{n1(t.clutchPtsPer)}</td>
+                      <td className="px-2 py-4 text-center font-mono text-xs">{n1(t.clutchOppPtsPer)}</td>
+                      <td className={`px-2 py-4 text-center font-mono text-xs font-bold ${t.clutchOrtg > 100 ? 'text-emerald-400' : 'text-rose-400'}`}>{n1(t.clutchOrtg)}</td>
+                      <td className={`px-2 py-4 text-center font-mono text-xs font-bold ${t.clutchDrtg < 100 ? 'text-emerald-400' : 'text-rose-400'}`}>{n1(t.clutchDrtg)}</td>
+                      <td className={`px-2 py-4 text-center font-mono text-xs font-bold ${t.clutchNetRtg > 0 ? 'text-emerald-400' : 'text-rose-400'}`}>{t.clutchNetRtg > 0 ? '+' : ''}{n1(t.clutchNetRtg)}</td>
+                    </tr>
+                  ))}
+                  {sortedClutchTeams.length === 0 && (
+                    <tr><td colSpan={11} className="py-16 text-center text-slate-600 font-display uppercase tracking-widest">No clutch games yet</td></tr>
+                  )}
+                </tbody>
+              </table>
+            )}
           </div>
         </div>
+        {teamSubTab === 'clutch' && (
+          <p className="text-[10px] font-black text-slate-600 uppercase tracking-widest text-right px-1">
+            Clutch situations only (last 5 min, ±5 pts)
+          </p>
+        )}
       </div>
     );
   };
