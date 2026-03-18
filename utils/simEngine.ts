@@ -3249,8 +3249,11 @@ const simulatePlayerGameLine = (
   // AST efficiency blends passing (55 %) + playmaking (45 %), with an IQ bonus
   // and a penalty for high-TO% passers who force broken plays over scoring reads.
   const astEff      = getAssistEfficiency(player.attributes.passing, player.attributes.playmaking, player.attributes.offensiveIQ, toRate);
-  const adjAstShare = Math.max(0.01, astEff * adjUsage * 3.0 * (1 + tm.astBoost));
-  const ast = Math.max(0, Math.round(teamAst * adjAstShare));
+  // Multiplier 2.0 replaces 3.0: share-sum across a 10-man rotation ≈ 0.99,
+  // so distributed totals now land at ~teamAst instead of ~1.48×teamAst.
+  // Individual ceiling: cap at 15 to prevent impossible single-game outliers.
+  const adjAstShare = Math.max(0.01, astEff * adjUsage * 2.0 * (1 + tm.astBoost));
+  const ast = Math.max(0, Math.min(15, Math.round(teamAst * adjAstShare)));
 
   // STL: getStealChance × 65 steal-opportunities per 48 min × minutes fraction.
   // stlBoost from defensive tendencies (pass-denial, gambles, helpDefender).
@@ -3565,7 +3568,12 @@ export const simulateGame = (
     const totalRating = roster.reduce((acc, p) => acc + p.rating, 0);
     const teamFga     = Math.round(statPace * 1.10);
     const teamReb     = Math.round(statPace * 0.44);
-    const teamAst     = Math.round((totalPts / 2.2) * 0.6);
+    // NBA reality: ~60% of FGM are assisted; FGM ≈ pts / 2.2.
+    // Old coefficient (0.6) applied to estimated FGM, but the share-sum across all
+    // players exceeds 1.0 by ~1.48×, causing reported team assists to balloon to 45+.
+    // New coefficient (0.46) brings the raw target to ~22-26 for typical 105-125 pt games,
+    // matching the 2024-25 NBA range of 22-26 team assists per game.
+    const teamAst     = Math.round((totalPts / 2.2) * 0.46);
 
     // Opponent defensive averages — computed once per team, applied to every player's box score.
     // Uses top-8 rotation players as the sample (starters + primary bench).
