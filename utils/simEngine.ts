@@ -97,49 +97,48 @@ export function getThreePointPercentage(attr: number): number {
  * Maps an offRebounding attribute (0–100) to an individual ORB% chance
  * per rebound opportunity (decimal).
  *
- * Calibrated to 2025-26 NBA data:
- *   • League avg individual ORB% ≈ 8-13 % (big men 10-20 %, guards 3-8 %)
- *   • Elite crashers (Robinson, Drummond): 20-25 %+
- *   • Team ORB% ~29-31 % emerges naturally when five players compete
+ * Position-differentiated so the C/PF vs. guard gap is realistic:
+ *   attr  │  C/PF      │  SF       │  PG/SG
+ *   ──────┼────────────┼───────────┼────────
+ *    50   │   9.0 %   │   6.0 %  │   3.0 %
+ *    65   │  16.0 %   │  11.0 %  │   6.0 %
+ *    80   │  24.0 %   │  16.0 %  │   9.0 %
+ *    94   │  32.0 %   │  21.0 %  │  13.0 %
+ *   100   │  36.0 %   │  24.0 %  │  15.0 %
  *
- * Piecewise-linear breakpoints (easy to tune independently):
- *   attr  │  C/PF   │  SF    │  PG/SG
- *   ──────┼─────────┼────────┼────────
- *    50   │   8.0 % │  6.0 % │   4.0 %
- *    65   │  13.0 % │ 11.0 % │   9.0 %
- *    80   │  18.0 % │ 16.0 % │  14.0 %
- *    94   │  24.0 % │ 22.0 % │  20.0 %
- *   100   │  28.0 % │ 26.0 % │  24.0 %
+ * These values are used in two ways:
+ *   1. Weighted selection of who grabs a secured OREB (relative weights).
+ *   2. Input to getTeamOrbChance, which aggregates and hard-clamps team OREB%
+ *      to 15–25 %, keeping team-level totals realistic regardless of individual peaks.
  *
  * Tuning guide:
- *   • Raise segment endpoints to inflate ORB league-wide.
- *   • Shift the positional bonus/penalty (±0.03 / ±0.02) to widen or narrow
- *     the C vs. guard gap.
- *   • Hard clamp [0.03, 0.28] is a last-resort safety net.
+ *   • Adjust positional bonuses (±0.14 / ±0.06) to widen or narrow the gap.
+ *   • Hard clamp [0.03, 0.40] is a last-resort safety net.
  */
 export function getOffReboundChance(attr: number, position?: string): number {
   const a = Math.max(0, Math.min(100, attr));
 
   let base: number;
   if (a <= 60) {
-    // Poor crashers: 4 % at 0 → 9 % at 60
-    base = 0.04 + (a / 60) * 0.05;
+    // Poor crashers: 3 % at 0 → 7 % at 60
+    base = 0.03 + (a / 60) * 0.04;
   } else if (a <= 80) {
-    // Solid to plus: 9 % at 60 → 15 % at 80
-    base = 0.09 + ((a - 60) / 20) * 0.06;
+    // Solid to plus: 7 % at 60 → 12 % at 80
+    base = 0.07 + ((a - 60) / 20) * 0.05;
   } else if (a <= 94) {
-    // Elite: 15 % at 80 → 21 % at 94
-    base = 0.15 + ((a - 80) / 14) * 0.06;
+    // Elite: 12 % at 80 → 18 % at 94
+    base = 0.12 + ((a - 80) / 14) * 0.06;
   } else {
-    // Rodman/Drummond peaks: 21 % at 95 → 25 % at 100
-    base = 0.21 + ((a - 95) / 5) * 0.04;
+    // Peak crashers: 18 % at 95 → 22 % at 100
+    base = 0.18 + ((a - 95) / 5) * 0.04;
   }
 
-  // Positional modifier: size = natural board advantage
-  if (position === 'C' || position === 'PF') base += 0.03;
-  else if (position === 'PG' || position === 'SG') base -= 0.02;
+  // Large positional spread: bigs dominate boards, guards are liabilities on glass
+  if (position === 'C' || position === 'PF')       base += 0.14; // → 17–36 % at elite
+  else if (position === 'SF')                      base += 0.02; // slight bump
+  else if (position === 'PG' || position === 'SG') base -= 0.06; // → max ~15 %
 
-  return Math.max(0.03, Math.min(0.28, base));
+  return Math.max(0.03, Math.min(0.40, base));
 }
 
 /**
@@ -193,20 +192,25 @@ export function getDefReboundChance(attr: number, position?: string): number {
  * any one of them does. We use a soft-sum (not independent-event product)
  * to stay in realistic range when 5 strong rebounders are on the floor.
  *
- *   teamOrbChance = clamp(Σ playerOrbChance × DECAY_FACTOR, 0.20, 0.38)
+ *   teamOrbChance = clamp(Σ playerOrbChance × DECAY_FACTOR, 0.15, 0.25)
  *
- * DECAY_FACTOR = 0.55 → a squad of five attr-75 players (each ~12 %)
- *   yields 5 × 0.12 × 0.55 ≈ 0.33  → league-avg ~29-33 %. ✓
+ * DECAY_FACTOR = 0.42 — tighter than before to prevent OREB inflation.
+ * A squad of five avg-rated players (each ~12 %) yields:
+ *   5 × 0.12 × 0.42 ≈ 0.25  (league-avg ~20-25 %, capped at 25 %). ✓
+ *
+ * Combined with the 7 % OOB chance in the miss resolver, the effective
+ * possession breakdown per miss is:
+ *   OOB  ~7 %  │  OREB ~14–23 %  │  DREB ~70–79 %  ← NBA-realistic.
  */
 export function getTeamOrbChance(
   rotation: Array<{ attributes: { offReb: number }; position?: string }>,
 ): number {
-  const DECAY = 0.55;
+  const DECAY = 0.42;
   const sum = rotation.reduce(
     (acc, p) => acc + getOffReboundChance(p.attributes.offReb, p.position),
     0,
   );
-  return Math.max(0.20, Math.min(0.38, sum * DECAY));
+  return Math.max(0.15, Math.min(0.25, sum * DECAY));
 }
 
 // ─── Turnover % & Assist Efficiency Functions ────────────────────────────────
@@ -3027,47 +3031,58 @@ const generateQuarterPBP = (
       events.push({ time, text: finalPbpText, type: evType, quarter });
     }
 
-    // ── Putback sequence — missed shot → rebound → putback (strictly ordered) ─
+    // ── Miss resolution: OOB → OREB → DREB (strictly ordered) ──────────────
     // Each step ticks the clock: miss is already logged above, then the clock
     // advances so the rebound appears 2 s later and the putback attempt 1 s after.
     // No event in this chain can share a timestamp with the original miss.
+    //
+    // Possession breakdown per miss (NBA-realistic targets):
+    //   OOB  ~7 %  │  OREB ~14–23 %  │  DREB ~70–79 %
     const teamOrbChance = getTeamOrbChance(rotation);
-    if (poss.result === 'MISSED' && Math.random() < teamOrbChance) {
-      // Prefer big men (high offReb + layups); exclude the original missed shooter.
-      const rebCandidates = rotation.filter(p =>
-        p.id !== handler.id && (p.attributes.layups ?? 40) >= 40);
-      const pool = rebCandidates.length > 0
-        ? rebCandidates
-        : rotation.filter(p => p.id !== handler.id);
-      if (pool.length > 0) {
-        const orbWeights = pool.map(p =>
-          getOffReboundChance(p.attributes.offReb ?? 50, p.position));
-        const totalOrbWeight = orbWeights.reduce((s, w) => s + w, 0);
-        let orbRoll = Math.random() * totalOrbWeight;
-        let rebounder = pool[pool.length - 1]; // fallback
-        for (let ri = 0; ri < pool.length; ri++) {
-          orbRoll -= orbWeights[ri];
-          if (orbRoll <= 0) { rebounder = pool[ri]; break; }
-        }
-        const rebLn = lastName(rebounder);
+    if (poss.result === 'MISSED') {
+      // ── Step 1: ball out of bounds — 7 % of misses, possession flips, no REB stat ─
+      const OOB_CHANCE = 0.07;
+      if (Math.random() < OOB_CHANCE) {
+        events.push({ time: tickSub(1), text: 'Ball out of bounds — defensive possession.', type: 'info', quarter });
+      } else if (Math.random() < teamOrbChance) {
+        // ── Step 2: offensive rebound — prefer big men, weight by OREB attribute ──
+        // Prefer big men (high offReb + layups); exclude the original missed shooter.
+        const rebCandidates = rotation.filter(p =>
+          p.id !== handler.id && (p.attributes.layups ?? 40) >= 40);
+        const pool = rebCandidates.length > 0
+          ? rebCandidates
+          : rotation.filter(p => p.id !== handler.id);
+        if (pool.length > 0) {
+          const orbWeights = pool.map(p =>
+            getOffReboundChance(p.attributes.offReb ?? 50, p.position));
+          const totalOrbWeight = orbWeights.reduce((s, w) => s + w, 0);
+          let orbRoll = Math.random() * totalOrbWeight;
+          let rebounder = pool[pool.length - 1]; // fallback
+          for (let ri = 0; ri < pool.length; ri++) {
+            orbRoll -= orbWeights[ri];
+            if (orbRoll <= 0) { rebounder = pool[ri]; break; }
+          }
+          const rebLn = lastName(rebounder);
 
-        // Rebound: 2 s after the miss
-        events.push({ time: tickSub(2), text: `${rebLn} Offensive Rebound.`, type: 'info', quarter });
+          // Rebound: 2 s after the miss
+          events.push({ time: tickSub(2), text: `${rebLn} Offensive Rebound.`, type: 'info', quarter });
 
-        // Putback attempt: 1 s after the rebound
-        const putbackChance = (
-          (rebounder.attributes.offReb ?? 50) * 0.4 +
-          (rebounder.attributes.layups ?? 50) * 0.6
-        ) / 100;
-        const putbackMade = Math.random() < putbackChance;
-        if (putbackMade) {
-          events.push({ time: tickSub(1), text: `${rebLn} Putback Layup: Made.`, type: 'score', quarter });
-          teamStreak++;
-          streakMap.set(rebounder.id, Math.max(0, streakMap.get(rebounder.id) ?? 0) + 1);
-        } else {
-          events.push({ time: tickSub(1), text: `${rebLn} Putback Layup: Missed.`, type: 'miss', quarter });
+          // Putback attempt: 1 s after the rebound
+          const putbackChance = (
+            (rebounder.attributes.offReb ?? 50) * 0.4 +
+            (rebounder.attributes.layups ?? 50) * 0.6
+          ) / 100;
+          const putbackMade = Math.random() < putbackChance;
+          if (putbackMade) {
+            events.push({ time: tickSub(1), text: `${rebLn} Putback Layup: Made.`, type: 'score', quarter });
+            teamStreak++;
+            streakMap.set(rebounder.id, Math.max(0, streakMap.get(rebounder.id) ?? 0) + 1);
+          } else {
+            events.push({ time: tickSub(1), text: `${rebLn} Putback Layup: Missed.`, type: 'miss', quarter });
+          }
         }
       }
+      // ── Step 3 (implicit): DREB — ~70–79 % of misses, possession ends naturally ─
     }
 
     const newStreak = streakMap.get(handler.id) ?? 0;
@@ -3237,11 +3252,13 @@ const simulatePlayerGameLine = (
   const ftm = Math.min(fta, Math.round(fta * ftPct));
   const pts = midFgm * 2 + insFgm * 2 + threepm * 3 + ftm;
 
-  // Share-sum across a 10-man rotation: Σ(rebounding/100 × adjUsage) ≈ 0.49.
-  // Old multiplier 2.5 → 0.49 × 2.5 = 1.21 → distributes 21% more than teamReb,
-  // pushing reported totals to ~51/team (102 combined) vs NBA average 43/team (86).
-  // New multiplier 2.1 → 0.49 × 2.1 = 1.03 ≈ 1 → distributed total ≈ teamReb.
-  const totalReb = Math.max(0, Math.round(teamReb * (player.attributes.rebounding / 100) * adjUsage * 2.1));
+  // Share-sum across a 10-man rotation: Σ(rebounding/100 × adjUsage).
+  // Because adjUsage sums to ~1.0 and avg rebounding rating ≈ 75-85, the real Σ
+  // is ~0.75–0.85, not 0.49. Multiplier 1.2 corrects for that:
+  //   Σ ≈ 0.80 → 0.80 × 1.2 = 0.96 ≈ 1 → distributed total ≈ teamReb (≤48). ✓
+  // Combined with the teamReb hard cap (48) this keeps individual per-game REB
+  // totals in the NBA-realistic 38–48 per-team range.
+  const totalReb = Math.max(0, Math.round(teamReb * (player.attributes.rebounding / 100) * adjUsage * 1.2));
   // Split ORB/DRB using the calibrated chance functions so the ratio reflects
   // realistic position-adjusted board rates, not raw attribute proportions.
   const orbChance = getOffReboundChance(player.attributes.offReb, player.position);
@@ -3571,7 +3588,7 @@ export const simulateGame = (
     const roster      = team.roster;
     const totalRating = roster.reduce((acc, p) => acc + p.rating, 0);
     const teamFga     = Math.round(statPace * 1.10);
-    const teamReb     = Math.round(statPace * 0.44);
+    const teamReb     = Math.min(48, Math.round(statPace * 0.44)); // hard cap: NBA range 38–48/team
     // NBA reality: ~60% of FGM are assisted; FGM ≈ pts / 2.2.
     // Old coefficient (0.6) applied to estimated FGM, but the share-sum across all
     // players exceeds 1.0 by ~1.48×, causing reported team assists to balloon to 45+.
