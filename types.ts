@@ -242,6 +242,20 @@ export interface SeasonStats extends PlayerStats {
   isPlayoffs?: boolean;
 }
 
+export interface ClutchGameLine {
+  clutchMin: number;
+  clutchPts: number;
+  clutchReb: number;
+  clutchAst: number;
+  clutchFgm: number;
+  clutchFga: number;
+  clutchThreepm: number;
+  clutchThreepa: number;
+  clutchFtm: number;
+  clutchFta: number;
+  clutchPlusMinus: number;
+}
+
 export interface GamePlayerLine {
   playerId: string;
   name: string;
@@ -270,6 +284,8 @@ export interface GamePlayerLine {
   opponentTeamName?: string;
   /** Set when player did not play. Value is the reason, e.g. 'Injured'. */
   dnp?: string;
+  /** Clutch stats (last 5 min of 4Q/OT, score diff ≤5). Only present when game had a clutch situation. */
+  clutchStats?: ClutchGameLine;
 }
 
 export interface Player {
@@ -525,6 +541,12 @@ export interface GameResult {
   gameInjuries?: Array<{playerId: string; playerName: string; injuryType: InjuryType; daysOut: number; teamId: string}>;
   /** Detailed per-quarter pace/possession stats */
   quarterDetails?: QuarterDetail[];
+  /** True when the game had a clutch situation (last 5 min of 4Q/OT, score diff ≤5) */
+  hasClutchSituation?: boolean;
+  /** Estimated clutch-time points scored by home team */
+  clutchHomeScore?: number;
+  /** Estimated clutch-time points scored by away team */
+  clutchAwayScore?: number;
 }
 
 /** Rookie=easiest AI GM, Pro=balanced, All-Star=optimized, Legend=targets human weaknesses.
