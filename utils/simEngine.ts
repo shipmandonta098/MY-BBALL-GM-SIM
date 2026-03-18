@@ -279,8 +279,10 @@ export function getTurnoverPercentage(
   }
   base += passMod;
 
-  // ── Off IQ: decision quality ───────────────────────────────────────────────
-  base += -(offIQ - 70) / 100 * 0.025;
+  // ── Off IQ: decision quality ────────────────────────────────────────────
+  // IQ 90 → −0.8 % TOs (reads the defense, makes safer choices);
+  // IQ 50 → +0.8 % (poor decision-making, telegraphs passes, over-dribbles).
+  base += -(offIQ - 70) / 100 * 0.040;
 
   // ── Positional pressure ────────────────────────────────────────────────────
   if (position === 'PG') base += 0.025;  // primary ball-handler; most pressure
@@ -332,8 +334,9 @@ export function getAssistEfficiency(
 ): number {
   // Passing vision (55 %) + playmaking court command (45 %)
   const blend    = (passing * 0.55 + playmaking * 0.45) / 100;
-  // Sharp readers convert more potential assists than they waste
-  const iqBonus  = (offIQ - 70) / 100 * 0.03;
+  // Sharp readers anticipate teammate cuts and deliver on-time passes.
+  // IQ 90 → +1.2 % efficiency; IQ 50 → −1.2 % (wastes reads with hesitation).
+  const iqBonus  = (offIQ - 70) / 100 * 0.06;
   // High-TO passers force broken plays: penalty ramps 0→8 % as toRate > 13 %
   const toPenalty = Math.max(0, Math.min(0.08, (toRate - 0.13) / 0.07 * 0.08));
 
@@ -364,7 +367,7 @@ export function getAssistEfficiency(
  * Tuning: STL_OPP_SCALE in simulatePlayerGameLine (default 65) controls the
  * number of steal opportunities per 48 min; raise/lower it to shift team totals.
  */
-export function getStealChance(attr: number, position?: string): number {
+export function getStealChance(attr: number, position?: string, defIQ?: number): number {
   const a = Math.max(0, Math.min(100, attr));
 
   // ── Primary: Steals attribute (higher = better pickpocket) ───────────────
@@ -386,6 +389,13 @@ export function getStealChance(attr: number, position?: string): number {
   // ── Positional modifier: guards read passing lanes; bigs give up angles ──
   if (position === 'PG' || position === 'SG') base += 0.005;
   else if (position === 'C') base -= 0.003;
+
+  // ── Defensive IQ: anticipation and positioning amplify steal reads ────────
+  // IQ 50 = no change; IQ 80 = +4.5 % relative; IQ 30 = −3 % relative.
+  // Smart defenders time reads and cut off passing lanes; low-IQ ones guess wrong.
+  if (defIQ !== undefined) {
+    base *= (1 + (defIQ - 50) / 100 * 0.15);
+  }
 
   return Math.max(0.005, Math.min(0.050, base));
 }
@@ -413,7 +423,7 @@ export function getStealChance(attr: number, position?: string): number {
  * Tuning: BLK_OPP_SCALE in simulatePlayerGameLine (default 50) controls the
  * number of block opportunities per 48 min; raise/lower to shift team totals.
  */
-export function getBlockChance(attr: number, position?: string): number {
+export function getBlockChance(attr: number, position?: string, defIQ?: number): number {
   const a = Math.max(0, Math.min(100, attr));
 
   // ── Primary: Blocks attribute ────────────────────────────────────────────
@@ -435,6 +445,13 @@ export function getBlockChance(attr: number, position?: string): number {
   // ── Positional modifier: length + rim-reading advantage for bigs ─────────
   if (position === 'C' || position === 'PF') base += 0.015;
   else if (position === 'PG' || position === 'SG') base -= 0.010;
+
+  // ── Defensive IQ: smarter help-side rotations generate cleaner block opps ─
+  // IQ 50 = no change; IQ 85 = +3.5 % relative; IQ 30 = −2 % relative.
+  // High IQ = picks right moment to rotate; low IQ = arrives late or not at all.
+  if (defIQ !== undefined) {
+    base *= (1 + (defIQ - 50) / 100 * 0.10);
+  }
 
   return Math.max(0.005, Math.min(0.100, base));
 }
@@ -478,6 +495,7 @@ export type Shot3PTContext = 'PULL_UP_3' | 'CATCH_AND_SHOOT_3' | 'TEAM_BOX_SCORE
 export function get3PTContestMod(
   perimDefAttr: number,
   context: Shot3PTContext = 'CATCH_AND_SHOOT_3',
+  defIQ?: number,
 ): number {
   const attr       = Math.max(0, Math.min(100, perimDefAttr));
   const normalized = (attr - 50) / 50; // -1 (worst) … 0 (avg) … +1 (best)
@@ -492,9 +510,18 @@ export function get3PTContestMod(
   const { down, up } = RANGES[context];
   // Elite defense (normalized > 0): linear penalty up to -down
   // Poor defense  (normalized < 0): linear reward up to +up (smaller)
-  return normalized >= 0
+  let result = normalized >= 0
     ? -normalized * down
     : -normalized * up;
+
+  // Defensive IQ: smart defenders read shooter tendencies, get hands up faster,
+  // and close out without over-committing. Additive shift independent of attr.
+  // IQ 80 → extra −0.003 suppression; IQ 30 → extra +0.002 (lazier closeout).
+  if (defIQ !== undefined) {
+    result -= (defIQ - 50) / 100 * 0.010;
+  }
+
+  return result;
 }
 
 // ─── Mid-Range Percentage ─────────────────────────────────────────────────────
@@ -635,6 +662,7 @@ export type MidRangeContext = 'PULL_UP_MID' | 'ELBOW_FADE' | 'TEAM_BOX_SCORE_MID
 export function getMidRangeContestMod(
   perimDefAttr: number,
   context: MidRangeContext = 'PULL_UP_MID',
+  defIQ?: number,
 ): number {
   const attr       = Math.max(0, Math.min(100, perimDefAttr));
   const normalized = (attr - 50) / 50; // −1 (worst) … 0 (avg) … +1 (best)
@@ -649,9 +677,17 @@ export function getMidRangeContestMod(
   };
 
   const { down, up } = RANGES[context];
-  return normalized >= 0
+  let result = normalized >= 0
     ? -normalized * down   // elite D: 0 → −down
     : -normalized * up;    // poor D:  0 → +up
+
+  // Defensive IQ: smart defenders position earlier on closeouts,
+  // don't bite on shot fakes, and funnel to help. Same additive shift as 3PT.
+  if (defIQ !== undefined) {
+    result -= (defIQ - 50) / 100 * 0.012;
+  }
+
+  return result;
 }
 
 // ─── Layup / At-Rim Finishing Percentage ─────────────────────────────────────
@@ -1107,8 +1143,10 @@ export function getPostScoringPercentage(
   const strBonus = strength    !== undefined
     ? Math.max(-0.020, Math.min(+0.020, (strength    - 50) / 100 * 0.04))
     : 0;
+  // Off IQ: smart finishers read help rotations and pick the right counter move.
+  // IQ 80 → +1.5 % layup%; IQ 30 → −1.0 %. Capped at ±2.5 %.
   const iqBonus  = offensiveIQ !== undefined
-    ? Math.max(-0.015, Math.min(+0.015, (offensiveIQ - 50) / 100 * 0.03))
+    ? Math.max(-0.025, Math.min(+0.025, (offensiveIQ - 50) / 100 * 0.05))
     : 0;
   const synergyBonus = Math.max(-0.020, Math.min(+0.025, strBonus + iqBonus));
 
@@ -1425,7 +1463,8 @@ interface PossessionResult {
 //                             contact plays (body fouls, blocking fouls).
 //   DISCIP_FOUL_R   (0.08) — raise to give more relief to disciplined contesters
 //                             (clean hands-up reduces foul risk).
-//   IQ_FOUL_DAMPEN  (0.20) — raise to let smart defenders avoid bad fouls more.
+//   IQ_FOUL_DAMPEN  (0.30) — raise to let smart defenders avoid bad fouls more,
+//                             and let low-IQ defenders commit extra dumb fouls.
 //   HELP_FOUL_EXTRA (0.06) — raise to penalise out-of-position help rotations.
 //
 // Calibration targets (NBA 2025-26):
@@ -1442,7 +1481,7 @@ interface PossessionResult {
 const GAMBLE_FOUL_W   = 0.15;
 const PHYSICS_FOUL_W  = 0.12;
 const DISCIP_FOUL_R   = 0.08;
-const IQ_FOUL_DAMPEN  = 0.20;
+const IQ_FOUL_DAMPEN  = 0.30;
 const HELP_FOUL_EXTRA = 0.06;
 
 /** Situational context passed to the defensive-action resolvers. */
@@ -1482,7 +1521,9 @@ function calculateDefFoulChance(
   const physMod   = (physicality / 100) * PHYSICS_FOUL_W;  // 87 → +0.104
   const discMod   = -(discipline / 100) * DISCIP_FOUL_R;   // 69 → −0.055
   const helpMod   = ctx.isHelp ? (helpDef / 100) * HELP_FOUL_EXTRA : 0;
-  const iqScale   = 1 - (defIQ  / 100) * IQ_FOUL_DAMPEN;  // 83 → ×0.834
+  // Centred on IQ=50: smart defenders commit fewer fouls, low-IQ ones commit more.
+  // IQ 95 → ×0.865 (−13.5 %); IQ 80 → ×0.91; IQ 50 → ×1.0; IQ 30 → ×1.06; IQ 10 → ×1.12
+  const iqScale   = 1 - (defIQ - 50) / 100 * IQ_FOUL_DAMPEN;
 
   return Math.max(0.02, Math.min(0.25,
     (base + gambleMod + physMod + discMod + helpMod) * iqScale,
@@ -1517,8 +1558,8 @@ function attemptDefensiveSteal(
   const pest    = dt?.onBallPest   ?? 50;
   const defLn   = defender.name.split(' ').at(-1) ?? defender.name;
 
-  // Attribute-driven base steal chance (2.5-3.5 % for elite thieves at attr 84)
-  const baseChance = getStealChance(defender.attributes.steals, defender.position);
+  // Attribute-driven base steal chance — defIQ amplifies anticipation/positioning
+  const baseChance = getStealChance(defender.attributes.steals, defender.position, defender.attributes.defensiveIQ);
 
   // Tendency multipliers scale how often a reach converts to a steal:
   //   Gambles ×1.5: high-gambles players get more conversions on their reaches
@@ -1596,8 +1637,8 @@ function attemptDefensiveBlock(
   const physicality = dt?.physicality           ?? 50;
   const defLn       = defender.name.split(' ').at(-1) ?? defender.name;
 
-  // Base block % from the attribute curve (4-7 % for elite rim protectors at 84-94)
-  const baseChance = getBlockChance(defender.attributes.blocks, defender.position);
+  // Base block % from attribute curve — defIQ improves help-side timing and footwork
+  const baseChance = getBlockChance(defender.attributes.blocks, defender.position, defender.attributes.defensiveIQ);
 
   // Tendency multipliers (averaged to prevent triple-stacking):
   //   Discipline ×1.2: clean contests → better hand positioning → more blocks
@@ -1960,7 +2001,11 @@ const simulatePossession = (
   {
     const drawFoulTend = ot?.drawFoul ?? 50;
     if ((shotType === 'DRIVE_LAYUP' || shotType === 'POST_FADE') && drawFoulTend >= 55 && !isTransition) {
-      if (Math.random() < (drawFoulTend - 50) / 100 * 0.28) {
+      // Offensive IQ amplifies foul-drawing: smart players know how to absorb contact,
+      // time their body lean, and sell the call without flopping (sustainable technique).
+      // IQ 60 = baseline; IQ 80 = +5 %; IQ 95 = +8.75 %.
+      const offIQFoulBoost = 1 + Math.max(0, offHandler.attributes.offensiveIQ - 60) / 100 * 0.25;
+      if (Math.random() < (drawFoulTend - 50) / 100 * 0.28 * offIQFoulBoost) {
         return {
           ballHandlerName: offHandler.name, ballHandlerId: offHandler.id,
           tendencyUsed: 'drawFoul', actionTaken: offAction,
@@ -2102,7 +2147,7 @@ const simulatePossession = (
         // getBlockChance: attribute-driven per-shot block %, amplified by rim position.
         // Hard cap at 15 % for even elite rim protectors.
         const blockChance = Math.min(0.15,
-          getBlockChance(defender?.attributes.blocks ?? 50, defender?.position)
+          getBlockChance(defender?.attributes.blocks ?? 50, defender?.position, defender?.attributes.defensiveIQ ?? 50)
           * intNorm * 2.2,
         );
 
@@ -2270,7 +2315,7 @@ const simulatePossession = (
     if (shotType === 'PULL_UP_3' || shotType === 'CATCH_AND_SHOOT_3') {
       const perimDef   = defender?.attributes.perimeterDef ?? 50;
       const ctx        = shotType as Shot3PTContext;
-      const contestMod = get3PTContestMod(perimDef, ctx);
+      const contestMod = get3PTContestMod(perimDef, ctx, defender?.attributes.defensiveIQ);
       defenseModifier += contestMod;
       // PBP flavour for notable cases (only if no stronger tendency already set text)
       if (perimDef >= 85 && contestMod <= -0.04) {
@@ -2293,7 +2338,7 @@ const simulatePossession = (
       const midCtx: MidRangeContext = (offAction === 'ISO' || offAction === 'TRANSITION')
         ? 'PULL_UP_MID'
         : 'ELBOW_FADE';
-      const contestMod = getMidRangeContestMod(perimDef, midCtx);
+      const contestMod = getMidRangeContestMod(perimDef, midCtx, defender?.attributes.defensiveIQ);
       defenseModifier += contestMod;
       if (perimDef >= 85 && contestMod <= -0.04) {
         if (!defTendencyUsed) defTendencyUsed = 'perimeterDef';
@@ -2353,6 +2398,16 @@ const simulatePossession = (
       defenseModifier -= 0.04;
       if (!defTendencyUsed) defTendencyUsed = 'shotContestDiscipline';
     }
+  }
+
+  // ── Step 5b: IQ Matchup Differential ─────────────────────────────────────
+  // Offensive IQ vs Defensive IQ determines who wins the chess match.
+  // A smart attacker exploits a dumb defender's misreads, wrong rotations,
+  // and over-aggressive tendencies. A smart defender clogs lanes and takes away reads.
+  // Scale: IQ gap of 20 pts = ±0.8 % shot quality. Capped at ±1.5 %.
+  if (defender) {
+    const iqAdv = (offHandler.attributes.offensiveIQ - defender.attributes.defensiveIQ) / 100;
+    defenseModifier += Math.max(-0.015, Math.min(0.015, iqAdv * 0.04));
   }
 
   // ── Step 6: STREAKY trait ──────────────────────────────────────────────────
@@ -2479,9 +2534,10 @@ const calculateFoulChance = (
     foulChance += (helpDefender / 100) * 0.06;
   }
 
-  // Defensive IQ: smart defenders read the play and choose safer angles
-  //   IQ 50 → ×1.0 (no change); IQ 83 → ×0.834 (−16.6 %); IQ 95 → ×0.81
-  foulChance *= (1 - (defensiveIQ / 100) * 0.20);
+  // Defensive IQ: smart defenders read the play and choose safer angles.
+  // Centred on IQ=50 so low IQ also raises foul risk.
+  // IQ 95 → ×0.865; IQ 80 → ×0.91; IQ 50 → ×1.0; IQ 30 → ×1.06
+  foulChance *= (1 - (defensiveIQ - 50) / 100 * 0.30);
 
   // Block-specific: shot contests carry slightly more foul risk than steals
   // because the body/arm is in motion during the shot and contact is harder to avoid.
@@ -3200,7 +3256,7 @@ const simulatePlayerGameLine = (
   // stlBoost from defensive tendencies (pass-denial, gambles, helpDefender).
   // Stamina: fatigued defenders lose a step — up to 15 % reduction at stamina=40.
   const STL_OPP_SCALE = 65;
-  const stlBase    = getStealChance(player.attributes.steals, player.position)
+  const stlBase    = getStealChance(player.attributes.steals, player.position, player.attributes.defensiveIQ)
     * STL_OPP_SCALE * minFac * (1 + tm.stlBoost);
   const stlFatigue = Math.max(0, (65 - (player.attributes.stamina ?? 70)) / 100 * 0.15);
   const stl        = Math.max(0, Math.floor(stlBase * (1 - stlFatigue) + Math.random() * 0.8));
@@ -3208,7 +3264,7 @@ const simulatePlayerGameLine = (
   // BLK: getBlockChance × 50 block-opportunities per 48 min × minutes fraction.
   // blkBoost from helpDefender/physicality tendencies; stamina reduction for tired bigs.
   const BLK_OPP_SCALE = 50;
-  const blkBase    = getBlockChance(player.attributes.blocks, player.position)
+  const blkBase    = getBlockChance(player.attributes.blocks, player.position, player.attributes.defensiveIQ)
     * BLK_OPP_SCALE * minFac * (1 + tm.blkBoost);
   const blkFatigue = Math.max(0, (65 - (player.attributes.stamina ?? 70)) / 100 * 0.12);
   const blk        = Math.max(0, Math.floor(blkBase * (1 - blkFatigue) + Math.random() * 0.8));
@@ -3519,14 +3575,15 @@ export const simulateGame = (
 
     // 3PT suppression: avg perimDef 75 → ~−1.5 %  |  85 → ~−2.1 %  |  25 → ~+0.7 %
     const oppAvgPerimDef   = oppTopN.reduce((s, op) => s + (op.attributes.perimeterDef ?? 50), 0) / oppCount;
-    const oppPerimDefMod   = get3PTContestMod(oppAvgPerimDef, 'TEAM_BOX_SCORE');
+    const oppAvgDefIQ      = oppTopN.reduce((s, op) => s + (op.attributes.defensiveIQ  ?? 50), 0) / oppCount;
+    const oppPerimDefMod   = get3PTContestMod(oppAvgPerimDef, 'TEAM_BOX_SCORE', oppAvgDefIQ);
 
     // At-rim suppression: avg interiorDef 80 → ~−3.6 %  |  85 → ~−4.2 %  |  20 → ~+1.4 %
     const oppAvgInteriorDef    = oppTopN.reduce((s, op) => s + (op.attributes.interiorDef ?? 50), 0) / oppCount;
     const oppInteriorDefMod    = getRimProtectionMod(oppAvgInteriorDef, 'TEAM_BOX_SCORE');
 
     // Mid-range suppression: avg perimDef 75 → ~−2.0 %  |  85 → ~−2.8 %  |  25 → ~+0.9 %
-    const oppMidDefMod = getMidRangeContestMod(oppAvgPerimDef, 'TEAM_BOX_SCORE_MID');
+    const oppMidDefMod = getMidRangeContestMod(oppAvgPerimDef, 'TEAM_BOX_SCORE_MID', oppAvgDefIQ);
 
     // Post suppression: composite interiorDef + strength; avg intDef 80/str 70 → ~−5 %
     const oppAvgInteriorStr = oppTopN.reduce((s, op) => s + (op.attributes.strength ?? 50), 0) / oppCount;
