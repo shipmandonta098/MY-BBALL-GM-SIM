@@ -3237,7 +3237,11 @@ const simulatePlayerGameLine = (
   const ftm = Math.min(fta, Math.round(fta * ftPct));
   const pts = midFgm * 2 + insFgm * 2 + threepm * 3 + ftm;
 
-  const totalReb = Math.max(0, Math.round(teamReb * (player.attributes.rebounding / 100) * adjUsage * 2.5));
+  // Share-sum across a 10-man rotation: Σ(rebounding/100 × adjUsage) ≈ 0.49.
+  // Old multiplier 2.5 → 0.49 × 2.5 = 1.21 → distributes 21% more than teamReb,
+  // pushing reported totals to ~51/team (102 combined) vs NBA average 43/team (86).
+  // New multiplier 2.1 → 0.49 × 2.1 = 1.03 ≈ 1 → distributed total ≈ teamReb.
+  const totalReb = Math.max(0, Math.round(teamReb * (player.attributes.rebounding / 100) * adjUsage * 2.1));
   // Split ORB/DRB using the calibrated chance functions so the ratio reflects
   // realistic position-adjusted board rates, not raw attribute proportions.
   const orbChance = getOffReboundChance(player.attributes.offReb, player.position);
