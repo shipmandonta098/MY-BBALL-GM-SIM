@@ -3252,13 +3252,11 @@ const simulatePlayerGameLine = (
   const ftm = Math.min(fta, Math.round(fta * ftPct));
   const pts = midFgm * 2 + insFgm * 2 + threepm * 3 + ftm;
 
-  // Share-sum across a 10-man rotation: Σ(rebounding/100 × adjUsage).
-  // Because adjUsage sums to ~1.0 and avg rebounding rating ≈ 75-85, the real Σ
-  // is ~0.75–0.85, not 0.49. Multiplier 1.2 corrects for that:
-  //   Σ ≈ 0.80 → 0.80 × 1.2 = 0.96 ≈ 1 → distributed total ≈ teamReb (≤48). ✓
-  // Combined with the teamReb hard cap (48) this keeps individual per-game REB
-  // totals in the NBA-realistic 38–48 per-team range.
-  const totalReb = Math.max(0, Math.round(teamReb * (player.attributes.rebounding / 100) * adjUsage * 1.2));
+  // Use minutes-based driver (minFac = minutes/48) instead of adjUsage so that
+  // playing time — not offensive usage — determines rebounding share.
+  // Post-normalization in distributeToPlayers scales all values so the team
+  // total equals teamReb exactly, making the multiplier here irrelevant.
+  const totalReb = Math.max(0, Math.round(teamReb * (player.attributes.rebounding / 100) * minFac));
   // Split ORB/DRB using the calibrated chance functions so the ratio reflects
   // realistic position-adjusted board rates, not raw attribute proportions.
   const orbChance = getOffReboundChance(player.attributes.offReb, player.position);
@@ -3631,7 +3629,7 @@ export const simulateGame = (
       .sort((a, b) => b.rating - a.rating);
     const ratingRank = new Map(sortedByRating.map(({ id }, rank) => [id, rank]));
 
-    return roster.map((p, i) => {
+    const raw = roster.map((p, i) => {
       // Hard gate: injured players get a zero-stat DNP line, bypassing all sim logic.
       // This must run before the isGT block to prevent garbage-time code from
       // overwriting mins for players who happen to be in the first 5 roster slots.
@@ -3670,6 +3668,21 @@ export const simulateGame = (
       const line = simulatePlayerGameLine(p, totalPts, teamFga, teamReb, teamAst, mins, usageShare, varRoll, ftBonus, oppPerimDefMod, oppInteriorDefMod, oppMidDefMod, oppPostDefMod);
       return { ...line, techs: 0, flagrants: 0, ejected: false };
     });
+
+    // Post-normalize rebounds so team total = teamReb exactly.
+    // The per-player formula uses minFac as a proportional driver; the raw sum
+    // won't equal teamReb precisely, so we scale every player's boards uniformly.
+    const totalRebRaw = raw.reduce((s, p) => s + (p.reb ?? 0), 0);
+    if (totalRebRaw > 0) {
+      const rebScale = teamReb / totalRebRaw;
+      return raw.map(p => {
+        if (p.dnp || !p.reb) return p;
+        const newReb = Math.max(0, Math.round(p.reb * rebScale));
+        const newOrb = Math.max(0, Math.round((p.offReb ?? 0) * rebScale));
+        return { ...p, reb: newReb, offReb: newOrb, defReb: Math.max(0, newReb - newOrb) };
+      });
+    }
+    return raw;
   };
 
   let homePlayerStats = distributeToPlayers(home, totalHome, true,  garbageTime);
