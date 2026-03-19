@@ -7,10 +7,18 @@ import { Player, GameResult, Team, Prospect, ContractOffer, Coach, NewsCategory,
 
 export const generateGameRecap = async (game: GameResult, homeTeam: Team, awayTeam: Team) => {
   const winner = game.homeScore > game.awayScore ? homeTeam : awayTeam;
-  const loser = game.homeScore > game.awayScore ? awayTeam : homeTeam;
+  const loser  = game.homeScore > game.awayScore ? awayTeam : homeTeam;
   const topPerf = game.topPerformers[0];
-  
-  return `FINAL: ${winner.name} defeat ${loser.name} ${Math.max(game.homeScore, game.awayScore)}-${Math.min(game.homeScore, game.awayScore)}. Notable: ${topPerf.points} points recorded by leading scorer.`;
+  const hi = Math.max(game.homeScore, game.awayScore);
+  const lo = Math.min(game.homeScore, game.awayScore);
+
+  if (game.isOvertime) {
+    const otPeriods = (game.quarterScores?.home?.length ?? 4) - 4;
+    const otLabel = otPeriods >= 3 ? 'triple overtime' : otPeriods === 2 ? 'double overtime' : 'overtime';
+    return `FINAL/${otPeriods === 1 ? 'OT' : otPeriods === 2 ? '2OT' : '3OT'}: ${winner.name} survive a ${otLabel} thriller to defeat ${loser.name} ${hi}-${lo}. ${topPerf.points} points from the leading scorer sealed the victory in a game that refused to end in regulation.`;
+  }
+
+  return `FINAL: ${winner.name} defeat ${loser.name} ${hi}-${lo}. Notable: ${topPerf.points} points recorded by leading scorer.`;
 };
 
 export const generateAwardBlurb = async (awardName: string, winner: AwardWinner) => {
