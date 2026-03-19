@@ -15,6 +15,16 @@ const BoxScoreModal: React.FC<BoxScoreModalProps> = ({ result, homeTeam, awayTea
   const [activeTab, setActiveTab] = useState<'stats' | 'pbp'>('stats');
   const isHomeWinner = result.homeScore > result.awayScore;
 
+  // Build period column labels dynamically: Q1–Q4 + OT1, OT2, OT3 if overtime
+  const numPeriods = result.quarterScores.home.length;
+  const periodLabels = Array.from({ length: numPeriods }, (_, i) =>
+    i < 4 ? `${i + 1}Q` : `OT${i - 3}`
+  );
+  const otPeriods = numPeriods - 4; // 0 = regulation, 1 = OT, 2 = 2OT, 3 = 3OT
+
+  // Convert raw quarter number (5, 6, 7) to a display label for PBP
+  const quarterLabel = (q: number) => q <= 4 ? `Q${q}` : `OT${q - 4}`;
+
   const StatTable = ({ team, stats }: { team: Team, stats: GamePlayerLine[] }) => {
     const active = stats.filter(l => !l.dnp).sort((a, b) => b.pts - a.pts);
     const dnp    = stats.filter(l => !!l.dnp);
@@ -151,8 +161,12 @@ const BoxScoreModal: React.FC<BoxScoreModalProps> = ({ result, homeTeam, awayTea
                   <p className="text-[10px] font-black uppercase text-slate-500 tracking-[0.4em] mt-2">Home</p>
                </div>
                <div className="flex flex-col items-center">
-                  <span className="px-6 py-2 bg-slate-800 text-slate-400 text-xs font-black uppercase rounded-full border border-slate-700 mb-2">Final</span>
-                  <p className="text-xs font-bold text-amber-500 uppercase tracking-widest">Regular Season</p>
+                  <span className="px-6 py-2 bg-slate-800 text-slate-400 text-xs font-black uppercase rounded-full border border-slate-700 mb-2">
+                    Final{otPeriods > 0 ? `/${otPeriods === 1 ? 'OT' : otPeriods === 2 ? '2OT' : '3OT'}` : ''}
+                  </span>
+                  <p className="text-xs font-bold text-amber-500 uppercase tracking-widest">
+                    {otPeriods > 0 ? (otPeriods === 1 ? 'Overtime' : otPeriods === 2 ? 'Double Overtime' : 'Triple Overtime') : 'Regular Season'}
+                  </p>
                </div>
                <div className="text-center">
                   <TeamBadge team={awayTeam} size="xl" className="mb-4 mx-auto" />
@@ -161,28 +175,31 @@ const BoxScoreModal: React.FC<BoxScoreModalProps> = ({ result, homeTeam, awayTea
                </div>
             </div>
 
-            {/* Quarterly Table */}
+            {/* Quarterly Table — extends to OT1/OT2/OT3 when applicable */}
             <div className="bg-slate-950/60 rounded-2xl p-6 border border-slate-800 min-w-[300px]">
                <table className="w-full text-center">
                   <thead className="text-[8px] font-black text-slate-600 uppercase tracking-widest">
                      <tr>
                         <th className="pb-2 text-left">TEAM</th>
-                        <th className="pb-2">1Q</th>
-                        <th className="pb-2">2Q</th>
-                        <th className="pb-2">3Q</th>
-                        <th className="pb-2">4Q</th>
+                        {periodLabels.map(label => (
+                          <th key={label} className={`pb-2 ${label.startsWith('OT') ? 'text-amber-400' : ''}`}>{label}</th>
+                        ))}
                         <th className="pb-2 text-white">TOT</th>
                      </tr>
                   </thead>
                   <tbody className="text-xs font-mono font-bold">
                      <tr className="border-b border-slate-800/50">
                         <td className="py-2 text-left text-slate-400 uppercase font-display">{homeTeam.name}</td>
-                        {result.quarterScores.home.map((s, i) => <td key={i} className="py-2 text-slate-300">{s}</td>)}
+                        {result.quarterScores.home.map((s, i) => (
+                          <td key={i} className={`py-2 ${i >= 4 ? 'text-amber-400 font-bold' : 'text-slate-300'}`}>{s}</td>
+                        ))}
                         <td className="py-2 text-white">{result.homeScore}</td>
                      </tr>
                      <tr>
                         <td className="py-2 text-left text-slate-400 uppercase font-display">{awayTeam.name}</td>
-                        {result.quarterScores.away.map((s, i) => <td key={i} className="py-2 text-slate-300">{s}</td>)}
+                        {result.quarterScores.away.map((s, i) => (
+                          <td key={i} className={`py-2 ${i >= 4 ? 'text-amber-400 font-bold' : 'text-slate-300'}`}>{s}</td>
+                        ))}
                         <td className="py-2 text-white">{result.awayScore}</td>
                      </tr>
                   </tbody>
@@ -236,7 +253,7 @@ const BoxScoreModal: React.FC<BoxScoreModalProps> = ({ result, homeTeam, awayTea
              <div className="max-w-3xl mx-auto space-y-4 pb-20">
                 {result.playByPlay?.map((event, i) => (
                    <div key={i} className="flex gap-8 p-6 bg-slate-950/40 border border-slate-800 rounded-2xl hover:border-amber-500/20 transition-all">
-                      <span className="text-xs font-mono text-slate-600 w-20 shrink-0 font-bold">Q{event.quarter} {event.time}</span>
+                      <span className={`text-xs font-mono w-20 shrink-0 font-bold ${event.quarter > 4 ? 'text-amber-500' : 'text-slate-600'}`}>{quarterLabel(event.quarter)} {event.time}</span>
                       <p className={`text-sm font-medium leading-relaxed ${event.type === 'score' ? 'text-white font-bold' : 'text-slate-400'}`}>
                          {event.text}
                       </p>

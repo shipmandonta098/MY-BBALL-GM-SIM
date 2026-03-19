@@ -59,7 +59,17 @@ const Results: React.FC<ResultsProps> = ({ history, teams, userTeamId, onViewBox
            </div>
            <div className="text-center">
               <p className="text-3xl font-display font-black text-white">{game.homeScore} - {game.awayScore}</p>
-              <p className="text-[10px] text-slate-600 font-bold uppercase mt-1">Final • Day {game.date}</p>
+              <p className="text-[10px] font-bold uppercase mt-1">
+                <span className="text-slate-600">Final</span>
+                {game.isOvertime && (
+                  <span className="text-amber-500 ml-1">
+                    {(game.quarterScores?.home?.length ?? 4) === 5 ? '· OT' :
+                     (game.quarterScores?.home?.length ?? 4) === 6 ? '· 2OT' :
+                     (game.quarterScores?.home?.length ?? 4) >= 7 ? '· 3OT' : '· OT'}
+                  </span>
+                )}
+                <span className="text-slate-600 ml-1">· Day {game.date}</span>
+              </p>
            </div>
            <div className="text-center">
                <TeamBadge team={away} size="md" className="mx-auto mb-2" />

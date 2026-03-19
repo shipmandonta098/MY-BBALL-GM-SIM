@@ -3749,11 +3749,16 @@ export const simulateGame = (
   let isOvertime = false;
   let otPeriod   = 0;
 
+  // Announce end-of-regulation tie before entering OT loop
+  if (totalHome === totalAway) {
+    pbp.push({ time: '0:00', text: `${home.name} ${totalHome} – ${away.name} ${totalAway} — Game tied at the end of regulation. We're going to OVERTIME!`, type: 'info', quarter: 4 });
+  }
+
   while (totalHome === totalAway && otPeriod < 3) {
     isOvertime = true;
     otPeriod++;
-    const otLabel = otPeriod === 1 ? 'OVERTIME!' : `${otPeriod}OT!`;
-    pbp.push({ time: '5:00', text: otLabel, type: 'info', quarter: 4 + otPeriod });
+    const otLabel = otPeriod === 1 ? 'OVERTIME' : otPeriod === 2 ? 'DOUBLE OVERTIME' : 'TRIPLE OVERTIME';
+    pbp.push({ time: '5:00', text: `${otLabel} — ${home.name} vs. ${away.name}! 5 minutes on the clock.`, type: 'info', quarter: 4 + otPeriod });
 
     // 8-10 possessions per team per OT period; urgency boosts scoring slightly
     const otPoss  = 8 + Math.floor(Math.random() * 3);
@@ -3763,6 +3768,18 @@ export const simulateGame = (
 
     totalHome += otH;
     totalAway += otA;
+
+    // Track OT scores in quarterScores so the box score table shows OT columns
+    homeQScores.push(otH);
+    awayQScores.push(otA);
+
+    // Announce OT result before checking for more OT
+    if (totalHome !== totalAway) {
+      const otWinner = totalHome > totalAway ? home.name : away.name;
+      pbp.push({ time: '0:05', text: `${otWinner} takes the lead with seconds left in ${otLabel}!`, type: 'score', quarter: 4 + otPeriod });
+    } else if (otPeriod < 3) {
+      pbp.push({ time: '0:00', text: `Still tied at the end of ${otLabel}! We need another period!`, type: 'info', quarter: 4 + otPeriod });
+    }
 
     // Force a winner in 3rd OT if still tied
     if (otPeriod === 3 && totalHome === totalAway) {
@@ -3793,8 +3810,9 @@ export const simulateGame = (
     (homeQScores[0] + homeQScores[1] < awayQScores[0] + awayQScores[1] - 15 && totalHome > totalAway) ||
     (awayQScores[0] + awayQScores[1] < homeQScores[0] + homeQScores[1] - 15 && totalAway > totalHome);
 
-  if (isBuzzerBeater) pbp.push({ time: '0:01', text: 'BUZZER BEATER! The crowd erupts!', type: 'score', quarter: 4 });
-  pbp.push({ time: '0:00', text: 'Final Buzzer', type: 'info', quarter: 4 });
+  const finalQuarter = 4 + otPeriod; // Q4 in regulation, OT1/OT2/OT3 if overtime
+  if (isBuzzerBeater) pbp.push({ time: '0:01', text: 'BUZZER BEATER! The crowd erupts!', type: 'score', quarter: finalQuarter });
+  pbp.push({ time: '0:00', text: 'Final Buzzer', type: 'info', quarter: finalQuarter });
 
   const margin = totalHome - totalAway;
 
