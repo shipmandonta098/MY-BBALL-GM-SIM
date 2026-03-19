@@ -1275,6 +1275,25 @@ const App: React.FC = () => {
     const rookieMultiplier = rookieSetting === 'Slow' ? 0.7 : rookieSetting === 'Fast' ? 1.3 : 1.0;
     const vetRate = (tempState.settings.vetDeclineRate || 100) / 100;
 
+    // Auto-extend franchise stars (88+ OVR) for AI teams before expiry processing
+    tempState.teams = tempState.teams.map(t => {
+      if (t.id === tempState.userTeamId) return t; // user manages their own extensions
+      const currentPayroll = t.roster.reduce((sum, p) => sum + (p.salary || 0), 0);
+      const cap = tempState.settings.salaryCap ?? 136_000_000;
+      const updatedRoster = t.roster.map(p => {
+        if (p.contractYears > 1) return p;       // not expiring
+        if (p.rating < 88) return p;             // not a franchise star
+        if ((p.morale ?? 75) < 60) return p;     // unhappy — let them walk
+        const extSalary = Math.round((
+          p.rating >= 95 ? 38_000_000 + (p.rating - 95) * 1_400_000 :
+                           26_000_000 + (p.rating - 88) * 1_714_286
+        ) / 250_000) * 250_000;
+        if (currentPayroll + extSalary > cap * 1.1) return p; // not enough cap
+        return { ...p, contractYears: 3 + Math.floor(Math.random() * 2), salary: extSalary };
+      });
+      return { ...t, roster: updatedRoster };
+    });
+
     // Collect expired-contract players BEFORE updating rosters
     const expiredPlayers: Player[] = [];
     tempState.teams.forEach(t => {
@@ -1357,7 +1376,16 @@ const App: React.FC = () => {
       ...expiredPlayers,
       ...generatedFAs.filter(p => !expiredIds.has(p.id)),
     ].sort((a, b) => b.rating - a.rating);
-    tempState.freeAgents = mergedFAs;
+    // Cap 90+ OVR players at 8 total to prevent superstar glut
+    let eliteCount = 0;
+    const cappedFAs = mergedFAs.filter(p => {
+      if (p.rating >= 90) {
+        if (eliteCount >= 8) return false;
+        eliteCount++;
+      }
+      return true;
+    });
+    tempState.freeAgents = cappedFAs;
     tempState.coachPool = [...generateCoachPool(20, tempState.settings.coachGenderRatio)];
     tempState.season += 1;
 
