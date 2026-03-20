@@ -851,7 +851,7 @@ const Stats: React.FC<StatsProps> = ({ league, onViewRoster, onManageTeam, onVie
 
   // ─── TEAM STATS TABLE ────────────────────────────────────────────────────
   const TeamStatsTable = () => {
-    type TeamSubTab = 'traditional' | 'advanced' | 'opponent' | 'clutch';
+    type TeamSubTab = 'traditional' | 'advanced' | 'opponent' | 'clutch' | 'by-quarter';
     const [teamSubTab, setTeamSubTab] = useState<TeamSubTab>('traditional');
     const [sortKey, setSortKey] = useState<string>('winPct');
     const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc');
@@ -960,6 +960,64 @@ const Stats: React.FC<StatsProps> = ({ league, onViewRoster, onManageTeam, onVie
         });
     }, [teamClutchStats, sortKey, sortDir, searchTerm]);
 
+    // ── BY-QUARTER STATS ─────────────────────────────────────────────────────
+    const teamQuarterStats = useMemo(() => {
+      type QEntry = { games: number; wins: number; losses: number; qScored: number[]; qAllowed: number[]; otScored: number; otAllowed: number; otGames: number; };
+      const map = new Map<string, QEntry>();
+      league.teams.forEach(t => map.set(t.id, { games: 0, wins: 0, losses: 0, qScored: [0, 0, 0, 0], qAllowed: [0, 0, 0, 0], otScored: 0, otAllowed: 0, otGames: 0 }));
+
+      league.history.forEach(g => {
+        const homeQ = g.quarterScores?.home ?? [];
+        const awayQ = g.quarterScores?.away ?? [];
+        const isOT  = homeQ.length > 4;
+        const homeEntry = map.get(g.homeTeamId);
+        const awayEntry = map.get(g.awayTeamId);
+        if (homeEntry) {
+          homeEntry.games++;
+          if (g.homeScore > g.awayScore) homeEntry.wins++; else homeEntry.losses++;
+          for (let i = 0; i < 4; i++) { homeEntry.qScored[i] += homeQ[i] ?? 0; homeEntry.qAllowed[i] += awayQ[i] ?? 0; }
+          if (isOT) { homeEntry.otGames++; for (let i = 4; i < homeQ.length; i++) { homeEntry.otScored += homeQ[i]; homeEntry.otAllowed += awayQ[i] ?? 0; } }
+        }
+        if (awayEntry) {
+          awayEntry.games++;
+          if (g.awayScore > g.homeScore) awayEntry.wins++; else awayEntry.losses++;
+          for (let i = 0; i < 4; i++) { awayEntry.qScored[i] += awayQ[i] ?? 0; awayEntry.qAllowed[i] += homeQ[i] ?? 0; }
+          if (isOT) { awayEntry.otGames++; for (let i = 4; i < awayQ.length; i++) { awayEntry.otScored += awayQ[i]; awayEntry.otAllowed += homeQ[i] ?? 0; } }
+        }
+      });
+
+      return league.teams.map(t => {
+        const e = map.get(t.id)!;
+        const gp = Math.max(1, e.games);
+        const q1Pts = e.qScored[0] / gp, q2Pts = e.qScored[1] / gp, q3Pts = e.qScored[2] / gp, q4Pts = e.qScored[3] / gp;
+        const q1Opp = e.qAllowed[0] / gp, q2Opp = e.qAllowed[1] / gp, q3Opp = e.qAllowed[2] / gp, q4Opp = e.qAllowed[3] / gp;
+        const otgp = Math.max(1, e.otGames);
+        const otPts = e.otGames > 0 ? e.otScored / otgp : 0;
+        const otOpp = e.otGames > 0 ? e.otAllowed / otgp : 0;
+        return {
+          teamId: t.id, teamName: t.name, team: t,
+          games: e.games, wins: e.wins, losses: e.losses, winPct: e.games > 0 ? e.wins / e.games : 0,
+          q1Pts, q2Pts, q3Pts, q4Pts,
+          q1Opp, q2Opp, q3Opp, q4Opp,
+          q1Net: q1Pts - q1Opp, q2Net: q2Pts - q2Opp, q3Net: q3Pts - q3Opp, q4Net: q4Pts - q4Opp,
+          h1Pts: q1Pts + q2Pts, h2Pts: q3Pts + q4Pts,
+          totalPts: q1Pts + q2Pts + q3Pts + q4Pts,
+          otPts, otOpp, otGames: e.otGames,
+        };
+      });
+    }, [league.history, league.teams]);
+
+    const sortedQuarterTeams = useMemo(() => {
+      return [...teamQuarterStats]
+        .filter(t => t.teamName.toLowerCase().includes(searchTerm.toLowerCase()))
+        .sort((a, b) => {
+          const av = (a as Record<string, unknown>)[sortKey];
+          const bv = (b as Record<string, unknown>)[sortKey];
+          if (typeof av === 'number' && typeof bv === 'number') return sortDir === 'desc' ? bv - av : av - bv;
+          return 0;
+        });
+    }, [teamQuarterStats, sortKey, sortDir, searchTerm]);
+
     const handleSort = (key: string) => {
       if (sortKey === key) setSortDir(d => d === 'asc' ? 'desc' : 'asc');
       else { setSortKey(key); setSortDir('desc'); }
@@ -1004,19 +1062,20 @@ const Stats: React.FC<StatsProps> = ({ league, onViewRoster, onManageTeam, onVie
       <div className="space-y-4 animate-in fade-in slide-in-from-bottom-4 duration-500">
         {/* Sub-tab pills */}
         <div className="flex gap-2 flex-wrap">
-          {(['traditional', 'advanced', 'opponent', 'clutch'] as TeamSubTab[]).map(tab => (
+          {(['traditional', 'advanced', 'opponent', 'clutch', 'by-quarter'] as TeamSubTab[]).map(tab => (
             <button
               key={tab}
-              onClick={() => { setTeamSubTab(tab); setSortKey(tab === 'advanced' ? 'netRtg' : tab === 'opponent' ? 'oppPts' : tab === 'clutch' ? 'clutchNetRtg' : 'winPct'); setSortDir('desc'); }}
+              onClick={() => { setTeamSubTab(tab); setSortKey(tab === 'advanced' ? 'netRtg' : tab === 'opponent' ? 'oppPts' : tab === 'clutch' ? 'clutchNetRtg' : tab === 'by-quarter' ? 'q4Pts' : 'winPct'); setSortDir('desc'); }}
               className={`px-4 py-2 rounded-xl text-[11px] font-black uppercase tracking-widest transition-all border ${
                 teamSubTab === tab
-                  ? tab === 'advanced'  ? 'bg-purple-500 border-purple-400 text-white'
-                  : tab === 'opponent' ? 'bg-blue-500 border-blue-400 text-white'
-                  : tab === 'clutch'   ? 'bg-amber-500 border-amber-400 text-slate-950'
+                  ? tab === 'advanced'    ? 'bg-purple-500 border-purple-400 text-white'
+                  : tab === 'opponent'   ? 'bg-blue-500 border-blue-400 text-white'
+                  : tab === 'clutch'     ? 'bg-amber-500 border-amber-400 text-slate-950'
+                  : tab === 'by-quarter' ? 'bg-emerald-500 border-emerald-400 text-slate-950'
                   : 'bg-amber-500 border-amber-400 text-slate-950'
                   : 'bg-slate-900 border-slate-800 text-slate-500 hover:text-white hover:border-slate-600'
               }`}
-            >{tab}</button>
+            >{tab === 'by-quarter' ? 'By Quarter' : tab}</button>
           ))}
         </div>
 
@@ -1301,11 +1360,104 @@ const Stats: React.FC<StatsProps> = ({ league, onViewRoster, onManageTeam, onVie
                 </tbody>
               </table>
             )}
+
+            {/* ── BY QUARTER ──────────────────────────────────────────── */}
+            {teamSubTab === 'by-quarter' && (() => {
+              const n = teamQuarterStats.length || 1;
+              const qAvg = (k: keyof typeof teamQuarterStats[0]) =>
+                teamQuarterStats.reduce((s, t) => s + (t[k] as number), 0) / n;
+              const lgQ1 = qAvg('q1Pts'), lgQ2 = qAvg('q2Pts'), lgQ3 = qAvg('q3Pts'), lgQ4 = qAvg('q4Pts');
+              const lgH1 = qAvg('h1Pts'), lgH2 = qAvg('h2Pts'), lgTotal = qAvg('totalPts');
+              const lgQ1N = qAvg('q1Net'), lgQ2N = qAvg('q2Net'), lgQ3N = qAvg('q3Net'), lgQ4N = qAvg('q4Net');
+
+              const qCell = (val: number, lgVal: number) => {
+                const diff = val - lgVal;
+                const cls = diff > 0.5 ? 'text-emerald-400' : diff < -0.5 ? 'text-rose-400' : 'text-slate-300';
+                return <td className={`px-2 py-4 text-center font-mono text-xs font-bold ${cls}`}>{n1(val)}</td>;
+              };
+              const netCell = (val: number) =>
+                <td className={`px-2 py-4 text-center font-mono text-xs font-bold ${val > 0 ? 'text-emerald-400' : val < 0 ? 'text-rose-400' : 'text-slate-500'}`}>{val > 0 ? '+' : ''}{n1(val)}</td>;
+
+              return (
+                <table className="w-full text-left border-collapse">
+                  <thead>
+                    <tr className="text-[10px] text-slate-500 font-black uppercase tracking-widest border-b border-slate-800 bg-slate-950/50">
+                      <th className="px-4 py-4">#</th>
+                      <th className="px-4 py-4 sticky left-0 bg-slate-950/90 cursor-pointer hover:text-white" onClick={() => handleSort('teamName')}>Team <Si k="teamName" /></th>
+                      <th className="px-2 py-4 text-center cursor-pointer hover:text-white" onClick={() => handleSort('games')}>G <Si k="games" /></th>
+                      <th className="px-2 py-4 text-center cursor-pointer hover:text-white" onClick={() => handleSort('q1Pts')}>Q1 <Si k="q1Pts" /></th>
+                      <th className="px-2 py-4 text-center cursor-pointer hover:text-white" onClick={() => handleSort('q2Pts')}>Q2 <Si k="q2Pts" /></th>
+                      <th className="px-2 py-4 text-center cursor-pointer hover:text-white" onClick={() => handleSort('h1Pts')}>H1 <Si k="h1Pts" /></th>
+                      <th className="px-2 py-4 text-center cursor-pointer hover:text-white" onClick={() => handleSort('q3Pts')}>Q3 <Si k="q3Pts" /></th>
+                      <th className="px-2 py-4 text-center cursor-pointer hover:text-white" onClick={() => handleSort('q4Pts')}>Q4 <Si k="q4Pts" /></th>
+                      <th className="px-2 py-4 text-center cursor-pointer hover:text-white" onClick={() => handleSort('h2Pts')}>H2 <Si k="h2Pts" /></th>
+                      <th className="px-2 py-4 text-center cursor-pointer hover:text-white" onClick={() => handleSort('totalPts')}>TOT <Si k="totalPts" /></th>
+                      <th className="px-1 py-4 text-slate-700">│</th>
+                      <th className="px-2 py-4 text-center cursor-pointer hover:text-white" onClick={() => handleSort('q1Net')}>Q1± <Si k="q1Net" /></th>
+                      <th className="px-2 py-4 text-center cursor-pointer hover:text-white" onClick={() => handleSort('q2Net')}>Q2± <Si k="q2Net" /></th>
+                      <th className="px-2 py-4 text-center cursor-pointer hover:text-white" onClick={() => handleSort('q3Net')}>Q3± <Si k="q3Net" /></th>
+                      <th className="px-2 py-4 text-center cursor-pointer hover:text-white" onClick={() => handleSort('q4Net')}>Q4± <Si k="q4Net" /></th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-800/40">
+                    {sortedQuarterTeams.map((t, idx) => (
+                      <tr key={t.teamId} className="hover:bg-slate-800/30 transition-all cursor-pointer group" onClick={() => onManageTeam?.(t.teamId)}>
+                        <td className="px-4 py-4 font-mono text-xs text-slate-500">{idx + 1}</td>
+                        <td className="px-4 py-4 sticky left-0 bg-slate-900 group-hover:bg-slate-800/60 transition-colors">
+                          <div className="flex items-center gap-3">
+                            <TeamBadge team={t.team} size="xs" />
+                            <span className="font-display font-bold text-slate-200 group-hover:text-emerald-400 transition-colors uppercase">{t.teamName}</span>
+                          </div>
+                        </td>
+                        <td className="px-2 py-4 text-center font-mono text-xs text-slate-400">{t.games}</td>
+                        {qCell(t.q1Pts, lgQ1)}
+                        {qCell(t.q2Pts, lgQ2)}
+                        <td className="px-2 py-4 text-center font-mono text-xs text-slate-400">{n1(t.h1Pts)}</td>
+                        {qCell(t.q3Pts, lgQ3)}
+                        {qCell(t.q4Pts, lgQ4)}
+                        <td className="px-2 py-4 text-center font-mono text-xs text-slate-400">{n1(t.h2Pts)}</td>
+                        <td className="px-2 py-4 text-center font-mono text-xs font-bold text-white">{n1(t.totalPts)}</td>
+                        <td className="px-1 py-4 text-slate-800">│</td>
+                        {netCell(t.q1Net)}
+                        {netCell(t.q2Net)}
+                        {netCell(t.q3Net)}
+                        {netCell(t.q4Net)}
+                      </tr>
+                    ))}
+                    {sortedQuarterTeams.length === 0 && (
+                      <tr><td colSpan={15} className="py-16 text-center text-slate-600 font-display uppercase tracking-widest">No games played yet</td></tr>
+                    )}
+                  </tbody>
+                  <tfoot>
+                    <tr className="bg-slate-950/80 font-black text-slate-400 border-t-2 border-slate-800">
+                      <td colSpan={3} className="px-4 py-4 text-[10px] uppercase tracking-widest">League Avg</td>
+                      <td className="px-2 py-4 text-center font-mono text-xs">{n1(lgQ1)}</td>
+                      <td className="px-2 py-4 text-center font-mono text-xs">{n1(lgQ2)}</td>
+                      <td className="px-2 py-4 text-center font-mono text-xs">{n1(lgH1)}</td>
+                      <td className="px-2 py-4 text-center font-mono text-xs">{n1(lgQ3)}</td>
+                      <td className="px-2 py-4 text-center font-mono text-xs">{n1(lgQ4)}</td>
+                      <td className="px-2 py-4 text-center font-mono text-xs">{n1(lgH2)}</td>
+                      <td className="px-2 py-4 text-center font-mono text-xs">{n1(lgTotal)}</td>
+                      <td className="px-1 py-4"></td>
+                      <td className="px-2 py-4 text-center font-mono text-xs">{lgQ1N > 0 ? '+' : ''}{n1(lgQ1N)}</td>
+                      <td className="px-2 py-4 text-center font-mono text-xs">{lgQ2N > 0 ? '+' : ''}{n1(lgQ2N)}</td>
+                      <td className="px-2 py-4 text-center font-mono text-xs">{lgQ3N > 0 ? '+' : ''}{n1(lgQ3N)}</td>
+                      <td className="px-2 py-4 text-center font-mono text-xs">{lgQ4N > 0 ? '+' : ''}{n1(lgQ4N)}</td>
+                    </tr>
+                  </tfoot>
+                </table>
+              );
+            })()}
           </div>
         </div>
         {teamSubTab === 'clutch' && (
           <p className="text-[10px] font-black text-slate-600 uppercase tracking-widest text-right px-1">
             Clutch situations only (last 5 min, ±5 pts)
+          </p>
+        )}
+        {teamSubTab === 'by-quarter' && (
+          <p className="text-[10px] font-black text-slate-600 uppercase tracking-widest text-right px-1">
+            Q1–Q4 avg pts scored per game · ± = net vs opponent · green/red = vs league avg
           </p>
         )}
       </div>
