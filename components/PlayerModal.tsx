@@ -27,6 +27,7 @@ interface PlayerModalProps {
     allPlayers: Player[];
     teamPlayers: Player[];
     seasonLength: number;
+    currentTeamAbbreviation?: string;
   };
 }
 
@@ -975,8 +976,13 @@ const PlayerModal: React.FC<PlayerModalProps> = ({
                 / s.minutes * 30 : 0;
             const pmPg = s.gamesPlayed > 0 ? s.plusMinus / s.gamesPlayed : 0;
 
+            // Current-season splits from previous teams (trade splits)
+            const currentSeasonSplits = currentSeason
+              ? (player.careerStats ?? []).filter(cs => cs.year === currentSeason && cs.isSplit)
+              : [];
+
             const hasCareer  = player.careerStats && player.careerStats.length > 0;
-            const hasCurr    = s.gamesPlayed > 0;
+            const hasCurr    = s.gamesPlayed > 0 || currentSeasonSplits.length > 0;
             const hasHighs   = player.careerHighs && (
               player.careerHighs.points   > 0 ||
               player.careerHighs.rebounds > 0 ||
@@ -1222,6 +1228,10 @@ const PlayerModal: React.FC<PlayerModalProps> = ({
                       <table className="w-full text-center">
                         <thead>
                           <tr className="border-b border-slate-800">
+                            {/* Show Team column if there are splits */}
+                            {currentSeasonSplits.length > 0 && (
+                              <th className="px-3 py-3 text-[10px] font-black uppercase tracking-widest text-slate-500">Team</th>
+                            )}
                             {statCols.map(c => (
                               <th key={c.label} className="px-3 py-3 text-[10px] font-black uppercase tracking-widest text-slate-500">
                                 {c.label}
@@ -1229,14 +1239,71 @@ const PlayerModal: React.FC<PlayerModalProps> = ({
                             ))}
                           </tr>
                         </thead>
-                        <tbody>
-                          <tr>
-                            {statCols.map(c => (
-                              <td key={c.label} className={`px-3 py-4 font-display font-bold tabular-nums text-sm ${c.hi ? 'text-amber-400' : 'text-slate-200'}`}>
-                                {c.value}
-                              </td>
-                            ))}
-                          </tr>
+                        <tbody className="divide-y divide-slate-800/40">
+                          {/* Split rows from previous teams this season */}
+                          {currentSeasonSplits.map((split, i) => {
+                            const sgp = Math.max(1, split.gamesPlayed);
+                            const sTwopm = split.fgm - split.threepm;
+                            const sTwopa = split.fga - split.threepa;
+                            const splitCols = [
+                              String(split.gamesPlayed),
+                              String(split.gamesStarted),
+                              (split.minutes / sgp).toFixed(1),
+                              (split.points / sgp).toFixed(1),
+                              (split.rebounds / sgp).toFixed(1),
+                              (split.offReb / sgp).toFixed(1),
+                              (split.defReb / sgp).toFixed(1),
+                              (split.assists / sgp).toFixed(1),
+                              (split.steals / sgp).toFixed(1),
+                              (split.blocks / sgp).toFixed(1),
+                              (split.tov / sgp).toFixed(1),
+                              (split.pf / sgp).toFixed(1),
+                              (split.fgm / sgp).toFixed(1),
+                              (split.fga / sgp).toFixed(1),
+                              split.fga > 0 ? ((split.fgm / split.fga) * 100).toFixed(1) + '%' : '—',
+                              (split.threepm / sgp).toFixed(1),
+                              (split.threepa / sgp).toFixed(1),
+                              split.threepa > 0 ? ((split.threepm / split.threepa) * 100).toFixed(1) + '%' : '—',
+                              (sTwopm / sgp).toFixed(1),
+                              (sTwopa / sgp).toFixed(1),
+                              sTwopa > 0 ? ((sTwopm / sTwopa) * 100).toFixed(1) + '%' : '—',
+                              (split.ftm / sgp).toFixed(1),
+                              (split.fta / sgp).toFixed(1),
+                              split.fta > 0 ? ((split.ftm / split.fta) * 100).toFixed(1) + '%' : '—',
+                              split.fga > 0 ? (((split.fgm + 0.5 * split.threepm) / split.fga) * 100).toFixed(1) + '%' : '—',
+                            ];
+                            return (
+                              <tr key={`split-${i}`} className="hover:bg-slate-800/20 transition-colors opacity-75">
+                                <td className="px-3 py-3">
+                                  <span className="inline-block px-2 py-0.5 bg-slate-800 border border-slate-700 rounded-md text-[10px] font-black uppercase text-slate-400">
+                                    {split.teamAbbreviation ?? split.teamName.slice(0, 3).toUpperCase()}
+                                  </span>
+                                </td>
+                                {splitCols.map((val, j) => (
+                                  <td key={j} className="px-3 py-3 font-display font-bold tabular-nums text-sm text-slate-400">
+                                    {val}
+                                  </td>
+                                ))}
+                              </tr>
+                            );
+                          })}
+                          {/* Current team row */}
+                          {s.gamesPlayed > 0 && (
+                            <tr>
+                              {currentSeasonSplits.length > 0 && (
+                                <td className="px-3 py-4">
+                                  <span className="inline-block px-2 py-0.5 bg-amber-500/20 border border-amber-500/40 rounded-md text-[10px] font-black uppercase text-amber-400">
+                                    {leagueContext?.currentTeamAbbreviation ?? '—'}
+                                  </span>
+                                </td>
+                              )}
+                              {statCols.map(c => (
+                                <td key={c.label} className={`px-3 py-4 font-display font-bold tabular-nums text-sm ${c.hi ? 'text-amber-400' : 'text-slate-200'}`}>
+                                  {c.value}
+                                </td>
+                              ))}
+                            </tr>
+                          )}
                         </tbody>
                       </table>
                     </div>
@@ -1369,66 +1436,120 @@ const PlayerModal: React.FC<PlayerModalProps> = ({
                 })()}
 
                 {/* ── Career stats by season ──────────────────────────────────── */}
-                {statsTab === 'career' && hasCareer && (
-                  <div className="bg-slate-950/50 border border-slate-800 rounded-3xl overflow-hidden">
-                    <div className="overflow-x-auto">
-                      <table className="w-full text-center">
-                        <thead>
-                          <tr className="border-b border-slate-800">
-                            {['Season', 'Team', 'GP', 'GS', 'MIN', 'PTS', 'REB', 'ORB', 'DRB', 'AST', 'STL', 'BLK', 'PF', 'FGM', 'FGA', 'FG%', '3PM', '3PA', '3P%', '2PM', '2PA', '2P%', 'FTM', 'FTA', 'FT%', 'eFG%'].map(h => (
-                              <th key={h} className="px-3 py-3 text-[10px] font-black uppercase tracking-widest text-slate-500 whitespace-nowrap">
-                                {h}
-                              </th>
-                            ))}
-                          </tr>
-                        </thead>
-                        <tbody className="divide-y divide-slate-800/40">
-                          {[...player.careerStats]
-                            .sort((a, b) => b.year - a.year)
-                            .map((cs, i) => {
-                              const cgp  = Math.max(1, cs.gamesPlayed);
-                              const isCurrent = i === 0;
-                              return (
-                                <tr key={`${cs.year}-${cs.teamId}`} className={isCurrent ? 'bg-amber-500/5' : 'hover:bg-slate-800/20 transition-colors'}>
-                                  <td className={`px-3 py-3 text-[11px] font-black tabular-nums whitespace-nowrap ${isCurrent ? 'text-amber-400' : 'text-slate-400'}`}>
-                                    {cs.year}–{String(cs.year + 1).slice(2)}
-                                  </td>
-                                  <td className="px-3 py-3 text-[10px] font-black text-slate-500 uppercase whitespace-nowrap">
-                                    {cs.teamName.length > 10 ? cs.teamName.slice(0, 10) + '…' : cs.teamName}
-                                  </td>
-                                  <td className="px-3 py-3 font-display font-bold text-slate-300 tabular-nums text-sm">{cs.gamesPlayed}</td>
-                                  <td className="px-3 py-3 font-display font-bold text-slate-300 tabular-nums text-sm">{cs.gamesStarted}</td>
-                                  <td className="px-3 py-3 font-display font-bold text-slate-300 tabular-nums text-sm">{fmt1(cs.minutes / cgp)}</td>
-                                  <td className={`px-3 py-3 font-display font-bold tabular-nums text-sm ${cs.points / cgp >= 20 ? 'text-amber-400' : 'text-slate-200'}`}>{fmt1(cs.points / cgp)}</td>
-                                  <td className="px-3 py-3 font-display font-bold text-slate-200 tabular-nums text-sm">{fmt1(cs.rebounds / cgp)}</td>
-                                  <td className="px-3 py-3 font-display font-bold text-slate-300 tabular-nums text-sm">{fmt1(cs.offReb / cgp)}</td>
-                                  <td className="px-3 py-3 font-display font-bold text-slate-300 tabular-nums text-sm">{fmt1(cs.defReb / cgp)}</td>
-                                  <td className="px-3 py-3 font-display font-bold text-slate-200 tabular-nums text-sm">{fmt1(cs.assists / cgp)}</td>
-                                  <td className="px-3 py-3 font-display font-bold text-slate-300 tabular-nums text-sm">{fmt1(cs.steals / cgp)}</td>
-                                  <td className="px-3 py-3 font-display font-bold text-slate-300 tabular-nums text-sm">{fmt1(cs.blocks / cgp)}</td>
-                                  <td className="px-3 py-3 font-display font-bold text-slate-300 tabular-nums text-sm">{fmt1(cs.pf / cgp)}</td>
-                                  <td className="px-3 py-3 font-display font-bold text-slate-300 tabular-nums text-sm">{fmt1(cs.fgm / cgp)}</td>
-                                  <td className="px-3 py-3 font-display font-bold text-slate-300 tabular-nums text-sm">{fmt1(cs.fga / cgp)}</td>
-                                  <td className="px-3 py-3 font-display font-bold text-slate-300 tabular-nums text-sm">{cs.fga > 0 ? fmtPct(cs.fgm / cs.fga) : '—'}</td>
-                                  <td className="px-3 py-3 font-display font-bold text-slate-300 tabular-nums text-sm">{fmt1(cs.threepm / cgp)}</td>
-                                  <td className="px-3 py-3 font-display font-bold text-slate-300 tabular-nums text-sm">{fmt1(cs.threepa / cgp)}</td>
-                                  <td className="px-3 py-3 font-display font-bold text-slate-300 tabular-nums text-sm">{cs.threepa > 0 ? fmtPct(cs.threepm / cs.threepa) : '—'}</td>
-                                  <td className="px-3 py-3 font-display font-bold text-slate-300 tabular-nums text-sm">{fmt1((cs.fgm - cs.threepm) / cgp)}</td>
-                                  <td className="px-3 py-3 font-display font-bold text-slate-300 tabular-nums text-sm">{fmt1((cs.fga - cs.threepa) / cgp)}</td>
-                                  <td className="px-3 py-3 font-display font-bold text-slate-300 tabular-nums text-sm">{(cs.fga - cs.threepa) > 0 ? fmtPct((cs.fgm - cs.threepm) / (cs.fga - cs.threepa)) : '—'}</td>
-                                  <td className="px-3 py-3 font-display font-bold text-slate-300 tabular-nums text-sm">{fmt1(cs.ftm / cgp)}</td>
-                                  <td className="px-3 py-3 font-display font-bold text-slate-300 tabular-nums text-sm">{fmt1(cs.fta / cgp)}</td>
-                                  <td className="px-3 py-3 font-display font-bold text-slate-300 tabular-nums text-sm">{cs.fta > 0 ? fmtPct(cs.ftm / cs.fta) : '—'}</td>
-                                  <td className="px-3 py-3 font-display font-bold text-slate-300 tabular-nums text-sm">{cs.fga > 0 ? fmtPct((cs.fgm + 0.5 * cs.threepm) / cs.fga) : '—'}</td>
-                                </tr>
-                              );
-                            })
-                          }
-                        </tbody>
-                      </table>
+                {statsTab === 'career' && hasCareer && (() => {
+                  // Group career stats by year, detect split seasons
+                  const byYear = new Map<number, typeof player.careerStats>();
+                  for (const cs of player.careerStats) {
+                    if (!byYear.has(cs.year)) byYear.set(cs.year, []);
+                    byYear.get(cs.year)!.push(cs);
+                  }
+                  const sortedYears = [...byYear.keys()].sort((a, b) => b - a);
+
+                  const careerRows: React.ReactNode[] = [];
+                  sortedYears.forEach((year, yi) => {
+                    const entries = byYear.get(year)!;
+                    const isMostRecent = yi === 0;
+                    const isMultiTeam = entries.length > 1;
+
+                    // Helper to render one stat row
+                    const renderRow = (cs: typeof entries[0], label: string, abbr: string, highlight: boolean, dimmed: boolean) => {
+                      const cgp = Math.max(1, cs.gamesPlayed);
+                      return (
+                        <tr key={`${cs.year}-${cs.teamId}-${abbr}`} className={highlight ? 'bg-amber-500/5' : dimmed ? 'opacity-60 hover:opacity-100 hover:bg-slate-800/20 transition-all' : 'hover:bg-slate-800/20 transition-colors'}>
+                          <td className={`px-3 py-3 text-[11px] font-black tabular-nums whitespace-nowrap ${highlight ? 'text-amber-400' : 'text-slate-400'}`}>
+                            {label}
+                          </td>
+                          <td className="px-3 py-3 whitespace-nowrap">
+                            <span className={`inline-block px-2 py-0.5 rounded-md text-[10px] font-black uppercase ${highlight ? 'bg-amber-500/20 border border-amber-500/40 text-amber-400' : 'bg-slate-800 border border-slate-700 text-slate-400'}`}>
+                              {abbr}
+                            </span>
+                          </td>
+                          <td className="px-3 py-3 font-display font-bold text-slate-300 tabular-nums text-sm">{cs.gamesPlayed}</td>
+                          <td className="px-3 py-3 font-display font-bold text-slate-300 tabular-nums text-sm">{cs.gamesStarted}</td>
+                          <td className="px-3 py-3 font-display font-bold text-slate-300 tabular-nums text-sm">{fmt1(cs.minutes / cgp)}</td>
+                          <td className={`px-3 py-3 font-display font-bold tabular-nums text-sm ${cs.points / cgp >= 20 ? 'text-amber-400' : 'text-slate-200'}`}>{fmt1(cs.points / cgp)}</td>
+                          <td className="px-3 py-3 font-display font-bold text-slate-200 tabular-nums text-sm">{fmt1(cs.rebounds / cgp)}</td>
+                          <td className="px-3 py-3 font-display font-bold text-slate-300 tabular-nums text-sm">{fmt1(cs.offReb / cgp)}</td>
+                          <td className="px-3 py-3 font-display font-bold text-slate-300 tabular-nums text-sm">{fmt1(cs.defReb / cgp)}</td>
+                          <td className="px-3 py-3 font-display font-bold text-slate-200 tabular-nums text-sm">{fmt1(cs.assists / cgp)}</td>
+                          <td className="px-3 py-3 font-display font-bold text-slate-300 tabular-nums text-sm">{fmt1(cs.steals / cgp)}</td>
+                          <td className="px-3 py-3 font-display font-bold text-slate-300 tabular-nums text-sm">{fmt1(cs.blocks / cgp)}</td>
+                          <td className="px-3 py-3 font-display font-bold text-slate-300 tabular-nums text-sm">{fmt1(cs.pf / cgp)}</td>
+                          <td className="px-3 py-3 font-display font-bold text-slate-300 tabular-nums text-sm">{fmt1(cs.fgm / cgp)}</td>
+                          <td className="px-3 py-3 font-display font-bold text-slate-300 tabular-nums text-sm">{fmt1(cs.fga / cgp)}</td>
+                          <td className="px-3 py-3 font-display font-bold text-slate-300 tabular-nums text-sm">{cs.fga > 0 ? fmtPct(cs.fgm / cs.fga) : '—'}</td>
+                          <td className="px-3 py-3 font-display font-bold text-slate-300 tabular-nums text-sm">{fmt1(cs.threepm / cgp)}</td>
+                          <td className="px-3 py-3 font-display font-bold text-slate-300 tabular-nums text-sm">{fmt1(cs.threepa / cgp)}</td>
+                          <td className="px-3 py-3 font-display font-bold text-slate-300 tabular-nums text-sm">{cs.threepa > 0 ? fmtPct(cs.threepm / cs.threepa) : '—'}</td>
+                          <td className="px-3 py-3 font-display font-bold text-slate-300 tabular-nums text-sm">{fmt1((cs.fgm - cs.threepm) / cgp)}</td>
+                          <td className="px-3 py-3 font-display font-bold text-slate-300 tabular-nums text-sm">{fmt1((cs.fga - cs.threepa) / cgp)}</td>
+                          <td className="px-3 py-3 font-display font-bold text-slate-300 tabular-nums text-sm">{(cs.fga - cs.threepa) > 0 ? fmtPct((cs.fgm - cs.threepm) / (cs.fga - cs.threepa)) : '—'}</td>
+                          <td className="px-3 py-3 font-display font-bold text-slate-300 tabular-nums text-sm">{fmt1(cs.ftm / cgp)}</td>
+                          <td className="px-3 py-3 font-display font-bold text-slate-300 tabular-nums text-sm">{fmt1(cs.fta / cgp)}</td>
+                          <td className="px-3 py-3 font-display font-bold text-slate-300 tabular-nums text-sm">{cs.fta > 0 ? fmtPct(cs.ftm / cs.fta) : '—'}</td>
+                          <td className="px-3 py-3 font-display font-bold text-slate-300 tabular-nums text-sm">{cs.fga > 0 ? fmtPct((cs.fgm + 0.5 * cs.threepm) / cs.fga) : '—'}</td>
+                        </tr>
+                      );
+                    };
+
+                    if (isMultiTeam) {
+                      // TOT aggregate row
+                      const tot = entries.reduce((acc, cs) => ({
+                        gamesPlayed: acc.gamesPlayed + cs.gamesPlayed,
+                        gamesStarted: acc.gamesStarted + cs.gamesStarted,
+                        minutes: acc.minutes + cs.minutes,
+                        points: acc.points + cs.points,
+                        rebounds: acc.rebounds + cs.rebounds,
+                        offReb: acc.offReb + cs.offReb,
+                        defReb: acc.defReb + cs.defReb,
+                        assists: acc.assists + cs.assists,
+                        steals: acc.steals + cs.steals,
+                        blocks: acc.blocks + cs.blocks,
+                        tov: acc.tov + cs.tov,
+                        pf: acc.pf + cs.pf,
+                        fgm: acc.fgm + cs.fgm, fga: acc.fga + cs.fga,
+                        threepm: acc.threepm + cs.threepm, threepa: acc.threepa + cs.threepa,
+                        ftm: acc.ftm + cs.ftm, fta: acc.fta + cs.fta,
+                        plusMinus: acc.plusMinus + cs.plusMinus,
+                        techs: 0, flagrants: 0, ejections: 0,
+                        year, teamId: 'TOT', teamName: 'TOT',
+                        teamAbbreviation: 'TOT', isSplit: false,
+                      }), { gamesPlayed:0, gamesStarted:0, minutes:0, points:0, rebounds:0, offReb:0, defReb:0, assists:0, steals:0, blocks:0, tov:0, pf:0, fgm:0, fga:0, threepm:0, threepa:0, ftm:0, fta:0, plusMinus:0, techs:0, flagrants:0, ejections:0, year, teamId:'TOT', teamName:'TOT', teamAbbreviation:'TOT', isSplit:false });
+                      // TOT row first
+                      careerRows.push(renderRow(tot as typeof entries[0], `${year}–${String(year+1).slice(2)}`, 'TOT', isMostRecent, false));
+                      // Then individual split rows
+                      entries.forEach(cs => {
+                        const abbr = cs.teamAbbreviation ?? cs.teamName.slice(0, 3).toUpperCase();
+                        careerRows.push(renderRow(cs, '', abbr, false, true));
+                      });
+                    } else {
+                      const cs = entries[0];
+                      const abbr = cs.teamAbbreviation ?? cs.teamName.slice(0, 3).toUpperCase();
+                      careerRows.push(renderRow(cs, `${year}–${String(year+1).slice(2)}`, abbr, isMostRecent, false));
+                    }
+                  });
+
+                  return (
+                    <div className="bg-slate-950/50 border border-slate-800 rounded-3xl overflow-hidden">
+                      <div className="overflow-x-auto">
+                        <table className="w-full text-center">
+                          <thead>
+                            <tr className="border-b border-slate-800">
+                              {['Season', 'Team', 'GP', 'GS', 'MIN', 'PTS', 'REB', 'ORB', 'DRB', 'AST', 'STL', 'BLK', 'PF', 'FGM', 'FGA', 'FG%', '3PM', '3PA', '3P%', '2PM', '2PA', '2P%', 'FTM', 'FTA', 'FT%', 'eFG%'].map(h => (
+                                <th key={h} className="px-3 py-3 text-[10px] font-black uppercase tracking-widest text-slate-500 whitespace-nowrap">
+                                  {h}
+                                </th>
+                              ))}
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y divide-slate-800/40">
+                            {careerRows}
+                          </tbody>
+                        </table>
+                      </div>
                     </div>
-                  </div>
-                )}
+                  );
+                })()}
 
                 {/* ── Career highs ────────────────────────────────────────────── */}
                 {hasHighs && (

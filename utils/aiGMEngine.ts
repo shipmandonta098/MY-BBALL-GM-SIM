@@ -9,6 +9,7 @@ import {
   CoachBadge, CoachScheme,
 } from '../types';
 import { generateCoach } from '../constants';
+import { snapshotPlayerStats } from './playerUtils';
 
 // ─── Types ──────────────────────────────────────────────────
 export type AIGMPersonality =
@@ -851,11 +852,13 @@ export function aiGMInSeasonTrades(
       ) {
         const rebuilderTeam = s.teams.find(t => t.id === team.id)!;
         const buyerTeam = s.teams.find(t => t.id === buyer.id)!;
+        const snappedVet = snapshotPlayerStats(vet, rebuilderTeam.id, rebuilderTeam.name, rebuilderTeam.abbreviation, s.season, true);
+        const snappedReturn = snapshotPlayerStats(returnPlayer, buyerTeam.id, buyerTeam.name, buyerTeam.abbreviation, s.season, true);
         s = {
           ...s,
           teams: s.teams.map(t => {
-            if (t.id === rebuilderTeam.id) return { ...t, roster: [...t.roster.filter(p => p.id !== vet.id), { ...returnPlayer, lastTeamId: buyerTeam.id }] };
-            if (t.id === buyerTeam.id) return { ...t, roster: [...t.roster.filter(p => p.id !== returnPlayer.id), { ...vet, lastTeamId: rebuilderTeam.id }] };
+            if (t.id === rebuilderTeam.id) return { ...t, roster: [...t.roster.filter(p => p.id !== vet.id), { ...snappedReturn, lastTeamId: buyerTeam.id }] };
+            if (t.id === buyerTeam.id) return { ...t, roster: [...t.roster.filter(p => p.id !== returnPlayer.id), { ...snappedVet, lastTeamId: rebuilderTeam.id }] };
             return t;
           }),
         };
@@ -916,11 +919,13 @@ export function aiGMInSeasonTrades(
         evaluateTrade(sellerGets, sellerSends, sellerData.aiGM?.personality ?? 'Balanced', s.teams.length, s.settings?.tradeDifficulty) &&
         evaluateTrade(contenderGets, contenderSends, personality, s.teams.length, s.settings?.tradeDifficulty)
       ) {
+        const snappedTarget = snapshotPlayerStats(targetPlayer!, sellerData.id, sellerData.name, sellerData.abbreviation, s.season, true);
+        const snappedReturnP = snapshotPlayerStats(returnPlayer, contenderData.id, contenderData.name, contenderData.abbreviation, s.season, true);
         s = {
           ...s,
           teams: s.teams.map(t => {
-            if (t.id === foundSellerId) return { ...t, roster: [...t.roster.filter(p => p.id !== targetPlayer!.id), { ...returnPlayer, lastTeamId: contenderData.id }] };
-            if (t.id === team.id) return { ...t, roster: [...t.roster.filter(p => p.id !== returnPlayer.id), { ...targetPlayer!, lastTeamId: sellerData.id }] };
+            if (t.id === foundSellerId) return { ...t, roster: [...t.roster.filter(p => p.id !== targetPlayer!.id), { ...snappedReturnP, lastTeamId: contenderData.id }] };
+            if (t.id === team.id) return { ...t, roster: [...t.roster.filter(p => p.id !== returnPlayer.id), { ...snappedTarget, lastTeamId: sellerData.id }] };
             return t;
           }),
         };

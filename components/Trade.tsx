@@ -1,6 +1,7 @@
 import React, { useState, useMemo, useEffect } from 'react';
 import { LeagueState, Team, Player, DraftPick, TradePiece, TradeProposal, Position, Transaction } from '../types';
 import TeamBadge from './TeamBadge';
+import { snapshotPlayerStats } from '../utils/playerUtils';
 
 interface TradeProps {
   league: LeagueState;
@@ -89,19 +90,28 @@ const Trade: React.FC<TradeProps> = ({ league, updateLeague, recordTransaction }
   };
 
   const executeTrade = () => {
+    // Snapshot stats for traded players before moving them
+    const season = league.season;
+    const snappedUserPlayers = userPieces
+      .filter(p => p.type === 'player')
+      .map(p => snapshotPlayerStats(p.data as Player, userTeam.id, userTeam.name, userTeam.abbreviation, season, true));
+    const snappedPartnerPlayers = partnerPieces
+      .filter(p => p.type === 'player')
+      .map(p => snapshotPlayerStats(p.data as Player, partnerTeam.id, partnerTeam.name, partnerTeam.abbreviation, season, true));
+
     let updatedTeams = league.teams.map(t => {
       let roster = [...t.roster];
       let picks = [...t.picks];
       if (t.id === userTeam.id) {
         roster = roster.filter(p => !userPieces.some(up => up.type === 'player' && (up.data as Player).id === p.id));
         picks = picks.filter(p => !userPieces.some(up => up.type === 'pick' && (up.data as DraftPick).originalTeamId === p.originalTeamId && (up.data as DraftPick).round === p.round));
-        roster = [...roster, ...partnerPieces.filter(p => p.type === 'player').map(p => p.data as Player)];
+        roster = [...roster, ...snappedPartnerPlayers];
         picks = [...picks, ...partnerPieces.filter(p => p.type === 'pick').map(p => p.data as DraftPick)];
       }
       if (t.id === partnerTeam.id) {
         roster = roster.filter(p => !partnerPieces.some(pp => pp.type === 'player' && (pp.data as Player).id === p.id));
         picks = picks.filter(p => !partnerPieces.some(pp => pp.type === 'pick' && (pp.data as DraftPick).originalTeamId === p.originalTeamId && (pp.data as DraftPick).round === p.round));
-        roster = [...roster, ...userPieces.filter(p => p.type === 'player').map(p => p.data as Player)];
+        roster = [...roster, ...snappedUserPlayers];
         picks = [...picks, ...userPieces.filter(p => p.type === 'pick').map(p => p.data as DraftPick)];
       }
       return { ...t, roster, picks };

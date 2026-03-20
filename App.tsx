@@ -3,6 +3,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { LeagueState, Player, Team, GameResult, PlayerStatus, ScheduleGame, BulkSimSummary, Prospect, Coach, TradeProposal, Position, NewsItem, NewsCategory, LeagueSettings, SeasonAwards, PlayoffBracket, PlayoffSeries, Transaction, TransactionType, PowerRankingSnapshot, PowerRankingEntry, GMProfile, GMMilestone, RivalryStats, InjuryType, SeasonPhase, AllStarWeekendData, AllStarVoteEntry } from './types';
 import { generateLeagueTeams, generateSeasonSchedule, generateProspects, generateFreeAgentPool, generateCoachPool, EXPANSION_TEAM_POOL, generateCoach, enforcePositionalBounds } from './constants';
 import { simulateGame, normalizeLeagueOVRs } from './utils/simEngine';
+import { snapshotPlayerStats } from './utils/playerUtils';
 import { generateGameRecap, generateScoutingReport, generateSeasonNarrative, generateCoachScoutingReport, generateNewsHeadline } from './services/geminiService';
 import { generateAwards } from './utils/awardEngine';
 import { assignAIPersonalities, runAIGMOffseason, aiGMTradeDeadlineAction, aiGMInSeasonTrades, aiGMPreOffseasonAgreements } from './utils/aiGMEngine';
@@ -1330,6 +1331,14 @@ const App: React.FC = () => {
       });
     });
 
+    // ── Snapshot season stats → careerStats, then reset for new season ────────
+    tempState.teams = tempState.teams.map(t => ({
+      ...t,
+      roster: t.roster.map(p =>
+        snapshotPlayerStats(p, t.id, t.name, t.abbreviation, tempState.season, false)
+      ),
+    }));
+
     tempState.teams = tempState.teams.map(t => {
       const facBudget     = t.finances?.budgets?.facilities ?? 20;
       const hcDevRating   = t.staff.headCoach?.ratingDevelopment ?? 50;
@@ -1801,6 +1810,7 @@ const App: React.FC = () => {
               allPlayers: allLeaguePlayers,
               teamPlayers: playerTeam?.roster ?? [],
               seasonLength: league.settings.seasonLength ?? 82,
+              currentTeamAbbreviation: playerTeam?.abbreviation,
             }}
           />
         );

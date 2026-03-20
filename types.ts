@@ -239,7 +239,9 @@ export interface SeasonStats extends PlayerStats {
   year: number;
   teamId: string;
   teamName: string;
+  teamAbbreviation?: string; // 3-letter abbreviation, e.g. "ATL"
   isPlayoffs?: boolean;
+  isSplit?: boolean;         // true = mid-season trade split (not a full season)
 }
 
 export interface ClutchGameLine {
