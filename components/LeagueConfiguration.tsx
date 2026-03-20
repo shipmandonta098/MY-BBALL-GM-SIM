@@ -167,6 +167,7 @@ const LeagueConfiguration: React.FC<LeagueConfigurationProps> = ({ onConfirm, on
   // ── Advanced ──────────────────────────────────────────────────────────────
   const [godMode, setGodMode]         = useState(false);
   const [seasonLength, setSeasonLength] = useState(82);
+  const [quarterLength, setQuarterLength] = useState(12);
   const [salaryCap, setSalaryCap]     = useState(140_000_000);
   const [numTeams, setNumTeams]       = useState(30);
 
@@ -193,6 +194,7 @@ const LeagueConfiguration: React.FC<LeagueConfigurationProps> = ({ onConfirm, on
       if (p.rookieProgressionRate)         setRookieProgression(p.rookieProgressionRate);
       if (p.showAdvancedStats !== undefined) setShowAdvancedStats(p.showAdvancedStats);
       if (p.seasonLength)                  setSeasonLength(p.seasonLength);
+      if (p.quarterLength)                 setQuarterLength(p.quarterLength);
       if (p.salaryCap)                     setSalaryCap(p.salaryCap);
       if (p.minPayroll)                    setMinPayroll(p.minPayroll);
       if (p.luxuryTaxThreshold)            setLuxuryTaxThreshold(p.luxuryTaxThreshold);
@@ -333,6 +335,7 @@ const LeagueConfiguration: React.FC<LeagueConfigurationProps> = ({ onConfirm, on
       // Advanced
       godMode,
       seasonLength,
+      quarterLength,
       numTeams,
     };
     if (saveAsDefault) {
@@ -623,6 +626,37 @@ const LeagueConfiguration: React.FC<LeagueConfigurationProps> = ({ onConfirm, on
                     <input type="number" value={seasonLength} min={20} max={82}
                       onChange={e => setSeasonLength(parseInt(e.target.value) || 82)}
                       className={`w-full bg-slate-950 border rounded-xl px-4 py-3 text-white font-mono focus:outline-none ${errors.seasonLength ? 'border-rose-500' : 'border-slate-800'}`} />
+                  </Field>
+
+                  <Field label="Quarter Length (Minutes)" hint="Minutes per quarter. NBA standard is 12. College uses 20-min halves (10 per quarter). Scales possessions, scoring, and player minutes.">
+                    <div className="space-y-2">
+                      <div className="flex gap-2">
+                        {[8, 10, 12, 15, 20].map(v => (
+                          <button
+                            key={v}
+                            type="button"
+                            onClick={() => setQuarterLength(v)}
+                            className={`flex-1 py-2 rounded-xl text-xs font-black uppercase transition-all border ${
+                              quarterLength === v
+                                ? 'bg-amber-500 border-amber-400 text-slate-950'
+                                : 'bg-slate-950 border-slate-800 text-slate-400 hover:text-white hover:border-slate-600'
+                            }`}
+                          >{v}</button>
+                        ))}
+                      </div>
+                      <div className="flex items-center gap-3">
+                        <input
+                          type="range" min={5} max={20} step={1}
+                          value={quarterLength}
+                          onChange={e => setQuarterLength(parseInt(e.target.value))}
+                          className="flex-1 h-1.5 accent-amber-500 bg-slate-800 rounded-lg appearance-none cursor-pointer"
+                        />
+                        <span className="text-amber-400 font-mono font-black text-sm w-12 text-right">{quarterLength} min</span>
+                      </div>
+                      <p className="text-[9px] text-slate-500 font-black uppercase tracking-widest">
+                        ~{Math.round(((quarterLength / 12) * 105))} pts/game avg · {quarterLength * 4} min regulation
+                      </p>
+                    </div>
                   </Field>
 
                   <Field label="Division Games" hint="Games played vs. each team in own division. Leave 0 to treat like any conference game.">

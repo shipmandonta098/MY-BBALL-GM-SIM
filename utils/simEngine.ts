@@ -3322,9 +3322,11 @@ export const simulateGame = (
   homeB2B = false,
   awayB2B = false,
   rivalryLevel = 'Ice Cold',
-  settings?: Pick<LeagueSettings, 'injuryFrequency' | 'homeCourt' | 'b2bFrequency'>,
+  settings?: Pick<LeagueSettings, 'injuryFrequency' | 'homeCourt' | 'b2bFrequency' | 'quarterLength'>,
 ): GameResult => {
   // ── Settings-driven constants ──────────────────────────────────────────────
+  const quarterLength = settings?.quarterLength ?? 12; // minutes per quarter
+  const quarterLengthScale = quarterLength / 12;       // possession/minute scaler
   const homeCourtAdv = settings?.homeCourt === false ? 0 : HOME_COURT_ADV;
   const injuryMult: Record<string, number> = { None: 0, Low: 0.5, Medium: 1.0, High: 2.0 };
   const injuryMultiplier = injuryMult[settings?.injuryFrequency ?? 'Medium'] ?? 1.0;
@@ -3381,8 +3383,8 @@ export const simulateGame = (
   const awayEffPace = getTeamEffectivePace(away, home, 0, false, awayB2B);
   const gamePace    = Math.round((homeEffPace + awayEffPace) / 2);
 
-  // Total possessions per team per 48-min game, then per quarter
-  const totalPoss  = paceToTotalPossessions(gamePace);
+  // Total possessions per team scaled to actual quarter length
+  const totalPoss  = Math.round(paceToTotalPossessions(gamePace) * quarterLengthScale);
   // Q4 gets ~94% of base possessions (intentional fouling, timeouts)
   const baseQPoss: Record<number, number> = {
     1: Math.round(totalPoss / 4),
@@ -3647,7 +3649,7 @@ export const simulateGame = (
 
       let mins = 0;
       if (team.rotation && team.rotation.minutes[p.id] !== undefined) {
-        mins = team.rotation.minutes[p.id];
+        mins = Math.round(team.rotation.minutes[p.id] * quarterLengthScale);
       } else {
         const rank = ratingRank.get(p.id) ?? i;
         if (i < 5) {
@@ -3657,10 +3659,11 @@ export const simulateGame = (
           else                 mins = 26 + Math.floor(Math.random() * 5);
         } else if (i < 9) mins = 14 + Math.floor(Math.random() * 10);
         else if (i < 12)  mins = Math.floor(Math.random() * 6);
+        mins = Math.round(mins * quarterLengthScale);
       }
       if (isGT) {
-        if (i < 5) mins = Math.max(20, mins - 10);
-        else if (i < 9) mins = Math.min(30, mins + 8);
+        if (i < 5) mins = Math.max(Math.round(20 * quarterLengthScale), mins - Math.round(10 * quarterLengthScale));
+        else if (i < 9) mins = Math.min(Math.round(30 * quarterLengthScale), mins + Math.round(8 * quarterLengthScale));
       }
       const ftBonus    = isHome ? 0.03 : 0;
       const varRoll    = playerVariance.get(p.id) ?? 0;
@@ -3883,8 +3886,8 @@ export const simulateGame = (
   if (hasClutchSituation) {
     const q4Home = homeQScores[3] ?? 0;
     const q4Away = awayQScores[3] ?? 0;
-    // Last 5 of 12 min quarter ≈ 41.7% of Q4 scoring
-    const clutchFraction = 5 / 12;
+    // Last 5 min of Q4 as a fraction of actual quarter length
+    const clutchFraction = Math.min(1, 5 / quarterLength);
     clutchHomeScore = Math.max(0, Math.round(q4Home * clutchFraction + (Math.random() * 2 - 1)));
     clutchAwayScore = Math.max(0, Math.round(q4Away * clutchFraction + (Math.random() * 2 - 1)));
 
