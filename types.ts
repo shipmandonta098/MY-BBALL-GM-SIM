@@ -627,6 +627,7 @@ export interface LeagueSettings {
   comebackFrequency?: 'Low' | 'Medium' | 'High' | 'Realistic';
   overtimeFrequency?: 'Low' | 'Medium' | 'High' | 'Realistic';
   globalPaceOverride?: number;
+  quarterLength?: number;          // minutes per quarter, default 12
   shotClockLength?: 24 | 20 | 14;
   scoringEra?: 'Low Scoring' | 'Modern' | 'Run & Gun';
   threePtFrequency?: 'Low' | 'Medium' | 'High' | 'Very High';
