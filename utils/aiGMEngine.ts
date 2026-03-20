@@ -361,6 +361,39 @@ export function runAIGMOffseason(
       txs.push(makeTransaction(s, 'release', [t.id], `${t.name} released ${p.name}.`, [p.id]));
     });
 
+    // ── 1.5. RE-SIGN OWN EXPIRING STARS (83+ OVR) ───────────
+    const ownExpiring = faPool
+      .filter(p => p.lastTeamId === t.id && p.rating >= 83)
+      .sort((a, b) => b.rating - a.rating);
+    for (const fa of ownExpiring) {
+      if (currentRoster.length >= (s.settings.maxRosterSize ?? 15)) break;
+      const currentSalary = rosterSalary({ ...t, roster: currentRoster });
+      const offerAmt = faOfferAmount(fa, { ...t, roster: currentRoster }, salaryCap, personality, ratings.negotiation, difficulty, topFAIds.has(fa.id));
+      const isHardCap = s.settings.salaryCapType === 'Hard Cap';
+      if (isHardCap && currentSalary + offerAmt > salaryCap) continue;
+      if (!isHardCap && currentSalary + offerAmt > salaryCap * 1.15 && personality !== 'Win Now') continue;
+      const maxYears = s.settings.maxContractYears ?? 5;
+      const rawYears = 2 + Math.floor(Math.random() * 3);
+      const signedPlayer: Player = {
+        ...fa,
+        isFreeAgent: false,
+        salary: offerAmt,
+        contractYears: Math.min(rawYears, maxYears),
+        status: 'Rotation' as PlayerStatus,
+        morale: Math.min(95, (fa.morale ?? 70) + 10),
+      };
+      currentRoster.push(signedPlayer);
+      faPool = faPool.filter(p => p.id !== fa.id);
+      signingsLeft--;
+      newsItems.push(makeNewsItem(
+        'signing',
+        `${t.abbreviation} RE-SIGNS`,
+        `${t.name} have re-signed ${fa.name} (${fa.position}, ${fa.rating} OVR) to a ${signedPlayer.contractYears}-year deal worth $${(offerAmt / 1_000_000).toFixed(1)}M.`,
+        s.currentDay, t.id, fa.id, fa.rating >= 88
+      ));
+      txs.push(makeTransaction(s, 'signing', [t.id], `${t.name} re-signed ${fa.name}.`, [fa.id]));
+    }
+
     // ── 2. FREE AGENT SIGNING ────────────────────────────────
     // Sort FA pool by personality priorities
     const rankedFAs = [...faPool].sort((a, b) => {

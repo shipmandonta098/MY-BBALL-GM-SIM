@@ -1221,19 +1221,24 @@ export const generateFreeAgentPool = (count: number, season: number, genderRatio
   return Array.from({ length: count }).map((_, i) => {
     const draftCtx: DraftContext = { season, teamNames, usedPicks };
     const p = generatePlayer(`fa-${season}-${i}`, [21, 36], genderRatio, draftCtx);
+    // Skew OVR distribution: 90% → 70–82, 8% → 83–87, 2% → 88–92, none 93+
+    const tierRoll = Math.random();
+    const [tierMin, tierMax] = tierRoll < 0.90 ? [70, 82] : tierRoll < 0.98 ? [83, 87] : [88, 92];
+    const skewedRating = Math.min(tierMax, Math.max(tierMin, p.rating));
+    const skewedPlayer = skewedRating !== p.rating ? { ...p, rating: skewedRating } : p;
     return {
-      ...p,
+      ...skewedPlayer,
       isFreeAgent: true,
       lastTeamId: undefined,
       contractYears: 0,
       desiredContract: {
         years: Math.floor(Math.random() * 3) + 1,
         salary: Math.round((
-          p.rating >= 95 ? 38_000_000 + (p.rating - 95) * 1_400_000 :
-          p.rating >= 88 ? 26_000_000 + (p.rating - 88) * 1_714_286 :
-          p.rating >= 80 ? 16_000_000 + (p.rating - 80) * 1_250_000 :
-          p.rating >= 70 ? 7_000_000  + (p.rating - 70) * 900_000   :
-          p.rating >= 60 ? 3_000_000  + (p.rating - 60) * 400_000   : 1_500_000
+          skewedRating >= 95 ? 38_000_000 + (skewedRating - 95) * 1_400_000 :
+          skewedRating >= 88 ? 26_000_000 + (skewedRating - 88) * 1_714_286 :
+          skewedRating >= 80 ? 16_000_000 + (skewedRating - 80) * 1_250_000 :
+          skewedRating >= 70 ? 7_000_000  + (skewedRating - 70) * 900_000   :
+          skewedRating >= 60 ? 3_000_000  + (skewedRating - 60) * 400_000   : 1_500_000
         ) * (0.90 + Math.random() * 0.20) / 250_000) * 250_000
       },
       interestScore: 30 + Math.floor(Math.random() * 50)

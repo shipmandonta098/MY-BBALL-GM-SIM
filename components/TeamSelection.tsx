@@ -8,6 +8,12 @@ interface TeamEditDraft {
   abbreviation: string;
   primaryColor: string;
   secondaryColor: string;
+  logo: string;
+  division: string;
+  population: number;
+  stadiumCapacity: number;
+  status: 'Active' | 'Inactive' | 'Relocating' | 'Expansion';
+  borderStyle: 'None' | 'Solid' | 'Gradient';
 }
 
 interface TeamSelectionProps {
@@ -17,10 +23,15 @@ interface TeamSelectionProps {
   onBack?: () => void;
 }
 
+const DIVISIONS = ['Atlantic', 'Central', 'Southeast', 'Northwest', 'Pacific', 'Southwest'];
+const BORDER_STYLES: TeamEditDraft['borderStyle'][] = ['None', 'Solid', 'Gradient'];
+const STATUS_OPTIONS: TeamEditDraft['status'][] = ['Active', 'Inactive', 'Relocating', 'Expansion'];
+
 const TeamSelection: React.FC<TeamSelectionProps> = ({ teams, onSelectTeam, onEditTeam, onBack }) => {
   const [hoveredTeam, setHoveredTeam] = useState<string | null>(null);
   const [editingTeamId, setEditingTeamId] = useState<string | null>(null);
   const [editDraft, setEditDraft] = useState<TeamEditDraft | null>(null);
+  const [logoPreviewError, setLogoPreviewError] = useState(false);
 
   const getTeamRating = (team: Team) => {
     const avg = team.roster.reduce((sum, p) => sum + p.rating, 0) / team.roster.length;
@@ -35,12 +46,19 @@ const TeamSelection: React.FC<TeamSelectionProps> = ({ teams, onSelectTeam, onEd
 
   const openEdit = (e: React.MouseEvent, team: Team) => {
     e.stopPropagation();
+    setLogoPreviewError(false);
     setEditDraft({
       city: team.city,
       name: team.name,
       abbreviation: team.abbreviation ?? team.city.substring(0, 3).toUpperCase(),
       primaryColor: team.primaryColor,
       secondaryColor: team.secondaryColor,
+      logo: team.logo ?? '',
+      division: team.division,
+      population: team.population,
+      stadiumCapacity: team.stadiumCapacity,
+      status: team.status,
+      borderStyle: team.borderStyle ?? 'None',
     });
     setEditingTeamId(team.id);
   };
@@ -163,9 +181,10 @@ const TeamSelection: React.FC<TeamSelectionProps> = ({ teams, onSelectTeam, onEd
 
       {/* Edit Team Modal */}
       {editDraft && previewTeam && (
-        <div className="fixed inset-0 z-[150] flex items-center justify-center bg-black/70 backdrop-blur-sm p-6 animate-in fade-in duration-200">
-          <div className="bg-slate-900 border border-slate-700 rounded-3xl p-8 w-full max-w-lg shadow-2xl space-y-6">
-            <div className="flex items-center justify-between">
+        <div className="fixed inset-0 z-[150] flex items-center justify-center bg-black/70 backdrop-blur-sm p-4 animate-in fade-in duration-200">
+          <div className="bg-slate-900 border border-slate-700 rounded-3xl w-full max-w-4xl shadow-2xl overflow-hidden max-h-[95vh] flex flex-col">
+            {/* Header */}
+            <div className="flex items-center justify-between px-8 pt-7 pb-5 border-b border-slate-800 flex-shrink-0">
               <h3 className="text-2xl font-display font-bold uppercase text-white">Edit Team Info</h3>
               <button
                 onClick={() => { setEditingTeamId(null); setEditDraft(null); }}
@@ -177,92 +196,210 @@ const TeamSelection: React.FC<TeamSelectionProps> = ({ teams, onSelectTeam, onEd
               </button>
             </div>
 
-            {/* Preview badge */}
-            <div className="flex items-center gap-5 bg-slate-950/60 rounded-2xl p-4 border border-slate-800">
-              <div
-                className="w-16 h-16 rounded-xl overflow-hidden bg-slate-800 border-2 flex items-center justify-center flex-shrink-0"
-                style={{ borderColor: editDraft.secondaryColor }}
-              >
-                <TeamBadge team={previewTeam} size="lg" />
-              </div>
-              <div>
-                <p className="text-slate-500 text-[10px] font-black uppercase tracking-[0.3em]">{editDraft.city}</p>
-                <p className="font-display font-bold text-2xl uppercase" style={{ color: editDraft.primaryColor }}>{editDraft.name}</p>
-                <p className="text-slate-600 text-[10px] font-bold uppercase tracking-widest mt-0.5">{editDraft.abbreviation}</p>
+            <div className="overflow-y-auto flex-1">
+              <div className="grid grid-cols-1 lg:grid-cols-3 gap-0 divide-y lg:divide-y-0 lg:divide-x divide-slate-800">
+
+                {/* Left: Visual Identity */}
+                <div className="p-7 space-y-6">
+                  <h4 className="text-[10px] font-black text-amber-500 uppercase tracking-[0.5em]">Visual Identity</h4>
+
+                  {/* Logo preview */}
+                  <div className="aspect-square bg-slate-950 rounded-2xl border border-slate-800 flex items-center justify-center overflow-hidden relative group">
+                    {editDraft.logo && !logoPreviewError
+                      ? <img
+                          src={editDraft.logo}
+                          alt="Logo Preview"
+                          className="w-32 h-32 object-contain"
+                          referrerPolicy="no-referrer"
+                          onError={() => setLogoPreviewError(true)}
+                        />
+                      : <div
+                          className="w-32 h-32 flex items-center justify-center rounded-2xl text-white font-black text-4xl select-none"
+                          style={{ backgroundColor: editDraft.primaryColor }}
+                        >
+                          {(editDraft.abbreviation || editDraft.name).substring(0, 3).toUpperCase()}
+                        </div>
+                    }
+                  </div>
+
+                  {/* Logo URL */}
+                  <div className="space-y-2">
+                    <label className="text-[10px] font-black uppercase text-slate-500 tracking-widest">Logo URL</label>
+                    <input
+                      type="text"
+                      value={editDraft.logo}
+                      onChange={e => { setLogoPreviewError(false); setEditDraft(d => d ? { ...d, logo: e.target.value } : d); }}
+                      placeholder="https://..."
+                      className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2.5 text-white text-xs focus:outline-none focus:border-amber-500/50"
+                    />
+                  </div>
+
+                  {/* Jersey colors */}
+                  <div className="space-y-3">
+                    <label className="text-[10px] font-black uppercase text-slate-500 tracking-widest">Jersey Colors</label>
+                    <div className="flex gap-3">
+                      <div className="flex-1 space-y-1.5">
+                        <div className="h-10 rounded-xl border border-slate-800 relative overflow-hidden">
+                          <input
+                            type="color"
+                            value={editDraft.primaryColor}
+                            onChange={e => setEditDraft(d => d ? { ...d, primaryColor: e.target.value } : d)}
+                            className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
+                          />
+                          <div className="w-full h-full" style={{ backgroundColor: editDraft.primaryColor }} />
+                        </div>
+                        <p className="text-[8px] font-black text-center text-slate-600 uppercase">Primary</p>
+                      </div>
+                      <div className="flex-1 space-y-1.5">
+                        <div className="h-10 rounded-xl border border-slate-800 relative overflow-hidden">
+                          <input
+                            type="color"
+                            value={editDraft.secondaryColor}
+                            onChange={e => setEditDraft(d => d ? { ...d, secondaryColor: e.target.value } : d)}
+                            className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
+                          />
+                          <div className="w-full h-full" style={{ backgroundColor: editDraft.secondaryColor }} />
+                        </div>
+                        <p className="text-[8px] font-black text-center text-slate-600 uppercase">Secondary</p>
+                      </div>
+                    </div>
+                    <div className="h-3 w-full rounded-full overflow-hidden flex border border-slate-800">
+                      <div className="flex-1" style={{ backgroundColor: editDraft.primaryColor }} />
+                      <div className="flex-1" style={{ backgroundColor: editDraft.secondaryColor }} />
+                    </div>
+                  </div>
+
+                  {/* Border style */}
+                  <div className="space-y-2">
+                    <label className="text-[10px] font-black uppercase text-slate-500 tracking-widest">Border Style</label>
+                    <select
+                      value={editDraft.borderStyle}
+                      onChange={e => setEditDraft(d => d ? { ...d, borderStyle: e.target.value as TeamEditDraft['borderStyle'] } : d)}
+                      className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2.5 text-white font-bold text-sm focus:outline-none focus:border-amber-500/50"
+                    >
+                      {BORDER_STYLES.map(s => <option key={s} value={s}>{s}</option>)}
+                    </select>
+                  </div>
+                </div>
+
+                {/* Right: Team Information (spans 2 cols) */}
+                <div className="lg:col-span-2 p-7 space-y-6">
+                  {/* Conference badge + section title */}
+                  <div className="flex items-center justify-between">
+                    <h4 className="text-[10px] font-black text-amber-500 uppercase tracking-[0.5em]">Team Information</h4>
+                    <div className={`px-3 py-1 rounded-full text-[10px] font-black uppercase tracking-widest border ${previewTeam.conference === 'Eastern' ? 'bg-blue-500/10 text-blue-400 border-blue-500/20' : 'bg-red-500/10 text-red-400 border-red-500/20'}`}>
+                      {previewTeam.conference} Conference
+                    </div>
+                  </div>
+
+                  {/* Preview badge */}
+                  <div className="flex items-center gap-4 bg-slate-950/60 rounded-2xl p-4 border border-slate-800">
+                    <div
+                      className="w-14 h-14 rounded-xl overflow-hidden bg-slate-800 border-2 flex items-center justify-center flex-shrink-0"
+                      style={{ borderColor: editDraft.secondaryColor }}
+                    >
+                      <TeamBadge team={previewTeam} size="lg" />
+                    </div>
+                    <div>
+                      <p className="text-slate-500 text-[10px] font-black uppercase tracking-[0.3em]">{editDraft.city}</p>
+                      <p className="font-display font-bold text-xl uppercase" style={{ color: editDraft.primaryColor }}>{editDraft.name}</p>
+                      <p className="text-slate-600 text-[10px] font-bold uppercase tracking-widest mt-0.5">{editDraft.abbreviation}</p>
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-5">
+                    {/* City */}
+                    <div className="space-y-2">
+                      <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-widest">City / Region</label>
+                      <input
+                        type="text"
+                        value={editDraft.city}
+                        maxLength={20}
+                        onChange={e => setEditDraft(d => d ? { ...d, city: e.target.value } : d)}
+                        className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2.5 text-white font-display text-sm focus:outline-none focus:border-amber-500/50"
+                      />
+                    </div>
+
+                    {/* Team Name */}
+                    <div className="space-y-2">
+                      <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-widest">Team Name</label>
+                      <input
+                        type="text"
+                        value={editDraft.name}
+                        maxLength={20}
+                        onChange={e => setEditDraft(d => d ? { ...d, name: e.target.value } : d)}
+                        className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2.5 text-white font-display text-sm focus:outline-none focus:border-amber-500/50"
+                      />
+                    </div>
+
+                    {/* Abbreviation */}
+                    <div className="space-y-2">
+                      <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-widest">Abbreviation</label>
+                      <input
+                        type="text"
+                        value={editDraft.abbreviation}
+                        maxLength={4}
+                        onChange={e => setEditDraft(d => d ? { ...d, abbreviation: e.target.value.toUpperCase() } : d)}
+                        className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2.5 text-white font-display text-sm focus:outline-none focus:border-amber-500/50 uppercase"
+                      />
+                    </div>
+
+                    {/* Division */}
+                    <div className="space-y-2">
+                      <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-widest">Division</label>
+                      <select
+                        value={editDraft.division}
+                        onChange={e => setEditDraft(d => d ? { ...d, division: e.target.value } : d)}
+                        className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2.5 text-white font-bold text-sm focus:outline-none focus:border-amber-500/50"
+                      >
+                        {DIVISIONS.map(div => <option key={div} value={div}>{div}</option>)}
+                      </select>
+                    </div>
+
+                    {/* Population */}
+                    <div className="space-y-2">
+                      <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-widest">Population (Millions)</label>
+                      <input
+                        type="number"
+                        value={editDraft.population}
+                        min={0.1}
+                        step={0.1}
+                        onChange={e => setEditDraft(d => d ? { ...d, population: parseFloat(e.target.value) || d.population } : d)}
+                        className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2.5 text-white font-display text-sm focus:outline-none focus:border-amber-500/50"
+                      />
+                    </div>
+
+                    {/* Stadium Capacity */}
+                    <div className="space-y-2">
+                      <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-widest">Stadium Capacity</label>
+                      <input
+                        type="number"
+                        value={editDraft.stadiumCapacity}
+                        min={1000}
+                        step={500}
+                        onChange={e => setEditDraft(d => d ? { ...d, stadiumCapacity: parseInt(e.target.value) || d.stadiumCapacity } : d)}
+                        className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2.5 text-white font-display text-sm focus:outline-none focus:border-amber-500/50"
+                      />
+                    </div>
+
+                    {/* Team Status */}
+                    <div className="space-y-2">
+                      <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-widest">Team Status</label>
+                      <select
+                        value={editDraft.status}
+                        onChange={e => setEditDraft(d => d ? { ...d, status: e.target.value as TeamEditDraft['status'] } : d)}
+                        className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2.5 text-white font-bold text-sm focus:outline-none focus:border-amber-500/50"
+                      >
+                        {STATUS_OPTIONS.map(s => <option key={s} value={s}>{s}</option>)}
+                      </select>
+                    </div>
+                  </div>
+                </div>
               </div>
             </div>
 
-            <div className="grid grid-cols-2 gap-4">
-              <div className="space-y-1">
-                <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-widest">City</label>
-                <input
-                  type="text"
-                  value={editDraft.city}
-                  maxLength={20}
-                  onChange={e => setEditDraft(d => d ? { ...d, city: e.target.value } : d)}
-                  className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2.5 text-white font-display text-sm focus:outline-none focus:border-amber-500/50"
-                />
-              </div>
-              <div className="space-y-1">
-                <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-widest">Team Name</label>
-                <input
-                  type="text"
-                  value={editDraft.name}
-                  maxLength={20}
-                  onChange={e => setEditDraft(d => d ? { ...d, name: e.target.value } : d)}
-                  className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2.5 text-white font-display text-sm focus:outline-none focus:border-amber-500/50"
-                />
-              </div>
-              <div className="space-y-1">
-                <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-widest">Abbreviation</label>
-                <input
-                  type="text"
-                  value={editDraft.abbreviation}
-                  maxLength={4}
-                  onChange={e => setEditDraft(d => d ? { ...d, abbreviation: e.target.value.toUpperCase() } : d)}
-                  className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2.5 text-white font-display text-sm focus:outline-none focus:border-amber-500/50 uppercase"
-                />
-              </div>
-              <div /> {/* spacer */}
-              <div className="space-y-1">
-                <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-widest">Primary Color</label>
-                <div className="flex items-center gap-2">
-                  <input
-                    type="color"
-                    value={editDraft.primaryColor}
-                    onChange={e => setEditDraft(d => d ? { ...d, primaryColor: e.target.value } : d)}
-                    className="w-10 h-10 rounded-lg cursor-pointer border-0 bg-transparent"
-                  />
-                  <input
-                    type="text"
-                    value={editDraft.primaryColor}
-                    maxLength={7}
-                    onChange={e => setEditDraft(d => d ? { ...d, primaryColor: e.target.value } : d)}
-                    className="flex-1 bg-slate-950 border border-slate-800 rounded-xl px-3 py-2.5 text-white font-mono text-sm focus:outline-none focus:border-amber-500/50"
-                  />
-                </div>
-              </div>
-              <div className="space-y-1">
-                <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-widest">Secondary Color</label>
-                <div className="flex items-center gap-2">
-                  <input
-                    type="color"
-                    value={editDraft.secondaryColor}
-                    onChange={e => setEditDraft(d => d ? { ...d, secondaryColor: e.target.value } : d)}
-                    className="w-10 h-10 rounded-lg cursor-pointer border-0 bg-transparent"
-                  />
-                  <input
-                    type="text"
-                    value={editDraft.secondaryColor}
-                    maxLength={7}
-                    onChange={e => setEditDraft(d => d ? { ...d, secondaryColor: e.target.value } : d)}
-                    className="flex-1 bg-slate-950 border border-slate-800 rounded-xl px-3 py-2.5 text-white font-mono text-sm focus:outline-none focus:border-amber-500/50"
-                  />
-                </div>
-              </div>
-            </div>
-
-            <div className="flex gap-3 pt-2">
+            {/* Footer actions */}
+            <div className="flex gap-3 px-8 py-5 border-t border-slate-800 flex-shrink-0">
               <button
                 onClick={handleEditSave}
                 className="flex-1 py-3 bg-amber-500 hover:bg-amber-400 text-slate-950 font-display font-bold uppercase text-sm rounded-2xl transition-all active:scale-95"
