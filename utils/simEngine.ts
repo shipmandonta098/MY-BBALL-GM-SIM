@@ -1,7 +1,7 @@
 import { Team, GameResult, Player, GamePlayerLine, ClutchGameLine, CoachScheme, PlayByPlayEvent, InjuryType, LeagueState, QuarterDetail, LeagueSettings } from '../types';
 
 // ─── Constants ───────────────────────────────────────────────────────────────
-const BASE_PPP       = 1.12;
+const BASE_PPP       = 1.06;
 const SCORE_VARIANCE = 0.04;
 const HOME_COURT_ADV = 0.025;  // +2.5% shooting efficiency for home team
 const VISIT_TOV_PEN  = 0.008;  // road team slight TOV penalty
@@ -506,9 +506,9 @@ export function get3PTContestMod(
 
   // Per-context suppression/reward ceiling (tunable)
   const RANGES: Record<Shot3PTContext, { down: number; up: number }> = {
-    CATCH_AND_SHOOT_3: { down: 0.060, up: 0.025 }, // closeout quality matters most
-    PULL_UP_3:         { down: 0.040, up: 0.015 }, // self-created; harder to fully contest
-    TEAM_BOX_SCORE:    { down: 0.030, up: 0.012 }, // per-game average over many possessions
+    CATCH_AND_SHOOT_3: { down: 0.075, up: 0.030 }, // closeout quality matters most
+    PULL_UP_3:         { down: 0.050, up: 0.020 }, // self-created; harder to fully contest
+    TEAM_BOX_SCORE:    { down: 0.040, up: 0.016 }, // per-game average over many possessions
   };
 
   const { down, up } = RANGES[context];
@@ -677,7 +677,7 @@ export function getMidRangeContestMod(
     // Elbow face-up / catch-and-shoot mid: defender is closer; easier to get a hand up
     ELBOW_FADE:           { down: 0.090, up: 0.028 },
     // Per-game team average — smoothed across many possessions
-    TEAM_BOX_SCORE_MID:   { down: 0.040, up: 0.012 },
+    TEAM_BOX_SCORE_MID:   { down: 0.055, up: 0.018 },
   };
 
   const { down, up } = RANGES[context];
@@ -881,9 +881,9 @@ export function getRimProtectionMod(
 
   // (down = how much elite D suppresses; up = how much poor D rewards shooter)
   const RANGES: Record<RimContext, { down: number; up: number }> = {
-    DRIVE_LAYUP:    { down: 0.090, up: 0.040 }, // elite protector: up to −9 % per drive
-    POST_FADE:      { down: 0.060, up: 0.025 }, // post-up: less direct rim contest
-    TEAM_BOX_SCORE: { down: 0.040, up: 0.035 }, // team game average — stars not fully blanked
+    DRIVE_LAYUP:    { down: 0.110, up: 0.045 }, // elite protector: up to −11 % per drive
+    POST_FADE:      { down: 0.070, up: 0.030 }, // post-up: less direct rim contest
+    TEAM_BOX_SCORE: { down: 0.060, up: 0.045 }, // team game average — elite D gives real edge
     // Slam dunks are telegraphed — elite shot-blockers time the challenge better than on layups.
     // However, porous interior D barely changes dunk % (no one to contest → dunker just finishes).
     // Effective range: elite rim protector (attr 90) → up to −18 %; weak D → +1.5 % at most.
@@ -1263,9 +1263,11 @@ const getQuarterScoringBounds = (
   gamePace: number,
 ): { lo: number; hi: number } => {
   // Points = possessions × PPP; PPP varies by game tempo
-  const basePPP = gamePace <= 70 ? 1.04 :
-                  gamePace <= 80 ? 1.10 :
-                  gamePace <= 90 ? 1.14 : 1.18;
+  // Calibrated to NBA 2025-26: average team scores ~112 pts on ~100 possessions (1.12 PPP).
+  // Slow teams grind to ~1.04, fast teams push to ~1.12. Elite offenses hit ~1.18.
+  const basePPP = gamePace <= 70 ? 0.98 :
+                  gamePace <= 80 ? 1.04 :
+                  gamePace <= 90 ? 1.08 : 1.12;
   const expected  = possessions * basePPP;
   const variance  = possessions * 0.14;
   return { lo: Math.round(expected - variance), hi: Math.round(expected + variance) };
@@ -3162,6 +3164,10 @@ const simulatePlayerGameLine = (
   const tm     = computeTendencyModifiers(player);
   const minFac = minutes / 48;
 
+  // Fatigue penalty: players logging 32+ minutes lose shot-making quality.
+  // Each minute over 32 costs ~0.35% FG% across all zones (rest + conditioning).
+  const fatigueMod = minutes > 32 ? -((minutes - 32) * 0.0035) : 0;
+
   const adjUsage = Math.max(0.02, usageShare * (1 + tm.usageBoost));
   const fga      = Math.max(0, Math.round(teamFga * adjUsage * (minutes / 32)));
 
@@ -3199,27 +3205,30 @@ const simulatePlayerGameLine = (
   );
 
   // Inside FG%: three-way blend of layup, dunk, and post-scoring quality.
-  // getDunkPercentage: proper high-base curve (92-98% uncontested).
-  // getPostScoringPercentage: hook/drop-step range (48-63% calibrated).
-  // Weights are dynamic so specialist post scorers and dunkers each pull the
-  // blended inside FG% toward their own high-efficiency band.
+  // Box-score context: "inside" represents all at-rim attempts (layups, contact
+  // finishes, short hooks, dump-offs) — not just clean uncontested dunks.
+  // Dunk% (80-98%) is therefore down-weighted so the blend lands at NBA at-rim
+  // average of 58-63%, not the 65-70% that a straight blend would produce.
   const layupBase   = getLayupPercentage(player.attributes.layups, player.position);
   const dunkBase    = getDunkPercentage(player.attributes.dunks, player.position, player.attributes.jumping);
   const postBase    = getPostScoringPercentage(
     player.attributes.postScoring, player.position,
     player.attributes.strength, player.attributes.offensiveIQ,
   );
-  const dunkWeight  = Math.min(0.30, player.attributes.dunks       / 100 * 0.30);
+  // Reduced dunkWeight (0.20 max) and scaled dunkBase by 0.75 for box-score context:
+  // uncontested dunks are pre-selected plays; box-score "inside" includes many
+  // contested attempts where the defense has already rotated.
+  const dunkWeight  = Math.min(0.20, player.attributes.dunks       / 100 * 0.20);
   const postWeight  = Math.min(0.25, player.attributes.postScoring / 100 * 0.25);
   const layupWeight = Math.max(0,    1 - dunkWeight - postWeight);
-  const fgPctIns    = layupBase * layupWeight + dunkBase * dunkWeight + postBase * postWeight;
+  const fgPctIns    = layupBase * layupWeight + (dunkBase * 0.75) * dunkWeight + postBase * postWeight;
 
   // Stochastic rounding: Math.floor(n*rate + rand()) gives correct expected
   // value (= n*rate) without the systematic upward bias of Math.round that
   // was locking season 3PT% leaders at 50% for high-base shooters.
-  const threeRate = Math.max(0.05, fgPct3 + fgPctBoost + opponentPerimDefMod + (Math.random() * 0.06 - 0.03));
+  const threeRate = Math.max(0.05, fgPct3 + fgPctBoost + fatigueMod + opponentPerimDefMod + (Math.random() * 0.06 - 0.03));
   const threepm   = Math.min(threepa, Math.floor(threepa * threeRate + Math.random()));
-  const midRate   = Math.max(0.05, fgPctMid + fgPctBoost + opponentMidDefMod + (Math.random() * 0.06 - 0.03));
+  const midRate   = Math.max(0.05, fgPctMid + fgPctBoost + fatigueMod + opponentMidDefMod + (Math.random() * 0.06 - 0.03));
   const midFgm    = Math.min(midFga,  Math.floor(midFga  * midRate   + Math.random()));
   // Inside FGM: interior + post defense mods both apply (weighted by post share).
   // opponentInteriorDefMod suppresses drives/dunks; opponentPostDefMod suppresses
@@ -3227,11 +3236,15 @@ const simulatePlayerGameLine = (
   // (postWeight≈0) is barely affected by post defense, and a pure post scorer
   // (postWeight≈0.25) feels the full post-defense penalty.
   const blendedInsideMod = opponentInteriorDefMod * (1 - postWeight) + opponentPostDefMod * postWeight;
-  const insRate   = Math.max(0.35, fgPctIns + fgPctBoost + blendedInsideMod + (Math.random() * 0.06 - 0.03));
+  // Floor lowered to 0.30 (from 0.35): even poor finishers shouldn't make 35%+
+  // of their inside attempts after factoring in rim protection and fatigue.
+  const insRate   = Math.max(0.30, fgPctIns + fgPctBoost + fatigueMod + blendedInsideMod + (Math.random() * 0.06 - 0.03));
   const insFgm    = Math.min(insFga,  Math.floor(insFga  * insRate   + Math.random()));
   const fgm     = threepm + midFgm + insFgm;
 
-  const fta = Math.round((player.attributes.strength / 100) * 5 * minFac + Math.random() * 2);
+  // FTA: scaled by strength and minutes. Cap random component to prevent outlier
+  // games — NBA teams average 22 FTA, so per-player average should be ~2-3 FTA.
+  const fta = Math.round((player.attributes.strength / 100) * 3.5 * minFac + Math.random() * 1.5);
 
   // FT%: piecewise curve + positional tweak + situational modifiers.
   // ftBonus carries the home-court advantage from the call site; we also
