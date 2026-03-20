@@ -123,7 +123,7 @@ const Roster: React.FC<RosterProps> = ({ leagueTeams, userTeamId, initialTeamId,
         if (aVal > bVal) return sortConfig.direction === 'asc' ? 1 : -1;
         return 0;
       });
-  }, [activeTeam.roster, searchTerm, posFilter, minOvr, sortConfig]);
+  }, [activeTeam.roster, searchTerm, posFilter, minOvr, injuredOnly, sortConfig]);
 
   const toggleSort = (key: string) => {
     setSortConfig(prev => ({
