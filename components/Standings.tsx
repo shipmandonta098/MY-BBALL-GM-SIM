@@ -45,10 +45,7 @@ const Standings: React.FC<StandingsProps> = ({
 }) => {
   const [showTiebreakers, setShowTiebreakers] = useState(false);
 
-  // The bracket always seeds 8 per conference; use that as the true cutoff.
-  // playoffFormat is total teams (e.g. 16 = 8 per conf, 8 = 4 per conf) but
-  // the bracket generation is hardcoded to 8-per-conf, so clamp to 8 minimum.
-  const playoffSpotsPerConf = Math.max(8, Math.floor(playoffFormat / 2));
+  const playoffSpotsPerConf = Math.floor(playoffFormat / 2);
 
   const sortedConferences = useMemo(() => {
     const conferences: Conference[] = ['Eastern', 'Western'];
