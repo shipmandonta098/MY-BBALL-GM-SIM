@@ -9,23 +9,23 @@ const VISIT_TOV_PEN  = 0.008;  // road team slight TOV penalty
 // ─── Pace / Possession Engine ─────────────────────────────────────────────────
 /** Pace rating (60-100) → total possessions per 48 min (per team) */
 const PACE_TABLE: Array<{ lo: number; hi: number; possLo: number; possHi: number }> = [
-  { lo: 60, hi: 65,  possLo: 88,  possHi: 92  },  // very slow, grind it out
-  { lo: 66, hi: 70,  possLo: 93,  possHi: 97  },  // slow, halfcourt heavy
-  { lo: 71, hi: 75,  possLo: 98,  possHi: 102 },  // below average pace
-  { lo: 76, hi: 80,  possLo: 103, possHi: 107 },  // average NBA pace
-  { lo: 81, hi: 85,  possLo: 108, possHi: 112 },  // uptempo
-  { lo: 86, hi: 90,  possLo: 113, possHi: 117 },  // very fast
-  { lo: 91, hi: 100, possLo: 118, possHi: 125 },  // run and gun
+  { lo: 60, hi: 65,  possLo: 84,  possHi: 88  },  // very slow, grind it out
+  { lo: 66, hi: 70,  possLo: 89,  possHi: 93  },  // slow, halfcourt heavy
+  { lo: 71, hi: 75,  possLo: 94,  possHi: 98  },  // below average pace
+  { lo: 76, hi: 80,  possLo: 98,  possHi: 102 },  // average NBA pace (~100 poss/team)
+  { lo: 81, hi: 85,  possLo: 103, possHi: 107 },  // uptempo
+  { lo: 86, hi: 90,  possLo: 108, possHi: 113 },  // very fast
+  { lo: 91, hi: 100, possLo: 114, possHi: 120 },  // run and gun
 ];
 
 /** Base scheme pace ratings. Used when team.paceRating is not set. */
 const SCHEME_DEFAULT_PACE: Record<CoachScheme, number> = {
-  'Balanced':       82,  // 108–112 poss (up from 78)
-  'Pace and Space': 89,  // 113–117 poss
+  'Balanced':       78,  // 98–102 poss — NBA average halfcourt offense
+  'Pace and Space': 87,  // 108–113 poss
   'Grit and Grind': 64,
-  'Triangle':       76,  // 103–107 poss
-  'Small Ball':     86,  // 113–117 poss
-  'Showtime':       95,  // 118–125 poss
+  'Triangle':       74,  // 94–98 poss
+  'Small Ball':     84,  // 103–107 poss
+  'Showtime':       93,  // 114–120 poss
 };
 
 // ─── Attribute → Expected 3P% ─────────────────────────────────────────────────
@@ -118,27 +118,30 @@ export function getThreePointPercentage(attr: number): number {
 export function getOffReboundChance(attr: number, position?: string): number {
   const a = Math.max(0, Math.min(100, attr));
 
+  // Calibrated to NBA 2025-26: elite offensive rebounders (bigs with 90+ offReb)
+  // crash 35–45% of available offensive boards; guards with weak offReb at 14–18%.
   let base: number;
-  if (a <= 60) {
-    // Poor crashers: 3 % at 0 → 7 % at 60
-    base = 0.03 + (a / 60) * 0.04;
-  } else if (a <= 80) {
-    // Solid to plus: 7 % at 60 → 12 % at 80
-    base = 0.07 + ((a - 60) / 20) * 0.05;
-  } else if (a <= 94) {
-    // Elite: 12 % at 80 → 18 % at 94
-    base = 0.12 + ((a - 80) / 14) * 0.06;
+  if (a <= 50) {
+    // Non-crasher: 10 % at 0 → 18 % at 50
+    base = 0.10 + (a / 50) * 0.08;
+  } else if (a <= 70) {
+    // Below-avg to avg crasher: 18 % at 50 → 24 % at 70
+    base = 0.18 + ((a - 50) / 20) * 0.06;
+  } else if (a <= 85) {
+    // Plus rebounder: 24 % at 70 → 30 % at 85
+    base = 0.24 + ((a - 70) / 15) * 0.06;
   } else {
-    // Peak crashers: 18 % at 95 → 22 % at 100
-    base = 0.18 + ((a - 95) / 5) * 0.04;
+    // Elite crasher: 30 % at 85 → 37 % at 100  (Rodman/Gobert tier)
+    base = 0.30 + ((a - 85) / 15) * 0.07;
   }
 
-  // Large positional spread: bigs dominate boards, guards are liabilities on glass
-  if (position === 'C' || position === 'PF')       base += 0.14; // → 17–36 % at elite
-  else if (position === 'SF')                      base += 0.02; // slight bump
-  else if (position === 'PG' || position === 'SG') base -= 0.06; // → max ~15 %
+  // Positional spread: bigs seal out and have natural leverage near the rim;
+  // guards rarely crash and are frequently beaten by bigger bodies.
+  if (position === 'C' || position === 'PF')       base += 0.12; // → 22–49 % at peak
+  else if (position === 'SF')                      base += 0.02;
+  else if (position === 'PG' || position === 'SG') base -= 0.06; // → 12–31 %
 
-  return Math.max(0.03, Math.min(0.40, base));
+  return Math.max(0.06, Math.min(0.48, base));
 }
 
 /**
@@ -3269,12 +3272,20 @@ const simulatePlayerGameLine = (
   // playing time — not offensive usage — determines rebounding share.
   // Post-normalization in distributeToPlayers scales all values so the team
   // total equals teamReb exactly, making the multiplier here irrelevant.
-  const totalReb = Math.max(0, Math.round(teamReb * (player.attributes.rebounding / 100) * minFac));
-  // Split ORB/DRB using the calibrated chance functions so the ratio reflects
-  // realistic position-adjusted board rates, not raw attribute proportions.
-  const orbChance = getOffReboundChance(player.attributes.offReb, player.position);
-  const drbChance = getDefReboundChance(player.attributes.defReb, player.position);
-  const orbRatio  = orbChance / (orbChance + drbChance);
+  // Power-curve (squared) concentrates rebounds in high-rebounding players —
+  // a C with rebounding=90 gets ~4× the raw weight of a PG with rebounding=50,
+  // matching NBA reality where elite big men average 13–15 RPG vs guards at 3–5.
+  const totalReb = Math.max(0, Math.round(
+    teamReb * Math.pow(player.attributes.rebounding / 100, 2) * minFac,
+  ));
+  // ORB/DRB split: use position-based base (bigs ~27% of their boards are ORBs,
+  // guards ~19%) + small attribute modifier. This replaces orbChance/drbChance
+  // ratio which produced unrealistic 45-55% ORB splits for bigs.
+  const posOrbBase =
+    player.position === 'C' || player.position === 'PF' ? 0.270 :
+    player.position === 'SF'                            ? 0.235 : 0.195;
+  const orbAttrMod = (player.attributes.offReb - player.attributes.defReb) / 300;
+  const orbRatio   = Math.max(0.14, Math.min(0.38, posOrbBase + orbAttrMod));
   const offReb    = Math.round(totalReb * orbRatio);
   const defReb    = totalReb - offReb;
 
@@ -3601,7 +3612,9 @@ export const simulateGame = (
     const roster      = team.roster;
     const totalRating = roster.reduce((acc, p) => acc + p.rating, 0);
     const teamFga     = Math.round(statPace * 1.10);
-    const teamReb     = Math.min(48, Math.round(statPace * 0.44)); // hard cap: NBA range 38–48/team
+    // teamReb: ~42–52 boards/team at NBA pace. 0.50 coefficient (was 0.44) accounts
+    // for offensive boards — each missed shot is a rebound opportunity for either team.
+    const teamReb     = Math.min(56, Math.round(statPace * 0.50));
     // NBA reality: ~60% of FGM are assisted; FGM ≈ pts / 2.2.
     // Old coefficient (0.6) applied to estimated FGM, but the share-sum across all
     // players exceeds 1.0 by ~1.48×, causing reported team assists to balloon to 45+.
@@ -3694,7 +3707,11 @@ export const simulateGame = (
       return raw.map(p => {
         if (p.dnp || !p.reb) return p;
         const newReb = Math.max(0, Math.round(p.reb * rebScale));
-        const newOrb = Math.max(0, Math.round((p.offReb ?? 0) * rebScale));
+        // Preserve the player's ORB/DRB ratio through normalization — scaling the
+        // raw offReb integer directly causes aggressive rounding-to-zero for players
+        // with few boards (1 raw reb × 0.3 scale = 0), hiding their ORBs entirely.
+        const rawOrbRatio = p.reb > 0 ? (p.offReb ?? 0) / p.reb : 0;
+        const newOrb = Math.max(0, Math.round(newReb * rawOrbRatio));
         return { ...p, reb: newReb, offReb: newOrb, defReb: Math.max(0, newReb - newOrb) };
       });
     }
