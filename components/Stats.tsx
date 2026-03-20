@@ -71,7 +71,7 @@ const Stats: React.FC<StatsProps> = ({ league, onViewRoster, onManageTeam, onVie
       let oppOrb = 0, oppDrb = 0, oppTrb = 0;
       let oppAst = 0, oppStl = 0, oppBlk = 0, oppTov = 0, oppPf = 0;
 
-      league.history.forEach(g => {
+      league.history.filter(g => g.season === league.season).forEach(g => {
         let oppLines: typeof g.homePlayerStats;
         if (g.homeTeamId === t.id) {
           ptsScored += g.homeScore; ptsAllowed += g.awayScore;
