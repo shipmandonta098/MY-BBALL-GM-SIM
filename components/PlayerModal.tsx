@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Player, PlayerStatus, PersonalityTrait, Position, PlayerTendencies } from '../types';
-import { getFlag, POS_ATTR_RANGES, PosAttrRangeKey, enforcePositionalBounds } from '../constants';
+import { getFlag, POS_ATTR_RANGES, PosAttrRangeKey, enforcePositionalBounds, FEMALE_ATTR_CAPS } from '../constants';
 
 const POS_RANGE_KEYS: PosAttrRangeKey[] = ['shooting', 'playmaking', 'defense', 'rebounding', 'athleticism'];
 
@@ -175,7 +175,9 @@ const PlayerModal: React.FC<PlayerModalProps> = ({
 
   const handleAttributeChange = (key: keyof Player['attributes'], val: number) => {
     setEditedPlayer(prev => {
-      const updated = { ...prev, attributes: { ...prev.attributes, [key]: val } };
+      const femaleCap = prev.gender === 'Female' ? (FEMALE_ATTR_CAPS[key] ?? 99) : 99;
+      const clamped = Math.min(val, femaleCap);
+      const updated = { ...prev, attributes: { ...prev.attributes, [key]: clamped } };
       return enforcePositionalBounds(updated);
     });
   };
@@ -453,19 +455,32 @@ const PlayerModal: React.FC<PlayerModalProps> = ({
                   </div>
 
                   <div className="space-y-6">
-                    {Object.entries(editedPlayer.attributes).slice(12).map(([key, val]) => (
+                    {Object.entries(editedPlayer.attributes).slice(12).map(([key, val]) => {
+                      const femaleCap = editedPlayer.gender === 'Female' ? (FEMALE_ATTR_CAPS[key as keyof Player['attributes']] ?? undefined) : undefined;
+                      const sliderMax = femaleCap ?? 99;
+                      const overCap = femaleCap !== undefined && (val as number) > femaleCap;
+                      return (
                       <div key={key} className="space-y-2">
                         <div className="flex justify-between items-center">
                           <label className="text-[9px] font-bold uppercase text-slate-500 tracking-wider">{key.replace(/([A-Z])/g, ' $1')}</label>
-                          <span className="text-slate-300 font-mono text-xs">{val}</span>
+                          <div className="flex items-center gap-2">
+                            {femaleCap !== undefined && (
+                              <span className="text-[8px] text-violet-400/70 font-mono">♀ max {femaleCap}</span>
+                            )}
+                            <span className={`font-mono text-xs ${overCap ? 'text-amber-400' : 'text-slate-300'}`}>{val}</span>
+                          </div>
                         </div>
-                        <input 
-                          type="range" min="0" max="99" value={val as number}
+                        <input
+                          type="range" min="0" max={sliderMax} value={Math.min(val as number, sliderMax)}
                           onChange={e => handleAttributeChange(key as any, parseInt(e.target.value))}
-                          className="w-full h-1 bg-slate-950 rounded-lg appearance-none cursor-pointer accent-slate-600"
+                          className={`w-full h-1 bg-slate-950 rounded-lg appearance-none cursor-pointer ${femaleCap !== undefined ? 'accent-violet-500' : 'accent-slate-600'}`}
                         />
+                        {overCap && (
+                          <p className="text-[8px] text-amber-500/80 font-semibold">⚠ Will be capped to {femaleCap} on save</p>
+                        )}
                       </div>
-                    ))}
+                      );
+                    })}
 
                     <div className="h-px w-full bg-slate-800/50 my-4"></div>
                     

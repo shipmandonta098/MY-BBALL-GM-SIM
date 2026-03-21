@@ -299,6 +299,26 @@ const parseHeightStr = (h: string): number => {
   return m ? parseInt(m[1]) * 12 + parseInt(m[2]) : 0;
 };
 
+/**
+ * Hard caps applied to female players for physical attributes that are
+ * physiologically distinct from the male game.
+ * Shooting, IQ, handles, passing, and speed retain full range.
+ */
+export const FEMALE_ATTR_CAPS: Partial<Record<keyof Player['attributes'], number>> = {
+  dunks:    25,   // Griner/Stewart elite tier; most female players 10–18
+  jumping:  80,   // Elite at 80, average 60–70
+  strength: 82,   // Strong centers at 82, guards/wings 60–75
+};
+
+/** Clamp female-specific physical attribute caps onto an attributes object. */
+export const applyFemaleAttrCaps = (attrs: Player['attributes']): Player['attributes'] => {
+  const a = { ...attrs } as any;
+  for (const [key, cap] of Object.entries(FEMALE_ATTR_CAPS)) {
+    if (a[key] !== undefined && a[key] > (cap as number)) a[key] = cap as number;
+  }
+  return a as Player['attributes'];
+};
+
 /** Low-level attrs-only bounds pass. Call this from generators and enforcePositionalBounds. */
 export const applyAttrBounds = (
   attrs: Player['attributes'],
@@ -348,8 +368,9 @@ export const enforcePositionalBounds = (player: Player): Player => {
   // GLASS CLEANER badge → reb caps +8 for PG/SG
   const glassCleaner = playerBadges.includes('Glass Cleaner');
   const newAttrs = applyAttrBounds(player.attributes, pos, { capBonus, heightBonus, stretchBig, glassCleaner });
-  const newRating = calcPositionRating(pos, newAttrs);
-  return { ...player, attributes: newAttrs, rating: newRating };
+  const cappedAttrs = player.gender === 'Female' ? applyFemaleAttrCaps(newAttrs) : newAttrs;
+  const newRating = calcPositionRating(pos, cappedAttrs);
+  return { ...player, attributes: cappedAttrs, rating: newRating };
 };
 
 const COLLEGES_HIGH_MAJOR = [
@@ -1311,9 +1332,10 @@ export const generateProspects = (year: number, count: number = 100, genderRatio
       defReb: getRandomAttr(rating),
     };
     const pAttrs = applyPhysical(rawAttrs, pos, physGender, phys.heightIn, phys.weight);
-    const bAttrs  = applyAttrBounds(pAttrs as Player['attributes'], pos, {
+    const bAttrsRaw = applyAttrBounds(pAttrs as Player['attributes'], pos, {
       heightBonus: phys.heightIn >= (HEIGHT_WEIGHT[pos]?.[physGender]?.avgH ?? 0) + 3 ? 5 : 0,
     });
+    const bAttrs = gender === 'Female' ? applyFemaleAttrCaps(bAttrsRaw) : bAttrsRaw;
     const prospectTraits = getRandomTraits();
 
     const rawProspect = {
