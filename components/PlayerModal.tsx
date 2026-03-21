@@ -866,6 +866,7 @@ const PlayerModal: React.FC<PlayerModalProps> = ({
                   <AttributeRow label="Strength" value={player.attributes.strength} />
                   <AttributeRow label="Vertical/Jumping" value={player.attributes.jumping} />
                   <AttributeRow label="Stamina" value={player.attributes.stamina} />
+                  <AttributeRow label="Durability" value={player.attributes.durability ?? 65} />
                 </div>
               </div>
             </div>
