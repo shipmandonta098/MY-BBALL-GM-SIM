@@ -324,6 +324,7 @@ export interface Player {
     postScoring: number;
     offReb: number;
     defReb: number;
+    durability: number;
   };
   salary: number;
   contractYears: number;

@@ -3761,6 +3761,9 @@ export const simulateGame = (
       let chance = 0.004 * injuryMultiplier;
       if (p.min > 35) chance *= 1.5;
       if (isB2B)      chance *= 1.3;
+      // Durability attribute: 99 → ~50% less likely, 50 → neutral, 1 → ~50% more likely
+      const durability = player.attributes.durability ?? 50;
+      chance *= 1 - ((durability - 50) / 100);
       // Medical staff reduces injury chance (0% at tier 1 / 20, up to -40% at elite / 100)
       const medReduction = ((medBudget - 20) / 80) * 0.40;
       chance *= (1 - medReduction);
