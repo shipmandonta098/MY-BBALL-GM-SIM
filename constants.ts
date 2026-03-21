@@ -1184,6 +1184,8 @@ export const generatePlayer = (id: string, ageRange: [number, number] = [19, 38]
     postScoring: getRandomAttr(rating),
     offReb: getRandomAttr(rating),
     defReb: getRandomAttr(rating),
+    // Durability is independent of skill — wide random spread (30–95)
+    durability: Math.min(99, Math.max(20, Math.floor(55 + (Math.random() * 60 - 15)))),
   };
   const pAttrs = applyPhysical(rawAttrs, pos, physGender, phys.heightIn, phys.weight);
   const playerTraits = getRandomTraits();
@@ -1330,6 +1332,7 @@ export const generateProspects = (year: number, count: number = 100, genderRatio
       postScoring: getRandomAttr(rating),
       offReb: getRandomAttr(rating),
       defReb: getRandomAttr(rating),
+      durability: Math.min(99, Math.max(20, Math.floor(55 + (Math.random() * 60 - 15)))),
     };
     const pAttrs = applyPhysical(rawAttrs, pos, physGender, phys.heightIn, phys.weight);
     const bAttrsRaw = applyAttrBounds(pAttrs as Player['attributes'], pos, {

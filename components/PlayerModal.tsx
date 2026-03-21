@@ -72,7 +72,7 @@ const PlayerModal: React.FC<PlayerModalProps> = ({
     speed: 60, strength: 55, jumping: 55, stamina: 75,
     perimeterDef: 50, interiorDef: 50, steals: 50, blocks: 50,
     defensiveIQ: 50, ballHandling: 50, passing: 50, offensiveIQ: 50,
-    postScoring: 50, offReb: 50, defReb: 50
+    postScoring: 50, offReb: 50, defReb: 50, durability: 65
   };
 
   const defaultTendencies: PlayerTendencies = {
