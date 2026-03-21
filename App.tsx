@@ -1657,7 +1657,7 @@ const App: React.FC = () => {
           {activeTab === 'transactions' && <Transactions league={league} />}
           {activeTab === 'power_rankings' && <PowerRankings league={league} onViewRoster={handleViewRoster} onManageTeam={handleManageTeam} />}
           {activeTab === 'expansion' && <Expansion league={league} updateLeague={updateLeagueState} onScout={handleViewPlayer} />}
-          {activeTab === 'roster' && <Roster leagueTeams={league.teams} userTeamId={league.userTeamId} initialTeamId={rosterTeamId} onScout={handleViewPlayer} onScoutCoach={handleScoutCoach} scoutingReport={scoutingReport} onUpdateTeamRoster={handleUpdateTeamRoster} onManageTeam={handleManageTeam} />}
+          {activeTab === 'roster' && <Roster leagueTeams={league.teams} userTeamId={league.userTeamId} initialTeamId={rosterTeamId} onScout={handleViewPlayer} onScoutCoach={handleScoutCoach} scoutingReport={scoutingReport} onUpdateTeamRoster={handleUpdateTeamRoster} onManageTeam={handleManageTeam} godMode={league.settings.godMode} />}
           {activeTab === 'rotations' && <Rotations league={league} updateLeague={updateLeagueState} />}
           {activeTab === 'free_agency' && <FreeAgency league={league} updateLeague={updateLeagueState} onScout={handleViewPlayer} recordTransaction={recordTransaction} />}
           {activeTab === 'coach_market' && <CoachesMarket league={league} updateLeague={updateLeagueState} onScout={handleScoutCoach} />}
