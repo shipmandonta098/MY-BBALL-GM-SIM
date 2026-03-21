@@ -589,6 +589,14 @@ const Settings: React.FC<SettingsProps> = ({ league, updateLeague, onRegenerateS
             )}
             {inSeason ? (
               <LockedField>
+                <ButtonField label="Quarter Length (Minutes)" options={[8, 10, 12, 15, 20]} value={s.quarterLength ?? 12} onChange={() => {}} />
+              </LockedField>
+            ) : (
+              <ButtonField label="Quarter Length (Minutes)" options={[8, 10, 12, 15, 20]} value={s.quarterLength ?? 12}
+                onChange={v => updateSettings({ quarterLength: parseInt(v) }, 'Quarter Length')} />
+            )}
+            {inSeason ? (
+              <LockedField>
                 <NumberInputField label="Division Games" value={s.divisionGames ?? 16} min={0} max={82} onChange={() => {}} />
               </LockedField>
             ) : (
