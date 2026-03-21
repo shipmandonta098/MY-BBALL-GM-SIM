@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useEffect } from 'react';
+import React, { useState, useMemo, useEffect, useRef } from 'react';
 import { Team, Player, Position, PlayerStatus, PersonalityTrait, Coach, TeamRotation } from '../types';
 import TeamBadge from './TeamBadge';
 import { getFlag } from '../constants';
@@ -12,6 +12,7 @@ export interface RosterProps {
   scoutingReport: { playerId: string; report: string } | null;
   onUpdateTeamRoster?: (teamId: string, updatedRoster: Player[]) => void;
   onManageTeam?: (teamId: string) => void;
+  godMode?: boolean;
 }
 
 const traitIcons: Record<PersonalityTrait, string> = {
@@ -56,13 +57,16 @@ const ARCHETYPE_COLORS: Record<string, string> = {
   'Two-Way Forward':    'bg-teal-500/20 text-teal-400 border-teal-500/30',
 };
 
-const Roster: React.FC<RosterProps> = ({ leagueTeams, userTeamId, initialTeamId, onScout, onScoutCoach, scoutingReport, onUpdateTeamRoster, onManageTeam }) => {
+const Roster: React.FC<RosterProps> = ({ leagueTeams, userTeamId, initialTeamId, onScout, onScoutCoach, scoutingReport, onUpdateTeamRoster, onManageTeam, godMode }) => {
   const [selectedTeamId, setSelectedTeamId] = useState(initialTeamId || userTeamId);
   const [searchTerm, setSearchTerm] = useState('');
   const [posFilter, setPosFilter] = useState<string>('ALL');
   const [minOvr, setMinOvr] = useState(60);
   const [sortConfig, setSortConfig] = useState<{ key: string, direction: 'asc' | 'desc' }>({ key: 'rating', direction: 'desc' });
   const [injuredOnly, setInjuredOnly] = useState(false);
+  const [godModeMsg, setGodModeMsg] = useState<{ text: string; type: 'ok' | 'err' } | null>(null);
+  const importRosterRef = useRef<HTMLInputElement>(null);
+  const importPlayerRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     if (initialTeamId) {
@@ -135,6 +139,77 @@ const Roster: React.FC<RosterProps> = ({ leagueTeams, userTeamId, initialTeamId,
   const formatMoney = (amount: number) => `$${(amount / 1000000).toFixed(1)}M`;
 
   const hcRating = activeTeam.staff.headCoach ? Math.round((activeTeam.staff.headCoach.ratingOffense + activeTeam.staff.headCoach.ratingDefense)/2) : 0;
+
+  // ── God-mode helpers ──────────────────────────────────────────────────────
+  const flashMsg = (text: string, type: 'ok' | 'err') => {
+    setGodModeMsg({ text, type });
+    setTimeout(() => setGodModeMsg(null), 3500);
+  };
+
+  const downloadJson = (data: unknown, filename: string) => {
+    const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  const handleExportRoster = () => {
+    downloadJson(activeTeam.roster, `${activeTeam.abbreviation}-roster.json`);
+    flashMsg(`Exported ${activeTeam.roster.length} players.`, 'ok');
+  };
+
+  const handleExportPlayer = (player: Player, e: React.MouseEvent) => {
+    e.stopPropagation();
+    downloadJson(player, `${player.name.replace(/\s+/g, '_')}.json`);
+    flashMsg(`Exported ${player.name}.`, 'ok');
+  };
+
+  const handleImportRoster = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      try {
+        const parsed = JSON.parse(ev.target?.result as string) as Player[];
+        if (!Array.isArray(parsed)) throw new Error('Expected an array of players.');
+        onUpdateTeamRoster?.(activeTeam.id, parsed);
+        flashMsg(`Imported ${parsed.length} players into ${activeTeam.name}.`, 'ok');
+      } catch (err: any) {
+        flashMsg(`Import failed: ${err.message}`, 'err');
+      }
+    };
+    reader.readAsText(file);
+    e.target.value = '';
+  };
+
+  const handleImportPlayer = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      try {
+        const parsed = JSON.parse(ev.target?.result as string) as Player;
+        if (!parsed.id || !parsed.name) throw new Error('Invalid player JSON.');
+        const updated = [...activeTeam.roster, parsed];
+        onUpdateTeamRoster?.(activeTeam.id, updated);
+        flashMsg(`Added ${parsed.name} to ${activeTeam.name}.`, 'ok');
+      } catch (err: any) {
+        flashMsg(`Import failed: ${err.message}`, 'err');
+      }
+    };
+    reader.readAsText(file);
+    e.target.value = '';
+  };
+
+  const handleDeleteAll = () => {
+    if (!window.confirm(`Delete ALL ${activeTeam.roster.length} players from ${activeTeam.name}? This cannot be undone.`)) return;
+    onUpdateTeamRoster?.(activeTeam.id, []);
+    flashMsg(`Cleared ${activeTeam.name} roster.`, 'ok');
+  };
+  // ─────────────────────────────────────────────────────────────────────────
 
   return (
     <div className="space-y-6 animate-in fade-in duration-500 pb-20">
@@ -258,6 +333,63 @@ const Roster: React.FC<RosterProps> = ({ leagueTeams, userTeamId, initialTeamId,
         )}
       </div>
 
+      {/* God Mode Panel */}
+      {godMode && (
+        <div className="bg-amber-950/20 border border-amber-500/30 rounded-2xl p-5 space-y-4">
+          <div className="flex items-center gap-2 mb-1">
+            <span className="text-amber-400 text-base">⚡</span>
+            <span className="text-[10px] font-black uppercase tracking-widest text-amber-400">God Mode — Roster Tools</span>
+          </div>
+          {godModeMsg && (
+            <div className={`text-[11px] font-bold px-4 py-2 rounded-xl border ${
+              godModeMsg.type === 'ok'
+                ? 'bg-emerald-900/40 border-emerald-500/40 text-emerald-300'
+                : 'bg-rose-900/40 border-rose-500/40 text-rose-300'
+            }`}>
+              {godModeMsg.text}
+            </div>
+          )}
+          <div className="flex flex-wrap gap-3">
+            {/* Export Roster */}
+            <button
+              onClick={handleExportRoster}
+              className="flex items-center gap-2 px-4 py-2.5 bg-amber-500/10 border border-amber-500/40 text-amber-300 rounded-xl text-[11px] font-black uppercase tracking-widest hover:bg-amber-500/20 transition-all"
+            >
+              ↓ Export Roster
+            </button>
+
+            {/* Import Roster */}
+            <button
+              onClick={() => importRosterRef.current?.click()}
+              className="flex items-center gap-2 px-4 py-2.5 bg-amber-500/10 border border-amber-500/40 text-amber-300 rounded-xl text-[11px] font-black uppercase tracking-widest hover:bg-amber-500/20 transition-all"
+            >
+              ↑ Import Roster
+            </button>
+            <input ref={importRosterRef} type="file" accept=".json" className="hidden" onChange={handleImportRoster} />
+
+            {/* Import Player */}
+            <button
+              onClick={() => importPlayerRef.current?.click()}
+              className="flex items-center gap-2 px-4 py-2.5 bg-blue-500/10 border border-blue-500/40 text-blue-300 rounded-xl text-[11px] font-black uppercase tracking-widest hover:bg-blue-500/20 transition-all"
+            >
+              ↑ Import Player
+            </button>
+            <input ref={importPlayerRef} type="file" accept=".json" className="hidden" onChange={handleImportPlayer} />
+
+            {/* Delete All */}
+            <button
+              onClick={handleDeleteAll}
+              className="flex items-center gap-2 px-4 py-2.5 bg-rose-500/10 border border-rose-500/40 text-rose-400 rounded-xl text-[11px] font-black uppercase tracking-widest hover:bg-rose-500/20 transition-all ml-auto"
+            >
+              🗑 Delete All Players
+            </button>
+          </div>
+          <p className="text-[10px] text-amber-600 font-bold uppercase tracking-wider">
+            Export a row's player using the ↓ icon on each row · Roster import replaces the full roster · Player import appends
+          </p>
+        </div>
+      )}
+
       {/* Roster Table */}
       <div className="bg-slate-900 border border-slate-800 rounded-3xl overflow-hidden shadow-2xl">
         <div className="overflow-x-auto">
@@ -270,6 +402,7 @@ const Roster: React.FC<RosterProps> = ({ leagueTeams, userTeamId, initialTeamId,
                 <th className="px-8 py-6 text-center cursor-pointer hover:text-white transition-colors" onClick={() => toggleSort('rating')}>OVR</th>
                 <th className="px-8 py-6 text-center cursor-pointer hover:text-white transition-colors" onClick={() => toggleSort('potential')}>POT</th>
                 <th className="px-8 py-6 text-right cursor-pointer hover:text-white transition-colors" onClick={() => toggleSort('salary')}>Salary</th>
+                {godMode && <th className="px-4 py-6 text-center">Export</th>}
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-800/40">
@@ -344,6 +477,17 @@ const Roster: React.FC<RosterProps> = ({ leagueTeams, userTeamId, initialTeamId,
                     <div className="font-mono text-sm font-bold text-slate-100">{formatMoney(player.salary)}</div>
                     <div className="text-[10px] text-slate-600 font-bold uppercase tracking-tighter">{player.contractYears} Seasons</div>
                   </td>
+                  {godMode && (
+                    <td className="px-4 py-6 text-center">
+                      <button
+                        onClick={(e) => handleExportPlayer(player, e)}
+                        title="Export player as JSON"
+                        className="text-amber-400/60 hover:text-amber-300 text-base transition-colors px-2 py-1 rounded hover:bg-amber-500/10"
+                      >
+                        ↓
+                      </button>
+                    </td>
+                  )}
                 </tr>
               ))}
             </tbody>
