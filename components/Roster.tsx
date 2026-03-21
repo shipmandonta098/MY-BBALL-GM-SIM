@@ -147,15 +147,13 @@ const Roster: React.FC<RosterProps> = ({ leagueTeams, userTeamId, initialTeamId,
   };
 
   const downloadJson = (data: unknown, filename: string) => {
-    const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
-    const url = URL.createObjectURL(blob);
+    const json = JSON.stringify(data, null, 2);
     const a = document.createElement('a');
-    a.href = url;
+    a.href = 'data:application/json;charset=utf-8,' + encodeURIComponent(json);
     a.download = filename;
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);
-    setTimeout(() => URL.revokeObjectURL(url), 1000);
   };
 
   const handleExportRoster = () => {
