@@ -176,7 +176,6 @@ const LeagueConfiguration: React.FC<LeagueConfigurationProps> = ({ onConfirm, on
   const [saveAsDefault, setSaveAsDefault] = useState(false);
   const [errors, setErrors]           = useState<Record<string, string>>({});
   const [godModeConfirm, setGodModeConfirm] = useState(false);
-  const [genderWarning, setGenderWarning]   = useState(false);
 
   // ── Load saved defaults ───────────────────────────────────────────────────
   useEffect(() => {
@@ -241,9 +240,10 @@ const LeagueConfiguration: React.FC<LeagueConfigurationProps> = ({ onConfirm, on
     } catch { /* ignore */ }
   }, []);
 
+  // Auto-sync coach gender distribution to player gender distribution
   useEffect(() => {
-    setGenderWarning(playerGenderRatio === 100 && coachGenderRatio === 10);
-  }, [playerGenderRatio, coachGenderRatio]);
+    setCoachGenderRatio(playerGenderRatio);
+  }, [playerGenderRatio]);
 
   const handleGodModeToggle = (checked: boolean) => {
     if (checked) setGodModeConfirm(true);
@@ -401,17 +401,6 @@ const LeagueConfiguration: React.FC<LeagueConfigurationProps> = ({ onConfirm, on
           </h2>
           <p className="text-slate-500 text-sm font-medium uppercase tracking-[0.2em]">Craft your basketball universe</p>
         </div>
-
-        {/* Gender conflict warning */}
-        {genderWarning && (
-          <div className="flex items-start gap-3 bg-amber-500/10 border border-amber-500/30 rounded-2xl p-4">
-            <span className="text-xl mt-0.5">⚠️</span>
-            <p className="text-sm text-amber-300">
-              <strong>Distribution mismatch:</strong> You have All Female players but Realistic (10% Female) coaches.
-              Consider updating Coach Gender Distribution to match your player setting.
-            </p>
-          </div>
-        )}
 
         {/* ── Row 1: Name + Year ──────────────────────────────────────────────── */}
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
