@@ -102,6 +102,9 @@ const PlayerModal: React.FC<PlayerModalProps> = ({
   });
 
   const [editedPlayer, setEditedPlayer] = React.useState<Player>(normalizePlayer(player));
+  // Separate string state for the age input so intermediate keystrokes (e.g. deleting
+  // one digit of "30" to get "3") don't corrupt editedPlayer.age or birthdate.
+  const [ageInputStr, setAgeInputStr] = React.useState(String(player.age));
 
   // Split name for editing
   const splitName = (full: string) => {
@@ -115,6 +118,7 @@ const PlayerModal: React.FC<PlayerModalProps> = ({
 
   useEffect(() => {
     setEditedPlayer(normalizePlayer(player));
+    setAgeInputStr(String(player.age));
     const { first, last } = splitName(player.name);
     setEditFirstName(first);
     setEditLastName(last);
@@ -337,37 +341,21 @@ const PlayerModal: React.FC<PlayerModalProps> = ({
                       <input
                         type="number"
                         min="18" max="45"
-                        value={editedPlayer.age}
-                        onChange={e => {
-                          const raw = parseInt(e.target.value);
-                          if (isNaN(raw)) return;
-                          const updated: typeof editedPlayer = { ...editedPlayer, age: raw };
-                          // Only recalculate birthdate when the value is in a valid range
-                          // to avoid corrupting birthdate with intermediate typing values (e.g. "3" on the way to "30")
-                          if (currentSeason && raw >= 18 && raw <= 45) {
-                            const newBirthYear = currentSeason - raw;
-                            if (editedPlayer.birthdate) {
-                              const [, mm, dd] = editedPlayer.birthdate.split('-');
-                              updated.birthdate = `${newBirthYear}-${mm}-${dd}`;
-                            } else {
-                              updated.birthdate = `${newBirthYear}-06-15`;
-                            }
-                          }
-                          setEditedPlayer(updated);
-                        }}
-                        onBlur={e => {
-                          const clamped = Math.min(45, Math.max(18, editedPlayer.age || 18));
-                          // Always recalculate birthdate on blur to ensure consistency with the final age value
+                        value={ageInputStr}
+                        onChange={e => setAgeInputStr(e.target.value)}
+                        onBlur={() => {
+                          // Commit the typed age to editedPlayer only on blur, clamped to valid range.
+                          // This avoids corrupting birthdate while the user is mid-type (e.g. "3" of "30").
+                          const raw = parseInt(ageInputStr, 10);
+                          const clamped = Math.min(45, Math.max(18, isNaN(raw) ? editedPlayer.age : raw));
+                          setAgeInputStr(String(clamped));
+                          const updated: typeof editedPlayer = { ...editedPlayer, age: clamped };
                           if (currentSeason) {
                             const newBirthYear = currentSeason - clamped;
                             const [, mm, dd] = (editedPlayer.birthdate ?? `${newBirthYear}-06-15`).split('-');
-                            const correctBirthdate = `${newBirthYear}-${mm}-${dd}`;
-                            if (clamped !== editedPlayer.age || editedPlayer.birthdate !== correctBirthdate) {
-                              setEditedPlayer({ ...editedPlayer, age: clamped, birthdate: correctBirthdate });
-                            }
-                          } else if (clamped !== editedPlayer.age) {
-                            setEditedPlayer({ ...editedPlayer, age: clamped });
+                            updated.birthdate = `${newBirthYear}-${mm}-${dd}`;
                           }
+                          setEditedPlayer(updated);
                         }}
                         className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-3 text-white font-bold focus:outline-none focus:border-amber-500/50"
                       />
