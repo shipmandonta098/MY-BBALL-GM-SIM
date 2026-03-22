@@ -245,7 +245,7 @@ export const POSITION_HARD_CAPS: Record<Position, AttrBounds> = {
 export const POSITION_HARD_FLOORS: Record<Position, AttrBounds> = {
   PG: { ballHandling: 78, speed: 80, passing: 75, perimeterDef: 72, shooting3pt: 75 },
   SG: { shooting3pt: 76, speed: 76, perimeterDef: 74, ballHandling: 70 },
-  SF: { speed: 74, perimeterDef: 72, athleticism: 76 },
+  SF: { speed: 60, perimeterDef: 72, athleticism: 76 },
   PF: { strength: 78, interiorDef: 76, offReb: 72, defReb: 75 },
   C:  { strength: 82, interiorDef: 80, offReb: 76, defReb: 78, blocks: 76, postScoring: 76 },
 };
