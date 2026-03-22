@@ -6,7 +6,7 @@ import { getHistoricalFinancials } from '../constants';
 interface SettingsProps {
   league: LeagueState;
   updateLeague: (updated: Partial<LeagueState>) => void;
-  onRegenerateSchedule?: () => void;
+  onRegenerateSchedule?: () => Promise<boolean>;
 }
 
 type SettingsTab = 'league' | 'gameplay' | 'sliders' | 'simulation' | 'godmode';
@@ -190,6 +190,8 @@ const Settings: React.FC<SettingsProps> = ({ league, updateLeague, onRegenerateS
   const [presetName, setPresetName]                 = useState('');
   const [regenConfirm, setRegenConfirm]             = useState(false);
   const [regenSuccess, setRegenSuccess]             = useState(false);
+  const [regenError, setRegenError]                 = useState(false);
+  const [regenLoading, setRegenLoading]             = useState(false);
 
   const updateSettings = (updates: Partial<LeagueSettings>, label = '') => {
     const entries: ChangeEntry[] = Object.entries(updates).map(([k, v]) => ({
@@ -203,9 +205,12 @@ const Settings: React.FC<SettingsProps> = ({ league, updateLeague, onRegenerateS
 
   const s = league.settings;
   const inSeason = !league.isOffseason;
+  // Show the regenerate section when: in-season (preseason) OR offseason with draft complete.
+  // This covers both first-season preseason and second-season post-FA state.
+  const canShowRegen = !!onRegenerateSchedule && (!league.isOffseason || league.draftPhase === 'completed');
   // Locked only when a season is actively IN-PROGRESS (some but not all games played).
-  // If all games are played (leftover from previous season) or none are played (fresh preseason)
-  // the schedule can still be regenerated.
+  // If all previous-season games are played (carry-over schedule) or none played yet
+  // (fresh preseason), allow regeneration.
   const playedCount = league.schedule.filter(g => g.played).length;
   const anyGamePlayed = playedCount > 0 && playedCount < league.schedule.length;
 
@@ -261,11 +266,27 @@ const Settings: React.FC<SettingsProps> = ({ league, updateLeague, onRegenerateS
     setResetConfirm(null);
   };
 
-  const handleRegen = () => {
+  const handleRegen = async () => {
     setRegenConfirm(false);
-    onRegenerateSchedule?.();
-    setRegenSuccess(true);
-    setTimeout(() => setRegenSuccess(false), 4000);
+    setRegenLoading(true);
+    setRegenError(false);
+    setRegenSuccess(false);
+    try {
+      const ok = await onRegenerateSchedule?.();
+      if (ok === false) {
+        setRegenError(true);
+        setTimeout(() => setRegenError(false), 5000);
+      } else {
+        setRegenSuccess(true);
+        setTimeout(() => setRegenSuccess(false), 4000);
+      }
+    } catch (err) {
+      console.error('Schedule regeneration failed:', err);
+      setRegenError(true);
+      setTimeout(() => setRegenError(false), 5000);
+    } finally {
+      setRegenLoading(false);
+    }
   };
 
   // ── Cross-tab search ──────────────────────────────────────────────────────
@@ -520,7 +541,19 @@ const Settings: React.FC<SettingsProps> = ({ league, updateLeague, onRegenerateS
           </svg>
           <div>
             <p className="text-sm text-emerald-300 font-bold">Schedule regenerated!</p>
-            <p className="text-xs text-emerald-500/70 mt-0.5">A new {league.schedule.length}-game schedule has been generated. Navigate to the Schedule tab to view it.</p>
+            <p className="text-xs text-emerald-500/70 mt-0.5">A new {league.schedule.length}-game schedule has been generated and saved. Navigate to the Schedule tab to view it.</p>
+          </div>
+        </div>
+      )}
+
+      {regenError && (
+        <div className="bg-rose-950/60 border border-rose-500/40 rounded-2xl p-4 flex items-center gap-3 animate-in slide-in-from-top-1">
+          <svg className="w-5 h-5 text-rose-400 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12" />
+          </svg>
+          <div>
+            <p className="text-sm text-rose-300 font-bold">Failed to regenerate schedule</p>
+            <p className="text-xs text-rose-500/70 mt-0.5">Could not build a valid schedule. Check that teams are configured correctly and try again.</p>
           </div>
         </div>
       )}
@@ -898,31 +931,39 @@ const Settings: React.FC<SettingsProps> = ({ league, updateLeague, onRegenerateS
               </button>
             </div>
 
-            {/* Regenerate Schedule */}
-            {inSeason && onRegenerateSchedule && (
+            {/* Regenerate Schedule — visible in preseason and post-FA offseason */}
+            {canShowRegen && (
               <div className="md:col-span-2 space-y-2">
                 <div className="flex items-center gap-3 bg-slate-950/40 border border-slate-800 rounded-2xl p-5">
                   <div className="flex-1 min-w-0">
                     <p className="text-[10px] font-black uppercase text-slate-400 tracking-widest">Regenerate Season Schedule</p>
                     <p className="text-xs text-slate-600 mt-1">
-                      {anyGamePlayed
-                        ? 'Locked — at least one game has already been played.'
-                        : 'Reshuffle all matchups and game dates for the current season. Only available before any game is played.'}
+                      {regenLoading
+                        ? 'Building new schedule — shuffling matchups and dates…'
+                        : anyGamePlayed
+                          ? 'Locked — season is in progress (some games have been played).'
+                          : 'Reshuffle all matchups and game dates. Available before any game is played.'}
                     </p>
                   </div>
                   <button
-                    disabled={anyGamePlayed}
+                    disabled={anyGamePlayed || regenLoading}
                     onClick={() => setRegenConfirm(true)}
                     className={`shrink-0 px-5 py-3 rounded-2xl text-[10px] font-black uppercase tracking-widest transition-all flex items-center gap-2 ${
-                      anyGamePlayed
+                      anyGamePlayed || regenLoading
                         ? 'bg-slate-800 text-slate-600 cursor-not-allowed border border-slate-700'
-                        : 'bg-amber-500/20 text-amber-400 border border-amber-500/30 hover:bg-amber-500/30'
+                        : 'bg-amber-500/20 text-amber-400 border border-amber-500/30 hover:bg-amber-500/30 active:bg-amber-500/40'
                     }`}
                   >
-                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-                    </svg>
-                    {anyGamePlayed ? 'Locked' : 'Regenerate'}
+                    {regenLoading ? (
+                      <svg className="w-4 h-4 animate-spin" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                      </svg>
+                    ) : (
+                      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                      </svg>
+                    )}
+                    {regenLoading ? 'Regenerating…' : anyGamePlayed ? 'Locked' : 'Regenerate'}
                   </button>
                 </div>
               </div>
