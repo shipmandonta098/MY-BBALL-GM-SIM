@@ -1,14 +1,18 @@
 
-import React, { useState } from 'react';
+import React, { useState, useRef } from 'react';
 import { LeagueState, Team, Coach, CoachScheme } from '../types';
 
 interface CoachingProps {
   league: LeagueState;
   updateLeague: (updated: Partial<LeagueState>) => void;
+  godMode?: boolean;
 }
 
-const Coaching: React.FC<CoachingProps> = ({ league, updateLeague }) => {
+const Coaching: React.FC<CoachingProps> = ({ league, updateLeague, godMode = false }) => {
   const [hiringRole, setHiringRole] = useState<string | null>(null);
+  const [godMsg, setGodMsg] = useState<{ text: string; type: 'ok' | 'err' } | null>(null);
+  const importStaffRef = useRef<HTMLInputElement>(null);
+  const importCoachRef = useRef<HTMLInputElement>(null);
   const userTeam = league.teams.find(t => t.id === league.userTeamId)!;
 
   // Fix: Explicitly cast Object.values to (Coach | null)[] to fix 'unknown' type access errors
@@ -21,6 +25,78 @@ const Coaching: React.FC<CoachingProps> = ({ league, updateLeague }) => {
   const hcBonus    = Math.max(0, (hcDevRating - 50) / 50) * 30;
   const assistBase = Math.max(0, (assistDevRating - 60) * 0.5);
   const rookieGrowthBoost = (hcBonus + assistBase).toFixed(1);
+
+  const flashGodMsg = (text: string, type: 'ok' | 'err') => {
+    setGodMsg({ text, type });
+    setTimeout(() => setGodMsg(null), 3500);
+  };
+
+  const downloadJson = (data: unknown, filename: string) => {
+    const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  };
+
+  const handleExportStaff = () => {
+    downloadJson(userTeam.staff, `${userTeam.abbreviation}-staff.json`);
+    flashGodMsg(`Exported ${userTeam.name} staff.`, 'ok');
+  };
+
+  const handleImportStaff = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      try {
+        const parsed = JSON.parse(ev.target?.result as string);
+        if (typeof parsed !== 'object' || Array.isArray(parsed)) throw new Error('Expected a staff object.');
+        const updatedTeams = league.teams.map(t =>
+          t.id === userTeam.id ? { ...t, staff: { ...userTeam.staff, ...parsed } } : t
+        );
+        updateLeague({ teams: updatedTeams });
+        flashGodMsg('Staff imported successfully.', 'ok');
+      } catch (err: any) {
+        flashGodMsg(`Import failed: ${err.message}`, 'err');
+      }
+    };
+    reader.readAsText(file);
+    e.target.value = '';
+  };
+
+  const STAFF_ROLES: { key: keyof typeof userTeam.staff; label: string }[] = [
+    { key: 'headCoach', label: 'Head Coach' },
+    { key: 'assistantOffense', label: 'Asst OFF' },
+    { key: 'assistantDefense', label: 'Asst DEF' },
+    { key: 'assistantDev', label: 'Asst DEV' },
+    { key: 'trainer', label: 'Trainer' },
+  ];
+
+  const handleImportCoach = (e: React.ChangeEvent<HTMLInputElement>, role: keyof typeof userTeam.staff) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      try {
+        const parsed = JSON.parse(ev.target?.result as string) as Coach;
+        if (!parsed.id || !parsed.name) throw new Error('Invalid coach JSON.');
+        const updatedTeams = league.teams.map(t =>
+          t.id === userTeam.id ? { ...t, staff: { ...t.staff, [role]: parsed } } : t
+        );
+        updateLeague({ teams: updatedTeams });
+        flashGodMsg(`${parsed.name} imported as ${STAFF_ROLES.find(r => r.key === role)?.label}.`, 'ok');
+      } catch (err: any) {
+        flashGodMsg(`Import failed: ${err.message}`, 'err');
+      }
+    };
+    reader.readAsText(file);
+    e.target.value = '';
+  };
 
   const handleHire = (coach: Coach) => {
     if (!hiringRole) return;
@@ -204,6 +280,63 @@ const Coaching: React.FC<CoachingProps> = ({ league, updateLeague }) => {
            </div>
         </div>
       </div>
+
+      {godMode && (
+        <div className="bg-amber-950/20 border border-amber-500/30 rounded-2xl p-5 space-y-4">
+          <div className="flex items-center gap-2 mb-1">
+            <span className="text-amber-400 text-base">⚡</span>
+            <span className="text-[10px] font-black uppercase tracking-widest text-amber-400">God Mode — Staff Tools</span>
+          </div>
+          {godMsg && (
+            <div className={`text-[11px] font-bold px-4 py-2 rounded-xl border ${godMsg.type === 'ok' ? 'bg-emerald-900/40 border-emerald-500/40 text-emerald-300' : 'bg-rose-900/40 border-rose-500/40 text-rose-300'}`}>
+              {godMsg.text}
+            </div>
+          )}
+          <div className="flex flex-wrap gap-3">
+            <button
+              onClick={handleExportStaff}
+              className="flex items-center gap-2 px-4 py-2.5 bg-amber-500/10 border border-amber-500/40 text-amber-300 rounded-xl text-[11px] font-black uppercase tracking-widest hover:bg-amber-500/20 transition-all"
+            >
+              ↓ Export Staff
+            </button>
+            <button
+              onClick={() => importStaffRef.current?.click()}
+              className="flex items-center gap-2 px-4 py-2.5 bg-amber-500/10 border border-amber-500/40 text-amber-300 rounded-xl text-[11px] font-black uppercase tracking-widest hover:bg-amber-500/20 transition-all"
+            >
+              ↑ Import Staff
+            </button>
+            <input ref={importStaffRef} type="file" accept=".json" className="hidden" onChange={handleImportStaff} />
+          </div>
+          <div className="space-y-2">
+            <p className="text-[10px] font-black uppercase text-slate-600 tracking-widest">Import Individual Coach</p>
+            <div className="flex flex-wrap gap-3">
+              {STAFF_ROLES.map(({ key, label }) => {
+                const ref = React.createRef<HTMLInputElement>();
+                return (
+                  <React.Fragment key={key}>
+                    <button
+                      onClick={() => (document.getElementById(`import-coach-${key}`) as HTMLInputElement)?.click()}
+                      className="flex items-center gap-2 px-3 py-2 bg-blue-500/10 border border-blue-500/40 text-blue-300 rounded-xl text-[10px] font-black uppercase tracking-widest hover:bg-blue-500/20 transition-all"
+                    >
+                      ↑ {label}
+                    </button>
+                    <input
+                      id={`import-coach-${key}`}
+                      type="file"
+                      accept=".json"
+                      className="hidden"
+                      onChange={e => handleImportCoach(e, key)}
+                    />
+                  </React.Fragment>
+                );
+              })}
+            </div>
+          </div>
+          <p className="text-[10px] text-amber-600 font-bold uppercase tracking-wider">
+            Export Staff saves all 5 staff roles · Import Staff replaces all · Import Individual targets a specific slot
+          </p>
+        </div>
+      )}
 
       {hiringRole && (
         <div className="fixed inset-0 z-[2000] bg-slate-950/95 backdrop-blur-xl flex items-center justify-center p-6 animate-in fade-in duration-300">
