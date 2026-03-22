@@ -373,6 +373,22 @@ export const enforcePositionalBounds = (player: Player): Player => {
   return { ...player, attributes: cappedAttrs, rating: newRating };
 };
 
+/**
+ * Derives the 5 composite attributes from their sub-attributes.
+ * Call this whenever any sub-attribute changes so composites stay in sync.
+ */
+export const deriveComposites = (a: Player['attributes']): Player['attributes'] => {
+  const clamp = (v: number) => Math.round(Math.min(99, Math.max(25, v)));
+  return {
+    ...a,
+    shooting:    clamp((a.layups ?? 50) * 0.15 + (a.dunks ?? 50) * 0.10 + (a.shootingMid ?? 50) * 0.20 + (a.shooting3pt ?? 50) * 0.30 + (a.freeThrow ?? 50) * 0.25),
+    defense:     clamp((a.perimeterDef ?? 50) * 0.25 + (a.interiorDef ?? 50) * 0.25 + (a.steals ?? 50) * 0.15 + (a.blocks ?? 50) * 0.15 + (a.defensiveIQ ?? 50) * 0.20),
+    rebounding:  clamp((a.offReb ?? 50) * 0.45 + (a.defReb ?? 50) * 0.45 + (a.strength ?? 50) * 0.10),
+    playmaking:  clamp((a.ballHandling ?? 50) * 0.35 + (a.passing ?? 50) * 0.35 + (a.offensiveIQ ?? 50) * 0.30),
+    athleticism: clamp((a.speed ?? 50) * 0.30 + (a.strength ?? 50) * 0.25 + (a.jumping ?? 50) * 0.25 + (a.stamina ?? 50) * 0.20),
+  };
+};
+
 export const COLLEGES_HIGH_MAJOR = [
   "Duke","Kentucky","Kansas","North Carolina","UCLA","Michigan","Michigan State","Arizona",
   "Gonzaga","Villanova","Louisville","Syracuse","Ohio State","Indiana","Connecticut","Florida",
