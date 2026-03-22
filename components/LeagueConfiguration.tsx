@@ -1,6 +1,7 @@
 
 import React, { useState, useEffect } from 'react';
 import { LeagueSettings } from '../types';
+import { getHistoricalFinancials } from '../constants';
 
 interface LeagueConfigurationProps {
   onConfirm: (name: string, year: number, settings: Partial<LeagueSettings>) => void;
@@ -92,6 +93,7 @@ const LeagueConfiguration: React.FC<LeagueConfigurationProps> = ({ onConfirm, on
   // ── Basic ─────────────────────────────────────────────────────────────────
   const [name, setName]               = useState('Global Basketball Association');
   const [year, setYear]               = useState(2025);
+  const [historicalOverride, setHistoricalOverride] = useState(false);
 
   // ── Gender ────────────────────────────────────────────────────────────────
   const [playerGenderRatio, setPlayerGenderRatio]         = useState(0);
@@ -245,6 +247,16 @@ const LeagueConfiguration: React.FC<LeagueConfigurationProps> = ({ onConfirm, on
     setCoachGenderRatio(playerGenderRatio);
   }, [playerGenderRatio]);
 
+  // ── Auto-load historical financials when year changes ─────────────────────
+  useEffect(() => {
+    if (historicalOverride) return;
+    const h = getHistoricalFinancials(year);
+    setSalaryCap(h.salaryCap > 0 ? h.salaryCap : 140_000_000);
+    setMinPayroll(h.minPayroll > 0 ? h.minPayroll : 46_650_000);
+    setLuxuryTaxThreshold(h.luxuryTaxThreshold > 0 ? h.luxuryTaxThreshold : 84_750_000);
+    setRookieScaleContracts(h.rookieScaleContracts);
+  }, [year, historicalOverride]);
+
   const handleGodModeToggle = (checked: boolean) => {
     if (checked) setGodModeConfirm(true);
     else setGodMode(false);
@@ -256,13 +268,21 @@ const LeagueConfiguration: React.FC<LeagueConfigurationProps> = ({ onConfirm, on
     else if (name.length > 30) errs.name = 'League name must be 30 characters or fewer.';
     if (!year || year < 1900 || year > 2200) errs.year = 'Starting year must be between 1900 and 2200.';
     if (seasonLength < 20 || seasonLength > 82) errs.seasonLength = 'Season length must be between 20 and 82 games.';
-    if (salaryCap < 80_000_000 || salaryCap > 300_000_000) errs.salaryCap = 'Salary cap must be $80M – $300M.';
+    const h = getHistoricalFinancials(year);
+    const effectiveCap = h.salaryCap > 0 ? salaryCap : salaryCap; // always present
+    if (effectiveCap < 1_000_000 || effectiveCap > 300_000_000) errs.salaryCap = 'Salary cap must be $1M – $300M.';
     setErrors(errs);
     return Object.keys(errs).length === 0;
   };
 
   const handleConfirm = () => {
     if (!validate()) return;
+    const h = getHistoricalFinancials(year);
+    const noCap = !historicalOverride && h.salaryCap === 0;
+    const effectiveCap  = noCap ? 999_000_000 : salaryCap;
+    const effectiveTax  = noCap || h.luxuryTaxLine === 0 ? 0 : Math.round(effectiveCap * 1.15);
+    const effectiveTrade = !historicalOverride ? h.tradeSalaryMatchPct : 125;
+    const effectiveLuxMult = !historicalOverride ? h.luxuryTaxMultiplier : 1.5;
     const settings: Partial<LeagueSettings> = {
       // Basic
       franchiseName: name,
@@ -278,13 +298,15 @@ const LeagueConfiguration: React.FC<LeagueConfigurationProps> = ({ onConfirm, on
       vetDeclineRate: 100,
       simSpeed: 'Normal',
       showAdvancedStats,
-      // Financial
-      salaryCap,
-      luxuryTaxLine: Math.round(salaryCap * 1.15),
-      hardCap: Math.round(salaryCap * 1.25),
+      // Financial (historical-aware)
+      salaryCap: effectiveCap,
+      luxuryTaxLine: effectiveTax,
+      hardCap: Math.round(effectiveCap * 1.25),
       minPayroll,
       luxuryTaxThreshold,
-      salaryCapType,
+      salaryCapType: noCap ? 'Soft Cap' : salaryCapType,
+      tradeSalaryMatchPct: effectiveTrade,
+      luxuryTaxMultiplier: effectiveLuxMult,
       // Rookie Contracts
       pick1SalaryPct,
       roundsAboveMin,
@@ -413,6 +435,51 @@ const LeagueConfiguration: React.FC<LeagueConfigurationProps> = ({ onConfirm, on
               className={`w-full bg-slate-950 border rounded-xl px-4 py-3 text-white font-display text-lg focus:outline-none ${errors.year ? 'border-rose-500' : 'border-slate-800'}`} />
           </Field>
         </div>
+
+        {/* ── Historical Era Banner ─────────────────────────────────────────────── */}
+        {(() => {
+          const h = getHistoricalFinancials(year);
+          const noCap = h.salaryCap === 0;
+          return (
+            <div className={`rounded-2xl border px-5 py-4 flex flex-col gap-2 ${historicalOverride ? 'border-slate-700 bg-slate-900/40' : 'border-amber-500/30 bg-amber-500/5'}`}>
+              <div className="flex items-center justify-between flex-wrap gap-2">
+                <div className="flex items-center gap-2">
+                  <span className="text-[9px] font-black uppercase tracking-widest text-amber-500">
+                    {historicalOverride ? '✏ Custom Financials' : `📅 Historical values loaded for ${year}`}
+                  </span>
+                  <span className="text-[9px] text-slate-500 font-bold uppercase tracking-wider">— {h.era}</span>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setHistoricalOverride(v => !v)}
+                  className={`text-[9px] font-black uppercase tracking-widest px-3 py-1 rounded-full border transition-all ${
+                    historicalOverride
+                      ? 'border-amber-500 text-amber-500 hover:bg-amber-500 hover:text-slate-950'
+                      : 'border-slate-600 text-slate-500 hover:border-slate-400 hover:text-slate-300'
+                  }`}
+                >
+                  {historicalOverride ? 'Restore Historical' : 'Override (Alt History)'}
+                </button>
+              </div>
+              <div className="flex flex-wrap gap-3 text-[10px] font-bold text-slate-400">
+                <span className={noCap ? 'text-rose-400' : 'text-slate-300'}>
+                  Cap: {noCap ? 'None' : `$${(h.salaryCap / 1_000_000).toFixed(1)}M`}
+                </span>
+                <span>·</span>
+                <span>
+                  Luxury Tax: {h.luxuryTaxLine === 0 ? 'None' : `$${(h.luxuryTaxLine / 1_000_000).toFixed(1)}M`}
+                </span>
+                <span>·</span>
+                <span>Rookie Scale: {h.rookieScaleContracts ? 'Yes' : 'No'}</span>
+                <span>·</span>
+                <span>Trade Match: {h.tradeSalaryMatchPct === 100 ? 'Unrestricted' : `${h.tradeSalaryMatchPct}%`}</span>
+              </div>
+              {!historicalOverride && (
+                <p className="text-[9px] text-slate-600 italic">{h.note}</p>
+              )}
+            </div>
+          );
+        })()}
 
         {/* ── Roster & Gender ──────────────────────────────────────────────────── */}
         <Section title="Roster & Gender Options">

@@ -1719,3 +1719,224 @@ export const generateSeasonSchedule = (
 };
 
 export const dayToDateString = (day: number, seasonYear: number) => `Day ${day}`;
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Historical Financial Lookup
+// Each entry covers [fromYear, toYear] inclusive. Values are approximate
+// real-world figures scaled to the sim's 30-team league structure.
+// ─────────────────────────────────────────────────────────────────────────────
+export interface HistoricalFinancials {
+  /** Era label shown in UI */
+  era: string;
+  /** Salary cap in dollars; 0 = no cap */
+  salaryCap: number;
+  /** Luxury tax threshold; 0 = no luxury tax */
+  luxuryTaxLine: number;
+  /** Second apron / soft-tax threshold; 0 = N/A */
+  luxuryTaxThreshold: number;
+  /** Whether a formal rookie pay scale exists */
+  rookieScaleContracts: boolean;
+  /** Trade salary match requirement as a percentage (100 = no restriction) */
+  tradeSalaryMatchPct: number;
+  /** Minimum payroll floor */
+  minPayroll: number;
+  /** Luxury-tax dollar multiplier (penalty per $ over tax line) */
+  luxuryTaxMultiplier: number;
+  /** Descriptive note shown in UI */
+  note: string;
+}
+
+interface EraEntry {
+  from: number;
+  to: number;
+  f: HistoricalFinancials;
+}
+
+const ERA_TABLE: EraEntry[] = [
+  {
+    from: 1947, to: 1983,
+    f: {
+      era: 'Pre-Cap Era', salaryCap: 0, luxuryTaxLine: 0, luxuryTaxThreshold: 0,
+      rookieScaleContracts: false, tradeSalaryMatchPct: 100, minPayroll: 0,
+      luxuryTaxMultiplier: 1.0,
+      note: 'No salary cap, no luxury tax, free-market contracts.',
+    },
+  },
+  {
+    from: 1984, to: 1984,
+    f: {
+      era: 'First Salary Cap', salaryCap: 3_600_000, luxuryTaxLine: 0, luxuryTaxThreshold: 0,
+      rookieScaleContracts: false, tradeSalaryMatchPct: 100, minPayroll: 0,
+      luxuryTaxMultiplier: 1.0,
+      note: 'NBA\'s first salary cap introduced. No luxury tax yet.',
+    },
+  },
+  {
+    from: 1985, to: 1987,
+    f: {
+      era: 'Early Cap Era', salaryCap: 4_945_000, luxuryTaxLine: 0, luxuryTaxThreshold: 0,
+      rookieScaleContracts: false, tradeSalaryMatchPct: 100, minPayroll: 0,
+      luxuryTaxMultiplier: 1.0,
+      note: 'Cap grows with TV revenue. No tax, no rookie scale.',
+    },
+  },
+  {
+    from: 1988, to: 1991,
+    f: {
+      era: 'Late 80s Cap', salaryCap: 9_802_000, luxuryTaxLine: 0, luxuryTaxThreshold: 0,
+      rookieScaleContracts: false, tradeSalaryMatchPct: 125, minPayroll: 0,
+      luxuryTaxMultiplier: 1.0,
+      note: 'Trade rules begin to take shape. Cap near $10M.',
+    },
+  },
+  {
+    from: 1992, to: 1994,
+    f: {
+      era: 'Early 90s Cap', salaryCap: 14_000_000, luxuryTaxLine: 0, luxuryTaxThreshold: 0,
+      rookieScaleContracts: false, tradeSalaryMatchPct: 125, minPayroll: 0,
+      luxuryTaxMultiplier: 1.0,
+      note: 'Cap ~$14M. No rookie scale until 1995 CBA.',
+    },
+  },
+  {
+    from: 1995, to: 1997,
+    f: {
+      era: 'Rookie Scale Era Begins', salaryCap: 23_000_000, luxuryTaxLine: 0, luxuryTaxThreshold: 0,
+      rookieScaleContracts: true, tradeSalaryMatchPct: 125, minPayroll: 8_000_000,
+      luxuryTaxMultiplier: 1.0,
+      note: '1995 CBA introduced rookie salary scale. Cap surges to $23M.',
+    },
+  },
+  {
+    from: 1998, to: 1999,
+    f: {
+      era: '1998 Lockout Era', salaryCap: 30_000_000, luxuryTaxLine: 0, luxuryTaxThreshold: 0,
+      rookieScaleContracts: true, tradeSalaryMatchPct: 125, minPayroll: 9_000_000,
+      luxuryTaxMultiplier: 1.0,
+      note: 'Post-lockout shortened season. New CBA with max contracts.',
+    },
+  },
+  {
+    from: 2000, to: 2001,
+    f: {
+      era: 'Turn of the Millennium', salaryCap: 35_500_000, luxuryTaxLine: 42_500_000, luxuryTaxThreshold: 0,
+      rookieScaleContracts: true, tradeSalaryMatchPct: 125, minPayroll: 15_000_000,
+      luxuryTaxMultiplier: 1.5,
+      note: 'Luxury tax introduced. Cap ~$35.5M.',
+    },
+  },
+  {
+    from: 2002, to: 2004,
+    f: {
+      era: 'Early 2000s', salaryCap: 43_840_000, luxuryTaxLine: 52_900_000, luxuryTaxThreshold: 0,
+      rookieScaleContracts: true, tradeSalaryMatchPct: 125, minPayroll: 22_000_000,
+      luxuryTaxMultiplier: 1.5,
+      note: 'Cap stabilizes ~$44M after TV deal bubble.',
+    },
+  },
+  {
+    from: 2005, to: 2007,
+    f: {
+      era: 'Mid-2000s', salaryCap: 53_135_000, luxuryTaxLine: 64_900_000, luxuryTaxThreshold: 0,
+      rookieScaleContracts: true, tradeSalaryMatchPct: 125, minPayroll: 29_000_000,
+      luxuryTaxMultiplier: 1.5,
+      note: '2005 CBA. New salary framework. Cap ~$53M.',
+    },
+  },
+  {
+    from: 2008, to: 2010,
+    f: {
+      era: 'Late 2000s', salaryCap: 58_680_000, luxuryTaxLine: 71_150_000, luxuryTaxThreshold: 0,
+      rookieScaleContracts: true, tradeSalaryMatchPct: 125, minPayroll: 43_238_000,
+      luxuryTaxMultiplier: 1.5,
+      note: 'Cap peaks ~$58M pre-recession freeze.',
+    },
+  },
+  {
+    from: 2011, to: 2013,
+    f: {
+      era: 'Post-Lockout CBA', salaryCap: 58_044_000, luxuryTaxLine: 70_307_000, luxuryTaxThreshold: 0,
+      rookieScaleContracts: true, tradeSalaryMatchPct: 125, minPayroll: 46_602_000,
+      luxuryTaxMultiplier: 1.5,
+      note: '2011 lockout. Repeater tax added. Cap frozen ~$58M.',
+    },
+  },
+  {
+    from: 2014, to: 2015,
+    f: {
+      era: 'Pre-Spike Era', salaryCap: 63_065_000, luxuryTaxLine: 76_829_000, luxuryTaxThreshold: 0,
+      rookieScaleContracts: true, tradeSalaryMatchPct: 125, minPayroll: 50_000_000,
+      luxuryTaxMultiplier: 1.5,
+      note: 'Cap rises toward $63M before massive TV deal kicks in.',
+    },
+  },
+  {
+    from: 2016, to: 2016,
+    f: {
+      era: 'TV Deal Spike', salaryCap: 94_143_000, luxuryTaxLine: 113_287_000, luxuryTaxThreshold: 40_000_000,
+      rookieScaleContracts: true, tradeSalaryMatchPct: 125, minPayroll: 75_000_000,
+      luxuryTaxMultiplier: 1.5,
+      note: 'Massive $24B TV deal causes cap to jump from $70M to $94M.',
+    },
+  },
+  {
+    from: 2017, to: 2018,
+    f: {
+      era: 'Post-Spike Settling', salaryCap: 101_869_000, luxuryTaxLine: 123_733_000, luxuryTaxThreshold: 60_000_000,
+      rookieScaleContracts: true, tradeSalaryMatchPct: 125, minPayroll: 82_000_000,
+      luxuryTaxMultiplier: 1.5,
+      note: 'Cap normalizes after spike. ~$102M.',
+    },
+  },
+  {
+    from: 2019, to: 2020,
+    f: {
+      era: 'Pre-COVID Era', salaryCap: 109_140_000, luxuryTaxLine: 132_627_000, luxuryTaxThreshold: 70_000_000,
+      rookieScaleContracts: true, tradeSalaryMatchPct: 125, minPayroll: 90_000_000,
+      luxuryTaxMultiplier: 1.5,
+      note: 'Cap reaches $109M. COVID freeze follows in 2020.',
+    },
+  },
+  {
+    from: 2021, to: 2022,
+    f: {
+      era: 'COVID Recovery', salaryCap: 112_414_000, luxuryTaxLine: 136_606_000, luxuryTaxThreshold: 72_000_000,
+      rookieScaleContracts: true, tradeSalaryMatchPct: 125, minPayroll: 92_000_000,
+      luxuryTaxMultiplier: 1.5,
+      note: 'Cap resumes growth post-pandemic.',
+    },
+  },
+  {
+    from: 2023, to: 2023,
+    f: {
+      era: '2023 New CBA', salaryCap: 136_021_000, luxuryTaxLine: 165_294_000, luxuryTaxThreshold: 84_750_000,
+      rookieScaleContracts: true, tradeSalaryMatchPct: 125, minPayroll: 112_566_000,
+      luxuryTaxMultiplier: 1.75,
+      note: '2023 CBA: second apron rules tighten. Cap $136M.',
+    },
+  },
+  {
+    from: 2024, to: 2025,
+    f: {
+      era: 'Modern Era', salaryCap: 140_588_000, luxuryTaxLine: 170_814_000, luxuryTaxThreshold: 84_750_000,
+      rookieScaleContracts: true, tradeSalaryMatchPct: 125, minPayroll: 115_000_000,
+      luxuryTaxMultiplier: 1.75,
+      note: 'Second apron strictly enforced. Cap ~$140M.',
+    },
+  },
+  {
+    from: 2026, to: 2099,
+    f: {
+      era: 'Future Projection', salaryCap: 153_000_000, luxuryTaxLine: 185_000_000, luxuryTaxThreshold: 92_000_000,
+      rookieScaleContracts: true, tradeSalaryMatchPct: 125, minPayroll: 125_000_000,
+      luxuryTaxMultiplier: 1.75,
+      note: 'Projected forward from 2026 CBA negotiations.',
+    },
+  },
+];
+
+/** Returns the historical financial settings for a given starting year. */
+export const getHistoricalFinancials = (year: number): HistoricalFinancials => {
+  const entry = ERA_TABLE.find(e => year >= e.from && year <= e.to);
+  return entry ? entry.f : ERA_TABLE[ERA_TABLE.length - 1].f;
+};
