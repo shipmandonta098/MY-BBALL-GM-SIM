@@ -701,7 +701,33 @@ const PlayerModal: React.FC<PlayerModalProps> = ({
           <div className="absolute inset-0 bg-gradient-to-t from-slate-900 via-slate-900/40 to-transparent"></div>
           <div className="absolute bottom-8 left-10 md:bottom-10 md:left-12 flex items-end gap-8">
             <div className="text-[12rem] md:text-[14rem] font-display font-black text-white/[0.03] absolute -top-10 md:-top-20 -left-10 md:-left-16 pointer-events-none select-none">#{player.jerseyNumber}</div>
-            
+
+            {/* Jersey avatar */}
+            {(() => {
+              const tones = ['#FDBCB4','#E8A87C','#C68642','#8D5524','#4A2E17'];
+              const skin = tones[player.name.split('').reduce((a,c)=>a+c.charCodeAt(0),0) % tones.length];
+              const jerseyNum = player.jerseyNumber != null ? String(player.jerseyNumber) : '';
+              return (
+                <div className="w-28 h-28 md:w-40 md:h-40 bg-slate-900 rounded-3xl border-4 border-slate-800 shadow-2xl relative z-10 shrink-0 overflow-hidden">
+                  <svg viewBox="0 0 100 120" xmlns="http://www.w3.org/2000/svg" className="w-full h-full">
+                    {/* Head */}
+                    <circle cx="50" cy="32" r="20" fill={skin}/>
+                    {/* Neck */}
+                    <rect x="44" y="50" width="12" height="10" fill={skin}/>
+                    {/* Jersey body */}
+                    <path d="M 20 56 L 14 72 L 24 76 L 24 120 L 76 120 L 76 76 L 86 72 L 80 56 Q 68 50 60 54 L 50 66 L 40 54 Q 32 50 20 56 Z" fill="#d97706"/>
+                    {/* V-neck collar */}
+                    <path d="M 40 54 L 50 66 L 60 54" fill="none" stroke="rgba(255,255,255,0.4)" strokeWidth="2"/>
+                    {/* Sleeve highlight */}
+                    <path d="M 14 72 L 24 76" stroke="rgba(255,255,255,0.2)" strokeWidth="1.5"/>
+                    <path d="M 86 72 L 76 76" stroke="rgba(255,255,255,0.2)" strokeWidth="1.5"/>
+                    {/* Jersey number */}
+                    <text x="50" y="104" textAnchor="middle" fill="white" fontSize="26" fontFamily="monospace" fontWeight="bold" opacity="0.9">{jerseyNum}</text>
+                  </svg>
+                </div>
+              );
+            })()}
+
             <div className="relative z-10 flex flex-col">
               <h2 className="text-5xl md:text-8xl font-display font-bold uppercase tracking-tighter text-white drop-shadow-lg leading-tight">{player.name}</h2>
               <div className="flex flex-wrap items-center gap-4 mt-2">

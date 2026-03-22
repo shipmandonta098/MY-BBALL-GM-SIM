@@ -71,14 +71,15 @@ const GMProfileView: React.FC<GMProfileProps> = ({ league, updateLeague }) => {
         <div className="absolute top-0 right-0 w-[500px] h-[500px] bg-amber-500/5 blur-[120px] rounded-full -mr-64 -mt-64 pointer-events-none" />
 
         <div className="relative z-10 flex flex-col md:flex-row items-center gap-10">
-          {/* Avatar + rep badge */}
-          <div className="relative shrink-0 group">
-            <div className="w-40 h-40 bg-slate-800 rounded-[2.5rem] border-4 border-slate-700 overflow-hidden shadow-2xl transition-transform group-hover:scale-105">
-              <img
-                src={`https://api.dicebear.com/7.x/avataaars/svg?seed=${profile.avatarSeed}&backgroundColor=b6e3f4,c0aede,d1d4f9,ffd5dc,ffdfbf`}
-                className="w-full h-full object-cover"
-                alt="GM Avatar"
-              />
+          {/* Rep badge (no avatar — removed from GM office) */}
+          <div className="relative shrink-0">
+            <div className="w-40 h-40 bg-slate-800 rounded-[2.5rem] border-4 border-slate-700 shadow-2xl flex items-center justify-center">
+              <svg viewBox="0 0 80 80" className="w-24 h-24 opacity-60" fill="none" xmlns="http://www.w3.org/2000/svg">
+                <rect x="10" y="28" width="60" height="42" rx="6" fill="#f59e0b" opacity="0.15" stroke="#f59e0b" strokeWidth="2"/>
+                <rect x="28" y="18" width="24" height="14" rx="4" fill="none" stroke="#f59e0b" strokeWidth="2"/>
+                <line x1="10" y1="44" x2="70" y2="44" stroke="#f59e0b" strokeWidth="2" opacity="0.5"/>
+                <rect x="34" y="40" width="12" height="8" rx="2" fill="#f59e0b" opacity="0.6"/>
+              </svg>
             </div>
             <div className="absolute -bottom-4 -right-4 w-14 h-14 bg-amber-500 rounded-2xl flex items-center justify-center text-slate-950 font-display font-black text-xl shadow-xl border-4 border-slate-900">
               {profile.reputation}

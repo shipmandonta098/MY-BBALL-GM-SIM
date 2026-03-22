@@ -89,11 +89,12 @@ const Career: React.FC<CareerProps> = ({ league, updateLeague }) => {
           {/* Avatar + rep badge */}
           <div className="relative shrink-0">
             <div className="w-36 h-36 bg-slate-800 rounded-[2rem] border-4 border-slate-700 overflow-hidden shadow-2xl">
-              <img
-                src={`https://api.dicebear.com/7.x/avataaars/svg?seed=${profile.avatarSeed}&backgroundColor=b6e3f4,c0aede,d1d4f9,ffd5dc,ffdfbf`}
-                className="w-full h-full object-cover"
-                alt="GM Avatar"
-              />
+              <svg viewBox="0 0 80 80" className="w-full h-full p-3 opacity-60" fill="none" xmlns="http://www.w3.org/2000/svg">
+                <rect x="10" y="28" width="60" height="42" rx="6" fill="#f59e0b" opacity="0.15" stroke="#f59e0b" strokeWidth="2"/>
+                <rect x="28" y="18" width="24" height="14" rx="4" fill="none" stroke="#f59e0b" strokeWidth="2"/>
+                <line x1="10" y1="44" x2="70" y2="44" stroke="#f59e0b" strokeWidth="2" opacity="0.5"/>
+                <rect x="34" y="40" width="12" height="8" rx="2" fill="#f59e0b" opacity="0.6"/>
+              </svg>
             </div>
             <div className="absolute -bottom-3 -right-3 w-12 h-12 bg-amber-500 rounded-xl flex items-center justify-center text-slate-950 font-display font-black text-lg shadow-xl border-4 border-slate-900">
               {profile.reputation}
