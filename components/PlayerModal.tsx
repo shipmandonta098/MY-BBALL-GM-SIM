@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Player, PlayerStatus, PersonalityTrait, Position, PlayerTendencies } from '../types';
-import { getFlag, POS_ATTR_RANGES, PosAttrRangeKey, enforcePositionalBounds, FEMALE_ATTR_CAPS } from '../constants';
+import { getFlag, POS_ATTR_RANGES, PosAttrRangeKey, enforcePositionalBounds, FEMALE_ATTR_CAPS, NAMES_MALE, NAMES_FEMALE, COLLEGES_HIGH_MAJOR, COLLEGES_MID_MAJOR, ALL_HOMETOWNS } from '../constants';
 
 const POS_RANGE_KEYS: PosAttrRangeKey[] = ['shooting', 'playmaking', 'defense', 'rebounding', 'athleticism'];
 
@@ -100,9 +100,34 @@ const PlayerModal: React.FC<PlayerModalProps> = ({
 
   const [editedPlayer, setEditedPlayer] = React.useState<Player>(normalizePlayer(player));
 
+  // Split name for editing
+  const splitName = (full: string) => {
+    const idx = full.indexOf(' ');
+    return idx === -1
+      ? { first: full, last: '' }
+      : { first: full.slice(0, idx), last: full.slice(idx + 1) };
+  };
+  const [editFirstName, setEditFirstName] = React.useState(() => splitName(player.name).first);
+  const [editLastName, setEditLastName]   = React.useState(() => splitName(player.name).last);
+
   useEffect(() => {
     setEditedPlayer(normalizePlayer(player));
+    const { first, last } = splitName(player.name);
+    setEditFirstName(first);
+    setEditLastName(last);
   }, [player]);
+
+  // Randomize helpers
+  const allFirstNames = editedPlayer.gender === 'Female' ? NAMES_FEMALE.first : NAMES_MALE.first;
+  const allLastNames  = editedPlayer.gender === 'Female' ? NAMES_FEMALE.last  : NAMES_MALE.last;
+  const allColleges   = [...COLLEGES_HIGH_MAJOR, ...COLLEGES_MID_MAJOR];
+  const pick = <T,>(arr: T[]): T => arr[Math.floor(Math.random() * arr.length)];
+
+  const randomizeFirstName = () => setEditFirstName(pick(allFirstNames));
+  const randomizeLastName  = () => setEditLastName(pick(allLastNames));
+  const randomizeJersey    = () => setEditedPlayer(p => ({ ...p, jerseyNumber: Math.floor(Math.random() * 100) }));
+  const randomizeCollege   = () => setEditedPlayer(p => ({ ...p, college: pick(allColleges) }));
+  const randomizeHometown  = () => setEditedPlayer(p => ({ ...p, hometown: pick(ALL_HOMETOWNS) }));
 
   useEffect(() => {
     const scrollContainer = document.getElementById('modal-scroll-container');
@@ -168,7 +193,9 @@ const PlayerModal: React.FC<PlayerModalProps> = ({
 
   const handleSave = () => {
     if (onUpdatePlayer) {
-      const bounded = enforcePositionalBounds(editedPlayer);
+      const fullName = [editFirstName.trim(), editLastName.trim()].filter(Boolean).join(' ');
+      const withName = { ...editedPlayer, name: fullName || editedPlayer.name };
+      const bounded = enforcePositionalBounds(withName);
       onUpdatePlayer({ ...bounded, potential: derivePotential(bounded.rating, bounded.age) });
     }
     setIsEditing(false);
@@ -262,20 +289,45 @@ const PlayerModal: React.FC<PlayerModalProps> = ({
               <div className="space-y-8">
                 <h3 className="text-[10px] font-black text-amber-500 uppercase tracking-[0.5em]">Basic Information</h3>
                 <div className="space-y-4">
+                  {/* First Name */}
                   <div className="space-y-2">
-                    <label className="text-[10px] font-black uppercase text-slate-500 tracking-widest">Full Name</label>
-                    <input 
-                      type="text" 
-                      value={editedPlayer.name}
-                      onChange={e => setEditedPlayer({...editedPlayer, name: e.target.value})}
-                      className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-3 text-white font-display text-xl focus:outline-none focus:border-amber-500/50"
-                    />
+                    <label className="text-[10px] font-black uppercase text-slate-500 tracking-widest">First Name</label>
+                    <div className="flex gap-2">
+                      <input
+                        type="text"
+                        value={editFirstName}
+                        onChange={e => setEditFirstName(e.target.value)}
+                        className="flex-1 bg-slate-950 border border-slate-800 rounded-xl px-4 py-3 text-white font-display text-xl focus:outline-none focus:border-amber-500/50"
+                      />
+                      <button
+                        onClick={randomizeFirstName}
+                        title="Randomize first name"
+                        className="px-3 py-2 bg-slate-800 hover:bg-amber-500 hover:text-slate-950 text-slate-400 rounded-xl transition-all text-sm font-black"
+                      >⚄</button>
+                    </div>
+                  </div>
+                  {/* Last Name */}
+                  <div className="space-y-2">
+                    <label className="text-[10px] font-black uppercase text-slate-500 tracking-widest">Last Name</label>
+                    <div className="flex gap-2">
+                      <input
+                        type="text"
+                        value={editLastName}
+                        onChange={e => setEditLastName(e.target.value)}
+                        className="flex-1 bg-slate-950 border border-slate-800 rounded-xl px-4 py-3 text-white font-display text-xl focus:outline-none focus:border-amber-500/50"
+                      />
+                      <button
+                        onClick={randomizeLastName}
+                        title="Randomize last name"
+                        className="px-3 py-2 bg-slate-800 hover:bg-amber-500 hover:text-slate-950 text-slate-400 rounded-xl transition-all text-sm font-black"
+                      >⚄</button>
+                    </div>
                   </div>
                   <div className="grid grid-cols-2 gap-4">
                     <div className="space-y-2">
                       <label className="text-[10px] font-black uppercase text-slate-500 tracking-widest">Age</label>
-                      <input 
-                        type="number" 
+                      <input
+                        type="number"
                         min="18" max="45"
                         value={editedPlayer.age}
                         onChange={e => setEditedPlayer({...editedPlayer, age: parseInt(e.target.value)})}
@@ -284,13 +336,20 @@ const PlayerModal: React.FC<PlayerModalProps> = ({
                     </div>
                     <div className="space-y-2">
                       <label className="text-[10px] font-black uppercase text-slate-500 tracking-widest">Jersey #</label>
-                      <input 
-                        type="number" 
-                        min="0" max="99"
-                        value={editedPlayer.jerseyNumber}
-                        onChange={e => setEditedPlayer({...editedPlayer, jerseyNumber: parseInt(e.target.value)})}
-                        className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-3 text-white font-bold focus:outline-none focus:border-amber-500/50"
-                      />
+                      <div className="flex gap-2">
+                        <input
+                          type="number"
+                          min="0" max="99"
+                          value={editedPlayer.jerseyNumber}
+                          onChange={e => setEditedPlayer({...editedPlayer, jerseyNumber: parseInt(e.target.value)})}
+                          className="flex-1 bg-slate-950 border border-slate-800 rounded-xl px-4 py-3 text-white font-bold focus:outline-none focus:border-amber-500/50"
+                        />
+                        <button
+                          onClick={randomizeJersey}
+                          title="Randomize jersey number"
+                          className="px-3 py-2 bg-slate-800 hover:bg-amber-500 hover:text-slate-950 text-slate-400 rounded-xl transition-all text-sm font-black"
+                        >⚄</button>
+                      </div>
                     </div>
                   </div>
                   <div className="grid grid-cols-2 gap-4">
@@ -345,22 +404,36 @@ const PlayerModal: React.FC<PlayerModalProps> = ({
                   </div>
                   <div className="space-y-2">
                     <label className="text-[10px] font-black uppercase text-slate-500 tracking-widest">Hometown / Country</label>
-                    <input
-                      type="text"
-                      value={editedPlayer.hometown}
-                      onChange={e => setEditedPlayer({...editedPlayer, hometown: e.target.value})}
-                      className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-3 text-white font-bold focus:outline-none focus:border-amber-500/50"
-                    />
+                    <div className="flex gap-2">
+                      <input
+                        type="text"
+                        value={editedPlayer.hometown}
+                        onChange={e => setEditedPlayer({...editedPlayer, hometown: e.target.value})}
+                        className="flex-1 bg-slate-950 border border-slate-800 rounded-xl px-4 py-3 text-white font-bold focus:outline-none focus:border-amber-500/50"
+                      />
+                      <button
+                        onClick={randomizeHometown}
+                        title="Randomize hometown"
+                        className="px-3 py-2 bg-slate-800 hover:bg-amber-500 hover:text-slate-950 text-slate-400 rounded-xl transition-all text-sm font-black"
+                      >⚄</button>
+                    </div>
                   </div>
                   <div className="space-y-2">
                     <label className="text-[10px] font-black uppercase text-slate-500 tracking-widest">College / School</label>
-                    <input
-                      type="text"
-                      value={editedPlayer.college ?? ''}
-                      onChange={e => setEditedPlayer({...editedPlayer, college: e.target.value})}
-                      className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-3 text-white font-bold focus:outline-none focus:border-amber-500/50"
-                      placeholder="e.g. Duke, N/A"
-                    />
+                    <div className="flex gap-2">
+                      <input
+                        type="text"
+                        value={editedPlayer.college ?? ''}
+                        onChange={e => setEditedPlayer({...editedPlayer, college: e.target.value})}
+                        className="flex-1 bg-slate-950 border border-slate-800 rounded-xl px-4 py-3 text-white font-bold focus:outline-none focus:border-amber-500/50"
+                        placeholder="e.g. Duke, N/A"
+                      />
+                      <button
+                        onClick={randomizeCollege}
+                        title="Randomize college"
+                        className="px-3 py-2 bg-slate-800 hover:bg-amber-500 hover:text-slate-950 text-slate-400 rounded-xl transition-all text-sm font-black"
+                      >⚄</button>
+                    </div>
                   </div>
                 </div>
 
