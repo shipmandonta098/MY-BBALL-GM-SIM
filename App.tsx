@@ -1761,9 +1761,9 @@ const App: React.FC = () => {
           {activeTab === 'finances' && <Finances league={league} updateLeague={updateLeagueState} />}
           {activeTab === 'trade' && <Trade league={league} updateLeague={updateLeagueState} recordTransaction={recordTransaction} />}
           {activeTab === 'settings' && <Settings league={league} updateLeague={updateLeagueState} onRegenerateSchedule={() => {
-            if (league.schedule.some(g => g.played)) return; // guard — should never reach here
+            if (league.schedule.some(g => g.played)) return;
             const newSchedule = generateSeasonSchedule(league.teams, league.settings.seasonLength, league.settings.divisionGames, league.settings.conferenceGames);
-            updateLeagueState({ schedule: newSchedule });
+            updateLeagueState({ schedule: newSchedule, currentDay: 1 });
           }} />}
         </div>
       </main>
