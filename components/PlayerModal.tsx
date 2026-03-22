@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Player, PlayerStatus, PersonalityTrait, Position, PlayerTendencies } from '../types';
-import { getFlag, POS_ATTR_RANGES, PosAttrRangeKey, enforcePositionalBounds, FEMALE_ATTR_CAPS, NAMES_MALE, NAMES_FEMALE, COLLEGES_HIGH_MAJOR, COLLEGES_MID_MAJOR, ALL_HOMETOWNS } from '../constants';
+import { getFlag, POS_ATTR_RANGES, PosAttrRangeKey, enforcePositionalBounds, FEMALE_ATTR_CAPS, NAMES_MALE, NAMES_FEMALE, COLLEGES_HIGH_MAJOR, COLLEGES_MID_MAJOR, ALL_HOMETOWNS, deriveComposites } from '../constants';
 
 const POS_RANGE_KEYS: PosAttrRangeKey[] = ['shooting', 'playmaking', 'defense', 'rebounding', 'athleticism'];
 
@@ -205,11 +205,15 @@ const PlayerModal: React.FC<PlayerModalProps> = ({
   const derivePotential = (rating: number, age: number): number =>
     Math.min(99, Math.max(rating, Math.round(rating + Math.max(0, (27 - age)) * 1.5)));
 
+  const COMPOSITE_KEYS = new Set<string>(['shooting', 'defense', 'rebounding', 'playmaking', 'athleticism']);
+
   const handleAttributeChange = (key: keyof Player['attributes'], val: number) => {
     setEditedPlayer(prev => {
       const femaleCap = prev.gender === 'Female' ? (FEMALE_ATTR_CAPS[key] ?? 99) : 99;
       const clamped = Math.min(val, femaleCap);
-      const updated = { ...prev, attributes: { ...prev.attributes, [key]: clamped } };
+      const withSub = { ...prev.attributes, [key]: clamped };
+      const withComposites = deriveComposites(withSub);
+      const updated = { ...prev, attributes: withComposites };
       return enforcePositionalBounds(updated);
     });
   };
@@ -482,74 +486,77 @@ const PlayerModal: React.FC<PlayerModalProps> = ({
                   </div>
                 </div>
 
+                {/* Composites: read-only, derived from sub-attributes */}
+                <div className="grid grid-cols-5 gap-3 bg-slate-950/60 rounded-2xl p-4 border border-slate-800">
+                  {(['shooting', 'defense', 'rebounding', 'playmaking', 'athleticism'] as const).map(key => {
+                    const val = editedPlayer.attributes[key] as number;
+                    const color = val >= 85 ? 'text-emerald-400' : val >= 70 ? 'text-amber-400' : 'text-rose-400';
+                    const bar   = val >= 85 ? 'bg-emerald-500' : val >= 70 ? 'bg-amber-500' : 'bg-rose-500';
+                    return (
+                      <div key={key} className="flex flex-col items-center gap-1.5">
+                        <span className="text-[8px] font-black uppercase text-slate-500 tracking-wider text-center">{key}</span>
+                        <span className={`text-2xl font-display font-black ${color}`}>{val}</span>
+                        <div className="w-full h-1 bg-slate-800 rounded-full overflow-hidden">
+                          <div className={`h-full rounded-full ${bar}`} style={{ width: `${val}%` }} />
+                        </div>
+                        <span className="text-[7px] text-slate-600 uppercase tracking-widest">auto</span>
+                      </div>
+                    );
+                  })}
+                </div>
+
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-x-12 gap-y-8">
                   <div className="space-y-6">
                     <div className="h-px w-full bg-slate-800/50 my-4"></div>
 
-                    {Object.entries(editedPlayer.attributes).slice(0, 12).map(([key, val]) => {
-                      const isRangedKey = POS_RANGE_KEYS.includes(key as PosAttrRangeKey);
-                      const posRange = isRangedKey ? POS_ATTR_RANGES[editedPlayer.position][key as PosAttrRangeKey] : null;
-                      const sliderMin = posRange ? posRange[0] : 0;
-                      const sliderMax = posRange ? posRange[1] : 99;
-                      const outOfRange = posRange && (val as number) > posRange[1];
-                      const warnLabels: Record<string, string> = {
-                        rebounding: 'Guards rarely exceed',
-                        shooting: 'Bigs rarely reach',
-                        playmaking: 'Bigs rarely reach',
-                        defense: 'Guards rarely reach',
-                        athleticism: 'Out of typical range',
-                      };
-                      return (
+                    {Object.entries(editedPlayer.attributes)
+                      .filter(([key]) => !COMPOSITE_KEYS.has(key))
+                      .slice(0, 12)
+                      .map(([key, val]) => (
                       <div key={key} className="space-y-2">
                         <div className="flex justify-between items-center">
                           <label className="text-[9px] font-bold uppercase text-slate-500 tracking-wider">{key.replace(/([A-Z])/g, ' $1')}</label>
-                          <div className="flex items-center gap-2">
-                            {posRange && <span className="text-[8px] text-slate-600 font-mono">{posRange[0]}–{posRange[1]}</span>}
-                            <span className={`font-mono text-xs ${outOfRange ? 'text-amber-400' : 'text-slate-300'}`}>{val}</span>
-                          </div>
+                          <span className="font-mono text-xs text-slate-300">{val}</span>
                         </div>
-                        <input 
-                          type="range" min={sliderMin} max={sliderMax} value={val as number}
+                        <input
+                          type="range" min="0" max="99" value={val as number}
                           onChange={e => handleAttributeChange(key as any, parseInt(e.target.value))}
-                          className={`w-full h-1 bg-slate-950 rounded-lg appearance-none cursor-pointer ${outOfRange ? 'accent-amber-400' : 'accent-slate-600'}`}
+                          className="w-full h-1 bg-slate-950 rounded-lg appearance-none cursor-pointer accent-slate-600"
                         />
-                        {outOfRange && (
-                          <p className="text-[8px] text-amber-500/80 font-semibold">
-                            ⚠ {warnLabels[key] ?? 'Out of typical range'} {posRange![1]} for {editedPlayer.position}
-                          </p>
-                        )}
                       </div>
-                      );
-                    })}
+                    ))}
                   </div>
 
                   <div className="space-y-6">
-                    {Object.entries(editedPlayer.attributes).slice(12).map(([key, val]) => {
-                      const femaleCap = editedPlayer.gender === 'Female' ? (FEMALE_ATTR_CAPS[key as keyof Player['attributes']] ?? undefined) : undefined;
-                      const sliderMax = femaleCap ?? 99;
-                      const overCap = femaleCap !== undefined && (val as number) > femaleCap;
-                      return (
-                      <div key={key} className="space-y-2">
-                        <div className="flex justify-between items-center">
-                          <label className="text-[9px] font-bold uppercase text-slate-500 tracking-wider">{key.replace(/([A-Z])/g, ' $1')}</label>
-                          <div className="flex items-center gap-2">
-                            {femaleCap !== undefined && (
-                              <span className="text-[8px] text-violet-400/70 font-mono">♀ max {femaleCap}</span>
-                            )}
-                            <span className={`font-mono text-xs ${overCap ? 'text-amber-400' : 'text-slate-300'}`}>{val}</span>
+                    {Object.entries(editedPlayer.attributes)
+                      .filter(([key]) => !COMPOSITE_KEYS.has(key))
+                      .slice(12)
+                      .map(([key, val]) => {
+                        const femaleCap = editedPlayer.gender === 'Female' ? (FEMALE_ATTR_CAPS[key as keyof Player['attributes']] ?? undefined) : undefined;
+                        const sliderMax = femaleCap ?? 99;
+                        const overCap = femaleCap !== undefined && (val as number) > femaleCap;
+                        return (
+                        <div key={key} className="space-y-2">
+                          <div className="flex justify-between items-center">
+                            <label className="text-[9px] font-bold uppercase text-slate-500 tracking-wider">{key.replace(/([A-Z])/g, ' $1')}</label>
+                            <div className="flex items-center gap-2">
+                              {femaleCap !== undefined && (
+                                <span className="text-[8px] text-violet-400/70 font-mono">♀ max {femaleCap}</span>
+                              )}
+                              <span className={`font-mono text-xs ${overCap ? 'text-amber-400' : 'text-slate-300'}`}>{val}</span>
+                            </div>
                           </div>
+                          <input
+                            type="range" min="0" max={sliderMax} value={Math.min(val as number, sliderMax)}
+                            onChange={e => handleAttributeChange(key as any, parseInt(e.target.value))}
+                            className={`w-full h-1 bg-slate-950 rounded-lg appearance-none cursor-pointer ${femaleCap !== undefined ? 'accent-violet-500' : 'accent-slate-600'}`}
+                          />
+                          {overCap && (
+                            <p className="text-[8px] text-amber-500/80 font-semibold">⚠ Will be capped to {femaleCap} on save</p>
+                          )}
                         </div>
-                        <input
-                          type="range" min="0" max={sliderMax} value={Math.min(val as number, sliderMax)}
-                          onChange={e => handleAttributeChange(key as any, parseInt(e.target.value))}
-                          className={`w-full h-1 bg-slate-950 rounded-lg appearance-none cursor-pointer ${femaleCap !== undefined ? 'accent-violet-500' : 'accent-slate-600'}`}
-                        />
-                        {overCap && (
-                          <p className="text-[8px] text-amber-500/80 font-semibold">⚠ Will be capped to {femaleCap} on save</p>
-                        )}
-                      </div>
-                      );
-                    })}
+                        );
+                      })}
 
                     <div className="h-px w-full bg-slate-800/50 my-4"></div>
                     
