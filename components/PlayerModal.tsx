@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Player, PlayerStatus, PersonalityTrait, Position, PlayerTendencies } from '../types';
-import { getFlag, POS_ATTR_RANGES, PosAttrRangeKey, enforcePositionalBounds, FEMALE_ATTR_CAPS, NAMES_MALE, NAMES_FEMALE, COLLEGES_HIGH_MAJOR, COLLEGES_MID_MAJOR, ALL_HOMETOWNS, deriveComposites, deriveArchetype } from '../constants';
+import { getFlag, countryFromHometown, POS_ATTR_RANGES, PosAttrRangeKey, enforcePositionalBounds, FEMALE_ATTR_CAPS, NAMES_MALE, NAMES_FEMALE, COLLEGES_HIGH_MAJOR, COLLEGES_MID_MAJOR, ALL_HOMETOWNS, deriveComposites, deriveArchetype } from '../constants';
 
 const POS_RANGE_KEYS: PosAttrRangeKey[] = ['shooting', 'playmaking', 'defense', 'rebounding', 'athleticism'];
 
@@ -130,7 +130,7 @@ const PlayerModal: React.FC<PlayerModalProps> = ({
   const randomizeLastName  = () => setEditLastName(pick(allLastNames));
   const randomizeJersey    = () => setEditedPlayer(p => ({ ...p, jerseyNumber: Math.floor(Math.random() * 100) }));
   const randomizeCollege   = () => setEditedPlayer(p => ({ ...p, college: pick(allColleges) }));
-  const randomizeHometown  = () => setEditedPlayer(p => ({ ...p, hometown: pick(ALL_HOMETOWNS) }));
+  const randomizeHometown  = () => setEditedPlayer(p => { const ht = pick(ALL_HOMETOWNS); return { ...p, hometown: ht, country: countryFromHometown(ht) }; });
 
   useEffect(() => {
     const scrollContainer = document.getElementById('modal-scroll-container');
@@ -342,7 +342,9 @@ const PlayerModal: React.FC<PlayerModalProps> = ({
                           const raw = parseInt(e.target.value);
                           if (isNaN(raw)) return;
                           const updated: typeof editedPlayer = { ...editedPlayer, age: raw };
-                          if (currentSeason) {
+                          // Only recalculate birthdate when the value is in a valid range
+                          // to avoid corrupting birthdate with intermediate typing values (e.g. "3" on the way to "30")
+                          if (currentSeason && raw >= 18 && raw <= 45) {
                             const newBirthYear = currentSeason - raw;
                             if (editedPlayer.birthdate) {
                               const [, mm, dd] = editedPlayer.birthdate.split('-');
@@ -355,7 +357,17 @@ const PlayerModal: React.FC<PlayerModalProps> = ({
                         }}
                         onBlur={e => {
                           const clamped = Math.min(45, Math.max(18, editedPlayer.age || 18));
-                          if (clamped !== editedPlayer.age) setEditedPlayer({ ...editedPlayer, age: clamped });
+                          // Always recalculate birthdate on blur to ensure consistency with the final age value
+                          if (currentSeason) {
+                            const newBirthYear = currentSeason - clamped;
+                            const [, mm, dd] = (editedPlayer.birthdate ?? `${newBirthYear}-06-15`).split('-');
+                            const correctBirthdate = `${newBirthYear}-${mm}-${dd}`;
+                            if (clamped !== editedPlayer.age || editedPlayer.birthdate !== correctBirthdate) {
+                              setEditedPlayer({ ...editedPlayer, age: clamped, birthdate: correctBirthdate });
+                            }
+                          } else if (clamped !== editedPlayer.age) {
+                            setEditedPlayer({ ...editedPlayer, age: clamped });
+                          }
                         }}
                         className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-3 text-white font-bold focus:outline-none focus:border-amber-500/50"
                       />
@@ -430,7 +442,7 @@ const PlayerModal: React.FC<PlayerModalProps> = ({
                       <input
                         type="text"
                         value={editedPlayer.hometown}
-                        onChange={e => setEditedPlayer({...editedPlayer, hometown: e.target.value})}
+                        onChange={e => setEditedPlayer({...editedPlayer, hometown: e.target.value, country: countryFromHometown(e.target.value)})}
                         className="flex-1 bg-slate-950 border border-slate-800 rounded-xl px-4 py-3 text-white font-bold focus:outline-none focus:border-amber-500/50"
                       />
                       <button
@@ -873,7 +885,7 @@ const PlayerModal: React.FC<PlayerModalProps> = ({
                       {(player as any).school || (player.college !== 'None' ? player.college : '—')}
                    </span>
                 </div>
-                {(player as any).proLeague && (
+                {(player as any).proLeague && (!player.college || player.college === 'None') && (
                   <div className="flex items-center gap-4">
                      <span className="text-[10px] text-slate-500 font-black uppercase tracking-[0.2em] w-24">Pro League</span>
                      <span className="text-white text-base font-medium">{(player as any).proLeague}</span>

@@ -939,7 +939,7 @@ const generateDraftInfo = (
   return { team: draftTeam, round: draftRound, pick: assignedPick, year: draftYear };
 };
 
-const countryFromHometown = (hometown: string): string => {
+export const countryFromHometown = (hometown: string): string => {
   const parts = hometown.split(', ');
   const last = parts[parts.length - 1].trim();
   return /^[A-Z]{2}$/.test(last) ? 'United States' : last;
