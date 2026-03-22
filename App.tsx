@@ -1,7 +1,7 @@
 
 import React, { useState, useEffect, useCallback } from 'react';
 import { LeagueState, Player, Team, GameResult, PlayerStatus, ScheduleGame, BulkSimSummary, Prospect, Coach, TradeProposal, Position, NewsItem, NewsCategory, LeagueSettings, SeasonAwards, PlayoffBracket, PlayoffSeries, Transaction, TransactionType, PowerRankingSnapshot, PowerRankingEntry, GMProfile, GMMilestone, RivalryStats, InjuryType, SeasonPhase, AllStarWeekendData, AllStarVoteEntry } from './types';
-import { generateLeagueTeams, generateSeasonSchedule, generateProspects, generateFreeAgentPool, generateCoachPool, EXPANSION_TEAM_POOL, generateCoach, enforcePositionalBounds } from './constants';
+import { generateLeagueTeams, generateSeasonSchedule, generateProspects, generateFreeAgentPool, generateCoachPool, EXPANSION_TEAM_POOL, generateCoach, enforcePositionalBounds, ageFromBirthdate } from './constants';
 import { simulateGame, normalizeLeagueOVRs } from './utils/simEngine';
 import { snapshotPlayerStats } from './utils/playerUtils';
 import { generateGameRecap, generateScoutingReport, generateSeasonNarrative, generateCoachScoutingReport, generateNewsHeadline } from './services/geminiService';
@@ -381,7 +381,7 @@ const App: React.FC = () => {
     const freshSchedule = generateSeasonSchedule(freshTeams, finalSettings.seasonLength, finalSettings.divisionGames, finalSettings.conferenceGames);
     const freshProspects = generateProspects(year, 100, genderRatio, finalSettings.prospectAgeMin ?? 19, finalSettings.prospectAgeMax ?? 21);
     const initialFAs = generateFreeAgentPool(25, year, genderRatio);
-    const coachPool = generateCoachPool(30, finalSettings.coachGenderRatio);
+    const coachPool = generateCoachPool(30, finalSettings.coachGenderRatio, year);
     // Assign AI GM personalities to all non-user teams (userTeamId assigned at team selection)
     const teamsWithAI = freshTeams; // personalities applied after user picks team in handleSelectTeam
     
@@ -1395,8 +1395,29 @@ const App: React.FC = () => {
       return true;
     });
     tempState.freeAgents = cappedFAs;
-    tempState.coachPool = [...generateCoachPool(20, tempState.settings.coachGenderRatio)];
     tempState.season += 1;
+    tempState.coachPool = [...generateCoachPool(20, tempState.settings.coachGenderRatio, tempState.season)];
+
+    // ── Recalculate player ages from birthdate + new league year ─────────────
+    const newSeason = tempState.season;
+    const recalcAge = (p: Player) => {
+      if (!p.birthdate) return p;
+      return { ...p, age: ageFromBirthdate(p.birthdate, newSeason) };
+    };
+    tempState.teams = tempState.teams.map(t => ({
+      ...t,
+      roster: t.roster.map(recalcAge),
+      // Age coaches by birthYear if available, otherwise +1
+      staff: Object.fromEntries(
+        Object.entries(t.staff).map(([role, coach]) => {
+          if (!coach) return [role, coach];
+          const c = coach as any;
+          const newAge = c.birthYear ? newSeason - c.birthYear : (c.age ?? 40) + 1;
+          return [role, { ...c, age: newAge }];
+        })
+      ) as typeof t.staff,
+    }));
+    tempState.freeAgents = tempState.freeAgents.map(recalcAge);
 
     // Generate fresh draft class for the new season
     const classSize = tempState.settings.draftClassSize === 'Small' ? 60

@@ -776,7 +776,7 @@ export const getRandomGender = (ratio: number): Gender => {
   return Math.random() * 100 < ratio ? 'Female' : 'Male';
 };
 
-export const generateCoach = (id: string, tier: 'A' | 'B' | 'C' | 'D' = 'C', genderRatio: number = 0): Coach => {
+export const generateCoach = (id: string, tier: 'A' | 'B' | 'C' | 'D' = 'C', genderRatio: number = 0, leagueYear?: number): Coach => {
   const gender = getRandomGender(genderRatio);
   const firstNames = gender === 'Male' ? COACH_FIRST_NAMES_MALE : COACH_FIRST_NAMES_FEMALE;
   const lastNames = gender === 'Male' ? NAMES_MALE.last : NAMES_FEMALE.last;
@@ -791,10 +791,13 @@ export const generateCoach = (id: string, tier: 'A' | 'B' | 'C' | 'D' = 'C', gen
 
   const salary = tier === 'A' ? 8000000 : tier === 'B' ? 5000000 : tier === 'C' ? 2000000 : 800000;
 
+  const coachAge = 35 + Math.floor(Math.random() * 40);
+  const _coachYear = leagueYear ?? new Date().getFullYear();
   return {
     id,
     name: `${firstNames[Math.floor(Math.random() * firstNames.length)]} ${lastNames[Math.floor(Math.random() * lastNames.length)]}`,
-    age: 35 + Math.floor(Math.random() * 40),
+    age: coachAge,
+    birthYear: _coachYear - coachAge,
     gender,
     role: COACH_ROLES[Math.floor(Math.random() * COACH_ROLES.length)],
     hometown: cities[Math.floor(Math.random() * cities.length)],
@@ -822,17 +825,26 @@ export const generateCoach = (id: string, tier: 'A' | 'B' | 'C' | 'D' = 'C', gen
   };
 };
 
-export const generateCoachPool = (count: number, genderRatio: number = 10): Coach[] => {
+export const generateCoachPool = (count: number, genderRatio: number = 10, leagueYear?: number): Coach[] => {
   return Array.from({ length: count }).map((_, i) => {
     const tier = i < 5 ? 'A' : i < 15 ? 'B' : i < 35 ? 'C' : 'D';
-    return generateCoach(`coach-fa-${i}`, tier, genderRatio);
+    return generateCoach(`coach-fa-${i}`, tier, genderRatio, leagueYear);
   });
 };
 
 const DAYS_IN_MONTH = [31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
-const randomBirthdate = (age: number): string => {
-  const currentYear = new Date().getFullYear();
-  const birthYear = currentYear - age - (Math.random() < 0.5 ? 1 : 0);
+
+/**
+ * Returns age as of the given league year, derived from a stored birthdate.
+ * Use this everywhere instead of reading the static `age` field.
+ */
+export const ageFromBirthdate = (birthdate: string, leagueYear: number): number => {
+  const birthYear = parseInt(birthdate?.split('-')[0] ?? '0', 10);
+  return birthYear > 0 ? Math.max(0, leagueYear - birthYear) : 0;
+};
+
+const randomBirthdate = (age: number, leagueYear: number): string => {
+  const birthYear = leagueYear - age - (Math.random() < 0.5 ? 1 : 0);
   const month = Math.floor(Math.random() * 12) + 1;
   const maxDay = month === 2 && birthYear % 4 === 0 ? 29 : DAYS_IN_MONTH[month - 1];
   const day = Math.floor(Math.random() * maxDay) + 1;
@@ -1143,7 +1155,7 @@ const applyPhysical = (attrs: AttrMap, pos: string, gender: 'Male'|'Female', hei
   return a;
 };
 
-export const generatePlayer = (id: string, ageRange: [number, number] = [19, 38], genderRatio: number = 0, draftCtx?: DraftContext): Player => {
+export const generatePlayer = (id: string, ageRange: [number, number] = [19, 38], genderRatio: number = 0, draftCtx?: DraftContext, leagueYear?: number): Player => {
   const gender = getRandomGender(genderRatio);
   
   // Pick a region based on weights
@@ -1167,6 +1179,7 @@ export const generatePlayer = (id: string, ageRange: [number, number] = [19, 38]
   const potential = Math.min(99, rating + Math.floor(Math.random() * 12));
   const pos = POSITIONS[Math.floor(Math.random() * POSITIONS.length)];
   const age = Math.floor(Math.random() * (ageRange[1] - ageRange[0]) + ageRange[0]);
+  const _leagueYear = leagueYear ?? new Date().getFullYear();
   
   const f = region.flavor;
   const getRandomAttr = (base: number, flavor: number = 0) => 
@@ -1247,7 +1260,7 @@ export const generatePlayer = (id: string, ageRange: [number, number] = [19, 38]
     tendencies: generateTendencies(pos, playerTraits),
     hometown: playerHometown,
     country: countryFromHometown(playerHometown),
-    birthdate: randomBirthdate(age), 
+    birthdate: randomBirthdate(age, _leagueYear),
     ...generateCollegeAndLeague(rating, region.id),
     draftInfo: draftCtx
       ? generateDraftInfo(rating, age, draftCtx)
@@ -1261,7 +1274,7 @@ export const generateFreeAgentPool = (count: number, season: number, genderRatio
   const usedPicks = new Map<number, Set<string>>();
   return Array.from({ length: count }).map((_, i) => {
     const draftCtx: DraftContext = { season, teamNames, usedPicks };
-    const p = generatePlayer(`fa-${season}-${i}`, [21, 36], genderRatio, draftCtx);
+    const p = generatePlayer(`fa-${season}-${i}`, [21, 36], genderRatio, draftCtx, season);
     // Skew OVR distribution: 90% → 70–82, 8% → 83–87, 2% → 88–92, none 93+
     const tierRoll = Math.random();
     const [tierMin, tierMax] = tierRoll < 0.90 ? [70, 82] : tierRoll < 0.98 ? [83, 87] : [88, 92];
@@ -1359,11 +1372,12 @@ export const generateProspects = (year: number, count: number = 100, genderRatio
     const bAttrs = gender === 'Female' ? applyFemaleAttrCaps(bAttrsRaw) : bAttrsRaw;
     const prospectTraits = getRandomTraits();
 
+    const prospectAge = ageMin + Math.floor(Math.random() * (Math.max(ageMin, ageMax) - ageMin + 1));
     const rawProspect = {
       id,
       name: `${firstNames[Math.floor(Math.random() * firstNames.length)]} ${lastNames[Math.floor(Math.random() * lastNames.length)]}`,
       gender,
-      age: ageMin + Math.floor(Math.random() * (Math.max(ageMin, ageMax) - ageMin + 1)),
+      age: prospectAge,
       position: pos,
       rating,
       potential,
@@ -1378,7 +1392,7 @@ export const generateProspects = (year: number, count: number = 100, genderRatio
       tendencies: generateTendencies(pos, prospectTraits),
       hometown: prospectHometown,
       country: countryFromHometown(prospectHometown),
-      birthdate: randomBirthdate(19 + Math.floor(Math.random() * 3)), 
+      birthdate: randomBirthdate(prospectAge, year),
       college: 'N/A',
       draftInfo: { team: "N/A", round: 0, pick: 0, year },
       careerStats: [],
@@ -1468,7 +1482,7 @@ export const generateLeagueTeams = (genderRatio: number = 0, season: number = 20
 
     const ownerGoals: OwnerGoal[] = ['Win Now', 'Rebuild', 'Profit'];
     const draftCtx: DraftContext = { season, teamNames, usedPicks };
-    const roster = Array.from({ length: 14 }).map((_, j) => generatePlayer(`p-${i}-${j}`, [19, 38], genderRatio, draftCtx));
+    const roster = Array.from({ length: 14 }).map((_, j) => generatePlayer(`p-${i}-${j}`, [19, 38], genderRatio, draftCtx, season));
 
     return {
       id: teamId,
@@ -1476,11 +1490,11 @@ export const generateLeagueTeams = (genderRatio: number = 0, season: number = 20
       city: data.city,
       roster,
       staff: {
-        headCoach: generateCoach(`coach-${teamId}-hc`, 'B', genderRatio),
-        assistantOffense: generateCoach(`coach-${teamId}-off`, 'C', genderRatio),
-        assistantDefense: generateCoach(`coach-${teamId}-def`, 'C', genderRatio),
-        assistantDev: generateCoach(`coach-${teamId}-dev`, 'C', genderRatio),
-        trainer: generateCoach(`coach-${teamId}-tr`, 'C', genderRatio)
+        headCoach: generateCoach(`coach-${teamId}-hc`, 'B', genderRatio, season),
+        assistantOffense: generateCoach(`coach-${teamId}-off`, 'C', genderRatio, season),
+        assistantDefense: generateCoach(`coach-${teamId}-def`, 'C', genderRatio, season),
+        assistantDev: generateCoach(`coach-${teamId}-dev`, 'C', genderRatio, season),
+        trainer: generateCoach(`coach-${teamId}-tr`, 'C', genderRatio, season)
       },
       staffBudget: 15000000,
       activeScheme: 'Balanced',
