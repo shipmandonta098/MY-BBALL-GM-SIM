@@ -118,6 +118,8 @@ const App: React.FC = () => {
   const [viewingBoxScore, setViewingBoxScore] = useState<{result: GameResult, home: Team, away: Team} | null>(null);
   const [viewingFranchiseId, setViewingFranchiseId] = useState<string | null>(null);
   const [bulkSummary, setBulkSummary] = useState<BulkSimSummary | null>(null);
+  const leagueRef = React.useRef<LeagueState | null>(null);
+  leagueRef.current = league;
 
   const refreshSaves = useCallback(async () => {
     const saves = await db.leagues.toArray();
@@ -1761,9 +1763,12 @@ const App: React.FC = () => {
           {activeTab === 'finances' && <Finances league={league} updateLeague={updateLeagueState} />}
           {activeTab === 'trade' && <Trade league={league} updateLeague={updateLeagueState} recordTransaction={recordTransaction} />}
           {activeTab === 'settings' && <Settings league={league} updateLeague={updateLeagueState} onRegenerateSchedule={() => {
-            if (league.schedule.some(g => g.played)) return;
-            const newSchedule = generateSeasonSchedule(league.teams, league.settings.seasonLength, league.settings.divisionGames, league.settings.conferenceGames);
-            updateLeagueState({ schedule: newSchedule, currentDay: 1 });
+            const cur = leagueRef.current;
+            if (!cur || cur.schedule.some(g => g.played)) return;
+            const newSchedule = generateSeasonSchedule(cur.teams, cur.settings.seasonLength, cur.settings.divisionGames, cur.settings.conferenceGames);
+            if (newSchedule.length > 0) {
+              setLeague(prev => prev ? { ...prev, schedule: newSchedule, currentDay: 1 } : null);
+            }
           }} />}
         </div>
       </main>

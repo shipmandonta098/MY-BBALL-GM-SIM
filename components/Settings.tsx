@@ -189,6 +189,7 @@ const Settings: React.FC<SettingsProps> = ({ league, updateLeague, onRegenerateS
   const [showSavePreset, setShowSavePreset]         = useState(false);
   const [presetName, setPresetName]                 = useState('');
   const [regenConfirm, setRegenConfirm]             = useState(false);
+  const [regenSuccess, setRegenSuccess]             = useState(false);
 
   const updateSettings = (updates: Partial<LeagueSettings>, label = '') => {
     const entries: ChangeEntry[] = Object.entries(updates).map(([k, v]) => ({
@@ -260,6 +261,8 @@ const Settings: React.FC<SettingsProps> = ({ league, updateLeague, onRegenerateS
   const handleRegen = () => {
     setRegenConfirm(false);
     onRegenerateSchedule?.();
+    setRegenSuccess(true);
+    setTimeout(() => setRegenSuccess(false), 4000);
   };
 
   // ── Cross-tab search ──────────────────────────────────────────────────────
@@ -503,6 +506,18 @@ const Settings: React.FC<SettingsProps> = ({ league, updateLeague, onRegenerateS
               className="px-5 py-2 bg-amber-500 text-slate-950 rounded-xl text-[10px] font-black uppercase">Confirm</button>
             <button onClick={() => setRegenConfirm(false)}
               className="px-5 py-2 bg-slate-700 text-slate-300 rounded-xl text-[10px] font-black uppercase">Cancel</button>
+          </div>
+        </div>
+      )}
+
+      {regenSuccess && (
+        <div className="bg-emerald-950/60 border border-emerald-500/40 rounded-2xl p-4 flex items-center gap-3 animate-in slide-in-from-top-1">
+          <svg className="w-5 h-5 text-emerald-400 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M5 13l4 4L19 7" />
+          </svg>
+          <div>
+            <p className="text-sm text-emerald-300 font-bold">Schedule regenerated!</p>
+            <p className="text-xs text-emerald-500/70 mt-0.5">A new {league.schedule.length}-game schedule has been generated. Navigate to the Schedule tab to view it.</p>
           </div>
         </div>
       )}
