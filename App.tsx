@@ -1355,7 +1355,7 @@ const App: React.FC = () => {
       const POS_DEV_KEYS: Record<string, (keyof Player['attributes'])[]> = {
         PG: ['ballHandling','passing','shooting3pt','offensiveIQ','perimeterDef'],
         SG: ['shooting3pt','shooting','shootingMid','perimeterDef','speed'],
-        SF: ['athleticism','shooting','perimeterDef','interiorDef','defReb'],
+        SF: ['speed','jumping','shooting','perimeterDef','defReb'],
         PF: ['interiorDef','defReb','offReb','postScoring','strength'],
         C:  ['interiorDef','strength','offReb','defReb','blocks'],
       };
