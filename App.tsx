@@ -1781,16 +1781,26 @@ const App: React.FC = () => {
           {activeTab === 'players' && <Players league={league} onViewPlayer={p => setSelectedPlayer(p)} />}
           {activeTab === 'finances' && <Finances league={league} updateLeague={updateLeagueState} />}
           {activeTab === 'trade' && <Trade league={league} updateLeague={updateLeagueState} recordTransaction={recordTransaction} />}
-          {activeTab === 'settings' && <Settings league={league} updateLeague={updateLeagueState} onRegenerateSchedule={() => {
-            const cur = leagueRef.current;
-            if (!cur) return;
-            // Block only when season is actively in-progress (some but not all games played)
-            const played = cur.schedule.filter(g => g.played).length;
-            const isInProgress = played > 0 && played < cur.schedule.length;
-            if (isInProgress) return;
-            const newSchedule = generateSeasonSchedule(cur.teams, cur.settings.seasonLength, cur.settings.divisionGames, cur.settings.conferenceGames);
-            if (newSchedule.length > 0) {
+          {activeTab === 'settings' && <Settings league={league} updateLeague={updateLeagueState} onRegenerateSchedule={async () => {
+            try {
+              const cur = leagueRef.current;
+              if (!cur) return false;
+              // Block only when season is in-progress (some games played, some remaining)
+              const played = cur.schedule.filter(g => g.played).length;
+              const isInProgress = played > 0 && played < cur.schedule.length;
+              if (isInProgress) return false;
+              const newSchedule = generateSeasonSchedule(
+                cur.teams,
+                cur.settings.seasonLength,
+                cur.settings.divisionGames,
+                cur.settings.conferenceGames,
+              );
+              if (!newSchedule || newSchedule.length === 0) return false;
               setLeague(prev => prev ? { ...prev, schedule: newSchedule, currentDay: 1, seasonPhase: 'Preseason' as SeasonPhase } : null);
+              return true;
+            } catch (err) {
+              console.error('Schedule regeneration error:', err);
+              return false;
             }
           }} />}
         </div>
