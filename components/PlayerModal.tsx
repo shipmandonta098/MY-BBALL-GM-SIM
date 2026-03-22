@@ -336,10 +336,11 @@ const PlayerModal: React.FC<PlayerModalProps> = ({
                         min="18" max="45"
                         value={editedPlayer.age}
                         onChange={e => {
-                          const newAge = parseInt(e.target.value) || 18;
-                          const updated: typeof editedPlayer = { ...editedPlayer, age: newAge };
+                          const raw = parseInt(e.target.value);
+                          if (isNaN(raw)) return;
+                          const updated: typeof editedPlayer = { ...editedPlayer, age: raw };
                           if (currentSeason) {
-                            const newBirthYear = currentSeason - newAge;
+                            const newBirthYear = currentSeason - raw;
                             if (editedPlayer.birthdate) {
                               const [, mm, dd] = editedPlayer.birthdate.split('-');
                               updated.birthdate = `${newBirthYear}-${mm}-${dd}`;
@@ -348,6 +349,10 @@ const PlayerModal: React.FC<PlayerModalProps> = ({
                             }
                           }
                           setEditedPlayer(updated);
+                        }}
+                        onBlur={e => {
+                          const clamped = Math.min(45, Math.max(18, editedPlayer.age || 18));
+                          if (clamped !== editedPlayer.age) setEditedPlayer({ ...editedPlayer, age: clamped });
                         }}
                         className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-3 text-white font-bold focus:outline-none focus:border-amber-500/50"
                       />
@@ -411,14 +416,10 @@ const PlayerModal: React.FC<PlayerModalProps> = ({
                     </select>
                   </div>
                   <div className="space-y-2">
-                    <label className="text-[10px] font-black uppercase text-slate-500 tracking-widest">Archetype</label>
-                    <select 
-                      value={editedPlayer.archetype}
-                      onChange={e => setEditedPlayer({...editedPlayer, archetype: e.target.value})}
-                      className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-3 text-white font-bold focus:outline-none focus:border-amber-500/50"
-                    >
-                      {archetypes.map(arc => <option key={arc} value={arc}>{arc}</option>)}
-                    </select>
+                    <label className="text-[10px] font-black uppercase text-slate-500 tracking-widest">Archetype <span className="text-slate-600 normal-case font-normal">(auto)</span></label>
+                    <div className="w-full bg-slate-900 border border-slate-800 rounded-xl px-4 py-3 text-slate-400 font-bold">
+                      {editedPlayer.archetype}
+                    </div>
                   </div>
                   <div className="space-y-2">
                     <label className="text-[10px] font-black uppercase text-slate-500 tracking-widest">Hometown / Country</label>
