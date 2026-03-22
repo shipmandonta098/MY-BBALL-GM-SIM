@@ -182,6 +182,7 @@ export interface Coach {
   id: string;
   name: string;
   age: number;
+  birthYear?: number;
   gender: Gender;
   role?: CoachRole;
   hometown: string;
