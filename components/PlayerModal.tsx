@@ -1742,24 +1742,38 @@ const PlayerModal: React.FC<PlayerModalProps> = ({
             );
           })()}
 
-          <section className="space-y-8">
+          <section className="space-y-5">
              <div className="flex items-center justify-between">
-                <h3 className="text-[10px] font-black text-amber-500 uppercase tracking-[0.5em]">Gemini Scouting analysis</h3>
-                <button 
+                <h3 className="text-[10px] font-black text-amber-500 uppercase tracking-[0.5em]">Scouting Intelligence</h3>
+                <button
                    onClick={() => onScout(player)}
                    className="px-6 py-2 bg-amber-500 hover:bg-amber-400 text-slate-950 text-[10px] font-black uppercase rounded-full transition-all"
                 >
-                   Generate intelligence
+                   {scoutingReport?.playerId === player.id ? '↺ Regenerate Intelligence' : 'Generate Intelligence'}
                 </button>
              </div>
-             <div className="bg-slate-950/50 border border-slate-800 rounded-3xl p-10 min-h-[160px]">
-                {scoutingReport?.playerId === player.id ? (
-                   <div className="text-xl md:text-2xl text-slate-300 italic leading-relaxed animate-in slide-in-from-bottom-2">
-                      {scoutingReport.report}
-                   </div>
-                ) : (
+             <div className="bg-slate-950/50 border border-slate-800 rounded-3xl p-8 min-h-[160px]">
+                {scoutingReport?.playerId === player.id ? (() => {
+                   const lines = scoutingReport.report.split('\n');
+                   const header = lines[0];
+                   const bullets = lines.filter(l => l.startsWith('•'));
+                   return (
+                      <div className="space-y-4 animate-in slide-in-from-bottom-2">
+                         <p className="text-[10px] font-black text-amber-500 uppercase tracking-[0.3em]">{header}</p>
+                         <ul className="space-y-3">
+                            {bullets.map((b, i) => (
+                               <li key={i} className="flex gap-3 text-sm text-slate-300 leading-relaxed">
+                                  <span className="text-amber-500 font-black mt-0.5 shrink-0">•</span>
+                                  <span>{b.replace(/^•\s*/, '')}</span>
+                               </li>
+                            ))}
+                         </ul>
+                      </div>
+                   );
+                })() : (
                    <div className="text-center py-10 opacity-30 italic">
                       <p className="font-display text-2xl uppercase tracking-widest">Awaiting Analysis</p>
+                      <p className="text-[10px] uppercase tracking-widest mt-2">Click Generate Intelligence to run scout report</p>
                    </div>
                 )}
              </div>
