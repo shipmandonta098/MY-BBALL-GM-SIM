@@ -1602,7 +1602,7 @@ export const generateSeasonSchedule = (
       if (teams[i].conference === teams[j].conference && teams[i].division !== teams[j].division)
         confNDPairs.push([teams[i].id, teams[j].id]);
 
-  confNDPairs.sort(() => Math.random() - 0.5); // randomise distribution
+  confNDPairs.sort((a, b) => Math.random() - 0.5 < 0 ? -1 : 1); // rough shuffle ok for small array
   const extraBudget: Record<string, number> = {};
   teams.forEach(t => { extraBudget[t.id] = confExtraPerTeam; });
   const confExtraPairs = new Set<string>();
@@ -1621,7 +1621,7 @@ export const generateSeasonSchedule = (
       if (teams[i].conference !== teams[j].conference)
         oocPairs.push([teams[i].id, teams[j].id]);
 
-  oocPairs.sort(() => Math.random() - 0.5);
+  oocPairs.sort(() => Math.random() - 0.5 < 0 ? -1 : 1);
   const oocBudget: Record<string, number> = {};
   teams.forEach(t => { oocBudget[t.id] = oocExtraPerTeam; });
   const oocExtraPairs = new Set<string>();
@@ -1672,7 +1672,16 @@ export const generateSeasonSchedule = (
     }
   });
 
-  matchupsPool.sort(() => Math.random() - 0.5);
+  // Fisher-Yates shuffle — required for large arrays; sort(() => Math.random()-0.5) is biased
+  const fyshuffle = <T,>(arr: T[]): T[] => {
+    for (let i = arr.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [arr[i], arr[j]] = [arr[j], arr[i]];
+    }
+    return arr;
+  };
+
+  fyshuffle(matchupsPool);
 
   let currentLeagueDay = 1;
   while (matchupsPool.length > 0 && currentLeagueDay < 500) {
