@@ -168,10 +168,15 @@ const PlayerModal: React.FC<PlayerModalProps> = ({
 
   const handleSave = () => {
     if (onUpdatePlayer) {
-      onUpdatePlayer(enforcePositionalBounds(editedPlayer));
+      const bounded = enforcePositionalBounds(editedPlayer);
+      onUpdatePlayer({ ...bounded, potential: derivePotential(bounded.rating, bounded.age) });
     }
     setIsEditing(false);
   };
+
+  /** Potential is auto-derived from current rating + age (not manually editable). */
+  const derivePotential = (rating: number, age: number): number =>
+    Math.min(99, Math.max(rating, Math.round(rating + Math.max(0, (27 - age)) * 1.5)));
 
   const handleAttributeChange = (key: keyof Player['attributes'], val: number) => {
     setEditedPlayer(prev => {
@@ -340,11 +345,21 @@ const PlayerModal: React.FC<PlayerModalProps> = ({
                   </div>
                   <div className="space-y-2">
                     <label className="text-[10px] font-black uppercase text-slate-500 tracking-widest">Hometown / Country</label>
-                    <input 
-                      type="text" 
+                    <input
+                      type="text"
                       value={editedPlayer.hometown}
                       onChange={e => setEditedPlayer({...editedPlayer, hometown: e.target.value})}
                       className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-3 text-white font-bold focus:outline-none focus:border-amber-500/50"
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <label className="text-[10px] font-black uppercase text-slate-500 tracking-widest">College / School</label>
+                    <input
+                      type="text"
+                      value={editedPlayer.college ?? ''}
+                      onChange={e => setEditedPlayer({...editedPlayer, college: e.target.value})}
+                      className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-3 text-white font-bold focus:outline-none focus:border-amber-500/50"
+                      placeholder="e.g. Duke, N/A"
                     />
                   </div>
                 </div>
@@ -377,44 +392,25 @@ const PlayerModal: React.FC<PlayerModalProps> = ({
 
               <div className="lg:col-span-2 space-y-8">
                 <div className="flex items-center justify-between">
-                  <h3 className="text-[10px] font-black text-amber-500 uppercase tracking-[0.5em]">Attributes & Potential</h3>
-                  <div className="flex gap-8">
+                  <h3 className="text-[10px] font-black text-amber-500 uppercase tracking-[0.5em]">Attributes & Rating</h3>
+                  {/* OVR and POT are read-only — derived from attributes and age */}
+                  <div className="flex gap-6 bg-slate-950/50 rounded-2xl px-6 py-4 border border-slate-800">
                     <div className="text-center">
                       <p className="text-[8px] font-black text-slate-500 uppercase tracking-widest mb-1">OVR</p>
-                      <p className="text-2xl font-display font-black text-white">{editedPlayer.rating}</p>
+                      <p className="text-3xl font-display font-black text-white">{editedPlayer.rating}</p>
+                      <p className="text-[8px] text-slate-600 mt-0.5">from attributes</p>
                     </div>
+                    <div className="w-px bg-slate-800 self-stretch"/>
                     <div className="text-center">
                       <p className="text-[8px] font-black text-slate-500 uppercase tracking-widest mb-1">POT</p>
-                      <p className="text-2xl font-display font-black text-amber-500">{editedPlayer.potential}</p>
+                      <p className="text-3xl font-display font-black text-amber-500">{derivePotential(editedPlayer.rating, editedPlayer.age)}</p>
+                      <p className="text-[8px] text-slate-600 mt-0.5">from rating + age</p>
                     </div>
                   </div>
                 </div>
 
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-x-12 gap-y-8">
                   <div className="space-y-6">
-                    <div className="space-y-3">
-                      <div className="flex justify-between items-center">
-                        <label className="text-[10px] font-black uppercase text-slate-400 tracking-widest">Overall Potential</label>
-                        <span className="text-amber-500 font-mono font-bold">{editedPlayer.potential}</span>
-                      </div>
-                      <input 
-                        type="range" min="0" max="99" value={editedPlayer.potential}
-                        onChange={e => setEditedPlayer({...editedPlayer, potential: parseInt(e.target.value)})}
-                        className="w-full h-1.5 bg-slate-950 rounded-lg appearance-none cursor-pointer accent-amber-500"
-                      />
-                    </div>
-                    <div className="space-y-3">
-                      <div className="flex justify-between items-center">
-                        <label className="text-[10px] font-black uppercase text-slate-400 tracking-widest">Overall Rating</label>
-                        <span className="text-white font-mono font-bold">{editedPlayer.rating}</span>
-                      </div>
-                      <input 
-                        type="range" min="0" max="99" value={editedPlayer.rating}
-                        onChange={e => setEditedPlayer({...editedPlayer, rating: parseInt(e.target.value)})}
-                        className="w-full h-1.5 bg-slate-950 rounded-lg appearance-none cursor-pointer accent-white"
-                      />
-                    </div>
-
                     <div className="h-px w-full bg-slate-800/50 my-4"></div>
 
                     {Object.entries(editedPlayer.attributes).slice(0, 12).map(([key, val]) => {
@@ -701,32 +697,6 @@ const PlayerModal: React.FC<PlayerModalProps> = ({
           <div className="absolute inset-0 bg-gradient-to-t from-slate-900 via-slate-900/40 to-transparent"></div>
           <div className="absolute bottom-8 left-10 md:bottom-10 md:left-12 flex items-end gap-8">
             <div className="text-[12rem] md:text-[14rem] font-display font-black text-white/[0.03] absolute -top-10 md:-top-20 -left-10 md:-left-16 pointer-events-none select-none">#{player.jerseyNumber}</div>
-
-            {/* Jersey avatar */}
-            {(() => {
-              const tones = ['#FDBCB4','#E8A87C','#C68642','#8D5524','#4A2E17'];
-              const skin = tones[player.name.split('').reduce((a,c)=>a+c.charCodeAt(0),0) % tones.length];
-              const jerseyNum = player.jerseyNumber != null ? String(player.jerseyNumber) : '';
-              return (
-                <div className="w-28 h-28 md:w-40 md:h-40 bg-slate-900 rounded-3xl border-4 border-slate-800 shadow-2xl relative z-10 shrink-0 overflow-hidden">
-                  <svg viewBox="0 0 100 120" xmlns="http://www.w3.org/2000/svg" className="w-full h-full">
-                    {/* Head */}
-                    <circle cx="50" cy="32" r="20" fill={skin}/>
-                    {/* Neck */}
-                    <rect x="44" y="50" width="12" height="10" fill={skin}/>
-                    {/* Jersey body */}
-                    <path d="M 20 56 L 14 72 L 24 76 L 24 120 L 76 120 L 76 76 L 86 72 L 80 56 Q 68 50 60 54 L 50 66 L 40 54 Q 32 50 20 56 Z" fill="#d97706"/>
-                    {/* V-neck collar */}
-                    <path d="M 40 54 L 50 66 L 60 54" fill="none" stroke="rgba(255,255,255,0.4)" strokeWidth="2"/>
-                    {/* Sleeve highlight */}
-                    <path d="M 14 72 L 24 76" stroke="rgba(255,255,255,0.2)" strokeWidth="1.5"/>
-                    <path d="M 86 72 L 76 76" stroke="rgba(255,255,255,0.2)" strokeWidth="1.5"/>
-                    {/* Jersey number */}
-                    <text x="50" y="104" textAnchor="middle" fill="white" fontSize="26" fontFamily="monospace" fontWeight="bold" opacity="0.9">{jerseyNum}</text>
-                  </svg>
-                </div>
-              );
-            })()}
 
             <div className="relative z-10 flex flex-col">
               <h2 className="text-5xl md:text-8xl font-display font-bold uppercase tracking-tighter text-white drop-shadow-lg leading-tight">{player.name}</h2>

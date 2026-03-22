@@ -262,41 +262,11 @@ const CoachModal: React.FC<CoachModalProps> = ({
         <div className="relative h-64 md:h-80 bg-slate-800 shrink-0">
           <div className="absolute inset-0 bg-gradient-to-t from-slate-900 via-slate-900/40 to-transparent"></div>
           <div className="absolute bottom-10 left-10 md:bottom-12 md:left-12 flex items-end gap-8">
-            {/* Coach avatar — suit (male) or dress (female) */}
-            {(() => {
-              const tones = ['#FDBCB4','#E8A87C','#C68642','#8D5524','#4A2E17'];
-              const skin = tones[coach.name.split('').reduce((a,c)=>a+c.charCodeAt(0),0) % tones.length];
-              const isFemale = coach.gender === 'Female';
-              return (
-                <div className="w-32 h-32 md:w-48 md:h-48 bg-slate-900 rounded-3xl border-4 border-slate-800 shadow-2xl relative z-10 shrink-0 overflow-hidden">
-                  <svg viewBox="0 0 100 120" xmlns="http://www.w3.org/2000/svg" className="w-full h-full">
-                    {/* Head */}
-                    <circle cx="50" cy="34" r="22" fill={skin}/>
-                    {/* Neck */}
-                    <rect x="44" y="54" width="12" height="10" fill={skin}/>
-                    {isFemale ? (
-                      <>
-                        {/* Dress — navy A-line */}
-                        <path d="M 32 62 Q 20 66 14 120 L 86 120 Q 80 66 68 62 L 50 72 Z" fill="#1e3a5f"/>
-                        {/* Dress neckline */}
-                        <path d="M 32 62 L 50 72 L 68 62" fill="none" stroke="rgba(255,255,255,0.25)" strokeWidth="1.5"/>
-                      </>
-                    ) : (
-                      <>
-                        {/* White shirt */}
-                        <path d="M 40 62 L 50 58 L 60 62 L 62 120 L 38 120 Z" fill="white"/>
-                        {/* Left lapel / suit jacket */}
-                        <path d="M 18 66 L 40 62 L 50 78 L 36 120 L 14 120 Z" fill="#1e293b"/>
-                        {/* Right lapel / suit jacket */}
-                        <path d="M 82 66 L 60 62 L 50 78 L 64 120 L 86 120 Z" fill="#1e293b"/>
-                        {/* Tie */}
-                        <path d="M 48 61 L 52 61 L 53 88 L 50 93 L 47 88 Z" fill="#b91c1c"/>
-                      </>
-                    )}
-                  </svg>
-                </div>
-              );
-            })()}
+            <div className="w-32 h-32 md:w-48 md:h-48 bg-slate-900 rounded-3xl border-4 border-slate-800 shadow-2xl relative z-10 p-4 shrink-0">
+              <div className="w-full h-full bg-slate-800 rounded-xl flex items-center justify-center font-display text-4xl md:text-6xl text-slate-600 uppercase">
+                {coach.name.charAt(0)}
+              </div>
+            </div>
             <div className="relative z-10 pb-2">
               <h2 className="text-5xl md:text-8xl font-display font-bold uppercase tracking-tighter text-white drop-shadow-lg leading-tight">{coach.name}</h2>
               <div className="flex flex-wrap items-center gap-4 mt-2">
