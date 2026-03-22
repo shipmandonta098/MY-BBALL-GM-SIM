@@ -103,7 +103,7 @@ function pickInterimCoach(
 const App: React.FC = () => {
   const [status, setStatus] = useState<AppStatus>('title');
   const [league, setLeague] = useState<LeagueState | null>(null);
-  const [activeTab, setActiveTab] = useState<'dashboard' | 'news' | 'roster' | 'rotations' | 'free_agency' | 'results' | 'standings' | 'schedule' | 'draft' | 'coaching' | 'stats' | 'finances' | 'trade' | 'expansion' | 'settings' | 'coach_market' | 'awards' | 'playoffs' | 'transactions' | 'power_rankings' | 'gm_profile' | 'team_management' | 'players' | 'allstar'>('dashboard');
+  const [activeTab, setActiveTab] = useState<'dashboard' | 'news' | 'roster' | 'rotations' | 'free_agency' | 'results' | 'standings' | 'schedule' | 'draft' | 'coaching' | 'stats' | 'finances' | 'trade' | 'expansion' | 'settings' | 'coach_market' | 'awards' | 'playoffs' | 'transactions' | 'power_rankings' | 'gm_profile' | 'team_management' | 'players' | 'allstar' | 'league_history' | 'franchise_history'>('dashboard');
   const [rosterTeamId, setRosterTeamId] = useState<string>('');
   const [teamManagementId, setTeamManagementId] = useState<string>('');
   const [loading, setLoading] = useState(false);
@@ -1638,7 +1638,7 @@ const App: React.FC = () => {
   };
   
   const handleViewRoster = (teamId: string) => { setRosterTeamId(teamId); setActiveTab('roster'); };
-  const handleViewFranchise = (teamId: string) => { setViewingFranchiseId(teamId); setActiveTab('results'); };
+  const handleViewFranchise = (teamId: string) => { setViewingFranchiseId(teamId); setActiveTab('franchise_history'); };
   const handleManageTeam = (teamId: string) => { setTeamManagementId(teamId); setActiveTab('team_management'); };
   const updateLeagueState = (updated: Partial<LeagueState> | ((prev: LeagueState) => LeagueState)) => { 
     if (!league) return; 
@@ -1757,19 +1757,36 @@ const App: React.FC = () => {
             />
           )}
           {activeTab === 'results' && (
+            <Results
+              history={league.history}
+              teams={league.teams}
+              userTeamId={league.userTeamId}
+              onViewBoxScore={(res, home, away) => setViewingBoxScore({ result: res, home, away })}
+              onViewFranchise={handleViewFranchise}
+            />
+          )}
+          {activeTab === 'league_history' && (
+            <FranchiseHistory
+              league={league}
+              initialView="league"
+              hideViewSwitcher
+            />
+          )}
+          {activeTab === 'franchise_history' && (
             viewingFranchiseId ? (
-              <FranchiseHistory 
-                league={league} 
-                initialTeamId={viewingFranchiseId} 
-                onBack={() => setViewingFranchiseId(null)} 
+              <FranchiseHistory
+                league={league}
+                initialTeamId={viewingFranchiseId}
+                initialView="franchise"
+                hideViewSwitcher
+                onBack={() => { setViewingFranchiseId(null); setActiveTab('franchise_history'); }}
               />
             ) : (
-              <Results 
-                history={league.history} 
-                teams={league.teams} 
-                userTeamId={league.userTeamId} 
-                onViewBoxScore={(res, home, away) => setViewingBoxScore({ result: res, home, away })} 
-                onViewFranchise={handleViewFranchise}
+              <FranchiseHistory
+                league={league}
+                initialTeamId={league.userTeamId}
+                initialView="franchise"
+                hideViewSwitcher
               />
             )
           )}
