@@ -1602,7 +1602,8 @@ export const generateSeasonSchedule = (
       if (teams[i].conference === teams[j].conference && teams[i].division !== teams[j].division)
         confNDPairs.push([teams[i].id, teams[j].id]);
 
-  confNDPairs.sort((a, b) => Math.random() - 0.5 < 0 ? -1 : 1); // rough shuffle ok for small array
+  // Fisher-Yates shuffle (replacing biased sort)
+  for (let i = confNDPairs.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [confNDPairs[i], confNDPairs[j]] = [confNDPairs[j], confNDPairs[i]]; }
   const extraBudget: Record<string, number> = {};
   teams.forEach(t => { extraBudget[t.id] = confExtraPerTeam; });
   const confExtraPairs = new Set<string>();
@@ -1621,7 +1622,8 @@ export const generateSeasonSchedule = (
       if (teams[i].conference !== teams[j].conference)
         oocPairs.push([teams[i].id, teams[j].id]);
 
-  oocPairs.sort(() => Math.random() - 0.5 < 0 ? -1 : 1);
+  // Fisher-Yates shuffle
+  for (let i = oocPairs.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [oocPairs[i], oocPairs[j]] = [oocPairs[j], oocPairs[i]]; }
   const oocBudget: Record<string, number> = {};
   teams.forEach(t => { oocBudget[t.id] = oocExtraPerTeam; });
   const oocExtraPairs = new Set<string>();
