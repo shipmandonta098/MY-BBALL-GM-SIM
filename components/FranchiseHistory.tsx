@@ -7,6 +7,10 @@ interface FranchiseHistoryProps {
   league: LeagueState;
   initialTeamId?: string;
   onBack?: () => void;
+  /** Controls which sub-tab opens by default. Defaults to 'franchise'. */
+  initialView?: HistoryView;
+  /** When true, hides the internal Franchise/League switcher (used when the parent nav already handles tab routing). */
+  hideViewSwitcher?: boolean;
 }
 
 interface SeasonRecord {
@@ -21,8 +25,8 @@ interface SeasonRecord {
 type HistoryView = 'franchise' | 'league';
 type LeagueSortKey = 'year' | 'champion' | 'runnerUp' | 'finalsMvp' | 'mvp' | 'dpoy' | 'smoy' | 'mip' | 'roy';
 
-const FranchiseHistory: React.FC<FranchiseHistoryProps> = ({ league, initialTeamId, onBack }) => {
-  const [historyView, setHistoryView] = useState<HistoryView>('franchise');
+const FranchiseHistory: React.FC<FranchiseHistoryProps> = ({ league, initialTeamId, onBack, initialView = 'franchise', hideViewSwitcher = false }) => {
+  const [historyView, setHistoryView] = useState<HistoryView>(initialView);
   const [selectedTeamId, setSelectedTeamId] = useState(initialTeamId || league.userTeamId);
   const [sortConfig, setSortConfig] = useState<{ key: keyof SeasonRecord; direction: 'asc' | 'desc' }>({
     key: 'year',
@@ -256,25 +260,27 @@ const FranchiseHistory: React.FC<FranchiseHistoryProps> = ({ league, initialTeam
         </div>
 
         <div className="flex flex-col gap-3 items-end">
-          {/* View switcher */}
-          <div className="flex gap-1 p-1 bg-slate-900 border border-slate-800 rounded-2xl">
-            <button
-              onClick={() => setHistoryView('franchise')}
-              className={`px-4 py-2 rounded-xl text-xs font-black uppercase tracking-widest transition-all ${
-                historyView === 'franchise' ? 'bg-amber-500 text-slate-950' : 'text-slate-400 hover:text-white'
-              }`}
-            >
-              Franchise
-            </button>
-            <button
-              onClick={() => setHistoryView('league')}
-              className={`px-4 py-2 rounded-xl text-xs font-black uppercase tracking-widest transition-all ${
-                historyView === 'league' ? 'bg-amber-500 text-slate-950' : 'text-slate-400 hover:text-white'
-              }`}
-            >
-              Season Log
-            </button>
-          </div>
+          {/* View switcher — hidden when parent nav already handles routing */}
+          {!hideViewSwitcher && (
+            <div className="flex gap-1 p-1 bg-slate-900 border border-slate-800 rounded-2xl">
+              <button
+                onClick={() => setHistoryView('franchise')}
+                className={`px-4 py-2 rounded-xl text-xs font-black uppercase tracking-widest transition-all ${
+                  historyView === 'franchise' ? 'bg-amber-500 text-slate-950' : 'text-slate-400 hover:text-white'
+                }`}
+              >
+                Franchise
+              </button>
+              <button
+                onClick={() => setHistoryView('league')}
+                className={`px-4 py-2 rounded-xl text-xs font-black uppercase tracking-widest transition-all ${
+                  historyView === 'league' ? 'bg-amber-500 text-slate-950' : 'text-slate-400 hover:text-white'
+                }`}
+              >
+                Season Log
+              </button>
+            </div>
+          )}
 
           {/* Franchise selector — only in franchise view */}
           {historyView === 'franchise' && (
