@@ -1,6 +1,7 @@
 
 import React, { useState, useMemo } from 'react';
 import { LeagueState, LeagueSettings } from '../types';
+import { getHistoricalFinancials } from '../constants';
 
 interface SettingsProps {
   league: LeagueState;
@@ -623,6 +624,38 @@ const Settings: React.FC<SettingsProps> = ({ league, updateLeague, onRegenerateS
             )}
 
             {/* Financial Rules */}
+            {(() => {
+              const startYear = s.startingYear ?? league.season;
+              const currentYear = league.season;
+              const h = getHistoricalFinancials(currentYear);
+              const noCap = s.salaryCap === 0 || s.salaryCap >= 990_000_000;
+              return (
+                <div className="col-span-full rounded-2xl border border-amber-500/20 bg-amber-500/5 px-5 py-4 space-y-2">
+                  <div className="flex items-center justify-between flex-wrap gap-2">
+                    <span className="text-[9px] font-black uppercase tracking-widest text-amber-500">
+                      📅 Season {currentYear} — {h.era}
+                    </span>
+                    {startYear !== currentYear && (
+                      <span className="text-[9px] text-slate-500 font-bold">Started: {startYear}</span>
+                    )}
+                  </div>
+                  <div className="flex flex-wrap gap-3 text-[10px] font-bold text-slate-400">
+                    <span className={noCap ? 'text-rose-400' : 'text-slate-200'}>
+                      Cap: {noCap ? 'No Salary Cap' : `$${(s.salaryCap / 1_000_000).toFixed(1)}M`}
+                    </span>
+                    <span>·</span>
+                    <span>
+                      Luxury Tax: {(!s.luxuryTaxLine || s.luxuryTaxLine === 0) ? 'None' : `$${(s.luxuryTaxLine / 1_000_000).toFixed(1)}M`}
+                    </span>
+                    <span>·</span>
+                    <span>Rookie Scale: {s.rookieScaleContracts !== false ? 'Yes' : 'No'}</span>
+                    <span>·</span>
+                    <span>Trade Match: {(s.tradeSalaryMatchPct ?? 125) === 100 ? 'Unrestricted' : `${s.tradeSalaryMatchPct ?? 125}%`}</span>
+                  </div>
+                  <p className="text-[9px] text-slate-600 italic">{h.note}</p>
+                </div>
+              );
+            })()}
             <SectionHeader title="Financial Rules" sub="Cap, tax, payroll floor, and trade matching" />
             <SelectField label="Salary Cap Type" value={s.salaryCapType ?? 'Soft Cap'}
               options={['Soft Cap','Hard Cap']}
