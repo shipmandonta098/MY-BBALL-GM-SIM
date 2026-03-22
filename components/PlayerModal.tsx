@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Player, PlayerStatus, PersonalityTrait, Position, PlayerTendencies } from '../types';
-import { getFlag, POS_ATTR_RANGES, PosAttrRangeKey, enforcePositionalBounds, FEMALE_ATTR_CAPS, NAMES_MALE, NAMES_FEMALE, COLLEGES_HIGH_MAJOR, COLLEGES_MID_MAJOR, ALL_HOMETOWNS, deriveComposites } from '../constants';
+import { getFlag, POS_ATTR_RANGES, PosAttrRangeKey, enforcePositionalBounds, FEMALE_ATTR_CAPS, NAMES_MALE, NAMES_FEMALE, COLLEGES_HIGH_MAJOR, COLLEGES_MID_MAJOR, ALL_HOMETOWNS, deriveComposites, deriveArchetype } from '../constants';
 
 const POS_RANGE_KEYS: PosAttrRangeKey[] = ['shooting', 'playmaking', 'defense', 'rebounding', 'athleticism'];
 
@@ -213,8 +213,9 @@ const PlayerModal: React.FC<PlayerModalProps> = ({
       const clamped = Math.min(val, femaleCap);
       const withSub = { ...prev.attributes, [key]: clamped };
       const withComposites = deriveComposites(withSub);
-      const updated = { ...prev, attributes: withComposites };
-      return enforcePositionalBounds(updated);
+      const bounded = enforcePositionalBounds({ ...prev, attributes: withComposites });
+      const archetype = deriveArchetype(bounded.position, bounded.attributes as Record<string, number>, bounded.rating);
+      return { ...bounded, archetype };
     });
   };
 
@@ -598,8 +599,8 @@ const PlayerModal: React.FC<PlayerModalProps> = ({
                     <div className="grid grid-cols-2 gap-4">
                       <div className="space-y-2">
                         <label className="text-[10px] font-black uppercase text-slate-500 tracking-widest">Draft Year</label>
-                        <input 
-                          type="number" 
+                        <input
+                          type="number"
                           value={editedPlayer.draftInfo.year}
                           onChange={e => handleDraftInfoChange('year', parseInt(e.target.value))}
                           className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-3 text-white font-bold focus:outline-none focus:border-amber-500/50"
@@ -607,11 +608,32 @@ const PlayerModal: React.FC<PlayerModalProps> = ({
                       </div>
                       <div className="space-y-2">
                         <label className="text-[10px] font-black uppercase text-slate-500 tracking-widest">Draft Round</label>
-                        <input 
-                          type="number" 
-                          min="1" max="2"
+                        <input
+                          type="number"
+                          min="0" max="2"
                           value={editedPlayer.draftInfo.round}
                           onChange={e => handleDraftInfoChange('round', parseInt(e.target.value))}
+                          className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-3 text-white font-bold focus:outline-none focus:border-amber-500/50"
+                        />
+                      </div>
+                    </div>
+                    <div className="grid grid-cols-2 gap-4">
+                      <div className="space-y-2">
+                        <label className="text-[10px] font-black uppercase text-slate-500 tracking-widest">Draft Pick</label>
+                        <input
+                          type="number"
+                          min="0" max="60"
+                          value={editedPlayer.draftInfo.pick}
+                          onChange={e => handleDraftInfoChange('pick', parseInt(e.target.value))}
+                          className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-3 text-white font-bold focus:outline-none focus:border-amber-500/50"
+                        />
+                      </div>
+                      <div className="space-y-2">
+                        <label className="text-[10px] font-black uppercase text-slate-500 tracking-widest">Draft Team</label>
+                        <input
+                          type="text"
+                          value={editedPlayer.draftInfo.team}
+                          onChange={e => handleDraftInfoChange('team', e.target.value)}
                           className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-3 text-white font-bold focus:outline-none focus:border-amber-500/50"
                         />
                       </div>

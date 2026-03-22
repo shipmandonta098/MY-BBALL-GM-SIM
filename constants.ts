@@ -236,7 +236,7 @@ export const POS_ATTR_RANGES: Record<Position, Record<PosAttrRangeKey, [number, 
 // ── Granular per-attribute hard caps & floors ────────────────────────────────
 type AttrBounds = Partial<Record<keyof Player['attributes'], number>>;
 export const POSITION_HARD_CAPS: Record<Position, AttrBounds> = {
-  PG: { blocks: 55, interiorDef: 58, offReb: 52, defReb: 65, postScoring: 60, strength: 68, layups: 65, dunks: 55 },
+  PG: { blocks: 55, interiorDef: 58, offReb: 52, defReb: 65, postScoring: 60, strength: 68 },
   SG: { blocks: 62, interiorDef: 65, offReb: 58, defReb: 68, postScoring: 65, strength: 72 },
   SF: { blocks: 75, interiorDef: 78, offReb: 74, defReb: 78, shooting3pt: 92, strength: 80 },
   PF: { shooting3pt: 82, ballHandling: 74, speed: 80, perimeterDef: 78, passing: 75 },
@@ -1104,6 +1104,70 @@ const assignArchetype = (pos: Position, attrs: Record<string, number>, rating: n
     if (r2 <= 0) return arch;
   }
   return clamped[clamped.length - 1][0];
+};
+
+/** Deterministic archetype derivation — picks highest-weight archetype for the given position + attributes. */
+export const deriveArchetype = (pos: Position, attrs: Record<string, number>, rating: number): string => {
+  const sht  = attrs.shooting3pt ?? 50;
+  const def  = attrs.defense ?? 50;
+  const blk  = attrs.blocks ?? 50;
+  const bh   = attrs.ballHandling ?? 50;
+  const pass = attrs.passing ?? 50;
+  const post = attrs.postScoring ?? 50;
+  const ath  = attrs.athleticism ?? 50;
+  const pDef = attrs.perimeterDef ?? 50;
+  const shooting = attrs.shooting ?? 50;
+
+  const w: [string, number][] = [];
+
+  if (pos === 'PG') {
+    w.push(['Playmaking Guard', 30 + (bh + pass - 100) * 0.15]);
+    w.push(['Pure Scorer',      20 + shooting * 0.10]);
+    w.push(['Lockdown Defender', 8 + (pDef + def - 100) * 0.08]);
+    w.push(['Bench Spark',       8]);
+    w.push(['Role Player',       6]);
+    w.push(['Hybrid Star',       rating >= 82 ? 15 : 3]);
+    w.push(['Two-Way Forward',   5]);
+    w.push(['3&D Wing',          8 + sht * 0.06]);
+  } else if (pos === 'SG') {
+    w.push(['Pure Scorer',      25 + shooting * 0.12]);
+    w.push(['3&D Wing',         22 + sht * 0.08]);
+    w.push(['Playmaking Guard', 12 + (bh + pass - 100) * 0.08]);
+    w.push(['Lockdown Defender', 8 + (pDef + def - 100) * 0.08]);
+    w.push(['Bench Spark',       8]);
+    w.push(['Hybrid Star',       rating >= 82 ? 12 : 3]);
+    w.push(['Role Player',       6]);
+    w.push(['Two-Way Forward',   9 + (def + ath - 100) * 0.04]);
+  } else if (pos === 'SF') {
+    w.push(['3&D Wing',          25 + sht * 0.07]);
+    w.push(['Two-Way Forward',   20 + (def + ath - 100) * 0.08]);
+    w.push(['Pure Scorer',       14 + shooting * 0.06]);
+    w.push(['Lockdown Defender', 10 + (pDef + def - 100) * 0.08]);
+    w.push(['Hybrid Star',       rating >= 82 ? 12 : 3]);
+    w.push(['Bench Spark',        6]);
+    w.push(['Role Player',        8]);
+    w.push(['Stretch Big',        5 + sht * 0.03]);
+  } else if (pos === 'PF') {
+    w.push(['Stretch Big',       22 + sht * 0.09]);
+    w.push(['Two-Way Forward',   18 + (def + ath - 100) * 0.06]);
+    w.push(['Rim Protector',     15 + (blk + def - 100) * 0.10]);
+    w.push(['Lockdown Defender', 10 + (def - 50) * 0.08]);
+    w.push(['Pure Scorer',        8 + post * 0.05]);
+    w.push(['Hybrid Star',        rating >= 82 ? 10 : 2]);
+    w.push(['Role Player',        8]);
+    w.push(['Bench Spark',        5]);
+  } else {
+    w.push(['Rim Protector',     30 + (blk + def - 100) * 0.12]);
+    w.push(['Stretch Big',       18 + sht * 0.08]);
+    w.push(['Two-Way Forward',   12 + (def + ath - 100) * 0.05]);
+    w.push(['Lockdown Defender',  8 + (def - 50) * 0.06]);
+    w.push(['Pure Scorer',        6 + post * 0.06]);
+    w.push(['Role Player',        10]);
+    w.push(['Bench Spark',         6]);
+    w.push(['Hybrid Star',        rating >= 82 ? 8 : 2]);
+  }
+
+  return w.reduce((best, cur) => (cur[1] > best[1] ? cur : best), w[0])[0];
 };
 
 type AttrMap = Record<string, number>;
