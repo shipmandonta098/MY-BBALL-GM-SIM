@@ -1534,19 +1534,89 @@ export const generateSeasonSchedule = (
     pairings[id2][id1] = (pairings[id2][id1] || 0) + 1;
   };
 
-  // Build the pool to have EXACTLY numGames per team
-  // Proximity-based filling
+  // ── Infer league structure from team data ─────────────────────────────────
+  const divMap: Record<string, string[]>  = {};
+  const confMap: Record<string, string[]> = {};
+  teams.forEach(t => {
+    (divMap[t.division]   ??= []).push(t.id);
+    (confMap[t.conference] ??= []).push(t.id);
+  });
+  const divSizes  = Object.values(divMap).map(d => d.length);
+  const confSizes = Object.values(confMap).map(c => c.length);
+  const medDivSize  = divSizes.sort((a,b)=>a-b)[Math.floor(divSizes.length/2)]   || 5;
+  const medConfSize = confSizes.sort((a,b)=>a-b)[Math.floor(confSizes.length/2)] || 15;
+  const divOpp      = Math.max(1, medDivSize - 1);            // e.g., 4
+  const confNDOpp   = Math.max(1, medConfSize - medDivSize);  // e.g., 10
+  const oocOpp      = Math.max(1, teams.length - medConfSize);// e.g., 15
+
+  // ── Convert per-team totals → per-pair game counts ────────────────────────
+  // divisionGamesCount / conferenceGamesCount are TOTAL per-team season counts,
+  // not per-pair. e.g., 16 div games / 4 opponents = 4 games per div pair.
+  const totalDiv  = numGames >= 80 ? (divisionGamesCount  ?? 16) : 0;
+  const totalConf = numGames >= 80 ? (conferenceGamesCount ?? 36) : 0;
+  const totalOoc  = Math.max(0, numGames - totalDiv - totalConf); // e.g., 30
+
+  const divPP   = Math.max(1, Math.round(totalDiv / divOpp));     // 16/4 = 4
+  const confPP  = Math.max(1, Math.floor(totalConf / confNDOpp)); // 36/10 = 3
+  const confExtraPerTeam = Math.max(0, totalConf - confPP * confNDOpp); // 6
+  const oocPP   = Math.max(1, Math.floor(totalOoc / oocOpp));     // 30/15 = 2
+  const oocExtraPerTeam  = Math.max(0, totalOoc - oocPP * oocOpp);
+
+  // ── Determine which conference non-div pairs get +1 game ──────────────────
+  // Each team should have exactly confExtraPerTeam opponents at confPP+1.
+  const confNDPairs: [string, string][] = [];
+  for (let i = 0; i < teams.length; i++)
+    for (let j = i + 1; j < teams.length; j++)
+      if (teams[i].conference === teams[j].conference && teams[i].division !== teams[j].division)
+        confNDPairs.push([teams[i].id, teams[j].id]);
+
+  confNDPairs.sort(() => Math.random() - 0.5); // randomise distribution
+  const extraBudget: Record<string, number> = {};
+  teams.forEach(t => { extraBudget[t.id] = confExtraPerTeam; });
+  const confExtraPairs = new Set<string>();
+  confNDPairs.forEach(([a, b]) => {
+    if ((extraBudget[a] ?? 0) > 0 && (extraBudget[b] ?? 0) > 0) {
+      confExtraPairs.add(`${a}|${b}`);
+      extraBudget[a]--;
+      extraBudget[b]--;
+    }
+  });
+
+  // Same for out-of-conference extra pairs
+  const oocPairs: [string, string][] = [];
+  for (let i = 0; i < teams.length; i++)
+    for (let j = i + 1; j < teams.length; j++)
+      if (teams[i].conference !== teams[j].conference)
+        oocPairs.push([teams[i].id, teams[j].id]);
+
+  oocPairs.sort(() => Math.random() - 0.5);
+  const oocBudget: Record<string, number> = {};
+  teams.forEach(t => { oocBudget[t.id] = oocExtraPerTeam; });
+  const oocExtraPairs = new Set<string>();
+  oocPairs.forEach(([a, b]) => {
+    if ((oocBudget[a] ?? 0) > 0 && (oocBudget[b] ?? 0) > 0) {
+      oocExtraPairs.add(`${a}|${b}`);
+      oocBudget[a]--;
+      oocBudget[b]--;
+    }
+  });
+
+  // ── Build the matchup pool ─────────────────────────────────────────────────
   for (let i = 0; i < teams.length; i++) {
     for (let j = i + 1; j < teams.length; j++) {
       const t1 = teams[i];
       const t2 = teams[j];
-      let count = 0;
+      let count: number;
       if (numGames >= 80) {
-        const divG  = divisionGamesCount  ?? 4;
-        const confG = conferenceGamesCount ?? 3;
-        if (t1.division === t2.division) count = divG;
-        else if (t1.conference === t2.conference) count = Math.max(1, confG);
-        else count = 2;
+        if (t1.division === t2.division) {
+          count = divPP;
+        } else if (t1.conference === t2.conference) {
+          const key = `${t1.id}|${t2.id}`;
+          count = confPP + (confExtraPairs.has(key) ? 1 : 0);
+        } else {
+          const key = `${t1.id}|${t2.id}`;
+          count = oocPP + (oocExtraPairs.has(key) ? 1 : 0);
+        }
       } else {
         count = 1;
       }
@@ -1558,7 +1628,7 @@ export const generateSeasonSchedule = (
     }
   }
 
-  // Fill remainders greedy
+  // Fill any remaining gaps (rounding edge cases) greedily
   const allTeamIds = teams.map(t => t.id);
   allTeamIds.forEach(id => {
     while (teamGamesCountTotal[id] < numGames) {
