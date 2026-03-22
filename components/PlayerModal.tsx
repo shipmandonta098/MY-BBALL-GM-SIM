@@ -334,7 +334,20 @@ const PlayerModal: React.FC<PlayerModalProps> = ({
                         type="number"
                         min="18" max="45"
                         value={editedPlayer.age}
-                        onChange={e => setEditedPlayer({...editedPlayer, age: parseInt(e.target.value)})}
+                        onChange={e => {
+                          const newAge = parseInt(e.target.value) || 18;
+                          const updated: typeof editedPlayer = { ...editedPlayer, age: newAge };
+                          if (currentSeason) {
+                            const newBirthYear = currentSeason - newAge;
+                            if (editedPlayer.birthdate) {
+                              const [, mm, dd] = editedPlayer.birthdate.split('-');
+                              updated.birthdate = `${newBirthYear}-${mm}-${dd}`;
+                            } else {
+                              updated.birthdate = `${newBirthYear}-06-15`;
+                            }
+                          }
+                          setEditedPlayer(updated);
+                        }}
                         className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-3 text-white font-bold focus:outline-none focus:border-amber-500/50"
                       />
                     </div>
