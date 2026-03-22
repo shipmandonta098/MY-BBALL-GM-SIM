@@ -29,6 +29,8 @@ interface PlayerModalProps {
     seasonLength: number;
     currentTeamAbbreviation?: string;
   };
+  /** All team names for the draft-team dropdown in god mode */
+  teams?: string[];
 }
 
 const traitIcons: Record<PersonalityTrait, string> = {
@@ -62,6 +64,7 @@ const PlayerModal: React.FC<PlayerModalProps> = ({
   careerAwards = [],
   currentSeason,
   leagueContext,
+  teams = [],
 }) => {
   const [isEditing, setIsEditing] = React.useState(false);
   const [statsTab, setStatsTab] = useState<'season' | 'career' | 'advanced'>('season');
@@ -631,12 +634,16 @@ const PlayerModal: React.FC<PlayerModalProps> = ({
                       </div>
                       <div className="space-y-2">
                         <label className="text-[10px] font-black uppercase text-slate-500 tracking-widest">Draft Team</label>
-                        <input
-                          type="text"
+                        <select
                           value={editedPlayer.draftInfo.team}
                           onChange={e => handleDraftInfoChange('team', e.target.value)}
                           className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-3 text-white font-bold focus:outline-none focus:border-amber-500/50"
-                        />
+                        >
+                          <option value="Undrafted">Undrafted</option>
+                          {teams.map(name => (
+                            <option key={name} value={name}>{name}</option>
+                          ))}
+                        </select>
                       </div>
                     </div>
                   </div>
