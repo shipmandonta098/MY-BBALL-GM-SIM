@@ -20,6 +20,7 @@ interface SeasonRecord {
   winPct: string;
   playoffResult: string;
   isChampion: boolean;
+  coach: string;
 }
 
 type HistoryView = 'franchise' | 'league';
@@ -44,6 +45,47 @@ const FranchiseHistory: React.FC<FranchiseHistoryProps> = ({ league, initialTeam
 
   // ─── Franchise-view data ────────────────────────────────────────────────────
 
+  /** Parse a coach name out of a hiring transaction description. */
+  const parseCoachName = (desc: string): string => {
+    const m = desc.match(/(?:hired|named|promoted)\s+(.+?)\s+(?:as\s|to\s|Interim)/i);
+    if (m?.[1]) return m[1].trim();
+    // Fallback: strip team name prefix and trailing "Head Coach." suffix
+    return desc.replace(/\.$/, '').split(' ').slice(1, -3).join(' ') || '—';
+  };
+
+  /**
+   * Build a Map<seasonYear, coachName> using chronological hiring events.
+   * We sort hirings by realTimestamp (wall-clock order) and assign them to
+   * seasons proportionally, since game timestamps reset each season and
+   * cannot be used to identify which season a hiring occurred in.
+   */
+  const coachBySeason = useMemo(() => {
+    const result = new Map<number, string>();
+    const hirings = (league.transactions ?? [])
+      .filter(tx => tx.type === 'hiring' && tx.teamIds.includes(selectedTeamId))
+      .sort((a, b) => a.realTimestamp - b.realTimestamp);
+
+    const sortedYears = [...(league.history.map(g => g.season)).concat([league.season])]
+      .filter((y, i, arr) => arr.indexOf(y) === i)
+      .sort((a, b) => a - b);
+
+    sortedYears.forEach((year, idx) => {
+      if (hirings.length === 0) {
+        result.set(year, selectedTeam.staff?.headCoach?.name ?? '—');
+        return;
+      }
+      // Proportionally map season index to hiring index
+      const hiringIdx = Math.min(hirings.length - 1, Math.floor(idx * hirings.length / sortedYears.length));
+      result.set(year, parseCoachName(hirings[hiringIdx].description));
+    });
+
+    // Always use actual live coach for the current season
+    const currentCoach = selectedTeam.staff?.headCoach?.name;
+    if (currentCoach) result.set(league.season, currentCoach);
+
+    return result;
+  }, [league.transactions, league.history, league.season, selectedTeamId, selectedTeam]);
+
   const seasonRecords = useMemo(() => {
     const records: SeasonRecord[] = [];
     const seasons: number[] = Array.from<number>(new Set(league.history.map(g => g.season))).sort((a: number, b: number) => b - a);
@@ -67,10 +109,16 @@ const FranchiseHistory: React.FC<FranchiseHistoryProps> = ({ league, initialTeam
       }
 
       const winPct = (wins + losses > 0) ? (wins / (wins + losses)).toFixed(3) : '.000';
-      let playoffResult = 'Missed Playoffs';
       const isChampion = league.championshipHistory?.some(c => c.year === year && c.championId === selectedTeamId) || false;
+      const seasonComplete = league.championshipHistory?.some(c => c.year === year) ||
+                             (year < league.season) ||
+                             (year === league.season && league.isOffseason);
 
-      if (isChampion) {
+      let playoffResult: string;
+      if (!seasonComplete) {
+        // Season has not concluded yet — don't assume missed playoffs
+        playoffResult = wins + losses === 0 ? 'Not Started' : 'In Progress';
+      } else if (isChampion) {
         playoffResult = 'Won Championship';
       } else {
         const runnerUp = league.championshipHistory?.find(c => c.year === year && c.runnerUpId === selectedTeamId);
@@ -78,14 +126,17 @@ const FranchiseHistory: React.FC<FranchiseHistoryProps> = ({ league, initialTeam
           playoffResult = 'Lost Finals';
         } else if (league.awardHistory?.find(a => a.year === year)) {
           playoffResult = wins + losses >= 82 && wins > 41 ? 'Playoffs' : 'Missed Playoffs';
+        } else {
+          playoffResult = 'Missed Playoffs';
         }
       }
 
-      records.push({ year, wins, losses, winPct, playoffResult, isChampion });
+      const coach = coachBySeason.get(year) ?? '—';
+      records.push({ year, wins, losses, winPct, playoffResult, isChampion, coach });
     });
 
     return records;
-  }, [league.history, league.season, league.championshipHistory, selectedTeamId, selectedTeam, league.awardHistory]);
+  }, [league.history, league.season, league.championshipHistory, selectedTeamId, selectedTeam, league.awardHistory, league.isOffseason, coachBySeason]);
 
   const sortedRecords = useMemo(() => {
     const sorted = [...seasonRecords];
@@ -108,7 +159,7 @@ const FranchiseHistory: React.FC<FranchiseHistoryProps> = ({ league, initialTeam
     const endYear = league.season;
     return {
       totalWins, totalLosses, winPct, championships, playoffApps,
-      years: `${seasonRecords.length}; ${startYear}-${(startYear+1).toString().slice(-2)} to ${endYear}-${(endYear+1).toString().slice(-2)}`
+      years: `${seasonRecords.length}; ${startYear-1}-${startYear.toString().slice(-2)} to ${endYear-1}-${endYear.toString().slice(-2)}`
     };
   }, [seasonRecords, league.season]);
 
@@ -142,12 +193,12 @@ const FranchiseHistory: React.FC<FranchiseHistoryProps> = ({ league, initialTeam
     (league.championshipHistory ?? []).forEach(c => {
       const day = c.year * 82;
       if (c.championId === selectedTeamId)
-        events.push({ day, icon: '🏆', label: `Season ${c.year} — Won Championship (${c.seriesScore} vs ${c.runnerUpName})`, colour: 'text-amber-400' });
+        events.push({ day, icon: '🏆', label: `${c.year-1}-${c.year.toString().slice(-2)} — Won Championship (${c.seriesScore} vs ${c.runnerUpName})`, colour: 'text-amber-400' });
       else if (c.runnerUpId === selectedTeamId)
-        events.push({ day, icon: '🥈', label: `Season ${c.year} — Lost Finals vs ${c.championName}`, colour: 'text-slate-300' });
+        events.push({ day, icon: '🥈', label: `${c.year-1}-${c.year.toString().slice(-2)} — Lost Finals vs ${c.championName}`, colour: 'text-slate-300' });
     });
     teamAwards.forEach(a =>
-      events.push({ day: a.year * 82, icon: a.icon, label: `Season ${a.year} — ${a.name} wins ${a.award} (${a.statsLabel})`, colour: 'text-slate-300' })
+      events.push({ day: a.year * 82, icon: a.icon, label: `${a.year-1}-${a.year.toString().slice(-2)} — ${a.name} wins ${a.award} (${a.statsLabel})`, colour: 'text-slate-300' })
     );
     coachHistory.forEach(tx =>
       events.push({ day: tx.timestamp, icon: tx.type === 'hiring' ? '✅' : '🚫', label: tx.description, colour: tx.type === 'hiring' ? 'text-emerald-400' : 'text-rose-400' })
@@ -358,12 +409,13 @@ const FranchiseHistory: React.FC<FranchiseHistoryProps> = ({ league, initialTeam
                 <thead>
                   <tr className="bg-slate-950/50 text-[10px] font-black text-slate-500 uppercase tracking-widest">
                     <th className="px-8 py-4 cursor-pointer hover:text-white transition-colors" onClick={() => handleSort('year')}>
-                      <div className="flex items-center gap-2">Year {sortConfig.key === 'year' && (sortConfig.direction === 'desc' ? <ChevronDown size={12} /> : <ChevronUp size={12} />)}</div>
+                      <div className="flex items-center gap-2">Season {sortConfig.key === 'year' && (sortConfig.direction === 'desc' ? <ChevronDown size={12} /> : <ChevronUp size={12} />)}</div>
                     </th>
                     <th className="px-8 py-4">Record (W-L)</th>
                     <th className="px-8 py-4 cursor-pointer hover:text-white transition-colors" onClick={() => handleSort('winPct')}>
                       <div className="flex items-center gap-2">Win % {sortConfig.key === 'winPct' && (sortConfig.direction === 'desc' ? <ChevronDown size={12} /> : <ChevronUp size={12} />)}</div>
                     </th>
+                    <th className="px-8 py-4">Coach</th>
                     <th className="px-8 py-4">Playoff Result</th>
                   </tr>
                 </thead>
@@ -374,15 +426,18 @@ const FranchiseHistory: React.FC<FranchiseHistoryProps> = ({ league, initialTeam
                       className={`group transition-colors ${record.isChampion ? 'bg-amber-500/10 hover:bg-amber-500/20' : 'hover:bg-slate-800/30'}`}
                     >
                       <td className="px-8 py-5 font-display font-bold text-white text-lg">
-                        {record.year}-{(record.year+1).toString().slice(-2)}
+                        {record.year-1}-{record.year.toString().slice(-2)}
                       </td>
                       <td className="px-8 py-5 font-mono text-slate-300">{record.wins}-{record.losses}</td>
                       <td className="px-8 py-5 font-mono text-slate-400">{record.winPct}</td>
+                      <td className="px-8 py-5 text-sm text-slate-300 font-medium">{record.coach}</td>
                       <td className="px-8 py-5">
                         <span className={`px-4 py-1 rounded-full text-[10px] font-black uppercase tracking-widest ${
                           record.isChampion ? 'bg-amber-500 text-slate-950' :
                           record.playoffResult === 'Lost Finals' ? 'bg-slate-700 text-white' :
                           record.playoffResult === 'Playoffs' ? 'bg-slate-800 text-slate-300' :
+                          record.playoffResult === 'In Progress' ? 'bg-blue-900/60 text-blue-300 border border-blue-700/50' :
+                          record.playoffResult === 'Not Started' ? 'text-slate-700' :
                           'text-slate-600'
                         }`}>
                           {record.playoffResult}
@@ -410,7 +465,7 @@ const FranchiseHistory: React.FC<FranchiseHistoryProps> = ({ league, initialTeam
                       <p className="font-display font-bold text-white uppercase text-sm">{a.name}</p>
                       <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest">{a.award} · {a.statsLabel}</p>
                     </div>
-                    <span className="font-mono text-xs text-amber-500 font-bold">Season {a.year}</span>
+                    <span className="font-mono text-xs text-amber-500 font-bold">{a.year-1}-{a.year.toString().slice(-2)}</span>
                   </div>
                 ))}
               </div>
@@ -539,7 +594,7 @@ const FranchiseHistory: React.FC<FranchiseHistoryProps> = ({ league, initialTeam
                                   className={`text-slate-600 transition-transform shrink-0 ${isExpanded ? 'rotate-90 text-amber-500' : 'group-hover:text-slate-400'}`}
                                 />
                                 <span className="font-display font-bold text-white text-base">
-                                  {row.year}-{(row.year + 1).toString().slice(-2)}
+                                  {row.year-1}-{row.year.toString().slice(-2)}
                                 </span>
                                 {userInvolved && (
                                   <span className={`px-1.5 py-0.5 rounded text-[8px] font-black uppercase tracking-widest ${
