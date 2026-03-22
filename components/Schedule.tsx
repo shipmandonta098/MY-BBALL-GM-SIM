@@ -9,9 +9,10 @@ interface ScheduleProps {
   onWatchLive?: (gameId: string) => void;
   onViewBoxScore: (result: GameResult, home: Team, away: Team) => void;
   onManageTeam?: (teamId: string) => void;
+  onAdvanceToRegularSeason?: () => void;
 }
 
-const Schedule: React.FC<ScheduleProps> = ({ league, onSimulate, onScout, onWatchLive, onViewBoxScore, onManageTeam }) => {
+const Schedule: React.FC<ScheduleProps> = ({ league, onSimulate, onScout, onWatchLive, onViewBoxScore, onManageTeam, onAdvanceToRegularSeason }) => {
   const [viewMode, setViewMode] = useState<'team' | 'league'>('team');
   const [selectedTeamId, setSelectedTeamId] = useState<string>(league.userTeamId);
   const [selectedDay, setSelectedDay] = useState<number>(league.currentDay);
@@ -365,8 +366,33 @@ const Schedule: React.FC<ScheduleProps> = ({ league, onSimulate, onScout, onWatc
     );
   };
 
+  const isPreseason = league.seasonPhase === 'Preseason' && !league.schedule.some(g => g.played);
+
   return (
     <div className="space-y-8 animate-in fade-in duration-500 pb-40">
+
+      {/* ── Preseason banner ── */}
+      {isPreseason && onAdvanceToRegularSeason && (
+        <div className="bg-gradient-to-br from-amber-900/30 to-slate-900 border border-amber-500/30 rounded-[2rem] p-7 flex flex-col sm:flex-row items-center justify-between gap-5 shadow-xl animate-in slide-in-from-top-2">
+          <div className="space-y-1">
+            <p className="text-[10px] font-black uppercase tracking-[0.5em] text-amber-500">⏸ Preseason</p>
+            <h2 className="text-xl font-display font-black text-white uppercase">Schedule Generated — Season Not Started</h2>
+            <p className="text-slate-400 text-xs leading-relaxed">
+              Regenerate the schedule in <span className="text-slate-300 font-bold">Settings → League</span>, or lock it in and advance to the regular season now.
+            </p>
+          </div>
+          <button
+            onClick={onAdvanceToRegularSeason}
+            className="shrink-0 px-8 py-4 bg-amber-500 hover:bg-amber-400 active:scale-95 text-slate-950 font-display font-black uppercase text-sm rounded-2xl transition-all shadow-lg shadow-amber-500/20 flex items-center gap-2 whitespace-nowrap"
+          >
+            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M13 9l3 3m0 0l-3 3m3-3H8m13 0a9 9 0 11-18 0 9 9 0 0118 0z" />
+            </svg>
+            Advance to Regular Season
+          </button>
+        </div>
+      )}
+
       <header className="bg-slate-900 border border-slate-800 rounded-[2.5rem] p-8 shadow-2xl relative overflow-hidden">
         <div className="absolute top-0 right-0 w-80 h-80 bg-amber-500/5 blur-[100px] rounded-full -mr-40 -mt-40"></div>
         

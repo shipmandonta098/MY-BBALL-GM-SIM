@@ -11,6 +11,7 @@ interface DashboardProps {
   setActiveTab: (tab: any) => void;
   onViewRoster: (teamId: string) => void;
   onManageTeam: (teamId: string) => void;
+  onAdvanceToRegularSeason?: () => void;
 }
 
 const CircularGauge = ({ value, label, color, size = 80 }: { value: number, label: string, color: string, size?: number }) => {
@@ -53,7 +54,7 @@ const CircularGauge = ({ value, label, color, size = 80 }: { value: number, labe
   );
 };
 
-const Dashboard: React.FC<DashboardProps> = ({ league, news, onSimulate, onScout, scoutingReport, setActiveTab, onViewRoster, onManageTeam }) => {
+const Dashboard: React.FC<DashboardProps> = ({ league, news, onSimulate, onScout, scoutingReport, setActiveTab, onViewRoster, onManageTeam, onAdvanceToRegularSeason }) => {
   const userTeam = league.teams.find(t => t.id === league.userTeamId)!;
   const opponents = league.teams.filter(t => t.id !== userTeam.id);
   const nextOpponent = opponents[league.currentDay % opponents.length];
@@ -463,6 +464,38 @@ const Dashboard: React.FC<DashboardProps> = ({ league, news, onSimulate, onScout
 
         {/* Right Panel: Quick Actions & News */}
         <div className="space-y-8">
+
+          {/* ── Preseason Banner ── */}
+          {(league.seasonPhase === 'Preseason' || (league.isOffseason && league.draftPhase === 'completed')) && onAdvanceToRegularSeason && (
+            <div className="bg-gradient-to-br from-amber-900/30 to-slate-900 border border-amber-500/30 rounded-3xl p-6 shadow-2xl animate-in slide-in-from-top-2">
+              <div className="flex items-center gap-3 mb-4">
+                <span className="text-2xl">🏀</span>
+                <div>
+                  <p className="text-[10px] font-black uppercase tracking-[0.4em] text-amber-500">
+                    {league.isOffseason ? 'Offseason Complete' : 'Preseason'}
+                  </p>
+                  <h3 className="text-lg font-display font-black text-white uppercase">
+                    {league.isOffseason ? 'Ready to Tip Off' : 'Season Locked & Loaded'}
+                  </h3>
+                </div>
+              </div>
+              <p className="text-slate-400 text-xs mb-5 leading-relaxed">
+                {league.isOffseason
+                  ? 'Draft and free agency are complete. Generate a fresh schedule and begin the new season.'
+                  : 'A schedule has been generated. You can regenerate it in Settings → League, or advance to start the regular season now.'}
+              </p>
+              <button
+                onClick={onAdvanceToRegularSeason}
+                className="w-full py-4 bg-amber-500 hover:bg-amber-400 active:scale-95 text-slate-950 font-display font-black uppercase text-sm rounded-2xl transition-all shadow-lg shadow-amber-500/20 flex items-center justify-center gap-2"
+              >
+                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M13 9l3 3m0 0l-3 3m3-3H8m13 0a9 9 0 11-18 0 9 9 0 0118 0z" />
+                </svg>
+                Advance to Regular Season
+              </button>
+            </div>
+          )}
+
           <section className="bg-slate-900 border border-slate-800 rounded-3xl p-6 shadow-2xl">
             <h3 className="text-xs font-black uppercase tracking-[0.2em] text-slate-500 mb-6 pb-2 border-b border-slate-800">Simulation Hub</h3>
             <div className="space-y-3">

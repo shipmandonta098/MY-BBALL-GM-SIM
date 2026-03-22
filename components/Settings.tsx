@@ -203,8 +203,11 @@ const Settings: React.FC<SettingsProps> = ({ league, updateLeague, onRegenerateS
 
   const s = league.settings;
   const inSeason = !league.isOffseason;
-  // True once any game has been played — schedule can no longer be regenerated
-  const anyGamePlayed = league.schedule.some(g => g.played);
+  // Locked only when a season is actively IN-PROGRESS (some but not all games played).
+  // If all games are played (leftover from previous season) or none are played (fresh preseason)
+  // the schedule can still be regenerated.
+  const playedCount = league.schedule.filter(g => g.played).length;
+  const anyGamePlayed = playedCount > 0 && playedCount < league.schedule.length;
 
   // ── Locked mid-season field wrapper ──────────────────────────────────────
   const LockedField: React.FC<{ children: React.ReactNode }> = ({ children }) => (

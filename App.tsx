@@ -1201,7 +1201,8 @@ const App: React.FC = () => {
       if (!tempState.tradeDeadlinePassed && pct > 0 && (deadlinePct === null || pct < deadlinePct)) {
         tempState = { ...tempState, seasonPhase: 'Regular Season' as SeasonPhase };
       }
-      if (pct === 0) {
+      // Only revert to Preseason if not explicitly advanced by the user
+      if (pct === 0 && tempState.seasonPhase !== 'Regular Season') {
         tempState = { ...tempState, seasonPhase: 'Preseason' as SeasonPhase };
       }
     }
@@ -1491,6 +1492,24 @@ const App: React.FC = () => {
     setLoading(false);
   };
 
+  const handleAdvanceToRegularSeason = () => {
+    if (!league) return;
+    // If offseason or previous season's games are all played, generate a fresh schedule
+    const needsFreshSchedule = league.isOffseason || league.schedule.every(g => g.played);
+    const newSchedule = needsFreshSchedule
+      ? generateSeasonSchedule(league.teams, league.settings.seasonLength, league.settings.divisionGames, league.settings.conferenceGames)
+      : league.schedule;
+    setLeague(prev => prev ? {
+      ...prev,
+      schedule: newSchedule,
+      currentDay: 1,
+      isOffseason: false,
+      seasonPhase: 'Regular Season' as SeasonPhase,
+      tradeDeadlinePassed: false,
+      allStarWeekend: undefined,
+    } : null);
+  };
+
   const handleScoutPlayer = async (player: Player | Prospect) => { setLoading(true); const report = await generateScoutingReport(player); setScoutingReport({ playerId: player.id, report }); setLoading(false); };
   const handleScoutCoach = async (coach: Coach) => { setSelectedCoach(coach); };
   const handleGenerateCoachIntelligence = async (coach: Coach) => { setLoading(true); const report = await generateCoachScoutingReport(coach); setCoachScoutingReport({ coachId: coach.id, report }); setLoading(false); };
@@ -1666,7 +1685,7 @@ const App: React.FC = () => {
       <Sidebar activeTab={activeTab} setActiveTab={setActiveTab} team={userTeam} onQuit={() => setStatus('title')} league={league} isExpansionActive={league.expansionDraft?.active} />
       <main className="flex-1 overflow-y-auto p-6 md:p-10 space-y-8 pb-32 transition-all duration-300 ease-in-out">
         <div key={activeTab} className="animate-in fade-in slide-in-from-bottom-2 duration-500">
-          {activeTab === 'dashboard' && <Dashboard league={league} news={news} onSimulate={handleSimulate} onScout={handleViewPlayer} scoutingReport={scoutingReport} setActiveTab={setActiveTab} onViewRoster={handleViewRoster} onManageTeam={handleManageTeam} />}
+          {activeTab === 'dashboard' && <Dashboard league={league} news={news} onSimulate={handleSimulate} onScout={handleViewPlayer} scoutingReport={scoutingReport} setActiveTab={setActiveTab} onViewRoster={handleViewRoster} onManageTeam={handleManageTeam} onAdvanceToRegularSeason={handleAdvanceToRegularSeason} />}
           {activeTab === 'gm_profile' && <GMProfileView league={league} updateLeague={updateLeagueState} />}
           {activeTab === 'team_management' && (
             <TeamManagement 
@@ -1755,7 +1774,7 @@ const App: React.FC = () => {
             )
           )}
           {activeTab === 'standings' && <Standings teams={league.teams} userTeamId={league.userTeamId} seasonLength={league.settings.seasonLength ?? 82} playoffFormat={league.settings.playoffFormat ?? 8} season={league.season} isPlayoffs={!!league.playoffBracket} onViewRoster={handleViewRoster} onManageTeam={handleManageTeam} />}
-          {activeTab === 'schedule' && <Schedule league={league} onSimulate={handleSimulate} onScout={handleViewPlayer} onWatchLive={handleWatchLive} onViewBoxScore={(res, home, away) => setViewingBoxScore({ result: res, home, away })} onManageTeam={handleManageTeam} />}
+          {activeTab === 'schedule' && <Schedule league={league} onSimulate={handleSimulate} onScout={handleViewPlayer} onWatchLive={handleWatchLive} onViewBoxScore={(res, home, away) => setViewingBoxScore({ result: res, home, away })} onManageTeam={handleManageTeam} onAdvanceToRegularSeason={handleAdvanceToRegularSeason} />}
           {activeTab === 'draft' && <Draft league={league} updateLeague={updateLeagueState} onScout={handleScoutPlayer} scoutingReport={scoutingReport} onNavigateToFreeAgency={() => setActiveTab('free_agency')} />}
           {activeTab === 'coaching' && <Coaching league={league} updateLeague={updateLeagueState} godMode={league.settings.godMode} />}
           {activeTab === 'stats' && <Stats league={league} onViewRoster={handleViewRoster} onManageTeam={handleManageTeam} onViewPlayer={p => setSelectedPlayer(p)} />}
@@ -1764,10 +1783,14 @@ const App: React.FC = () => {
           {activeTab === 'trade' && <Trade league={league} updateLeague={updateLeagueState} recordTransaction={recordTransaction} />}
           {activeTab === 'settings' && <Settings league={league} updateLeague={updateLeagueState} onRegenerateSchedule={() => {
             const cur = leagueRef.current;
-            if (!cur || cur.schedule.some(g => g.played)) return;
+            if (!cur) return;
+            // Block only when season is actively in-progress (some but not all games played)
+            const played = cur.schedule.filter(g => g.played).length;
+            const isInProgress = played > 0 && played < cur.schedule.length;
+            if (isInProgress) return;
             const newSchedule = generateSeasonSchedule(cur.teams, cur.settings.seasonLength, cur.settings.divisionGames, cur.settings.conferenceGames);
             if (newSchedule.length > 0) {
-              setLeague(prev => prev ? { ...prev, schedule: newSchedule, currentDay: 1 } : null);
+              setLeague(prev => prev ? { ...prev, schedule: newSchedule, currentDay: 1, seasonPhase: 'Preseason' as SeasonPhase } : null);
             }
           }} />}
         </div>
