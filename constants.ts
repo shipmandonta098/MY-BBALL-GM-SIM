@@ -373,7 +373,7 @@ export const enforcePositionalBounds = (player: Player): Player => {
   return { ...player, attributes: cappedAttrs, rating: newRating };
 };
 
-const COLLEGES_HIGH_MAJOR = [
+export const COLLEGES_HIGH_MAJOR = [
   "Duke","Kentucky","Kansas","North Carolina","UCLA","Michigan","Michigan State","Arizona",
   "Gonzaga","Villanova","Louisville","Syracuse","Ohio State","Indiana","Connecticut","Florida",
   "Texas","Oregon","Memphis","Georgetown","Notre Dame","Marquette","Creighton","Baylor",
@@ -383,7 +383,7 @@ const COLLEGES_HIGH_MAJOR = [
   "West Virginia","TCU","Iowa State","Kansas State",
 ];
 
-const COLLEGES_MID_MAJOR = [
+export const COLLEGES_MID_MAJOR = [
   "St. Mary's","Wichita State","Murray State","Belmont","Vermont","Davidson","Butler",
   "Xavier","Dayton","Rhode Island","VCU","Richmond","George Mason","Loyola Chicago",
   "Cleveland State","Northern Iowa","Drake","Valparaiso","UC Santa Barbara","Long Beach State",
@@ -483,12 +483,12 @@ const US_MALE_LAST = [
 ];
 
 // ─── Female names: 110+ unique, no current WNBA stars ─────────────────────────
-const NAMES_MALE = {
+export const NAMES_MALE = {
   first: US_MALE_FIRST,
   last: US_MALE_LAST
 };
 
-const NAMES_FEMALE = {
+export const NAMES_FEMALE = {
   first: [
     "Aaliyah","Amara","Destiny","Imani","Jasmine","Kiara","Layla","Monique","Nadia","Simone",
     "Tiana","Unique","Vanessa","Ximena","Yara","Zara","Brianna","Camille","Deja","Essence",
@@ -700,6 +700,8 @@ const REGIONS = [
     flavor: { athleticism: 2, shooting: 2, passing: 1, iq: 1 }
   }
 ];
+
+export const ALL_HOMETOWNS: string[] = REGIONS.flatMap(r => r.hometowns);
 
 const COACH_FIRST_NAMES_MALE = [
   "Alonzo","Bertrand","Carlton","Desmond","Edmund","Franklin","Gerard","Hector","Irving","Jerome",
