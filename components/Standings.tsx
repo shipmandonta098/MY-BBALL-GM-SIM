@@ -74,25 +74,22 @@ const Standings: React.FC<StandingsProps> = ({
 
         let clinch: ClinchStatus = null;
 
-        // During playoffs all seeds are locked — no badges needed
-        if (!isPlayoffs) {
-          // #1 seed (z): even if 2nd place wins every remaining game, can't catch leader
-          if (idx === 0 && confTeams.length > 1) {
-            const secondPlace = confTeams[1];
-            const secondMax = secondPlace.wins + Math.max(0, seasonLength - (secondPlace.wins + secondPlace.losses));
-            if (t.wins > secondMax) clinch = 'z';
-          }
+        // #1 seed (z): even if 2nd place wins every remaining game, can't catch leader
+        if (idx === 0 && confTeams.length > 1) {
+          const secondPlace = confTeams[1];
+          const secondMax = secondPlace.wins + Math.max(0, seasonLength - (secondPlace.wins + secondPlace.losses));
+          if (t.wins > secondMax) clinch = 'z';
+        }
 
-          // Playoff clinch (x): team's wins already exceed the max possible wins of firstOut
-          if (!clinch && idx < playoffSpotsPerConf && firstOut) {
-            const firstOutMax = firstOut.wins + Math.max(0, seasonLength - (firstOut.wins + firstOut.losses));
-            if (t.wins > firstOutMax) clinch = 'x';
-          }
+        // Playoff clinch (x): team's wins already exceed the max possible wins of firstOut
+        if (!clinch && idx < playoffSpotsPerConf && firstOut) {
+          const firstOutMax = firstOut.wins + Math.max(0, seasonLength - (firstOut.wins + firstOut.losses));
+          if (t.wins > firstOutMax) clinch = 'x';
+        }
 
-          // Eliminated (e): even winning every remaining game, can't reach last playoff team's current wins
-          if (!clinch && idx >= playoffSpotsPerConf) {
-            if (t.wins + gamesRemaining < lastPlayoffTeam.wins) clinch = 'e';
-          }
+        // Eliminated (e): even winning every remaining game, can't reach last playoff team's current wins
+        if (!clinch && idx >= playoffSpotsPerConf) {
+          if (t.wins + gamesRemaining < lastPlayoffTeam.wins) clinch = 'e';
         }
 
         return { team: t, gb: gb === 0 ? '-' : gb.toFixed(1), gamesRemaining, clinch };
