@@ -1161,7 +1161,7 @@ const App: React.FC = () => {
     return { newState: { ...newState, currentDay: newState.currentDay + 1 }, dayResults };
   };
 
-  const handleSimulate = async (mode: 'next' | 'day' | 'week' | 'month' | 'season' | 'to-game' | 'x-games' | 'single-instant', targetGameId?: string, numGames?: number) => {
+  const handleSimulate = async (mode: 'next' | 'day' | 'week' | 'month' | 'season' | 'to-game' | 'x-games' | 'single-instant' | 'to-deadline' | 'to-allstar', targetGameId?: string, numGames?: number) => {
     if (!league) return;
     if (mode === 'single-instant' && targetGameId) {
       const game = league.schedule.find(g => g.id === targetGameId)!;
@@ -1217,6 +1217,20 @@ const App: React.FC = () => {
       }
     } else if (mode === 'season') {
       while (tempState.currentDay < 500 && tempState.schedule.some(g => !g.played)) {
+        const step = await executeSimDay(tempState);
+        tempState = step.newState;
+        processResults(step.dayResults);
+      }
+    } else if (mode === 'to-deadline') {
+      // Sim until the trade deadline triggers (tradeDeadlinePassed flips to true)
+      while (tempState.currentDay < 500 && !tempState.tradeDeadlinePassed && tempState.schedule.some(g => !g.played)) {
+        const step = await executeSimDay(tempState);
+        tempState = step.newState;
+        processResults(step.dayResults);
+      }
+    } else if (mode === 'to-allstar') {
+      // Sim until All-Star Weekend is created
+      while (tempState.currentDay < 500 && !tempState.allStarWeekend && tempState.schedule.some(g => !g.played)) {
         const step = await executeSimDay(tempState);
         tempState = step.newState;
         processResults(step.dayResults);
@@ -1950,7 +1964,7 @@ const App: React.FC = () => {
             )
           )}
           {activeTab === 'standings' && <Standings teams={league.teams} userTeamId={league.userTeamId} seasonLength={league.settings.seasonLength ?? 82} playoffFormat={league.settings.playoffFormat ?? 16} season={league.season} isPlayoffs={!!league.playoffBracket} onViewRoster={handleViewRoster} onManageTeam={handleManageTeam} />}
-          {activeTab === 'schedule' && <Schedule league={league} onSimulate={handleSimulate} onScout={handleViewPlayer} onWatchLive={handleWatchLive} onViewBoxScore={(res, home, away) => setViewingBoxScore({ result: res, home, away })} onManageTeam={handleManageTeam} onAdvanceToRegularSeason={handleAdvanceToRegularSeason} />}
+          {activeTab === 'schedule' && <Schedule league={league} onSimulate={handleSimulate} onScout={handleViewPlayer} onWatchLive={handleWatchLive} onViewBoxScore={(res, home, away) => setViewingBoxScore({ result: res, home, away })} onManageTeam={handleManageTeam} onAdvanceToRegularSeason={handleAdvanceToRegularSeason} onViewAllStar={() => setActiveTab('allstar')} />}
           {activeTab === 'draft' && <Draft league={league} updateLeague={updateLeagueState} onScout={handleScoutPlayer} scoutingReport={scoutingReport} onNavigateToFreeAgency={() => setActiveTab('free_agency')} />}
           {activeTab === 'coaching' && <Coaching league={league} updateLeague={updateLeagueState} godMode={league.settings.godMode} />}
           {activeTab === 'stats' && <Stats league={league} onViewRoster={handleViewRoster} onManageTeam={handleManageTeam} onViewPlayer={p => setSelectedPlayer(p)} />}

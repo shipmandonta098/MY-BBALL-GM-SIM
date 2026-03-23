@@ -4,15 +4,16 @@ import TeamBadge from './TeamBadge';
 
 interface ScheduleProps {
   league: LeagueState;
-  onSimulate: (mode: 'next' | 'day' | 'week' | 'month' | 'season' | 'to-game' | 'x-games' | 'single-instant', targetGameId?: string, numGames?: number) => void;
+  onSimulate: (mode: 'next' | 'day' | 'week' | 'month' | 'season' | 'to-game' | 'x-games' | 'single-instant' | 'to-deadline' | 'to-allstar', targetGameId?: string, numGames?: number) => void;
   onScout: (player: Player) => void;
   onWatchLive?: (gameId: string) => void;
   onViewBoxScore: (result: GameResult, home: Team, away: Team) => void;
   onManageTeam?: (teamId: string) => void;
   onAdvanceToRegularSeason?: () => void;
+  onViewAllStar?: () => void;
 }
 
-const Schedule: React.FC<ScheduleProps> = ({ league, onSimulate, onScout, onWatchLive, onViewBoxScore, onManageTeam, onAdvanceToRegularSeason }) => {
+const Schedule: React.FC<ScheduleProps> = ({ league, onSimulate, onScout, onWatchLive, onViewBoxScore, onManageTeam, onAdvanceToRegularSeason, onViewAllStar }) => {
   const [viewMode, setViewMode] = useState<'team' | 'league'>('team');
   const [selectedTeamId, setSelectedTeamId] = useState<string>(league.userTeamId);
   const [selectedDay, setSelectedDay] = useState<number>(league.currentDay);
@@ -208,7 +209,16 @@ const Schedule: React.FC<ScheduleProps> = ({ league, onSimulate, onScout, onWatc
                    <p className="text-[10px] text-amber-500/70 font-bold uppercase">{game.played ? 'All-Star Weekend completed.' : 'Rest & Showcase events. Star morale boost.'}</p>
                 </div>
              </div>
-             <div className="px-4 py-1.5 bg-amber-500 text-slate-950 text-[10px] font-black uppercase rounded-lg">{game.played ? 'Completed' : 'Break Week'}</div>
+             {game.played && league.allStarWeekend && onViewAllStar ? (
+               <button
+                 onClick={onViewAllStar}
+                 className="px-4 py-1.5 bg-amber-500 hover:bg-amber-400 text-slate-950 text-[10px] font-black uppercase rounded-lg transition-all"
+               >
+                 View Results
+               </button>
+             ) : (
+               <div className="px-4 py-1.5 bg-amber-500 text-slate-950 text-[10px] font-black uppercase rounded-lg">{game.played ? 'Completed' : 'Break Week'}</div>
+             )}
           </div>
         )}
 
@@ -580,25 +590,41 @@ const Schedule: React.FC<ScheduleProps> = ({ league, onSimulate, onScout, onWatc
       {/* Advanced Sim Controls */}
       <div className="flex flex-col lg:flex-row gap-4 justify-between items-center sticky top-0 z-50 py-4 px-6 bg-slate-950/80 backdrop-blur-md border-b border-slate-800">
         <div className="flex flex-wrap gap-2">
-           <button 
+           <button
             onClick={() => onSimulate('day')}
             className="px-5 py-2.5 bg-slate-900 border border-slate-800 hover:bg-slate-800 hover:border-amber-500/50 text-slate-200 text-[10px] font-black uppercase tracking-widest rounded-xl transition-all hover:scale-105 active:scale-95"
           >
             Sim Day
           </button>
-          <button 
+          <button
             onClick={() => onSimulate('week')}
             className="px-5 py-2.5 bg-slate-900 border border-slate-800 hover:bg-slate-800 hover:border-amber-500/50 text-slate-200 text-[10px] font-black uppercase tracking-widest rounded-xl transition-all hover:scale-105 active:scale-95"
           >
             Sim Week
           </button>
-          <button 
+          <button
             onClick={() => onSimulate('month')}
             className="px-5 py-2.5 bg-slate-900 border border-slate-800 hover:bg-slate-800 hover:border-amber-500/50 text-slate-200 text-[10px] font-black uppercase tracking-widest rounded-xl transition-all hover:scale-105 active:scale-95"
           >
             Sim Month
           </button>
-          <button 
+          {!league.tradeDeadlinePassed && league.settings.tradeDeadline !== 'Disabled' && (
+            <button
+              onClick={() => onSimulate('to-deadline')}
+              className="px-5 py-2.5 bg-rose-500/10 border border-rose-500/30 hover:bg-rose-500/20 text-rose-400 text-[10px] font-black uppercase tracking-widest rounded-xl transition-all hover:scale-105 active:scale-95"
+            >
+              🚨 Sim to Deadline
+            </button>
+          )}
+          {!league.allStarWeekend && league.tradeDeadlinePassed && (
+            <button
+              onClick={() => onSimulate('to-allstar')}
+              className="px-5 py-2.5 bg-amber-500/10 border border-amber-500/30 hover:bg-amber-500/20 text-amber-400 text-[10px] font-black uppercase tracking-widest rounded-xl transition-all hover:scale-105 active:scale-95"
+            >
+              ⭐ Sim to All-Star
+            </button>
+          )}
+          <button
             onClick={() => onSimulate('season')}
             className="px-6 py-2.5 bg-amber-500 hover:bg-amber-400 text-slate-950 text-[10px] font-black uppercase tracking-widest rounded-xl transition-all shadow-lg shadow-amber-500/20 hover:scale-105 active:scale-95"
           >

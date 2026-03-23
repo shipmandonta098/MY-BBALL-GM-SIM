@@ -29,7 +29,7 @@ const Trade: React.FC<TradeProps> = ({ league, updateLeague, recordTransaction }
   const userTeam = league.teams.find(t => t.id === league.userTeamId)!;
   const partnerTeam = league.teams.find(t => t.id === partnerTeamId)!;
 
-  const isDeadlinePassed = league.currentDay > 55;
+  const isDeadlinePassed = !!league.tradeDeadlinePassed;
 
   // Asset Value Calculation
   const getAssetValue = (piece: TradePiece, forTeam: Team): number => {
@@ -72,9 +72,13 @@ const Trade: React.FC<TradeProps> = ({ league, updateLeague, recordTransaction }
   const userCapPass = userTeamSalary - userOutgoingSalary + partnerOutgoingSalary <= capLimit || partnerOutgoingSalary <= userOutgoingSalary * 1.25 + 100000;
   const partnerCapPass = partnerTeamSalary - partnerOutgoingSalary + userOutgoingSalary <= capLimit || userOutgoingSalary <= partnerOutgoingSalary * 1.25 + 100000;
 
-  const canPropose = userPieces.length > 0 || partnerPieces.length > 0;
+  const canPropose = (userPieces.length > 0 || partnerPieces.length > 0) && !isDeadlinePassed;
 
   const handlePropose = () => {
+    if (isDeadlinePassed) {
+      setAiResponse({ status: 'reject', message: 'The trade deadline has passed. No trades can be made until next season.' });
+      return;
+    }
     if (!userCapPass || !partnerCapPass) {
       setAiResponse({ status: 'reject', message: 'Salary cap rules violation. Salaries must match within 125%.' });
       return;
@@ -226,6 +230,15 @@ const Trade: React.FC<TradeProps> = ({ league, updateLeague, recordTransaction }
 
   return (
     <div className="space-y-8 animate-in fade-in duration-500 pb-40">
+      {isDeadlinePassed && (
+        <div className="bg-rose-500/10 border border-rose-500/40 rounded-2xl px-6 py-4 flex items-center gap-4">
+          <span className="text-2xl">🚨</span>
+          <div>
+            <p className="text-rose-400 font-display font-black uppercase tracking-widest text-sm">Trade Deadline Passed</p>
+            <p className="text-rose-400/70 text-xs font-bold uppercase mt-0.5">No trades can be made for the remainder of the season. Free agent signings are still available.</p>
+          </div>
+        </div>
+      )}
       <header className="bg-slate-900 border border-slate-800 rounded-[2.5rem] p-8 shadow-2xl relative overflow-hidden">
         <div className="absolute top-0 right-0 w-80 h-80 bg-amber-500/5 blur-[100px] rounded-full -mr-40 -mt-40"></div>
         <div className="relative z-10 flex flex-col md:flex-row items-center justify-between gap-6">
