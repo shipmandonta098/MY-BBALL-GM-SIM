@@ -50,9 +50,10 @@ const Schedule: React.FC<ScheduleProps> = ({ league, onSimulate, onScout, onWatc
       }
     });
 
+    const sl = league.settings.seasonLength ?? 82;
     return {
       played: played.length,
-      left: 82 - played.length,
+      left: sl - played.length,
       homeLeft,
       awayLeft,
       b2bsLeft: Math.max(0, b2bsTotal - b2bsPlayed),
@@ -167,35 +168,44 @@ const Schedule: React.FC<ScheduleProps> = ({ league, onSimulate, onScout, onWatc
       return focusWon ? 'W' : 'L';
     }) || [];
 
-    // Milestones
-    const isDeadline = game.gameNumber === 50;
-    const isAllStar = game.gameNumber === 52;
+    // Milestones — use same pct thresholds as the sim engine (App.tsx)
+    const seasonLen = league.settings.seasonLength ?? 82;
+    const tdSetting = league.settings.tradeDeadline;
+    const deadlinePct = tdSetting === 'Disabled' ? null
+      : tdSetting === 'Week 16' ? 0.63
+      : tdSetting === 'Week 12' ? 0.49
+      : 0.56; // Week 14 (default)
+    const deadlineGameNum = deadlinePct !== null ? Math.round(seasonLen * deadlinePct) : null;
+    const allStarGameNum  = Math.round(seasonLen * 0.73);
+
+    const isDeadline = deadlineGameNum !== null && game.gameNumber === deadlineGameNum;
+    const isAllStar  = game.gameNumber === allStarGameNum;
 
     return (
       <div className="space-y-4">
-        {viewMode === 'team' && isDeadline && !game.played && (
-          <div className="bg-rose-500/10 border border-rose-500/30 p-4 rounded-2xl flex items-center justify-between group shadow-lg shadow-rose-500/5 animate-pulse">
+        {viewMode === 'team' && isDeadline && (
+          <div className={`bg-rose-500/10 border border-rose-500/30 p-4 rounded-2xl flex items-center justify-between group shadow-lg shadow-rose-500/5 ${!game.played ? 'animate-pulse' : 'opacity-50'}`}>
              <div className="flex items-center gap-4">
                 <span className="text-2xl">🚨</span>
                 <div>
                    <h4 className="text-rose-500 font-display font-black uppercase tracking-widest text-lg">Trade Deadline</h4>
-                   <p className="text-[10px] text-rose-500/70 font-bold uppercase">Front office frenzy! Final chance to move assets.</p>
+                   <p className="text-[10px] text-rose-500/70 font-bold uppercase">{game.played ? 'Trade deadline has passed.' : 'Front office frenzy! Final chance to move assets.'}</p>
                 </div>
              </div>
-             <div className="px-4 py-1.5 bg-rose-500 text-white text-[10px] font-black uppercase rounded-lg">Frenzy Mode</div>
+             <div className="px-4 py-1.5 bg-rose-500 text-white text-[10px] font-black uppercase rounded-lg">{game.played ? 'Passed' : 'Frenzy Mode'}</div>
           </div>
         )}
 
-        {viewMode === 'team' && isAllStar && !game.played && (
-          <div className="bg-amber-500/10 border border-amber-500/30 p-4 rounded-2xl flex items-center justify-between group shadow-lg shadow-amber-500/5">
+        {viewMode === 'team' && isAllStar && (
+          <div className={`bg-amber-500/10 border border-amber-500/30 p-4 rounded-2xl flex items-center justify-between group shadow-lg shadow-amber-500/5 ${game.played ? 'opacity-50' : ''}`}>
              <div className="flex items-center gap-4">
                 <span className="text-2xl">⭐</span>
                 <div>
                    <h4 className="text-amber-500 font-display font-black uppercase tracking-widest text-lg">All-Star Weekend</h4>
-                   <p className="text-[10px] text-amber-500/70 font-bold uppercase">Rest & Showcase events. Star morale boost.</p>
+                   <p className="text-[10px] text-amber-500/70 font-bold uppercase">{game.played ? 'All-Star Weekend completed.' : 'Rest & Showcase events. Star morale boost.'}</p>
                 </div>
              </div>
-             <div className="px-4 py-1.5 bg-amber-500 text-slate-950 text-[10px] font-black uppercase rounded-lg">Break Week</div>
+             <div className="px-4 py-1.5 bg-amber-500 text-slate-950 text-[10px] font-black uppercase rounded-lg">{game.played ? 'Completed' : 'Break Week'}</div>
           </div>
         )}
 
@@ -206,7 +216,7 @@ const Schedule: React.FC<ScheduleProps> = ({ league, onSimulate, onScout, onWatc
           <div className="flex flex-col md:flex-row items-center gap-6">
             <div className="flex flex-col items-center md:items-start min-w-[120px]">
               <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-1">
-                {viewMode === 'team' ? `GAME ${game.gameNumber}/82` : `DAY ${game.day}`}
+                {viewMode === 'team' ? `GAME ${game.gameNumber}/${seasonLen}` : `DAY ${game.day}`}
               </span>
               {isB2B && viewMode === 'team' && (
                 <span className="mt-1 px-2 py-0.5 bg-rose-500/20 text-rose-500 text-[9px] font-black uppercase rounded border border-rose-500/20">
