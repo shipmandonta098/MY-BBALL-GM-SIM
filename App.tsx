@@ -1115,12 +1115,14 @@ const App: React.FC = () => {
     }
 
     // ── AI in-season signings (~30% chance per sim-day when FAs available) ──
+    // After trade deadline, AI teams sign more aggressively for the playoff push
+    const postDeadlineSigningThreshold = newState.tradeDeadlinePassed ? 13 : 10;
     if (!newState.isOffseason && newState.freeAgents.length > 0 && Math.random() < 0.3) {
       const cap = newState.settings.salaryCap || 140_000_000;
       const aiTeamsNeedingHelp = newState.teams.filter(t => {
         if (t.id === newState.userTeamId) return false;
         const activeRoster = t.roster.filter(p => !p.injuryDaysLeft || p.injuryDaysLeft === 0);
-        return activeRoster.length < 10; // sign if short-handed
+        return activeRoster.length < postDeadlineSigningThreshold;
       });
       if (aiTeamsNeedingHelp.length > 0) {
         const team = aiTeamsNeedingHelp[Math.floor(Math.random() * aiTeamsNeedingHelp.length)];
@@ -1360,7 +1362,8 @@ const App: React.FC = () => {
     tempState.isOffseason = true;
     tempState.seasonPhase = 'Offseason' as SeasonPhase;
     tempState.tradeDeadlinePassed = false;
-    tempState.allStarWeekend = undefined;
+    // allStarWeekend is preserved here so results remain viewable during offseason/playoffs
+    // It is cleared when the new season schedule begins (handleAdvanceToRegularSeason)
     tempState.draftPhase = 'lottery';
     tempState.offseasonDay = 0;
     
@@ -1728,7 +1731,7 @@ const App: React.FC = () => {
   
   const handleViewRoster = (teamId: string) => { setRosterTeamId(teamId); setActiveTab('roster'); };
   const handleViewFranchise = (teamId: string) => { setViewingFranchiseId(teamId); setActiveTab('franchise_history'); };
-  const handleManageTeam = (teamId: string) => { setTeamManagementId(teamId); setActiveTab('team_management'); };
+  const handleManageTeam = (teamId: string) => { setRosterTeamId(teamId); setActiveTab('roster'); };
   const updateLeagueState = (updated: Partial<LeagueState> | ((prev: LeagueState) => LeagueState)) => { 
     if (!league) return; 
     if (typeof updated === 'function') {
