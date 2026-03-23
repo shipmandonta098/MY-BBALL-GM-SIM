@@ -26,7 +26,7 @@ interface Preset {
 }
 
 const DEFAULT_SETTINGS: Partial<LeagueSettings> = {
-  playoffFormat: 8, playoffSeeding: 'Conference', playInTournament: true, homeCourt: true,
+  playoffFormat: 16, playoffSeeding: 'Conference', playInTournament: true, homeCourt: true,
   tradeDeadline: 'Week 14', hardCapAtDeadline: false,
   divisionGames: 16, conferenceGames: 36, tradeDeadlineFraction: 0.6,
   splitByConference: true, guaranteedPerDivision: 0, reseedRounds: false,

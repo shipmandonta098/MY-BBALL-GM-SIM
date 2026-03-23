@@ -215,7 +215,7 @@ const Career: React.FC<CareerProps> = ({ league, updateLeague }) => {
               { label: 'Division Games',      value: league.settings.divisionGames ?? 16 },
               { label: 'Conference Games',    value: league.settings.conferenceGames ?? 36 },
               { label: 'Trade Deadline',      value: `${Math.round((league.settings.tradeDeadlineFraction ?? 0.6) * 100)}%` },
-              { label: 'Playoff Teams',       value: league.settings.playoffFormat ?? 8 },
+              { label: 'Playoff Teams',       value: league.settings.playoffFormat ?? 16 },
               { label: 'Guaranteed / Div',    value: league.settings.guaranteedPerDivision ?? 0 },
             ].map(({ label, value }) => (
               <div key={label} className="flex flex-col gap-1">
