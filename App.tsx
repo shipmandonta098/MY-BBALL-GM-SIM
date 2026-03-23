@@ -1,7 +1,7 @@
 
 import React, { useState, useEffect, useCallback } from 'react';
 import { LeagueState, Player, Team, GameResult, PlayerStatus, ScheduleGame, BulkSimSummary, Prospect, Coach, TradeProposal, Position, NewsItem, NewsCategory, LeagueSettings, SeasonAwards, PlayoffBracket, PlayoffSeries, Transaction, TransactionType, PowerRankingSnapshot, PowerRankingEntry, GMProfile, GMMilestone, RivalryStats, InjuryType, SeasonPhase, AllStarWeekendData, AllStarVoteEntry } from './types';
-import { generateLeagueTeams, generateSeasonSchedule, generateProspects, generateFreeAgentPool, generateCoachPool, EXPANSION_TEAM_POOL, generateCoach, enforcePositionalBounds, ageFromBirthdate } from './constants';
+import { generateLeagueTeams, generateSeasonSchedule, generateProspects, generateFreeAgentPool, generateCoachPool, EXPANSION_TEAM_POOL, generateCoach, generatePlayer, generateDefaultRotation, enforcePositionalBounds, ageFromBirthdate } from './constants';
 import { simulateGame, normalizeLeagueOVRs } from './utils/simEngine';
 import { snapshotPlayerStats } from './utils/playerUtils';
 import { generateGameRecap, generateScoutingReport, generateSeasonNarrative, generateCoachScoutingReport, generateNewsHeadline } from './services/geminiService';
@@ -1651,9 +1651,76 @@ const App: React.FC = () => {
 
   if (status === 'title') return <TitleScreen onNewLeague={handleNewLeague} onLoadSave={handleLoadSave} onDeleteSave={handleDeleteSave} onRenameSave={handleRenameSave} onImportSave={handleImportSave} saves={allSaves} />;
   if (status === 'config') return <LeagueConfiguration onConfirm={handleConfigLeague} onCancel={() => setStatus('title')} />;
-  if (status === 'setup' && league) return <TeamSelection teams={league.teams} onSelectTeam={handleSelectTeam} onBack={() => setStatus('config')} onEditTeam={(teamId, updates) => {
-    setLeague(prev => prev ? { ...prev, teams: prev.teams.map(t => t.id === teamId ? { ...t, ...updates } : t) } : prev);
-  }} />;
+  if (status === 'setup' && league) {
+    const usedExpansionNames = new Set(league.teams.map(t => t.name));
+    const nextExpansion = EXPANSION_TEAM_POOL.find(e => !usedExpansionNames.has(e.name));
+    return <TeamSelection
+      teams={league.teams}
+      onSelectTeam={handleSelectTeam}
+      onBack={() => setStatus('config')}
+      onEditTeam={(teamId, updates) => {
+        setLeague(prev => prev ? { ...prev, teams: prev.teams.map(t => t.id === teamId ? { ...t, ...updates } : t) } : prev);
+      }}
+      onRemoveTeam={(teamId) => {
+        setLeague(prev => prev ? { ...prev, teams: prev.teams.filter(t => t.id !== teamId) } : prev);
+      }}
+      onAddTeam={nextExpansion ? () => {
+        setLeague(prev => {
+          if (!prev) return prev;
+          const idx = prev.teams.length;
+          const teamId = `team-expansion-${idx}-${Date.now()}`;
+          const genderRatio = prev.settings?.playerGenderRatio ?? 0;
+          const season = prev.season ?? 2026;
+          const roster = Array.from({ length: 14 }).map((_, j) =>
+            generatePlayer(`p-${teamId}-${j}`, [19, 38], genderRatio, undefined, season)
+          );
+          const data = nextExpansion!;
+          const newTeam: Team = {
+            id: teamId,
+            name: data.name,
+            city: data.city,
+            roster,
+            staff: {
+              headCoach: generateCoach(`coach-${teamId}-hc`, 'B', genderRatio, season),
+              assistantOffense: generateCoach(`coach-${teamId}-off`, 'C', genderRatio, season),
+              assistantDefense: generateCoach(`coach-${teamId}-def`, 'C', genderRatio, season),
+              assistantDev: generateCoach(`coach-${teamId}-dev`, 'C', genderRatio, season),
+              trainer: generateCoach(`coach-${teamId}-tr`, 'C', genderRatio, season),
+            },
+            staffBudget: 15000000,
+            activeScheme: 'Balanced',
+            wins: 0, losses: 0, homeWins: 0, homeLosses: 0, roadWins: 0, roadLosses: 0, confWins: 0, confLosses: 0, lastTen: [],
+            budget: 180000000,
+            logo: '',
+            conference: data.conf as any,
+            division: data.div as any,
+            marketSize: data.market as any,
+            streak: 0,
+            picks: [
+              { round: 1, pick: 0, originalTeamId: teamId, currentTeamId: teamId },
+              { round: 2, pick: 0, originalTeamId: teamId, currentTeamId: teamId },
+            ],
+            finances: {
+              revenue: 5000000, expenses: 4000000, cash: 25000000,
+              ticketPrice: 85, concessionPrice: 12, fanHype: 65, ownerPatience: 80,
+              ownerGoal: 'Win Now',
+              budgets: { scouting: 20, health: 20, facilities: 20 },
+            },
+            primaryColor: data.primary,
+            secondaryColor: data.secondary,
+            rotation: generateDefaultRotation(roster),
+            abbreviation: data.city.substring(0, 3).toUpperCase(),
+            population: data.market === 'Large' ? 8.5 : data.market === 'Medium' ? 4.2 : 1.5,
+            stadiumCapacity: data.market === 'Large' ? 20000 : data.market === 'Medium' ? 18500 : 17000,
+            borderStyle: 'Solid',
+            status: 'Active',
+          };
+          return { ...prev, teams: [...prev.teams, newTeam] };
+        });
+      } : undefined}
+      canAddTeam={!!nextExpansion}
+    />;
+  }
   if (!league || !league.userTeamId) return null;
 
   const userTeam = league.teams.find(t => t.id === league.userTeamId)!;
