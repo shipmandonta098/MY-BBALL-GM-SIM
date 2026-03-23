@@ -1158,6 +1158,77 @@ const App: React.FC = () => {
       }
     }
 
+    // ── Season Phase Milestones (trade deadline & all-star, checked every sim day) ──
+    if (!newState.isOffseason && !newState.playoffBracket) {
+      const totalGames = newState.schedule.length;
+      const playedGames = newState.schedule.filter(g => g.played).length;
+      const pct = totalGames > 0 ? playedGames / totalGames : 0;
+
+      // Trade Deadline
+      if (!newState.tradeDeadlinePassed) {
+        const tdSetting = newState.settings.tradeDeadline;
+        const deadlinePct = tdSetting === 'Disabled' ? null
+          : tdSetting === 'Week 14' ? 0.56
+          : tdSetting === 'Week 16' ? 0.63
+          : 0.49;
+        if (deadlinePct !== null && pct >= deadlinePct) {
+          newState = { ...newState, tradeDeadlinePassed: true, seasonPhase: 'Trade Deadline' as SeasonPhase };
+          try {
+            const aiDeadlineResult = aiGMTradeDeadlineAction(newState);
+            newState = aiDeadlineResult.updatedState;
+            if (aiDeadlineResult.newsItems?.length > 0) {
+              newState = { ...newState, newsFeed: [...aiDeadlineResult.newsItems, ...(newState.newsFeed || [])].slice(0, 100) };
+            }
+          } catch (_e) {}
+          newState = {
+            ...newState,
+            newsFeed: [{
+              id: `trade-deadline-${newState.season}`,
+              category: 'transaction' as NewsCategory,
+              headline: 'TRADE DEADLINE',
+              content: `The trade deadline has passed! No more trades can be made until next season. Teams must go with the rosters they have for the playoff push.`,
+              timestamp: newState.currentDay,
+              realTimestamp: Date.now(),
+              isBreaking: true,
+            }, ...(newState.newsFeed || [])],
+          };
+          setActiveTab('news');
+        }
+      }
+
+      // All-Star Weekend
+      if (newState.tradeDeadlinePassed && !newState.allStarWeekend && pct >= 0.73) {
+        const asd = buildAllStarWeekend(newState);
+        newState = { ...newState, allStarWeekend: asd, seasonPhase: 'All-Star Weekend' as SeasonPhase };
+        const eastStarters = asd.eastStarters.map(id => {
+          for (const t of newState.teams) { const p = t.roster.find(pl => pl.id === id); if (p) return p.name; }
+          return id;
+        });
+        const westStarters = asd.westStarters.map(id => {
+          for (const t of newState.teams) { const p = t.roster.find(pl => pl.id === id); if (p) return p.name; }
+          return id;
+        });
+        newState = {
+          ...newState,
+          newsFeed: [{
+            id: `allstar-reveal-${newState.season}`,
+            category: 'milestone' as NewsCategory,
+            headline: 'ALL-STAR ROSTERS REVEALED',
+            content: `This season's All-Star starters have been announced! East starters: ${eastStarters.join(', ')}. West starters: ${westStarters.join(', ')}. All-Star Weekend is here!`,
+            timestamp: newState.currentDay,
+            realTimestamp: Date.now(),
+            isBreaking: true,
+          }, ...(newState.newsFeed || [])],
+        };
+        setActiveTab('allstar');
+      }
+
+      // Phase tracking
+      if (newState.allStarWeekend?.completed && newState.seasonPhase === 'All-Star Weekend') {
+        newState = { ...newState, seasonPhase: 'Regular Season' as SeasonPhase };
+      }
+    }
+
     return { newState: { ...newState, currentDay: newState.currentDay + 1 }, dayResults };
   };
 
@@ -1242,71 +1313,22 @@ const App: React.FC = () => {
       setBulkSummary(summary);
     }
 
-    // ── Season Phase Milestones ─────────────────────────────────────────────
+    // ── Phase tracking fallback (milestones are now triggered inside executeSimDay) ──
     if (!tempState.isOffseason && !tempState.playoffBracket) {
       const totalGames = tempState.schedule.length;
       const playedGames = tempState.schedule.filter(g => g.played).length;
       const pct = totalGames > 0 ? playedGames / totalGames : 0;
-
-      // Trade Deadline: timing controlled by settings.tradeDeadline
       const tdSetting = tempState.settings.tradeDeadline;
       const deadlinePct = tdSetting === 'Disabled' ? null
         : tdSetting === 'Week 14' ? 0.56
         : tdSetting === 'Week 16' ? 0.63
-        : 0.49; // 'Week 12' or undefined → default
-      if (!tempState.tradeDeadlinePassed && deadlinePct !== null && pct >= deadlinePct && pct < deadlinePct + 0.15) {
-        tempState = { ...tempState, tradeDeadlinePassed: true, seasonPhase: 'Trade Deadline' as SeasonPhase };
-        try {
-          const aiDeadlineResult = aiGMTradeDeadlineAction(tempState);
-          tempState = aiDeadlineResult.updatedState;
-          if (aiDeadlineResult.newsItems?.length > 0) {
-            tempState = { ...tempState, newsFeed: [...aiDeadlineResult.newsItems, ...(tempState.newsFeed || [])].slice(0, 100) };
-          }
-        } catch (_e) {}
-        tempState.newsFeed = [{
-          id: `trade-deadline-${tempState.season}`,
-          category: 'transaction' as NewsCategory,
-          headline: 'TRADE DEADLINE',
-          content: `The trade deadline has passed! No more trades can be made until next season. Teams must go with the rosters they have for the playoff push.`,
-          timestamp: tempState.currentDay,
-          realTimestamp: Date.now(),
-          isBreaking: true,
-        }, ...(tempState.newsFeed || [])];
-        setActiveTab('news');
-      }
-
-      // All-Star Weekend: triggers once at ~73% games played (~60 of 82 games, mid-season break)
-      if (tempState.tradeDeadlinePassed && !tempState.allStarWeekend && pct >= 0.73 && pct < 0.90) {
-        const asd = buildAllStarWeekend(tempState);
-        tempState = { ...tempState, allStarWeekend: asd, seasonPhase: 'All-Star Weekend' as SeasonPhase };
-        const eastStarters = asd.eastStarters.map(id => {
-          for (const t of tempState.teams) { const p = t.roster.find(pl => pl.id === id); if (p) return p.name; }
-          return id;
-        });
-        const westStarters = asd.westStarters.map(id => {
-          for (const t of tempState.teams) { const p = t.roster.find(pl => pl.id === id); if (p) return p.name; }
-          return id;
-        });
-        tempState.newsFeed = [{
-          id: `allstar-reveal-${tempState.season}`,
-          category: 'milestone' as NewsCategory,
-          headline: 'ALL-STAR ROSTERS REVEALED',
-          content: `This season's All-Star starters have been announced! East starters: ${eastStarters.join(', ')}. West starters: ${westStarters.join(', ')}. All-Star Weekend is here!`,
-          timestamp: tempState.currentDay,
-          realTimestamp: Date.now(),
-          isBreaking: true,
-        }, ...(tempState.newsFeed || [])];
-        setActiveTab('allstar');
-      }
-
-      // Phase tracking during regular season
+        : 0.49;
       if (tempState.allStarWeekend?.completed && tempState.seasonPhase === 'All-Star Weekend') {
         tempState = { ...tempState, seasonPhase: 'Regular Season' as SeasonPhase };
       }
       if (!tempState.tradeDeadlinePassed && pct > 0 && (deadlinePct === null || pct < deadlinePct)) {
         tempState = { ...tempState, seasonPhase: 'Regular Season' as SeasonPhase };
       }
-      // Only revert to Preseason if not explicitly advanced by the user
       if (pct === 0 && tempState.seasonPhase !== 'Regular Season') {
         tempState = { ...tempState, seasonPhase: 'Preseason' as SeasonPhase };
       }
