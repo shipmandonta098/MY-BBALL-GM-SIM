@@ -133,7 +133,31 @@ const Dashboard: React.FC<DashboardProps> = ({ league, news, onSimulate, onScout
   if (totalSalary > league.settings.salaryCap) alerts.push({ text: "Over salary cap!", type: 'danger' });
   
   const lowMorale = userTeam.roster.filter(p => p.morale < 50).length;
-  if (lowMorale > 0) alerts.push({ text: "Low morale warning", type: 'warning' });
+  const moderateMorale = userTeam.roster.filter(p => p.morale >= 50 && p.morale < 65).length;
+
+  if (teamMorale < 50) {
+    // Build context string
+    const reasons: string[] = [];
+    if (userTeam.streak <= -3) reasons.push('losing streak');
+    const unhappyPlayers = userTeam.roster.filter(p => p.morale < 50 &&
+      (p.personalityTraits?.includes('Diva/Star') || p.personalityTraits?.includes('Hot Head') || p.personalityTraits?.includes('Money Hungry')));
+    if (unhappyPlayers.length > 0) reasons.push('player unhappiness');
+    const coachRating = userTeam.staff?.headCoach?.overall ?? 100;
+    if (coachRating < 55) reasons.push('coaching concerns');
+    const contextStr = reasons.length > 0 ? ` · ${reasons.join(' / ')}` : '';
+    alerts.push({ text: `Critical Morale Alert — ${lowMorale} player${lowMorale !== 1 ? 's' : ''} in red zone${contextStr}`, type: 'critical' });
+  } else if (teamMorale < 65) {
+    const reasons: string[] = [];
+    if (userTeam.streak <= -2) reasons.push('losing streak');
+    const unhappyCount = userTeam.roster.filter(p => p.morale < 65).length;
+    if (unhappyCount > 3) reasons.push('player unhappiness');
+    const coachRating = userTeam.staff?.headCoach?.overall ?? 100;
+    if (coachRating < 60) reasons.push('coaching concerns');
+    const contextStr = reasons.length > 0 ? ` · ${reasons.join(' / ')}` : '';
+    alerts.push({ text: `Low Morale Warning — team avg ${teamMorale}%${contextStr}`, type: 'danger' });
+  } else if (teamMorale < 80 && (moderateMorale > 2 || userTeam.streak <= -3)) {
+    alerts.push({ text: `Morale Dropping — team avg ${teamMorale}% · watch for further decline`, type: 'warning' });
+  }
   
   const injuredPlayers = userTeam.roster.filter(p => p.status === 'Injured');
   injuredPlayers.forEach(p => {
@@ -154,10 +178,10 @@ const Dashboard: React.FC<DashboardProps> = ({ league, news, onSimulate, onScout
             <div 
               key={i} 
               className={`flex items-center gap-2 px-4 py-2 rounded-xl border text-xs font-black uppercase tracking-widest animate-in slide-in-from-top-2 duration-500 delay-${i * 100}`}
-              style={{ 
-                backgroundColor: alert.type === 'danger' ? 'rgba(244, 63, 94, 0.1)' : 'rgba(245, 158, 11, 0.1)',
-                borderColor: alert.type === 'danger' ? 'rgba(244, 63, 94, 0.2)' : 'rgba(245, 158, 11, 0.2)',
-                color: alert.type === 'danger' ? '#f43f5e' : '#f59e0b'
+              style={{
+                backgroundColor: alert.type === 'critical' ? 'rgba(185, 28, 28, 0.15)' : alert.type === 'danger' ? 'rgba(244, 63, 94, 0.1)' : 'rgba(245, 158, 11, 0.1)',
+                borderColor: alert.type === 'critical' ? 'rgba(220, 38, 38, 0.4)' : alert.type === 'danger' ? 'rgba(244, 63, 94, 0.2)' : 'rgba(245, 158, 11, 0.2)',
+                color: alert.type === 'critical' ? '#ef4444' : alert.type === 'danger' ? '#f43f5e' : '#f59e0b'
               }}
             >
               <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" /></svg>
@@ -259,9 +283,9 @@ const Dashboard: React.FC<DashboardProps> = ({ league, news, onSimulate, onScout
               <div className="bg-slate-950/50 p-4 rounded-2xl border border-slate-800">
                 <p className="text-[10px] text-slate-500 font-bold uppercase mb-1">Team Morale</p>
                 <div className="flex items-center gap-2">
-                  <span className="text-3xl font-display font-black" style={{ color: userTeam.secondaryColor }}>{teamMorale}%</span>
+                  <span className="text-3xl font-display font-black" style={{ color: teamMorale < 50 ? '#ef4444' : teamMorale < 65 ? '#f43f5e' : teamMorale < 80 ? '#f59e0b' : '#22c55e' }}>{teamMorale}%</span>
                   <div className="flex-1 h-1 bg-slate-800 rounded-full overflow-hidden">
-                    <div className="h-full" style={{ width: `${teamMorale}%`, backgroundColor: userTeam.secondaryColor }}></div>
+                    <div className="h-full" style={{ width: `${teamMorale}%`, backgroundColor: teamMorale < 50 ? '#ef4444' : teamMorale < 65 ? '#f43f5e' : teamMorale < 80 ? '#f59e0b' : '#22c55e' }}></div>
                   </div>
                 </div>
               </div>
