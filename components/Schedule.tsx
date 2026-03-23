@@ -169,6 +169,9 @@ const Schedule: React.FC<ScheduleProps> = ({ league, onSimulate, onScout, onWatc
     }) || [];
 
     // Milestones — use same pct thresholds as the sim engine (App.tsx)
+    // Use `index + 1` as the per-team sequential game number (avoids the
+    // gameNumber overwrite bug where the last team to loop sets the value).
+    const teamGameNum = index + 1;
     const seasonLen = league.settings.seasonLength ?? 82;
     const tdSetting = league.settings.tradeDeadline;
     const deadlinePct = tdSetting === 'Disabled' ? null
@@ -178,8 +181,8 @@ const Schedule: React.FC<ScheduleProps> = ({ league, onSimulate, onScout, onWatc
     const deadlineGameNum = deadlinePct !== null ? Math.round(seasonLen * deadlinePct) : null;
     const allStarGameNum  = Math.round(seasonLen * 0.73);
 
-    const isDeadline = deadlineGameNum !== null && game.gameNumber === deadlineGameNum;
-    const isAllStar  = game.gameNumber === allStarGameNum;
+    const isDeadline = deadlineGameNum !== null && teamGameNum === deadlineGameNum;
+    const isAllStar  = teamGameNum === allStarGameNum;
 
     return (
       <div className="space-y-4">
@@ -216,7 +219,7 @@ const Schedule: React.FC<ScheduleProps> = ({ league, onSimulate, onScout, onWatc
           <div className="flex flex-col md:flex-row items-center gap-6">
             <div className="flex flex-col items-center md:items-start min-w-[120px]">
               <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-1">
-                {viewMode === 'team' ? `GAME ${game.gameNumber}/${seasonLen}` : `DAY ${game.day}`}
+                {viewMode === 'team' ? `GAME ${teamGameNum}/${seasonLen}` : `DAY ${game.day}`}
               </span>
               {isB2B && viewMode === 'team' && (
                 <span className="mt-1 px-2 py-0.5 bg-rose-500/20 text-rose-500 text-[9px] font-black uppercase rounded border border-rose-500/20">
@@ -450,9 +453,9 @@ const Schedule: React.FC<ScheduleProps> = ({ league, onSimulate, onScout, onWatc
           <div className="grid grid-cols-2 md:grid-cols-4 gap-8 relative z-10 text-center md:text-left">
             <div>
               <p className="text-[10px] text-slate-500 font-black uppercase tracking-[0.2em] mb-1">Season Progress</p>
-              <p className="text-3xl font-display font-bold text-white uppercase">{stats.played} / 82</p>
+              <p className="text-3xl font-display font-bold text-white uppercase">{stats.played} / {league.settings.seasonLength ?? 82}</p>
               <div className="h-1 bg-slate-800 rounded-full mt-2 overflow-hidden w-full">
-                <div className="h-full bg-amber-500" style={{ width: `${(stats.played/82)*100}%` }}></div>
+                <div className="h-full bg-amber-500" style={{ width: `${(stats.played / (league.settings.seasonLength ?? 82)) * 100}%` }}></div>
               </div>
             </div>
             <div>
