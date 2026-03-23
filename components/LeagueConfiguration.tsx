@@ -112,7 +112,7 @@ const LeagueConfiguration: React.FC<LeagueConfigurationProps> = ({ onConfirm, on
   const [showAdvancedStats, setShowAdvancedStats] = useState(true);
 
   // ── Playoffs & Schedule ───────────────────────────────────────────────────
-  const [playoffFormat, setPlayoffFormat]       = useState<6|8|10|12|14|16>(8);
+  const [playoffFormat, setPlayoffFormat]       = useState<6|8|10|12|14|16>(16);
   const [playoffSeeding, setPlayoffSeeding]     = useState<'Conference'|'League-wide'>('Conference');
   const [playInTournament, setPlayInTournament] = useState(true);
   const [homeCourt, setHomeCourt]               = useState(true);
