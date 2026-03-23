@@ -608,10 +608,6 @@ const LeagueConfiguration: React.FC<LeagueConfigurationProps> = ({ onConfirm, on
                 <h4 className="text-xs font-black text-amber-500 uppercase tracking-[0.3em] border-b border-slate-800 pb-3">League Infrastructure</h4>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
 
-                  <Field label="Number of Teams" hint="How many franchises start in the league. Max 38 (all available). Must be even.">
-                    <BtnGroup options={['20','24','28','30','32','38']} value={String(numTeams)}
-                      onChange={v => setNumTeams(parseInt(v))} />
-                  </Field>
                   <Field label="Salary Cap (Soft Limit)" hint={FIELD_HINTS.salaryCap} error={errors.salaryCap}>
                     <div className="space-y-2">
                       <input type="number" value={salaryCap} step={1_000_000} min={80_000_000} max={300_000_000}

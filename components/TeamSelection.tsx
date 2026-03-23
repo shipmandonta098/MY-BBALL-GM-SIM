@@ -20,6 +20,9 @@ interface TeamSelectionProps {
   teams: Team[];
   onSelectTeam: (teamId: string) => void;
   onEditTeam?: (teamId: string, updates: Partial<TeamEditDraft>) => void;
+  onRemoveTeam?: (teamId: string) => void;
+  onAddTeam?: () => void;
+  canAddTeam?: boolean;
   onBack?: () => void;
 }
 
@@ -27,11 +30,12 @@ const DIVISIONS = ['Atlantic', 'Central', 'Southeast', 'Northwest', 'Pacific', '
 const BORDER_STYLES: TeamEditDraft['borderStyle'][] = ['None', 'Solid', 'Gradient'];
 const STATUS_OPTIONS: TeamEditDraft['status'][] = ['Active', 'Inactive', 'Relocating', 'Expansion'];
 
-const TeamSelection: React.FC<TeamSelectionProps> = ({ teams, onSelectTeam, onEditTeam, onBack }) => {
+const TeamSelection: React.FC<TeamSelectionProps> = ({ teams, onSelectTeam, onEditTeam, onRemoveTeam, onAddTeam, canAddTeam, onBack }) => {
   const [hoveredTeam, setHoveredTeam] = useState<string | null>(null);
   const [editingTeamId, setEditingTeamId] = useState<string | null>(null);
   const [editDraft, setEditDraft] = useState<TeamEditDraft | null>(null);
   const [logoPreviewError, setLogoPreviewError] = useState(false);
+  const [removeConfirmId, setRemoveConfirmId] = useState<string | null>(null);
 
   const getTeamRating = (team: Team) => {
     const avg = team.roster.reduce((sum, p) => sum + p.rating, 0) / team.roster.length;
@@ -173,9 +177,62 @@ const TeamSelection: React.FC<TeamSelectionProps> = ({ teams, onSelectTeam, onEd
                     </svg>
                   </button>
                 )}
+
+                {/* Remove button */}
+                {onRemoveTeam && teams.length > 2 && (
+                  <button
+                    onClick={(e) => { e.stopPropagation(); setRemoveConfirmId(team.id); }}
+                    className="absolute top-3 left-3 z-10 p-1.5 rounded-lg bg-slate-800/90 text-slate-400 hover:text-rose-400 hover:bg-slate-700 transition-all border border-slate-700"
+                    title="Remove team"
+                  >
+                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12" />
+                    </svg>
+                  </button>
+                )}
+
+                {/* Remove confirmation overlay */}
+                {removeConfirmId === team.id && (
+                  <div className="absolute inset-0 z-20 flex flex-col items-center justify-center gap-3 bg-slate-950/90 rounded-2xl p-4 text-center">
+                    <p className="text-sm font-bold text-white">Remove {team.city} {team.name}?</p>
+                    <p className="text-[10px] text-slate-400">This team and its roster will be removed from the league.</p>
+                    <div className="flex gap-2 w-full">
+                      <button
+                        onClick={(e) => { e.stopPropagation(); onRemoveTeam(team.id); setRemoveConfirmId(null); }}
+                        className="flex-1 py-2 bg-rose-600 hover:bg-rose-500 text-white font-black text-xs uppercase rounded-xl transition-all"
+                      >
+                        Remove
+                      </button>
+                      <button
+                        onClick={(e) => { e.stopPropagation(); setRemoveConfirmId(null); }}
+                        className="flex-1 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 font-black text-xs uppercase rounded-xl transition-all"
+                      >
+                        Cancel
+                      </button>
+                    </div>
+                  </div>
+                )}
               </div>
             );
           })}
+
+          {/* Add Team card */}
+          {onAddTeam && canAddTeam && (
+            <div>
+              <button
+                onClick={onAddTeam}
+                className="relative flex flex-col items-center justify-center p-6 bg-slate-900/50 border-2 border-dashed border-slate-700 hover:border-amber-500/50 hover:bg-slate-900 rounded-2xl transition-all group w-full min-h-[280px] text-slate-600 hover:text-amber-500"
+              >
+                <div className="w-16 h-16 rounded-2xl border-2 border-dashed border-current flex items-center justify-center mb-4 transition-colors">
+                  <svg className="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 4v16m8-8H4" />
+                  </svg>
+                </div>
+                <span className="text-sm font-black uppercase tracking-widest">Add Expansion Team</span>
+                <span className="text-[10px] mt-1 font-bold uppercase tracking-wider opacity-60">Click to add next available franchise</span>
+              </button>
+            </div>
+          )}
         </div>
       </div>
 
