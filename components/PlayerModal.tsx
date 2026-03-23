@@ -28,6 +28,10 @@ interface PlayerModalProps {
     teamPlayers: Player[];
     seasonLength: number;
     currentTeamAbbreviation?: string;
+    teamStreak?: number;
+    teamScheme?: string;
+    teamWins?: number;
+    teamLosses?: number;
   };
   /** All team names for the draft-team dropdown in god mode */
   teams?: string[];
@@ -1741,6 +1745,121 @@ const PlayerModal: React.FC<PlayerModalProps> = ({
               </section>
             );
           })()}
+
+          {/* ── Morale & Mindset ────────────────────────────────────────────── */}
+          <section className="space-y-4">
+            <h3 className="text-[10px] font-black text-amber-500 uppercase tracking-[0.5em]">Morale &amp; Mindset</h3>
+            {(() => {
+              const morale = player.morale ?? 75;
+              const traits = player.personalityTraits ?? [];
+              const streak = leagueContext?.teamStreak ?? 0;
+              const wins   = leagueContext?.teamWins ?? 0;
+              const losses = leagueContext?.teamLosses ?? 0;
+              const mpg    = player.stats.gamesPlayed > 0 ? player.stats.minutes / player.stats.gamesPlayed : 0;
+
+              const moraleColor = morale < 50 ? '#ef4444' : morale < 65 ? '#f43f5e' : morale < 80 ? '#f59e0b' : '#22c55e';
+              const moraleLabel = morale < 50 ? 'Critical' : morale < 65 ? 'Low' : morale < 80 ? 'Moderate' : 'Good';
+
+              // Build factors list
+              type FactorEntry = { label: string; impact: 'positive' | 'negative' | 'neutral' };
+              const factors: FactorEntry[] = [];
+
+              // Streak / record
+              if (streak >= 4) factors.push({ label: `Win streak (${streak})`, impact: 'positive' });
+              else if (streak >= 2) factors.push({ label: `Winning recently`, impact: 'positive' });
+              else if (streak <= -4) factors.push({ label: `Losing streak (${Math.abs(streak)})`, impact: 'negative' });
+              else if (streak <= -2) factors.push({ label: `Losing recently`, impact: 'negative' });
+              if (wins > 0 || losses > 0) {
+                const winPct = wins / (wins + losses);
+                if (winPct >= 0.6) factors.push({ label: 'Team winning overall', impact: 'positive' });
+                else if (winPct < 0.35) factors.push({ label: 'Team struggling this season', impact: 'negative' });
+              }
+
+              // Playing time
+              const prefMin = player.status === 'Starter' ? 28 : player.status === 'Rotation' ? 18 : 10;
+              if (mpg > 0) {
+                if (mpg < prefMin - 10) factors.push({ label: 'Far below preferred minutes', impact: 'negative' });
+                else if (mpg < prefMin - 5) factors.push({ label: 'Below preferred minutes', impact: 'negative' });
+                else if (mpg >= prefMin) factors.push({ label: 'Playing expected minutes', impact: 'positive' });
+              }
+              if (player.status === 'Bench' && traits.includes('Diva/Star')) {
+                factors.push({ label: 'Bench role (Diva/Star)', impact: 'negative' });
+              }
+
+              // Personality-driven factors
+              if (traits.includes('Gym Rat'))             factors.push({ label: 'Gym Rat mentality (+)', impact: 'positive' });
+              if (traits.includes('Professional'))        factors.push({ label: 'Professional mindset (+)', impact: 'positive' });
+              if (traits.includes('Leader'))              factors.push({ label: 'Leader — feels team results personally', impact: streak >= 0 ? 'positive' : 'negative' });
+              if (traits.includes('Loyal') && streak >= 0) factors.push({ label: 'Loyal — team-first attitude', impact: 'positive' });
+              if (traits.includes('Workhorse') && mpg >= 28) factors.push({ label: 'Workhorse — loves heavy minutes', impact: 'positive' });
+              if (traits.includes('Money Hungry'))        factors.push({ label: 'Money Hungry — always wants more', impact: 'negative' });
+              if (traits.includes('Hot Head') && streak < 0) factors.push({ label: 'Hot Head — losing affects mood', impact: 'negative' });
+              if (traits.includes('Friendly/Team First')) factors.push({ label: 'Team First — positive chemistry', impact: 'positive' });
+              if (traits.includes('Lazy'))                factors.push({ label: 'Lazy — effort drops in losses', impact: 'negative' });
+
+              // Injury
+              if (player.status === 'Injured' && (player.injuryDaysLeft ?? 0) >= 14) {
+                factors.push({ label: `Long-term injury (${player.injuryDaysLeft}d out)`, impact: 'negative' });
+              }
+
+              // Trade block
+              if (player.onTradeBlock) factors.push({ label: 'On trade block — unhappy', impact: 'negative' });
+
+              return (
+                <div className="bg-slate-950/50 border border-slate-800 rounded-3xl p-6 space-y-5">
+                  {/* Bar */}
+                  <div className="flex items-center gap-4">
+                    <div className="flex-1 space-y-1.5">
+                      <div className="flex justify-between items-center">
+                        <span className="text-[10px] font-black uppercase tracking-widest" style={{ color: moraleColor }}>{moraleLabel} Morale</span>
+                        <span className="text-2xl font-display font-black tabular-nums" style={{ color: moraleColor }}>{Math.round(morale)}%</span>
+                      </div>
+                      <div className="h-2 bg-slate-800 rounded-full overflow-hidden">
+                        <div className="h-full rounded-full transition-all duration-500" style={{ width: `${morale}%`, backgroundColor: moraleColor }} />
+                      </div>
+                      <div className="flex justify-between text-[8px] font-black text-slate-700 uppercase tracking-widest">
+                        <span>Critical</span><span>Low</span><span>Moderate</span><span>Good</span>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Factors */}
+                  {factors.length > 0 && (
+                    <div className="space-y-2">
+                      <p className="text-[9px] font-black text-slate-600 uppercase tracking-widest">Contributing Factors</p>
+                      <div className="flex flex-wrap gap-1.5">
+                        {factors.map((f, i) => (
+                          <span
+                            key={i}
+                            className={`flex items-center gap-1 px-2.5 py-1 rounded-lg text-[10px] font-bold border ${
+                              f.impact === 'positive'
+                                ? 'bg-emerald-500/10 border-emerald-500/20 text-emerald-400'
+                                : f.impact === 'negative'
+                                ? 'bg-rose-500/10 border-rose-500/20 text-rose-400'
+                                : 'bg-slate-800 border-slate-700 text-slate-400'
+                            }`}
+                          >
+                            {f.impact === 'positive' ? '▲' : f.impact === 'negative' ? '▼' : '—'} {f.label}
+                          </span>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Sim impact note */}
+                  <p className="text-[9px] text-slate-600 leading-relaxed">
+                    {morale < 50
+                      ? 'Critical morale reduces shooting efficiency, increases turnovers, and lowers defensive effort.'
+                      : morale < 65
+                      ? 'Low morale causes small but consistent penalties to shooting and effort stats.'
+                      : morale >= 85
+                      ? 'High morale provides a shooting and defensive effort bonus in simulation.'
+                      : 'Morale is stable — no significant sim impact.'}
+                  </p>
+                </div>
+              );
+            })()}
+          </section>
 
           <section className="space-y-5">
              <div className="flex items-center justify-between">

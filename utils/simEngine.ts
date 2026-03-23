@@ -3162,7 +3162,14 @@ const simulatePlayerGameLine = (
   opponentInteriorDefMod = 0,  // team-level at-rim defensive suppression (getRimProtectionMod)
   opponentMidDefMod = 0,       // team-level mid-range suppression (getMidRangeContestMod)
   opponentPostDefMod = 0,      // team-level post suppression (getPostDefenseMod)
+  morale = 75,                 // player morale (0-100); affects FG%, TOV, STL, BLK
 ): GamePlayerLine => {
+  // Morale modifiers: centered at 75 so an average player is neutral.
+  // Critical (<50): FG -3%, TOV +25%, effort -15% | High (>85): FG +2%, effort +10%
+  const moraleNorm = (morale - 75) / 75; // [-1, +0.33] range
+  const moraleFgMod  = moraleNorm *  0.025;  // ±2.5% FG at extremes
+  const moraleTovMod = moraleNorm * -0.15;   // low morale → more turnovers (inverted: -15% rate boost)
+  const moraleEffMod = moraleNorm *  0.10;   // ±10% effort (steals/blocks)
   const fgPctBoost = varRoll / 100 * 0.4; // variance → small FG% delta
   const tm     = computeTendencyModifiers(player);
   const minFac = minutes / 48;
@@ -3176,14 +3183,15 @@ const simulatePlayerGameLine = (
 
   // TO% computed early: drives both the TOV stat and the AST efficiency penalty.
   // Uses getTurnoverPercentage() — piecewise curve calibrated to NBA 2025-26.
-  const toRate = getTurnoverPercentage(
+  // moraleTovMod is negative when morale < 75, boosting the raw toRate (more turnovers).
+  const toRate = Math.max(0, getTurnoverPercentage(
     player.attributes.ballHandling,
     player.attributes.passing,
     player.attributes.offensiveIQ,
     player.position,
     player.attributes.stamina,
     player.personalityTraits,
-  );
+  ) - moraleTovMod);
 
   // 3PA share influenced by pullUpThree tendency
   const threePaShare = Math.max(0, Math.min(0.90,
@@ -3229,9 +3237,9 @@ const simulatePlayerGameLine = (
   // Stochastic rounding: Math.floor(n*rate + rand()) gives correct expected
   // value (= n*rate) without the systematic upward bias of Math.round that
   // was locking season 3PT% leaders at 50% for high-base shooters.
-  const threeRate = Math.max(0.05, fgPct3 + fgPctBoost + fatigueMod + opponentPerimDefMod + (Math.random() * 0.06 - 0.03));
+  const threeRate = Math.max(0.05, fgPct3 + fgPctBoost + fatigueMod + opponentPerimDefMod + moraleFgMod + (Math.random() * 0.06 - 0.03));
   const threepm   = Math.min(threepa, Math.floor(threepa * threeRate + Math.random()));
-  const midRate   = Math.max(0.05, fgPctMid + fgPctBoost + fatigueMod + opponentMidDefMod + (Math.random() * 0.06 - 0.03));
+  const midRate   = Math.max(0.05, fgPctMid + fgPctBoost + fatigueMod + opponentMidDefMod + moraleFgMod + (Math.random() * 0.06 - 0.03));
   const midFgm    = Math.min(midFga,  Math.floor(midFga  * midRate   + Math.random()));
   // Inside FGM: interior + post defense mods both apply (weighted by post share).
   // opponentInteriorDefMod suppresses drives/dunks; opponentPostDefMod suppresses
@@ -3241,7 +3249,7 @@ const simulatePlayerGameLine = (
   const blendedInsideMod = opponentInteriorDefMod * (1 - postWeight) + opponentPostDefMod * postWeight;
   // Floor lowered to 0.30 (from 0.35): even poor finishers shouldn't make 35%+
   // of their inside attempts after factoring in rim protection and fatigue.
-  const insRate   = Math.max(0.30, fgPctIns + fgPctBoost + fatigueMod + blendedInsideMod + (Math.random() * 0.06 - 0.03));
+  const insRate   = Math.max(0.30, fgPctIns + fgPctBoost + fatigueMod + blendedInsideMod + moraleFgMod + (Math.random() * 0.06 - 0.03));
   const insFgm    = Math.min(insFga,  Math.floor(insFga  * insRate   + Math.random()));
   const fgm     = threepm + midFgm + insFgm;
 
@@ -3303,7 +3311,7 @@ const simulatePlayerGameLine = (
   // Stamina: fatigued defenders lose a step — up to 15 % reduction at stamina=40.
   const STL_OPP_SCALE = 65;
   const stlBase    = getStealChance(player.attributes.steals, player.position, player.attributes.defensiveIQ)
-    * STL_OPP_SCALE * minFac * (1 + tm.stlBoost);
+    * STL_OPP_SCALE * minFac * (1 + tm.stlBoost) * (1 + moraleEffMod);
   const stlFatigue = Math.max(0, (65 - (player.attributes.stamina ?? 70)) / 100 * 0.15);
   const stl        = Math.max(0, Math.floor(stlBase * (1 - stlFatigue) + Math.random() * 0.8));
 
@@ -3311,7 +3319,7 @@ const simulatePlayerGameLine = (
   // blkBoost from helpDefender/physicality tendencies; stamina reduction for tired bigs.
   const BLK_OPP_SCALE = 50;
   const blkBase    = getBlockChance(player.attributes.blocks, player.position, player.attributes.defensiveIQ)
-    * BLK_OPP_SCALE * minFac * (1 + tm.blkBoost);
+    * BLK_OPP_SCALE * minFac * (1 + tm.blkBoost) * (1 + moraleEffMod);
   const blkFatigue = Math.max(0, (65 - (player.attributes.stamina ?? 70)) / 100 * 0.12);
   const blk        = Math.max(0, Math.floor(blkBase * (1 - blkFatigue) + Math.random() * 0.8));
   const pf  = Math.min(6, Math.round((Math.floor(Math.random() * 4 * minFac + 1)) * (1 + tm.foulRisk)));
@@ -3694,7 +3702,7 @@ export const simulateGame = (
       const ftBonus    = isHome ? 0.03 : 0;
       const varRoll    = playerVariance.get(p.id) ?? 0;
       const usageShare = usageShares[i];
-      const line = simulatePlayerGameLine(p, totalPts, teamFga, teamReb, teamAst, mins, usageShare, varRoll, ftBonus, oppPerimDefMod, oppInteriorDefMod, oppMidDefMod, oppPostDefMod);
+      const line = simulatePlayerGameLine(p, totalPts, teamFga, teamReb, teamAst, mins, usageShare, varRoll, ftBonus, oppPerimDefMod, oppInteriorDefMod, oppMidDefMod, oppPostDefMod, p.morale ?? 75);
       return { ...line, techs: 0, flagrants: 0, ejected: false };
     });
 

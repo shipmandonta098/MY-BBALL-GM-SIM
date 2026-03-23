@@ -876,16 +876,59 @@ const App: React.FC = () => {
             suspensionGames = 1;
           }
 
-          let morale = p.morale || 75;
-          if (p.personalityTraits.includes('Diva/Star')) {
-            if (line.min < 20) morale -= 2;
-            if (p.status === 'Bench') morale -= 1;
+          let morale = p.morale ?? 75;
+          const traits = p.personalityTraits ?? [];
+          const teamStreak = team.streak;
+
+          // ── Win/Loss base effect ──────────────────────────────────────────
+          if (isWinner) {
+            morale += traits.includes('Loyal') ? 1.5 : 1.0;
+          } else {
+            morale += traits.includes('Lazy') ? -1.8 : traits.includes('Leader') ? -0.8 : -1.2;
           }
-          if (p.personalityTraits.includes('Loyal') && isWinner) morale += 1;
-          if (p.personalityTraits.includes('Money Hungry') && isWinner) morale += 0.5;
-          if (p.personalityTraits.includes('Friendly/Team First')) morale += 0.5;
-          if (p.personalityTraits.includes('Lazy') && !isWinner) morale -= 1;
-          
+
+          // ── Playing time / role satisfaction ─────────────────────────────
+          const prefMinsByStatus = p.status === 'Starter' ? 28 : p.status === 'Rotation' ? 18 : 10;
+          const minDiff = line.min - prefMinsByStatus;
+          if (minDiff < -12) {
+            // Significantly under expected minutes
+            morale += traits.includes('Diva/Star') ? -2.5 : -1.2;
+          } else if (minDiff < -6) {
+            morale += traits.includes('Diva/Star') ? -1.5 : -0.6;
+          } else if (minDiff > 6 && p.status !== 'Starter') {
+            morale += 0.5; // rewarded with extra run
+          }
+
+          // ── Scorer usage satisfaction ─────────────────────────────────────
+          // High-rating scorers (OVR ≥ 80) want touches; low FGA = frustration
+          if (p.rating >= 80) {
+            const expectedFga = p.status === 'Starter' ? 10 : 6;
+            if (line.fga < expectedFga - 4) morale -= 1.0;
+            else if (line.fga > expectedFga + 3) morale += 0.3;
+          }
+
+          // ── Personality trait effects ─────────────────────────────────────
+          if (traits.includes('Leader') && isWinner) morale += 0.5;
+          if (traits.includes('Gym Rat'))             morale += 0.3;
+          if (traits.includes('Workhorse') && line.min >= 28) morale += 0.4;
+          if (traits.includes('Professional'))        morale += 0.2;
+          if (traits.includes('Friendly/Team First')) morale += isWinner ? 0.6 : 0.2;
+          if (traits.includes('Money Hungry'))        morale -= 0.3; // perpetually somewhat dissatisfied
+          if (traits.includes('Hot Head') && !isWinner) morale -= 0.8;
+          if (traits.includes('Clutch') && isWinner)  morale += 0.4;
+          if (traits.includes('Diva/Star') && p.status === 'Bench') morale -= 0.8;
+
+          // ── Streak momentum ──────────────────────────────────────────────
+          if (teamStreak >= 4) morale += 0.5;
+          else if (teamStreak >= 2) morale += 0.2;
+          else if (teamStreak <= -4) morale -= 0.6;
+          else if (teamStreak <= -2) morale -= 0.3;
+
+          // ── Natural morale drift toward baseline ─────────────────────────
+          // Prevents morale from staying pinned at extremes indefinitely
+          const baseline = 72 + (p.rating - 65) * 0.1; // better players have slightly higher baseline
+          morale += (baseline - morale) * 0.03;
+
           morale = Math.min(100, Math.max(0, morale));
 
           return {
@@ -921,6 +964,10 @@ const App: React.FC = () => {
         })
       };
     };
+    // Track morale before update for delta-based news
+    const moraleBeforeById = new Map<string, number>();
+    [homeTeam, awayTeam].forEach(t => t.roster.forEach(p => moraleBeforeById.set(p.id, p.morale ?? 75)));
+
     updatedTeams = updatedTeams.map(t => {
       const isWinner = (t.id === homeTeam.id && homeWon) || (t.id === awayTeam.id && !homeWon);
       if (t.id === homeTeam.id) return updateStats(t, result.homePlayerStats, isWinner);
@@ -928,8 +975,40 @@ const App: React.FC = () => {
       return t;
     });
 
+    // Apply trade block for chronically unhappy Diva/Stars, and flag big morale drops
+    updatedTeams = updatedTeams.map(t => ({
+      ...t,
+      roster: t.roster.map(p => {
+        if (p.morale < 30 && p.personalityTraits?.includes('Diva/Star') && !p.onTradeBlock) {
+          return { ...p, onTradeBlock: true };
+        }
+        return p;
+      })
+    }));
+
     const rivalryHistory = updateRivalryStats(state, result);
     newState = { ...state, teams: updatedTeams, history: [result, ...state.history], schedule: state.schedule.map(sg => sg.id === gameId ? { ...sg, played: true, resultId: result.id } : sg), rivalryHistory };
+
+    // Generate morale-based news (only for user team, at most once per player per 15 games)
+    const userTeamUpdated = newState.teams.find(t => t.id === newState.userTeamId);
+    if (userTeamUpdated) {
+      for (const p of userTeamUpdated.roster) {
+        const prevMorale = moraleBeforeById.get(p.id) ?? 75;
+        const gp = p.stats.gamesPlayed;
+        // Big single-game drop crossing a threshold
+        if (prevMorale >= 50 && p.morale < 50 && gp % 5 === 0) {
+          newState = await addNewsItem(newState, 'transaction', {
+            player: p, team: userTeamUpdated,
+            detail: `${p.name} is frustrated — morale has dropped to a concerning level. Expect a performance dip.`
+          }, false);
+        } else if (prevMorale >= 35 && p.morale < 35 && p.personalityTraits?.includes('Diva/Star')) {
+          newState = await addNewsItem(newState, 'transaction', {
+            player: p, team: userTeamUpdated,
+            detail: `${p.name} is deeply unhappy with their current role. Trade rumors may follow.`
+          }, true);
+        }
+      }
+    }
 
     // News for ejections
     const allLines = [...result.homePlayerStats, ...result.awayPlayerStats];
@@ -955,6 +1034,16 @@ const App: React.FC = () => {
         const injTeam = newState.teams.find(t => t.id === inj.teamId)!;
         const injPlayer = injTeam.roster.find(p => p.id === inj.playerId)!;
         const wks = inj.daysOut >= 14 ? ` (${Math.round(inj.daysOut / 7)} wks)` : '';
+        // Injury morale hit: short = -5, long = -12
+        const injMoraleDrop = inj.daysOut >= 14 ? -12 : -5;
+        newState = {
+          ...newState,
+          teams: newState.teams.map(t => t.id !== inj.teamId ? t : {
+            ...t, roster: t.roster.map(p => p.id !== inj.playerId ? p : {
+              ...p, morale: Math.max(0, Math.min(100, (p.morale ?? 75) + injMoraleDrop))
+            })
+          })
+        };
         newState = await addNewsItem(newState, 'injury', {
           player: injPlayer, team: injTeam,
           detail: `${injPlayer.name} suffered a ${inj.injuryType} and is expected to miss ${inj.daysOut} day${inj.daysOut !== 1 ? 's' : ''}${wks}.`
@@ -1954,6 +2043,10 @@ const App: React.FC = () => {
               teamPlayers: playerTeam?.roster ?? [],
               seasonLength: league.settings.seasonLength ?? 82,
               currentTeamAbbreviation: playerTeam?.abbreviation,
+              teamStreak: playerTeam?.streak,
+              teamScheme: playerTeam?.activeScheme,
+              teamWins: playerTeam?.wins,
+              teamLosses: playerTeam?.losses,
             }}
             teams={league.teams.map(t => t.name)}
           />
