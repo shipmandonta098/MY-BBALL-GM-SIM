@@ -2,7 +2,9 @@ import React, { useState } from 'react';
 import {
   LeagueState, AllStarWeekendData, AllStarContestResult,
   AllStarGameResult, AllStarPlayerLine, Player, AllStarVoteEntry,
+  Team, PlayByPlayEvent,
 } from '../types';
+import { simulateGame } from '../utils/simEngine';
 
 interface AllStarProps {
   league: LeagueState;
@@ -129,208 +131,55 @@ function simulateDunkContest(league: LeagueState, participants: string[]): AllSt
   };
 }
 
-// ── Play-by-play generator ────────────────────────────────────────────────────
-function generatePlayByPlay(
-  eastLines: AllStarPlayerLine[],
-  westLines: AllStarPlayerLine[],
-  eQ: number[],
-  wQ: number[],
-): string[] {
-  const verbs2 = [
-    'drives and finishes at the rim', 'mid-range pull-up — GOOD', 'pump-fake and glides in',
-    'floater over the outstretched hand', 'catch-and-shoot from the elbow',
-    'turnaround jumper — money', 'tough bucket through contact',
-    'step-back at the free-throw line', 'finger roll off the glass',
-    'lefty scoop — GOOD', 'spin move and up-and-under',
-  ];
-  const verbs3 = [
-    'fires from deep — THREE 🎯', 'step-back triple — SPLASH 💦',
-    'top-of-the-arc — BANG', 'corner catch — nothing but net 🔥',
-    'logo shot — nailed it!', 'hand in the face — SPLASH',
-    'pull-up three — GOOD!',
-  ];
-  const dunkDescs = [
-    'catches the lob and HAMMERS it 🔨', 'windmill jam off the fast break 🌀',
-    'tomahawk slam — crowd erupts 🔥', 'off the alley-oop — BOOM 💥',
-    'power dunk over the helpside!', 'between the legs — pure showmanship!',
-    'off the glass, reverse slam!',
-  ];
-  const bigRunDescs = [
-    'goes on a personal 6-0 run', 'hits back-to-back buckets to ignite the run',
-    'takes over — three straight baskets', 'can\'t be stopped right now',
-    'scores 6 in a blink',
-  ];
-  const assistVerbs = ['dishes to', 'threads the needle to', 'no-look pass to', 'behind-the-back to', 'beautiful feed to'];
-  const nonScoring = [
-    (name: string) => `${name} swats it away — BLOCKED! 🛡️`,
-    (name: string) => `${name} picks the pocket and pushes in transition`,
-    (name: string) => `Crowd on their feet after ${name}'s near-miss no-look`,
-    (name: string) => `Timeout called on the floor — coaches huddle up`,
-    (name: string) => `${name} shows off some handles, draws the oohs and ahhs`,
-  ];
-
-  const pick = <T,>(arr: T[]): T => arr[Math.floor(Math.random() * arr.length)];
-  const pickWeighted = (lines: AllStarPlayerLine[]): AllStarPlayerLine => {
-    if (lines.length === 0) return lines[0];
-    const total = lines.reduce((s, l) => s + Math.max(1, l.pts), 0);
-    let r = Math.random() * total;
-    for (const l of lines) { r -= Math.max(1, l.pts); if (r <= 0) return l; }
-    return lines[lines.length - 1];
-  };
-
-  type SEvent = { conf: 'East' | 'West'; pts: number; text: string };
-
-  const buildEvents = (lines: AllStarPlayerLine[], target: number, conf: 'East' | 'West'): SEvent[] => {
-    const evts: SEvent[] = [];
-    let rem = target;
-    const maxEvents = 11;
-    while (rem > 3 && evts.length < maxEvents) {
-      const shooter = pickWeighted(lines);
-      const rand = Math.random();
-      if (rand < 0.07 && rem >= 6) {
-        // Big run — 6–8 pts chunk
-        const runPlayer = pickWeighted(lines);
-        const pts = Math.random() < 0.5 ? 6 : 8;
-        evts.push({ conf, pts, text: `${runPlayer.playerName} ${pick(bigRunDescs)}` });
-        rem -= pts;
-      } else if (rand < 0.20 && shooter.threepa > 0 && rem >= 3) {
-        evts.push({ conf, pts: 3, text: `${shooter.playerName} ${pick(verbs3)}` });
-        rem -= 3;
-      } else if (rand < 0.30 && shooter.pts >= 12) {
-        evts.push({ conf, pts: 2, text: `${shooter.playerName} ${pick(dunkDescs)}` });
-        rem -= 2;
-      } else if (rand < 0.45 && lines.length >= 2) {
-        const passer = pickWeighted(lines.filter(l => l.playerId !== shooter.playerId));
-        evts.push({ conf, pts: 2, text: `${passer.playerName} ${pick(assistVerbs)} ${shooter.playerName} for 2` });
-        rem -= 2;
-      } else {
-        evts.push({ conf, pts: 2, text: `${shooter.playerName} ${pick(verbs2)}` });
-        rem -= 2;
-      }
-    }
-    // Absorb remainder
-    if (rem > 0 && lines.length > 0) {
-      const shooter = pickWeighted(lines);
-      const text = rem === 1
-        ? `${shooter.playerName} converts 1-of-2 from the line`
-        : rem === 3 ? `${shooter.playerName} ${pick(verbs3)}`
-        : `${shooter.playerName} ${pick(verbs2)}`;
-      evts.push({ conf, pts: rem, text });
-    }
-    return evts;
-  };
-
-  let cumE = 0;
-  let cumW = 0;
-  const plays: string[] = [];
-
-  for (let q = 0; q < 4; q++) {
-    plays.push(`──── Quarter ${q + 1} ────`);
-    const eEvts = buildEvents(eastLines, eQ[q], 'East');
-    const wEvts = buildEvents(westLines, wQ[q], 'West');
-
-    // Interleave East/West events randomly
-    const combined: SEvent[] = [];
-    let ei = 0, wi = 0;
-    while (ei < eEvts.length || wi < wEvts.length) {
-      if (ei >= eEvts.length) { combined.push(wEvts[wi++]); continue; }
-      if (wi >= wEvts.length) { combined.push(eEvts[ei++]); continue; }
-      if (Math.random() < 0.5) combined.push(eEvts[ei++]);
-      else combined.push(wEvts[wi++]);
-    }
-
-    // Inject 1–2 non-scoring flavor lines per quarter
-    const flavourCount = 1 + (Math.random() < 0.5 ? 1 : 0);
-    for (let f = 0; f < flavourCount; f++) {
-      const allPlayers = [...eastLines, ...westLines];
-      const fp = allPlayers[Math.floor(Math.random() * allPlayers.length)];
-      const flavourIdx = Math.floor(Math.random() * (combined.length + 1));
-      combined.splice(flavourIdx, 0, { conf: fp.playerId < 'p' ? 'East' : 'West', pts: 0, text: pick(nonScoring)(fp.playerName) });
-    }
-
-    for (const ev of combined) {
-      if (ev.pts > 0) {
-        if (ev.conf === 'East') cumE += ev.pts;
-        else cumW += ev.pts;
-      }
-      const scoreTag = ev.pts > 0 ? ` · E ${cumE} – W ${cumW}` : '';
-      plays.push(`${ev.conf === 'East' ? '🔵' : '🔴'} ${ev.text}${scoreTag}`);
-    }
-
-    // Snap cumulative to actual quarter totals to avoid drift
-    const qEEnd = eQ.slice(0, q + 1).reduce((a, b) => a + b, 0);
-    const qWEnd = wQ.slice(0, q + 1).reduce((a, b) => a + b, 0);
-    plays.push(`📊 End Q${q + 1}: East ${qEEnd} – West ${qWEnd}`);
-    cumE = qEEnd;
-    cumW = qWEnd;
-  }
-
-  return plays;
-}
-
-// ── Per-player box score generator ───────────────────────────────────────────
-function genTeamBoxScore(
-  league: LeagueState,
-  roster: string[],
+// ── Build a virtual All-Star Team for use with simulateGame ──────────────────
+function buildAllStarTeam(
+  conf: 'East' | 'West',
+  rosterIds: string[],
   starters: string[],
-  totalPts: number,
-): AllStarPlayerLine[] {
-  const players = roster
-    .map(id => getPlayerById(league, id))
-    .filter(Boolean) as Player[];
-  if (players.length === 0) return [];
+  league: LeagueState,
+): Team {
+  const players = rosterIds.map(id => getPlayerById(league, id)).filter(Boolean) as Player[];
 
-  // Scoring weight: rating + in-season ppg + noise (slightly bias toward guards/wings)
-  const weights = players.map(p => {
-    const posBonus = (p.position === 'PG' || p.position === 'SG') ? 8 : (p.position === 'SF') ? 4 : 0;
-    return Math.max(1, p.rating * 0.55 + ppg(p) * 1.4 + posBonus + Math.random() * 14);
-  });
-  const totalW = weights.reduce((a, b) => a + b, 0);
-
-  // Distribute team total points; ensure integer pts add up to totalPts
-  const rawPts = players.map((_, i) => (weights[i] / totalW) * totalPts);
-  let lines: AllStarPlayerLine[] = players.map((p, i) => {
-    const pts = Math.round(rawPts[i]);
-    const isStarter = starters.includes(p.id);
-
-    // FG: build up to pts  (2-pt + 3-pt + ft)
-    const shootPct = 0.50 + (p.attributes.shooting3pt / 1000) + Math.random() * 0.08;
-    const fgaEst = pts > 0 ? Math.max(2, Math.round(pts / (shootPct * 2.1 + 0.25))) : Math.floor(Math.random() * 3);
-    const fgm = Math.min(fgaEst, Math.round(fgaEst * shootPct));
-
-    // 3PT split
-    const is3Shooter = p.attributes.shooting3pt >= 68;
-    const threepa = is3Shooter
-      ? Math.min(fgm, Math.floor(1 + Math.random() * 6))
-      : Math.floor(Math.random() * 3);
-    const threepm = Math.min(threepa, Math.round(threepa * (0.35 + Math.random() * 0.25)));
-
-    // FT
-    const ftm = Math.floor(Math.random() * 5);
-    const fta = ftm + (Math.random() < 0.5 ? 0 : Math.floor(Math.random() * 2));
-
-    // Boards — weighted by position
-    const rebBase = p.position === 'C' ? 6 : p.position === 'PF' ? 5 : p.position === 'SF' ? 3 : 2;
-    const reb = Math.floor(Math.random() * rebBase + (rebBase - 1));
-
-    // Assists — weighted toward PG/SG
-    const astBase = p.position === 'PG' ? 7 : p.position === 'SG' ? 4 : p.position === 'SF' ? 3 : 2;
-    const ast = Math.floor(Math.random() * astBase);
-
-    const stl = Math.floor(Math.random() * 3);
-    const blk = (p.position === 'C' || p.position === 'PF') ? Math.floor(Math.random() * 3) : Math.floor(Math.random() * 2);
-
-    return { playerId: p.id, playerName: p.name, position: p.position, pts, reb, ast, stl, blk, fgm, fga: fgaEst, threepm, threepa, ftm, fta, isStarter };
-  });
-
-  // Fix rounding so sum equals totalPts exactly
-  const diff = totalPts - lines.reduce((a, l) => a + l.pts, 0);
-  if (diff !== 0 && lines.length > 0) {
-    const topIdx = lines.reduce((best, l, i) => l.pts > lines[best].pts ? i : best, 0);
-    lines[topIdx] = { ...lines[topIdx], pts: Math.max(0, lines[topIdx].pts + diff) };
+  // Map starters to positions, filling gaps with best available
+  const positions = ['PG', 'SG', 'SF', 'PF', 'C'] as const;
+  const unassigned = starters.map(id => getPlayerById(league, id)).filter(Boolean) as Player[];
+  const starterMap: Record<string, string> = {};
+  for (const pos of positions) {
+    const idx = unassigned.findIndex(p => p.position === pos);
+    if (idx >= 0) { starterMap[pos] = unassigned[idx].id; unassigned.splice(idx, 1); }
+  }
+  // Fill any unfilled positions with remaining starters
+  for (const pos of positions) {
+    if (!starterMap[pos] && unassigned.length > 0) {
+      starterMap[pos] = unassigned.shift()!.id;
+    }
   }
 
-  return lines.sort((a, b) => b.pts - a.pts);
+  return {
+    id: `allstar-${conf.toLowerCase()}`,
+    name: 'All-Stars',
+    city: conf,
+    abbreviation: conf === 'East' ? 'EAST' : 'WEST',
+    conference: conf === 'East' ? 'Eastern' : 'Western',
+    division: 'Atlantic',
+    marketSize: 'Large',
+    roster: players,
+    staff: { headCoach: null, assistantOffense: null, assistantDefense: null, trainer: null },
+    staffBudget: 0,
+    activeScheme: 'Showtime',
+    paceRating: 96, // fast All-Star pace
+    wins: 41, losses: 41, homeWins: 0, homeLosses: 0, roadWins: 0, roadLosses: 0,
+    confWins: 0, confLosses: 0, lastTen: [], streak: 0, budget: 0,
+    logo: '', primaryColor: conf === 'East' ? '#3b82f6' : '#ef4444', secondaryColor: '#ffffff',
+    picks: [], needs: [],
+    finances: { revenue: 0, expenses: 0, ownerPatience: 100, ticketRevenue: 0, tvRevenue: 0, sponsorRevenue: 0, miscRevenue: 0 },
+    rotation: {
+      starters: starterMap as Record<typeof positions[number], string>,
+      bench: rosterIds.filter(id => !starters.includes(id)),
+    },
+    population: 5, stadiumCapacity: 20000,
+    borderStyle: 'None', status: 'Active',
+  };
 }
 
 function simulateAllStarGame(
@@ -340,63 +189,93 @@ function simulateAllStarGame(
   eastStarters: string[],
   westStarters: string[],
 ): AllStarGameResult {
-  // Quarter-by-quarter — All-Star games score high
-  const simQ = () => 38 + Math.floor(Math.random() * 18);
-  const eQ = [simQ(), simQ(), simQ(), simQ()];
-  const wQ = [simQ(), simQ(), simQ(), simQ()];
-  const eastScore = eQ.reduce((a, b) => a + b, 0);
-  const westScore = wQ.reduce((a, b) => a + b, 0);
+  const eastTeam = buildAllStarTeam('East', eastRoster, eastStarters, league);
+  const westTeam = buildAllStarTeam('West', westRoster, westStarters, league);
 
-  // Generate per-player box scores
-  const eastLines = genTeamBoxScore(league, eastRoster, eastStarters, eastScore);
-  const westLines = genTeamBoxScore(league, westRoster, westStarters, westScore);
-
-  // MVP: best player on winning team by pts + (reb*0.5) + (ast*0.7)
-  const winnerLines = eastScore >= westScore ? eastLines : westLines;
-  const mvpLine = winnerLines.reduce((best, l) =>
-    (l.pts + l.reb * 0.5 + l.ast * 0.7) > (best.pts + best.reb * 0.5 + best.ast * 0.7) ? l : best,
-    winnerLines[0],
+  // Run the real sim engine — no injuries, no home court, no B2B fatigue
+  const gameResult = simulateGame(
+    eastTeam, westTeam,
+    league.currentDay,
+    league.season,
+    false, false,
+    'Ice Cold',
+    { injuryFrequency: 'None', homeCourt: false, b2bFrequency: 'None', quarterLength: 12 },
   );
-  // Mark MVP in the box score
-  const markMvp = (lines: AllStarPlayerLine[]) =>
-    lines.map(l => l.playerId === mvpLine.playerId ? { ...l, isMvp: true } : l);
 
-  const mvpPlayer = getPlayerById(league, mvpLine.playerId)!;
-  const confWon = eastScore >= westScore ? 'East' : 'West';
-  const statLine = `${mvpLine.pts} pts, ${mvpLine.reb} reb, ${mvpLine.ast} ast, ${mvpLine.stl} stl`;
+  const eastScore = gameResult.homeScore;
+  const westScore = gameResult.awayScore;
+
+  // Build AllStarPlayerLine from real GamePlayerLine stats
+  const toAllStarLines = (
+    lines: typeof gameResult.homePlayerStats,
+    starters: string[],
+    mvpId: string,
+  ): AllStarPlayerLine[] =>
+    lines
+      .filter(l => !l.dnp)
+      .map(l => ({
+        playerId: l.playerId,
+        playerName: l.name,
+        position: getPlayerById(league, l.playerId)?.position ?? '?',
+        pts: l.pts,
+        reb: l.reb,
+        ast: l.ast,
+        stl: l.stl,
+        blk: l.blk,
+        fgm: l.fgm,
+        fga: l.fga,
+        threepm: l.threepm,
+        threepa: l.threepa,
+        ftm: l.ftm,
+        fta: l.fta,
+        isStarter: starters.includes(l.playerId),
+        isMvp: l.playerId === mvpId,
+      }))
+      .sort((a, b) => b.pts - a.pts);
+
+  // MVP: top performer on winning team
+  const winnerStats = eastScore >= westScore ? gameResult.homePlayerStats : gameResult.awayPlayerStats;
+  const mvpLine = winnerStats
+    .filter(l => !l.dnp)
+    .reduce((best, l) =>
+      (l.pts + l.reb * 0.5 + l.ast * 0.7) > (best.pts + best.reb * 0.5 + best.ast * 0.7) ? l : best,
+      winnerStats[0],
+    );
+
+  const mvpPlayer = getPlayerById(league, mvpLine.playerId);
+  const mvpName   = mvpPlayer?.name ?? mvpLine.name;
+  const confWon   = eastScore >= westScore ? 'East' : 'West';
+  const statLine  = `${mvpLine.pts} pts, ${mvpLine.reb} reb, ${mvpLine.ast} ast`;
+
+  const quarterScores = {
+    east: gameResult.quarterScores.home,
+    west: gameResult.quarterScores.away,
+  };
 
   const highlights = [
-    `${confWon} wins ${Math.max(eastScore, westScore)}-${Math.min(eastScore, westScore)} in an offensive showcase!`,
-    `${mvpPlayer.name} was unstoppable: ${mvpLine.pts} points to claim MVP honours.`,
-    `Both squads combined for ${eastScore + westScore} total points — an All-Star record.`,
-    `${mvpPlayer.name} raises the MVP trophy to a standing ovation.`,
+    `${confWon} wins ${Math.max(eastScore, westScore)}-${Math.min(eastScore, westScore)} in an All-Star showcase!`,
+    `${mvpName} was unstoppable: ${statLine} to claim MVP honours.`,
+    `Both squads combined for ${eastScore + westScore} total points.`,
+    `${mvpName} raises the MVP trophy to a standing ovation.`,
   ];
-
-  // Bonus highlight if there was a close quarter
-  const closeQ = eQ.findIndex((q, i) => Math.abs(q - wQ[i]) <= 2);
-  if (closeQ >= 0) {
-    highlights.splice(2, 0, `Q${closeQ + 1} was a thriller — just ${Math.abs(eQ[closeQ] - wQ[closeQ])} points separated the teams after three quarters of the period.`);
-  }
-
-  const playByPlay = generatePlayByPlay(eastLines, westLines, eQ, wQ);
 
   return {
     eastScore, westScore,
     mvp: {
       playerId: mvpLine.playerId,
-      playerName: mvpPlayer.name,
+      playerName: mvpName,
       teamId: teamId(league, mvpLine.playerId),
       teamName: teamName(league, mvpLine.playerId),
       statLine,
     },
     eastRoster, westRoster,
-    quarterScores: { east: eQ, west: wQ },
+    quarterScores,
     highlights,
     boxScore: {
-      east: markMvp(eastLines),
-      west: markMvp(westLines),
+      east: toAllStarLines(gameResult.homePlayerStats, eastStarters, mvpLine.playerId),
+      west: toAllStarLines(gameResult.awayPlayerStats, westStarters, mvpLine.playerId),
     },
-    playByPlay,
+    playByPlay: gameResult.playByPlay ?? [],
   };
 }
 
@@ -748,62 +627,48 @@ const BoxScoreTable: React.FC<{
 };
 
 // ── Play-by-Play Feed ─────────────────────────────────────────────────────────
-const PlayByPlayFeed: React.FC<{ plays: string[] }> = ({ plays }) => {
+// ── Play-by-Play Feed (static, collapsed by default) ─────────────────────────
+const PlayByPlayFeed: React.FC<{ plays: PlayByPlayEvent[] }> = ({ plays }) => {
   const [expanded, setExpanded] = React.useState(false);
+  const quarters = Array.from(new Set(plays.map(e => e.quarter))).sort((a, b) => a - b);
+  const actionCount = plays.filter(e => e.type !== 'info').length;
 
-  const isQuarterHeader = (line: string) => line.startsWith('────');
-  const isEndOfQuarter  = (line: string) => line.startsWith('📊');
-  const isEast          = (line: string) => line.startsWith('🔵');
-  const isWest          = (line: string) => line.startsWith('🔴');
+  const typeColor = (type: PlayByPlayEvent['type']) =>
+    type === 'score'    ? 'text-white'      :
+    type === 'miss'     ? 'text-slate-500'  :
+    type === 'turnover' ? 'text-rose-400'   :
+    type === 'foul'     ? 'text-amber-400'  :
+    'text-slate-600';
 
   return (
     <div className="bg-slate-900/50 border border-slate-800 rounded-xl overflow-hidden">
-      {/* Header — click to expand/collapse */}
       <button
         onClick={() => setExpanded(v => !v)}
         className="w-full flex items-center justify-between px-5 py-3.5 text-left hover:bg-slate-800/30 transition-colors"
       >
         <span className="text-[10px] font-black uppercase tracking-[0.25em] text-slate-500 flex items-center gap-2">
           <span>🏀</span> Play-by-Play
-          <span className="text-slate-700 font-normal normal-case tracking-normal">({plays.filter(p => !isQuarterHeader(p) && !isEndOfQuarter(p)).length} plays)</span>
+          <span className="text-slate-700 font-normal normal-case tracking-normal">({actionCount} plays)</span>
         </span>
         <span className={`text-slate-600 transition-transform duration-200 ${expanded ? 'rotate-180' : ''}`}>▼</span>
       </button>
 
       {expanded && (
         <div className="border-t border-slate-800/60">
-          <div className="max-h-96 overflow-y-auto px-3 py-2 space-y-0.5 text-xs" style={{ scrollbarWidth: 'thin' }}>
-            {plays.map((line, i) => {
-              if (isQuarterHeader(line)) {
-                return (
-                  <div key={i} className="sticky top-0 z-10 py-2 px-2 bg-slate-900/95 text-[10px] font-black text-orange-400 uppercase tracking-[0.25em] border-b border-slate-800/60 mt-1">
-                    {line.replace(/─+/g, '').trim()}
-                  </div>
-                );
-              }
-              if (isEndOfQuarter(line)) {
-                return (
-                  <div key={i} className="py-1.5 px-3 my-1 bg-slate-800/40 rounded-lg text-slate-400 font-semibold text-[11px]">
-                    {line}
-                  </div>
-                );
-              }
-              return (
-                <div
-                  key={i}
-                  className={`flex items-start gap-2 py-1.5 px-2 rounded transition-colors ${
-                    isEast(line)
-                      ? 'text-blue-300 hover:bg-blue-500/5'
-                      : isWest(line)
-                      ? 'text-red-300 hover:bg-red-500/5'
-                      : 'text-slate-400 hover:bg-slate-800/30'
-                  }`}
-                >
-                  <span className="shrink-0 mt-px leading-none">{line.slice(0, 2)}</span>
-                  <span className="leading-relaxed">{line.slice(2).trim()}</span>
+          <div className="max-h-96 overflow-y-auto px-3 py-2 text-xs" style={{ scrollbarWidth: 'thin' }}>
+            {quarters.map(q => (
+              <div key={q}>
+                <div className="sticky top-0 z-10 py-2 px-2 bg-slate-900/95 text-[10px] font-black text-orange-400 uppercase tracking-[0.25em] border-b border-slate-800/60 mt-1">
+                  {q <= 4 ? `Quarter ${q}` : `Overtime ${q - 4}`}
                 </div>
-              );
-            })}
+                {plays.filter(e => e.quarter === q).map((event, i) => (
+                  <div key={i} className={`flex items-start gap-2 py-1.5 px-2 rounded hover:bg-slate-800/20 ${typeColor(event.type)}`}>
+                    <span className="font-mono text-slate-700 w-9 shrink-0 text-[10px] mt-px">{event.time}</span>
+                    <span className="leading-relaxed">{event.text}</span>
+                  </div>
+                ))}
+              </div>
+            ))}
           </div>
         </div>
       )}
@@ -821,7 +686,7 @@ const WatchGameModal: React.FC<{
   const [speed, setSpeed] = React.useState(700);
   const feedRef = React.useRef<HTMLDivElement>(null);
 
-  const plays = result.playByPlay ?? [];
+  const plays = (result.playByPlay ?? []) as PlayByPlayEvent[];
   const done = revealedIdx >= plays.length;
 
   React.useEffect(() => {
@@ -835,17 +700,19 @@ const WatchGameModal: React.FC<{
   }, [revealedIdx]);
 
   const visiblePlays = plays.slice(0, revealedIdx);
+  const currentQ = visiblePlays.length > 0 ? visiblePlays[visiblePlays.length - 1].quarter : 1;
 
-  let liveEast = 0, liveWest = 0;
-  for (const line of visiblePlays) {
-    const m = line.match(/E (\d+) – W (\d+)/);
-    if (m) { liveEast = parseInt(m[1]); liveWest = parseInt(m[2]); }
-  }
+  // Live score: sum completed quarter scores
+  const completedQs = done ? (result.quarterScores?.east.length ?? 4) : Math.max(0, currentQ - 1);
+  const liveEast = (result.quarterScores?.east ?? []).slice(0, completedQs).reduce((a, b) => a + b, 0);
+  const liveWest = (result.quarterScores?.west ?? []).slice(0, completedQs).reduce((a, b) => a + b, 0);
 
-  const isQH  = (l: string) => l.startsWith('────');
-  const isEOQ = (l: string) => l.startsWith('📊');
-  const isEast = (l: string) => l.startsWith('🔵');
-  const isWest = (l: string) => l.startsWith('🔴');
+  const typeColor = (type: PlayByPlayEvent['type']) =>
+    type === 'score'    ? 'text-white font-semibold' :
+    type === 'miss'     ? 'text-slate-500'           :
+    type === 'turnover' ? 'text-rose-300'             :
+    type === 'foul'     ? 'text-amber-300'            :
+    'text-slate-500 italic text-xs';
 
   return (
     <div className="fixed inset-0 z-50 flex flex-col bg-slate-950/98 backdrop-blur-sm">
@@ -854,12 +721,12 @@ const WatchGameModal: React.FC<{
         <div className="flex items-center gap-3 min-w-0">
           {!done ? (
             <span className="flex items-center gap-1.5 text-xs font-black text-red-400 uppercase shrink-0">
-              <span className="w-2 h-2 rounded-full bg-red-500 animate-pulse" />LIVE
+              <span className="w-2 h-2 rounded-full bg-red-500 animate-pulse" />LIVE · Q{currentQ}
             </span>
           ) : (
             <span className="text-xs font-black text-emerald-400 uppercase shrink-0">FINAL</span>
           )}
-          <span className="text-white font-bold text-sm truncate">All-Star Game</span>
+          <span className="text-white font-bold text-sm truncate hidden sm:inline">All-Star Game</span>
         </div>
 
         {/* Live score */}
@@ -879,67 +746,48 @@ const WatchGameModal: React.FC<{
         <div className="flex items-center gap-2 shrink-0">
           {!done && (
             <>
-              <button
-                onClick={() => setPaused(p => !p)}
+              <button onClick={() => setPaused(p => !p)}
                 className="p-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 text-sm transition-colors"
-                title={paused ? 'Resume' : 'Pause'}
-              >
+                title={paused ? 'Resume' : 'Pause'}>
                 {paused ? '▶' : '⏸'}
               </button>
-              <select
-                value={speed}
-                onChange={e => setSpeed(+e.target.value)}
-                className="bg-slate-800 border border-slate-700 text-slate-300 text-xs px-2 py-1.5 rounded-lg cursor-pointer"
-              >
+              <select value={speed} onChange={e => setSpeed(+e.target.value)}
+                className="bg-slate-800 border border-slate-700 text-slate-300 text-xs px-2 py-1.5 rounded-lg cursor-pointer">
                 <option value={1400}>Slow</option>
                 <option value={700}>Normal</option>
                 <option value={300}>Fast</option>
                 <option value={60}>Turbo</option>
               </select>
-              <button
-                onClick={() => { setRevealedIdx(plays.length); setPaused(true); }}
-                className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-bold rounded-lg transition-colors"
-              >
+              <button onClick={() => { setRevealedIdx(plays.length); setPaused(true); }}
+                className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-bold rounded-lg transition-colors">
                 Skip →
               </button>
             </>
           )}
-          <button
-            onClick={onClose}
-            className={`px-3 py-1.5 text-xs font-bold rounded-lg transition-all ${done ? 'bg-orange-500 hover:bg-orange-400 text-slate-950' : 'bg-slate-800 hover:bg-slate-700 text-slate-400'}`}
-          >
+          <button onClick={onClose}
+            className={`px-3 py-1.5 text-xs font-bold rounded-lg transition-all ${done ? 'bg-orange-500 hover:bg-orange-400 text-slate-950' : 'bg-slate-800 hover:bg-slate-700 text-slate-400'}`}>
             {done ? 'Close' : '✕'}
           </button>
         </div>
       </div>
 
       {/* Play feed */}
-      <div
-        ref={feedRef}
-        className="flex-1 overflow-y-auto px-4 py-3 space-y-0.5 max-w-3xl mx-auto w-full"
-        style={{ scrollbarWidth: 'thin' }}
-      >
-        {visiblePlays.map((line, i) => {
-          if (isQH(line)) return (
-            <div key={i} className="sticky top-0 z-10 py-2 px-3 bg-slate-950/98 text-[10px] font-black text-orange-400 uppercase tracking-[0.3em] border-b border-slate-800/60 my-1">
-              {line.replace(/─+/g, '').trim()}
-            </div>
-          );
-          if (isEOQ(line)) return (
-            <div key={i} className="py-2 px-4 my-2 bg-slate-800/50 border border-slate-700/40 rounded-xl text-slate-300 font-bold text-sm text-center">
-              {line}
-            </div>
-          );
+      <div ref={feedRef} className="flex-1 overflow-y-auto px-4 py-3 max-w-3xl mx-auto w-full" style={{ scrollbarWidth: 'thin' }}>
+        {visiblePlays.map((event, i) => {
+          const prevQ = i > 0 ? visiblePlays[i - 1].quarter : 0;
+          const isNewQ = event.quarter !== prevQ;
           return (
-            <div
-              key={i}
-              className={`flex items-start gap-2 py-1.5 px-3 rounded-lg text-sm animate-in fade-in duration-200 ${
-                isEast(line) ? 'text-blue-300' : isWest(line) ? 'text-red-300' : 'text-slate-400'
-              }`}
-            >
-              <span className="shrink-0 mt-px">{line.slice(0, 2)}</span>
-              <span className="leading-relaxed">{line.slice(2).trim()}</span>
-            </div>
+            <React.Fragment key={i}>
+              {isNewQ && (
+                <div className="sticky top-0 z-10 py-2 px-3 bg-slate-950/98 text-[10px] font-black text-orange-400 uppercase tracking-[0.3em] border-b border-slate-800/60 my-1">
+                  {event.quarter <= 4 ? `Quarter ${event.quarter}` : `Overtime ${event.quarter - 4}`}
+                </div>
+              )}
+              <div className={`flex items-start gap-2 py-1.5 px-3 rounded-lg text-sm animate-in fade-in duration-200 ${typeColor(event.type)}`}>
+                <span className="font-mono text-slate-700 text-[10px] w-9 shrink-0 mt-1">{event.time}</span>
+                <span className="leading-relaxed">{event.text}</span>
+              </div>
+            </React.Fragment>
           );
         })}
 
@@ -957,7 +805,6 @@ const WatchGameModal: React.FC<{
       {done && (
         <div className="shrink-0 border-t border-slate-800 bg-slate-900/90 px-5 py-4 animate-in slide-in-from-bottom-2 duration-300">
           <div className="max-w-2xl mx-auto flex flex-col sm:flex-row items-center justify-between gap-4">
-            {/* Score */}
             <div className="flex items-center gap-6">
               <div className="text-center">
                 <div className={`font-display font-bold text-4xl ${result.eastScore > result.westScore ? 'text-blue-400' : 'text-blue-700'}`}>{result.eastScore}</div>
@@ -969,7 +816,6 @@ const WatchGameModal: React.FC<{
                 <div className="text-slate-500 text-xs font-bold uppercase mt-0.5">West {result.westScore > result.eastScore && '· WIN ✓'}</div>
               </div>
             </div>
-            {/* MVP */}
             <div className="flex items-center gap-3">
               <div className="w-10 h-10 rounded-full bg-orange-500/15 border border-orange-400/40 flex items-center justify-center shrink-0">
                 <StarIcon className="w-5 h-5 text-orange-400" />
