@@ -847,7 +847,7 @@ export interface AllStarGameResult {
   highlights: string[];
   quarterScores?: { east: number[]; west: number[] };
   boxScore?: { east: AllStarPlayerLine[]; west: AllStarPlayerLine[] };
-  playByPlay?: string[];
+  playByPlay?: PlayByPlayEvent[];
 }
 
 export interface AllStarWeekendData {
