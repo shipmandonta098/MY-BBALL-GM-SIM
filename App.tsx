@@ -3,6 +3,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { LeagueState, Player, Team, GameResult, PlayerStatus, ScheduleGame, BulkSimSummary, Prospect, Coach, TradeProposal, Position, NewsItem, NewsCategory, LeagueSettings, SeasonAwards, PlayoffBracket, PlayoffSeries, Transaction, TransactionType, PowerRankingSnapshot, PowerRankingEntry, GMProfile, GMMilestone, RivalryStats, InjuryType, SeasonPhase, AllStarWeekendData, AllStarVoteEntry } from './types';
 import { generateLeagueTeams, generateSeasonSchedule, generateProspects, generateFreeAgentPool, generateCoachPool, EXPANSION_TEAM_POOL, generateCoach, generatePlayer, generateDefaultRotation, enforcePositionalBounds, ageFromBirthdate } from './constants';
 import { simulateGame, normalizeLeagueOVRs } from './utils/simEngine';
+import { autoSimAllStarWeekend } from './utils/allStarSim';
 import { snapshotPlayerStats } from './utils/playerUtils';
 import { generateGameRecap, generateScoutingReport, generateSeasonNarrative, generateCoachScoutingReport, generateNewsHeadline } from './services/geminiService';
 import { generateAwards } from './utils/awardEngine';
@@ -1199,7 +1200,16 @@ const App: React.FC = () => {
       // All-Star Weekend
       if (newState.tradeDeadlinePassed && !newState.allStarWeekend && pct >= 0.73) {
         const asd = buildAllStarWeekend(newState);
-        newState = { ...newState, allStarWeekend: asd, seasonPhase: 'All-Star Weekend' as SeasonPhase };
+        // Auto-sim all events immediately — season sim continues without manual interaction
+        const completedAsd = autoSimAllStarWeekend(newState, asd);
+        newState = { ...newState, allStarWeekend: completedAsd, seasonPhase: 'All-Star Weekend' as SeasonPhase };
+        const mvp = completedAsd.allStarGame?.mvp;
+        const confWon = completedAsd.allStarGame
+          ? (completedAsd.allStarGame.eastScore > completedAsd.allStarGame.westScore ? 'East' : 'West')
+          : '';
+        const gameScore = completedAsd.allStarGame
+          ? `${Math.max(completedAsd.allStarGame.eastScore, completedAsd.allStarGame.westScore)}-${Math.min(completedAsd.allStarGame.eastScore, completedAsd.allStarGame.westScore)}`
+          : '';
         const eastStarters = asd.eastStarters.map(id => {
           for (const t of newState.teams) { const p = t.roster.find(pl => pl.id === id); if (p) return p.name; }
           return id;
@@ -1210,20 +1220,32 @@ const App: React.FC = () => {
         });
         newState = {
           ...newState,
-          newsFeed: [{
-            id: `allstar-reveal-${newState.season}`,
-            category: 'milestone' as NewsCategory,
-            headline: 'ALL-STAR ROSTERS REVEALED',
-            content: `This season's All-Star starters have been announced! East starters: ${eastStarters.join(', ')}. West starters: ${westStarters.join(', ')}. All-Star Weekend is here!`,
-            timestamp: newState.currentDay,
-            realTimestamp: Date.now(),
-            isBreaking: true,
-          }, ...(newState.newsFeed || [])],
+          newsFeed: [
+            ...(mvp ? [{
+              id: `allstar-game-${newState.season}`,
+              category: 'milestone' as NewsCategory,
+              headline: 'ALL-STAR GAME FINAL',
+              content: `${confWon} defeats ${confWon === 'East' ? 'West' : 'East'} ${gameScore}! ${mvp.playerName} (${mvp.statLine}) named All-Star Game MVP!`,
+              timestamp: newState.currentDay,
+              realTimestamp: Date.now(),
+              isBreaking: true,
+            }] : []),
+            {
+              id: `allstar-reveal-${newState.season}`,
+              category: 'milestone' as NewsCategory,
+              headline: 'ALL-STAR WEEKEND COMPLETE',
+              content: `All-Star Weekend is in the books! East starters: ${eastStarters.join(', ')}. West starters: ${westStarters.join(', ')}.`,
+              timestamp: newState.currentDay,
+              realTimestamp: Date.now(),
+              isBreaking: false,
+            },
+            ...(newState.newsFeed || []),
+          ],
         };
         setActiveTab('allstar');
       }
 
-      // Phase tracking
+      // Phase tracking — reset to Regular Season once All-Star is done
       if (newState.allStarWeekend?.completed && newState.seasonPhase === 'All-Star Weekend') {
         newState = { ...newState, seasonPhase: 'Regular Season' as SeasonPhase };
       }
