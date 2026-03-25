@@ -616,12 +616,12 @@ const Schedule: React.FC<ScheduleProps> = ({ league, onSimulate, onScout, onWatc
               🚨 Sim to Deadline
             </button>
           )}
-          {!league.allStarWeekend && league.tradeDeadlinePassed && (
+          {!league.allStarWeekend && (
             <button
               onClick={() => onSimulate('to-allstar')}
               className="px-5 py-2.5 bg-amber-500/10 border border-amber-500/30 hover:bg-amber-500/20 text-amber-400 text-[10px] font-black uppercase tracking-widest rounded-xl transition-all hover:scale-105 active:scale-95"
             >
-              ⭐ Sim to All-Star
+              ⭐ Sim to All-Star Weekend
             </button>
           )}
           <button
