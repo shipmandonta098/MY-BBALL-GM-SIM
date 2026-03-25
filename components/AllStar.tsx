@@ -2,9 +2,10 @@ import React, { useState } from 'react';
 import {
   LeagueState, AllStarWeekendData, AllStarContestResult,
   AllStarGameResult, AllStarPlayerLine, Player, AllStarVoteEntry,
-  Team, PlayByPlayEvent,
+  Team, PlayByPlayEvent, GameResult, ScheduleGame,
 } from '../types';
 import { simulateGame } from '../utils/simEngine';
+import LiveGameModal from './LiveGameModal';
 
 interface AllStarProps {
   league: LeagueState;
@@ -278,6 +279,72 @@ function simulateAllStarGame(
       west: toAllStarLines(gameResult.awayPlayerStats, westStarters, mvpLine.playerId),
     },
     playByPlay: gameResult.playByPlay ?? [],
+  };
+}
+
+// ── Convert LiveGameModal result → AllStarGameResult ──────────────────────────
+function convertGameResultToAllStar(
+  gr: GameResult,
+  eastRoster: string[],
+  westRoster: string[],
+  eastStarters: string[],
+  westStarters: string[],
+  league: LeagueState,
+): AllStarGameResult {
+  const eastScore = gr.homeScore;
+  const westScore = gr.awayScore;
+
+  const toAllStarLines = (
+    lines: typeof gr.homePlayerStats,
+    starters: string[],
+    mvpId: string,
+  ): AllStarPlayerLine[] =>
+    lines
+      .filter(l => !l.dnp)
+      .map(l => ({
+        playerId: l.playerId,
+        playerName: l.name,
+        position: getPlayerById(league, l.playerId)?.position ?? '?',
+        pts: l.pts, reb: l.reb, ast: l.ast, stl: l.stl, blk: l.blk,
+        fgm: l.fgm, fga: l.fga, threepm: l.threepm, threepa: l.threepa,
+        ftm: l.ftm, fta: l.fta,
+        isStarter: starters.includes(l.playerId),
+        isMvp: l.playerId === mvpId,
+      }))
+      .sort((a, b) => b.pts - a.pts);
+
+  const winnerStats = eastScore >= westScore ? gr.homePlayerStats : gr.awayPlayerStats;
+  const activeMvpCandidates = winnerStats.filter(l => !l.dnp);
+  const mvpLine = activeMvpCandidates.length > 0
+    ? activeMvpCandidates.reduce((best, l) =>
+        (l.pts + l.reb * 0.5 + l.ast * 0.7) > (best.pts + best.reb * 0.5 + best.ast * 0.7) ? l : best,
+        activeMvpCandidates[0])
+    : winnerStats[0];
+
+  const mvpPlayer = getPlayerById(league, mvpLine.playerId);
+  const confWon = eastScore >= westScore ? 'East' : 'West';
+  const statLine = `${mvpLine.pts} pts, ${mvpLine.reb} reb, ${mvpLine.ast} ast`;
+
+  return {
+    eastScore, westScore,
+    mvp: {
+      playerId: mvpLine.playerId,
+      playerName: mvpPlayer?.name ?? mvpLine.name,
+      teamId: teamId(league, mvpLine.playerId),
+      teamName: teamName(league, mvpLine.playerId),
+      statLine,
+    },
+    eastRoster, westRoster,
+    quarterScores: { east: gr.quarterScores.home, west: gr.quarterScores.away },
+    highlights: [
+      `${confWon} wins ${Math.max(eastScore, westScore)}-${Math.min(eastScore, westScore)} in the All-Star showcase!`,
+      `${mvpPlayer?.name ?? mvpLine.name}: ${statLine} — MVP honours!`,
+    ],
+    boxScore: {
+      east: toAllStarLines(gr.homePlayerStats, eastStarters, mvpLine.playerId),
+      west: toAllStarLines(gr.awayPlayerStats, westStarters, mvpLine.playerId),
+    },
+    playByPlay: gr.playByPlay ?? [],
   };
 }
 
@@ -678,164 +745,7 @@ const PlayByPlayFeed: React.FC<{ plays: PlayByPlayEvent[] }> = ({ plays }) => {
   );
 };
 
-// ── Watch Game Modal ──────────────────────────────────────────────────────────
-const WatchGameModal: React.FC<{
-  result: AllStarGameResult;
-  onClose: () => void;
-}> = ({ result, onClose }) => {
-  const [revealedIdx, setRevealedIdx] = React.useState(0);
-  const [paused, setPaused] = React.useState(false);
-  const [speed, setSpeed] = React.useState(700);
-  const feedRef = React.useRef<HTMLDivElement>(null);
-
-  const plays = (result.playByPlay ?? []) as PlayByPlayEvent[];
-  const done = revealedIdx >= plays.length;
-
-  React.useEffect(() => {
-    if (paused || done) return;
-    const t = setTimeout(() => setRevealedIdx(i => i + 1), speed);
-    return () => clearTimeout(t);
-  }, [paused, revealedIdx, done, speed]);
-
-  React.useEffect(() => {
-    if (feedRef.current) feedRef.current.scrollTop = feedRef.current.scrollHeight;
-  }, [revealedIdx]);
-
-  const visiblePlays = plays.slice(0, revealedIdx);
-  const currentQ = visiblePlays.length > 0 ? visiblePlays[visiblePlays.length - 1].quarter : 1;
-
-  // Live score: sum completed quarter scores
-  const completedQs = done ? (result.quarterScores?.east.length ?? 4) : Math.max(0, currentQ - 1);
-  const liveEast = (result.quarterScores?.east ?? []).slice(0, completedQs).reduce((a, b) => a + b, 0);
-  const liveWest = (result.quarterScores?.west ?? []).slice(0, completedQs).reduce((a, b) => a + b, 0);
-
-  const typeColor = (type: PlayByPlayEvent['type']) =>
-    type === 'score'    ? 'text-white font-semibold' :
-    type === 'miss'     ? 'text-slate-500'           :
-    type === 'turnover' ? 'text-rose-300'             :
-    type === 'foul'     ? 'text-amber-300'            :
-    'text-slate-500 italic text-xs';
-
-  return (
-    <div className="fixed inset-0 z-50 flex flex-col bg-slate-950/98 backdrop-blur-sm">
-      {/* Top bar */}
-      <div className="flex items-center justify-between px-4 py-3 border-b border-slate-800 bg-slate-900/90 shrink-0 gap-2 flex-wrap sm:flex-nowrap">
-        <div className="flex items-center gap-3 min-w-0">
-          {!done ? (
-            <span className="flex items-center gap-1.5 text-xs font-black text-red-400 uppercase shrink-0">
-              <span className="w-2 h-2 rounded-full bg-red-500 animate-pulse" />LIVE · Q{currentQ}
-            </span>
-          ) : (
-            <span className="text-xs font-black text-emerald-400 uppercase shrink-0">FINAL</span>
-          )}
-          <span className="text-white font-bold text-sm truncate hidden sm:inline">All-Star Game</span>
-        </div>
-
-        {/* Live score */}
-        <div className="flex items-center gap-3 font-display text-center shrink-0">
-          <div>
-            <div className="text-blue-400 font-bold text-2xl leading-none">{done ? result.eastScore : liveEast}</div>
-            <div className="text-slate-600 text-[9px] uppercase tracking-widest">East</div>
-          </div>
-          <span className="text-slate-700 text-xl">–</span>
-          <div>
-            <div className="text-red-400 font-bold text-2xl leading-none">{done ? result.westScore : liveWest}</div>
-            <div className="text-slate-600 text-[9px] uppercase tracking-widest">West</div>
-          </div>
-        </div>
-
-        {/* Controls */}
-        <div className="flex items-center gap-2 shrink-0">
-          {!done && (
-            <>
-              <button onClick={() => setPaused(p => !p)}
-                className="p-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 text-sm transition-colors"
-                title={paused ? 'Resume' : 'Pause'}>
-                {paused ? '▶' : '⏸'}
-              </button>
-              <select value={speed} onChange={e => setSpeed(+e.target.value)}
-                className="bg-slate-800 border border-slate-700 text-slate-300 text-xs px-2 py-1.5 rounded-lg cursor-pointer">
-                <option value={1400}>Slow</option>
-                <option value={700}>Normal</option>
-                <option value={300}>Fast</option>
-                <option value={60}>Turbo</option>
-              </select>
-              <button onClick={() => { setRevealedIdx(plays.length); setPaused(true); }}
-                className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-bold rounded-lg transition-colors">
-                Skip →
-              </button>
-            </>
-          )}
-          <button onClick={onClose}
-            className={`px-3 py-1.5 text-xs font-bold rounded-lg transition-all ${done ? 'bg-orange-500 hover:bg-orange-400 text-slate-950' : 'bg-slate-800 hover:bg-slate-700 text-slate-400'}`}>
-            {done ? 'Close' : '✕'}
-          </button>
-        </div>
-      </div>
-
-      {/* Play feed */}
-      <div ref={feedRef} className="flex-1 overflow-y-auto px-4 py-3 max-w-3xl mx-auto w-full" style={{ scrollbarWidth: 'thin' }}>
-        {visiblePlays.map((event, i) => {
-          const prevQ = i > 0 ? visiblePlays[i - 1].quarter : 0;
-          const isNewQ = event.quarter !== prevQ;
-          return (
-            <React.Fragment key={i}>
-              {isNewQ && (
-                <div className="sticky top-0 z-10 py-2 px-3 bg-slate-950/98 text-[10px] font-black text-orange-400 uppercase tracking-[0.3em] border-b border-slate-800/60 my-1">
-                  {event.quarter <= 4 ? `Quarter ${event.quarter}` : `Overtime ${event.quarter - 4}`}
-                </div>
-              )}
-              <div className={`flex items-start gap-2 py-1.5 px-3 rounded-lg text-sm animate-in fade-in duration-200 ${typeColor(event.type)}`}>
-                <span className="font-mono text-slate-700 text-[10px] w-9 shrink-0 mt-1">{event.time}</span>
-                <span className="leading-relaxed">{event.text}</span>
-              </div>
-            </React.Fragment>
-          );
-        })}
-
-        {/* Loading dots */}
-        {!done && !paused && (
-          <div className="flex gap-1.5 py-2 px-3">
-            {[0, 1, 2].map(i => (
-              <span key={i} className="w-1.5 h-1.5 rounded-full bg-orange-500 animate-bounce" style={{ animationDelay: `${i * 0.15}s` }} />
-            ))}
-          </div>
-        )}
-      </div>
-
-      {/* Final result panel */}
-      {done && (
-        <div className="shrink-0 border-t border-slate-800 bg-slate-900/90 px-5 py-4 animate-in slide-in-from-bottom-2 duration-300">
-          <div className="max-w-2xl mx-auto flex flex-col sm:flex-row items-center justify-between gap-4">
-            <div className="flex items-center gap-6">
-              <div className="text-center">
-                <div className={`font-display font-bold text-4xl ${result.eastScore > result.westScore ? 'text-blue-400' : 'text-blue-700'}`}>{result.eastScore}</div>
-                <div className="text-slate-500 text-xs font-bold uppercase mt-0.5">East {result.eastScore > result.westScore && '· WIN ✓'}</div>
-              </div>
-              <span className="text-slate-700 text-2xl font-bold">–</span>
-              <div className="text-center">
-                <div className={`font-display font-bold text-4xl ${result.westScore > result.eastScore ? 'text-red-400' : 'text-red-700'}`}>{result.westScore}</div>
-                <div className="text-slate-500 text-xs font-bold uppercase mt-0.5">West {result.westScore > result.eastScore && '· WIN ✓'}</div>
-              </div>
-            </div>
-            <div className="flex items-center gap-3">
-              <div className="w-10 h-10 rounded-full bg-orange-500/15 border border-orange-400/40 flex items-center justify-center shrink-0">
-                <StarIcon className="w-5 h-5 text-orange-400" />
-              </div>
-              <div>
-                <div className="text-orange-400 text-[10px] font-black uppercase tracking-wider">All-Star MVP</div>
-                <div className="text-white font-bold">{result.mvp.playerName}</div>
-                <div className="text-orange-300 font-mono text-xs mt-0.5">{result.mvp.statLine}</div>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
-    </div>
-  );
-};
-
-// ── Watch Event Modal ─────────────────────────────────────────────────────────
+// ── Watch Event Modal (Skills / 3-Pt / Dunk) ─────────────────────────────────
 const WatchEventModal: React.FC<{
   result: AllStarContestResult;
   onClose: () => void;
@@ -976,7 +886,7 @@ const AllStar: React.FC<AllStarProps> = ({ league, updateLeague, onAdvancePhase 
   const asd = league.allStarWeekend;
   // Default to Game tab — that's the main event
   const [tab, setTab] = useState<'rosters' | 'events' | 'game'>('game');
-  const [watchGameResult, setWatchGameResult] = useState<AllStarGameResult | null>(null);
+  const [watchGameTeams, setWatchGameTeams] = useState<{ east: Team; west: Team } | null>(null);
   const [watchEventResult, setWatchEventResult] = useState<AllStarContestResult | null>(null);
 
   if (!asd) {
@@ -1025,13 +935,27 @@ const AllStar: React.FC<AllStarProps> = ({ league, updateLeague, onAdvancePhase 
     }));
   };
 
-  // ── Watch handlers (simulate → open modal; save result immediately) ────────
+  // ── Watch handlers ────────────────────────────────────────────────────────
+  // All-Star game uses LiveGameModal directly (same engine as regular season)
   const handleWatchGame = () => {
-    const r = simulateAllStarGame(league, asd.eastRoster, asd.westRoster, asd.eastStarters, asd.westStarters);
+    const eastTeam = buildAllStarTeam('East', asd.eastRoster, asd.eastStarters, league);
+    const westTeam = buildAllStarTeam('West', asd.westRoster, asd.westStarters, league);
+    setWatchGameTeams({ east: eastTeam, west: westTeam });
+  };
+
+  const handleLiveGameComplete = (gameResult: GameResult) => {
+    const r = convertGameResultToAllStar(
+      gameResult,
+      asd.eastRoster, asd.westRoster,
+      asd.eastStarters, asd.westStarters,
+      league,
+    );
     const confWon = r.eastScore > r.westScore ? 'East' : 'West';
     updateLeague(prev => ({
       ...prev,
-      allStarWeekend: prev.allStarWeekend ? { ...prev.allStarWeekend, allStarGame: r, completed: true } : prev.allStarWeekend,
+      allStarWeekend: prev.allStarWeekend
+        ? { ...prev.allStarWeekend, allStarGame: r, completed: true }
+        : prev.allStarWeekend,
       newsFeed: [{
         id: `allstar-game-${Date.now()}`,
         category: 'milestone' as const,
@@ -1042,7 +966,7 @@ const AllStar: React.FC<AllStarProps> = ({ league, updateLeague, onAdvancePhase 
         isBreaking: true,
       }, ...prev.newsFeed],
     }));
-    setWatchGameResult(r);
+    setWatchGameTeams(null);
   };
   const handleWatchSkills = () => {
     const r = simulateSkillsChallenge(league, asd.skillsParticipants);
@@ -1360,8 +1284,27 @@ const AllStar: React.FC<AllStarProps> = ({ league, updateLeague, onAdvancePhase 
       )}
 
       {/* ── Watch modals ── */}
-      {watchGameResult && (
-        <WatchGameModal result={watchGameResult} onClose={() => setWatchGameResult(null)} />
+      {watchGameTeams && (
+        <LiveGameModal
+          game={{
+            id: `allstar-game-${league.season}`,
+            day: league.currentDay,
+            homeTeamId: watchGameTeams.east.id,
+            awayTeamId: watchGameTeams.west.id,
+            played: false,
+            homeB2B: false,
+            awayB2B: false,
+            homeB2BCount: 0,
+            awayB2BCount: 0,
+          }}
+          homeTeam={watchGameTeams.east}
+          awayTeam={watchGameTeams.west}
+          season={league.season}
+          league={league}
+          rivalryLevel="Ice Cold"
+          onComplete={handleLiveGameComplete}
+          onClose={() => setWatchGameTeams(null)}
+        />
       )}
       {watchEventResult && (
         <WatchEventModal result={watchEventResult} onClose={() => setWatchEventResult(null)} />
