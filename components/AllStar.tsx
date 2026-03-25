@@ -164,7 +164,7 @@ function buildAllStarTeam(
     division: 'Atlantic',
     marketSize: 'Large',
     roster: players,
-    staff: { headCoach: null, assistantOffense: null, assistantDefense: null, trainer: null },
+    staff: { headCoach: null, assistantOffense: null, assistantDefense: null, assistantDev: null, trainer: null },
     staffBudget: 0,
     activeScheme: 'Showtime',
     paceRating: 96, // fast All-Star pace
@@ -172,10 +172,12 @@ function buildAllStarTeam(
     confWins: 0, confLosses: 0, lastTen: [], streak: 0, budget: 0,
     logo: '', primaryColor: conf === 'East' ? '#3b82f6' : '#ef4444', secondaryColor: '#ffffff',
     picks: [], needs: [],
-    finances: { revenue: 0, expenses: 0, ownerPatience: 100, ticketRevenue: 0, tvRevenue: 0, sponsorRevenue: 0, miscRevenue: 0 },
+    finances: { revenue: 0, expenses: 0, cash: 0, ticketPrice: 0, concessionPrice: 0, fanHype: 50, ownerPatience: 100, ownerGoal: 'Compete' as const, budgets: { scouting: 0, health: 0, facilities: 0 }, ticketRevenue: 0, tvRevenue: 0, sponsorRevenue: 0, miscRevenue: 0 },
     rotation: {
       starters: starterMap as Record<typeof positions[number], string>,
       bench: rosterIds.filter(id => !starters.includes(id)),
+      reserves: [],
+      minutes: {},
     },
     population: 5, stadiumCapacity: 20000,
     borderStyle: 'None', status: 'Active',
