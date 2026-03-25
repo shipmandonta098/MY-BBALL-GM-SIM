@@ -577,7 +577,8 @@ const EventCard: React.FC<{
   participants: string[];
   league: LeagueState;
   onSim: () => void;
-}> = ({ title, icon, result, participants, league, onSim }) => (
+  onWatch?: () => void;
+}> = ({ title, icon, result, participants, league, onSim, onWatch }) => (
   <div className="bg-slate-800/60 border border-slate-700 rounded-xl overflow-hidden">
     <div className="flex items-center justify-between p-5 pb-3">
       <div className="flex items-center gap-3">
@@ -590,12 +591,22 @@ const EventCard: React.FC<{
       {result ? (
         <span className="px-3 py-1 bg-emerald-500/15 text-emerald-400 text-xs font-bold rounded-full border border-emerald-500/25">COMPLETE</span>
       ) : (
-        <button
-          onClick={onSim}
-          className="px-4 py-1.5 bg-orange-500 hover:bg-orange-400 active:scale-95 text-slate-950 font-bold text-sm rounded-lg transition-all"
-        >
-          Simulate
-        </button>
+        <div className="flex gap-2">
+          {onWatch && (
+            <button
+              onClick={onWatch}
+              className="px-4 py-1.5 bg-slate-700 hover:bg-slate-600 active:scale-95 text-slate-200 font-bold text-sm rounded-lg transition-all border border-slate-600 flex items-center gap-1.5"
+            >
+              <span className="text-xs">▶</span> Watch
+            </button>
+          )}
+          <button
+            onClick={onSim}
+            className="px-4 py-1.5 bg-orange-500 hover:bg-orange-400 active:scale-95 text-slate-950 font-bold text-sm rounded-lg transition-all"
+          >
+            Simulate
+          </button>
+        </div>
       )}
     </div>
 
@@ -800,11 +811,325 @@ const PlayByPlayFeed: React.FC<{ plays: string[] }> = ({ plays }) => {
   );
 };
 
+// ── Watch Game Modal ──────────────────────────────────────────────────────────
+const WatchGameModal: React.FC<{
+  result: AllStarGameResult;
+  onClose: () => void;
+}> = ({ result, onClose }) => {
+  const [revealedIdx, setRevealedIdx] = React.useState(0);
+  const [paused, setPaused] = React.useState(false);
+  const [speed, setSpeed] = React.useState(700);
+  const feedRef = React.useRef<HTMLDivElement>(null);
+
+  const plays = result.playByPlay ?? [];
+  const done = revealedIdx >= plays.length;
+
+  React.useEffect(() => {
+    if (paused || done) return;
+    const t = setTimeout(() => setRevealedIdx(i => i + 1), speed);
+    return () => clearTimeout(t);
+  }, [paused, revealedIdx, done, speed]);
+
+  React.useEffect(() => {
+    if (feedRef.current) feedRef.current.scrollTop = feedRef.current.scrollHeight;
+  }, [revealedIdx]);
+
+  const visiblePlays = plays.slice(0, revealedIdx);
+
+  let liveEast = 0, liveWest = 0;
+  for (const line of visiblePlays) {
+    const m = line.match(/E (\d+) – W (\d+)/);
+    if (m) { liveEast = parseInt(m[1]); liveWest = parseInt(m[2]); }
+  }
+
+  const isQH  = (l: string) => l.startsWith('────');
+  const isEOQ = (l: string) => l.startsWith('📊');
+  const isEast = (l: string) => l.startsWith('🔵');
+  const isWest = (l: string) => l.startsWith('🔴');
+
+  return (
+    <div className="fixed inset-0 z-50 flex flex-col bg-slate-950/98 backdrop-blur-sm">
+      {/* Top bar */}
+      <div className="flex items-center justify-between px-4 py-3 border-b border-slate-800 bg-slate-900/90 shrink-0 gap-2 flex-wrap sm:flex-nowrap">
+        <div className="flex items-center gap-3 min-w-0">
+          {!done ? (
+            <span className="flex items-center gap-1.5 text-xs font-black text-red-400 uppercase shrink-0">
+              <span className="w-2 h-2 rounded-full bg-red-500 animate-pulse" />LIVE
+            </span>
+          ) : (
+            <span className="text-xs font-black text-emerald-400 uppercase shrink-0">FINAL</span>
+          )}
+          <span className="text-white font-bold text-sm truncate">All-Star Game</span>
+        </div>
+
+        {/* Live score */}
+        <div className="flex items-center gap-3 font-display text-center shrink-0">
+          <div>
+            <div className="text-blue-400 font-bold text-2xl leading-none">{done ? result.eastScore : liveEast}</div>
+            <div className="text-slate-600 text-[9px] uppercase tracking-widest">East</div>
+          </div>
+          <span className="text-slate-700 text-xl">–</span>
+          <div>
+            <div className="text-red-400 font-bold text-2xl leading-none">{done ? result.westScore : liveWest}</div>
+            <div className="text-slate-600 text-[9px] uppercase tracking-widest">West</div>
+          </div>
+        </div>
+
+        {/* Controls */}
+        <div className="flex items-center gap-2 shrink-0">
+          {!done && (
+            <>
+              <button
+                onClick={() => setPaused(p => !p)}
+                className="p-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 text-sm transition-colors"
+                title={paused ? 'Resume' : 'Pause'}
+              >
+                {paused ? '▶' : '⏸'}
+              </button>
+              <select
+                value={speed}
+                onChange={e => setSpeed(+e.target.value)}
+                className="bg-slate-800 border border-slate-700 text-slate-300 text-xs px-2 py-1.5 rounded-lg cursor-pointer"
+              >
+                <option value={1400}>Slow</option>
+                <option value={700}>Normal</option>
+                <option value={300}>Fast</option>
+                <option value={60}>Turbo</option>
+              </select>
+              <button
+                onClick={() => { setRevealedIdx(plays.length); setPaused(true); }}
+                className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-bold rounded-lg transition-colors"
+              >
+                Skip →
+              </button>
+            </>
+          )}
+          <button
+            onClick={onClose}
+            className={`px-3 py-1.5 text-xs font-bold rounded-lg transition-all ${done ? 'bg-orange-500 hover:bg-orange-400 text-slate-950' : 'bg-slate-800 hover:bg-slate-700 text-slate-400'}`}
+          >
+            {done ? 'Close' : '✕'}
+          </button>
+        </div>
+      </div>
+
+      {/* Play feed */}
+      <div
+        ref={feedRef}
+        className="flex-1 overflow-y-auto px-4 py-3 space-y-0.5 max-w-3xl mx-auto w-full"
+        style={{ scrollbarWidth: 'thin' }}
+      >
+        {visiblePlays.map((line, i) => {
+          if (isQH(line)) return (
+            <div key={i} className="sticky top-0 z-10 py-2 px-3 bg-slate-950/98 text-[10px] font-black text-orange-400 uppercase tracking-[0.3em] border-b border-slate-800/60 my-1">
+              {line.replace(/─+/g, '').trim()}
+            </div>
+          );
+          if (isEOQ(line)) return (
+            <div key={i} className="py-2 px-4 my-2 bg-slate-800/50 border border-slate-700/40 rounded-xl text-slate-300 font-bold text-sm text-center">
+              {line}
+            </div>
+          );
+          return (
+            <div
+              key={i}
+              className={`flex items-start gap-2 py-1.5 px-3 rounded-lg text-sm animate-in fade-in duration-200 ${
+                isEast(line) ? 'text-blue-300' : isWest(line) ? 'text-red-300' : 'text-slate-400'
+              }`}
+            >
+              <span className="shrink-0 mt-px">{line.slice(0, 2)}</span>
+              <span className="leading-relaxed">{line.slice(2).trim()}</span>
+            </div>
+          );
+        })}
+
+        {/* Loading dots */}
+        {!done && !paused && (
+          <div className="flex gap-1.5 py-2 px-3">
+            {[0, 1, 2].map(i => (
+              <span key={i} className="w-1.5 h-1.5 rounded-full bg-orange-500 animate-bounce" style={{ animationDelay: `${i * 0.15}s` }} />
+            ))}
+          </div>
+        )}
+      </div>
+
+      {/* Final result panel */}
+      {done && (
+        <div className="shrink-0 border-t border-slate-800 bg-slate-900/90 px-5 py-4 animate-in slide-in-from-bottom-2 duration-300">
+          <div className="max-w-2xl mx-auto flex flex-col sm:flex-row items-center justify-between gap-4">
+            {/* Score */}
+            <div className="flex items-center gap-6">
+              <div className="text-center">
+                <div className={`font-display font-bold text-4xl ${result.eastScore > result.westScore ? 'text-blue-400' : 'text-blue-700'}`}>{result.eastScore}</div>
+                <div className="text-slate-500 text-xs font-bold uppercase mt-0.5">East {result.eastScore > result.westScore && '· WIN ✓'}</div>
+              </div>
+              <span className="text-slate-700 text-2xl font-bold">–</span>
+              <div className="text-center">
+                <div className={`font-display font-bold text-4xl ${result.westScore > result.eastScore ? 'text-red-400' : 'text-red-700'}`}>{result.westScore}</div>
+                <div className="text-slate-500 text-xs font-bold uppercase mt-0.5">West {result.westScore > result.eastScore && '· WIN ✓'}</div>
+              </div>
+            </div>
+            {/* MVP */}
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-full bg-orange-500/15 border border-orange-400/40 flex items-center justify-center shrink-0">
+                <StarIcon className="w-5 h-5 text-orange-400" />
+              </div>
+              <div>
+                <div className="text-orange-400 text-[10px] font-black uppercase tracking-wider">All-Star MVP</div>
+                <div className="text-white font-bold">{result.mvp.playerName}</div>
+                <div className="text-orange-300 font-mono text-xs mt-0.5">{result.mvp.statLine}</div>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+};
+
+// ── Watch Event Modal ─────────────────────────────────────────────────────────
+const WatchEventModal: React.FC<{
+  result: AllStarContestResult;
+  onClose: () => void;
+}> = ({ result, onClose }) => {
+  const eventIcon = result.eventName === 'Skills Challenge' ? '🏃'
+    : result.eventName === '3-Point Contest' ? '🎯' : '🔥';
+
+  // Build broadcast steps: intro → each highlight → winner reveal
+  const steps: { text: string; type: 'intro' | 'play' | 'winner' }[] = [
+    { text: `📺 Welcome to the ${result.eventName}! Competitors are taking the floor…`, type: 'intro' },
+    ...result.highlights.map(h => ({ text: h, type: 'play' as const })),
+    {
+      text: `🏆 ${result.winner.playerName} wins the ${result.eventName}${result.winner.score ? ` with a score of ${result.winner.score}` : ''}! What a performance!`,
+      type: 'winner',
+    },
+  ];
+
+  const [step, setStep] = React.useState(0);
+  const [paused, setPaused] = React.useState(false);
+
+  const done = step >= steps.length;
+  const delay = (steps[step]?.type === 'winner') ? 1800 : 1300;
+
+  React.useEffect(() => {
+    if (paused || done) return;
+    const t = setTimeout(() => setStep(s => s + 1), delay);
+    return () => clearTimeout(t);
+  }, [paused, step, done, delay]);
+
+  return (
+    <div className="fixed inset-0 z-50 bg-slate-950/90 backdrop-blur-sm flex items-center justify-center p-4">
+      <div className="bg-slate-900 border border-slate-700 rounded-2xl w-full max-w-lg overflow-hidden shadow-2xl">
+        {/* Header */}
+        <div className="flex items-center justify-between px-5 py-4 border-b border-slate-800">
+          <div className="flex items-center gap-3">
+            <span className="text-2xl">{eventIcon}</span>
+            <div>
+              <div className="font-bold text-white">{result.eventName}</div>
+              {!done ? (
+                <div className="flex items-center gap-1.5 text-red-400 text-xs font-black uppercase">
+                  <span className="w-1.5 h-1.5 rounded-full bg-red-500 animate-pulse" />LIVE
+                </div>
+              ) : (
+                <div className="text-emerald-400 text-xs font-black uppercase">Complete</div>
+              )}
+            </div>
+          </div>
+          <button
+            onClick={onClose}
+            className={`px-3 py-1.5 text-xs font-bold rounded-lg transition-all ${done ? 'bg-orange-500 hover:bg-orange-400 text-slate-950' : 'bg-slate-800 hover:bg-slate-700 text-slate-400'}`}
+          >
+            {done ? 'Close' : '✕'}
+          </button>
+        </div>
+
+        {/* Broadcast steps */}
+        <div className="p-5 space-y-3 min-h-[180px]">
+          {steps.slice(0, step + 1).map((s, i) => (
+            <div
+              key={i}
+              className={`flex gap-3 items-start animate-in fade-in slide-in-from-bottom-1 duration-300 ${
+                s.type === 'winner' ? 'p-3 bg-orange-500/10 border border-orange-500/25 rounded-xl' : ''
+              }`}
+            >
+              <span className={`shrink-0 mt-0.5 ${s.type === 'winner' ? 'text-orange-400' : 'text-orange-600'}`}>▸</span>
+              <p className={`text-sm leading-relaxed ${
+                s.type === 'winner' ? 'text-orange-300 font-bold' :
+                s.type === 'intro' ? 'text-slate-400' :
+                'text-slate-200'
+              }`}>{s.text}</p>
+            </div>
+          ))}
+          {!done && !paused && (
+            <div className="flex gap-1.5 pt-1 pl-6">
+              {[0, 1, 2].map(i => (
+                <span key={i} className="w-1.5 h-1.5 rounded-full bg-orange-500 animate-bounce" style={{ animationDelay: `${i * 0.15}s` }} />
+              ))}
+            </div>
+          )}
+        </div>
+
+        {/* Winner + runner-up reveal */}
+        {done && (
+          <div className="px-5 pb-5 border-t border-slate-800 pt-4 space-y-3 animate-in fade-in duration-300">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-full bg-orange-500/20 border-2 border-orange-400/40 flex items-center justify-center shrink-0">
+                <StarIcon className="w-5 h-5 text-orange-400" />
+              </div>
+              <div>
+                <div className="text-[10px] text-orange-400 font-black uppercase tracking-wider">Winner</div>
+                <div className="font-bold text-white">{result.winner.playerName}</div>
+                <div className="text-slate-400 text-xs flex gap-2">
+                  <span>{result.winner.teamName}</span>
+                  {result.winner.score && <span className="font-mono text-orange-300">{result.winner.score}</span>}
+                </div>
+              </div>
+            </div>
+            {result.runnerUp && (
+              <div className="flex items-center gap-3 opacity-70">
+                <div className="w-10 h-10 rounded-full bg-slate-800 border border-slate-700 flex items-center justify-center text-slate-400 font-bold text-xs shrink-0">2</div>
+                <div>
+                  <div className="text-[10px] text-slate-500 font-black uppercase">Runner-up</div>
+                  <div className="font-semibold text-slate-300 text-sm">{result.runnerUp.playerName}</div>
+                  <div className="text-slate-500 text-xs flex gap-2">
+                    <span>{result.runnerUp.teamName}</span>
+                    {result.runnerUp.score && <span className="font-mono">{result.runnerUp.score}</span>}
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Controls (when not done) */}
+        {!done && (
+          <div className="px-5 pb-4 flex justify-end gap-2">
+            <button
+              onClick={() => setPaused(p => !p)}
+              className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-bold rounded-lg transition-colors"
+            >
+              {paused ? '▶ Resume' : '⏸ Pause'}
+            </button>
+            <button
+              onClick={() => { setStep(steps.length); setPaused(true); }}
+              className="px-3 py-1.5 bg-slate-700 hover:bg-slate-600 text-slate-200 text-xs font-bold rounded-lg transition-colors"
+            >
+              Skip →
+            </button>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+};
+
 // ── Main component ────────────────────────────────────────────────────────────
 const AllStar: React.FC<AllStarProps> = ({ league, updateLeague, onAdvancePhase }) => {
   const asd = league.allStarWeekend;
   // Default to Game tab — that's the main event
   const [tab, setTab] = useState<'rosters' | 'events' | 'game'>('game');
+  const [watchGameResult, setWatchGameResult] = useState<AllStarGameResult | null>(null);
+  const [watchEventResult, setWatchEventResult] = useState<AllStarContestResult | null>(null);
 
   if (!asd) {
     return (
@@ -850,6 +1175,41 @@ const AllStar: React.FC<AllStarProps> = ({ league, updateLeague, onAdvancePhase 
         isBreaking: true,
       }, ...prev.newsFeed],
     }));
+  };
+
+  // ── Watch handlers (simulate → open modal; save result immediately) ────────
+  const handleWatchGame = () => {
+    const r = simulateAllStarGame(league, asd.eastRoster, asd.westRoster, asd.eastStarters, asd.westStarters);
+    const confWon = r.eastScore > r.westScore ? 'East' : 'West';
+    updateLeague(prev => ({
+      ...prev,
+      allStarWeekend: prev.allStarWeekend ? { ...prev.allStarWeekend, allStarGame: r, completed: true } : prev.allStarWeekend,
+      newsFeed: [{
+        id: `allstar-game-${Date.now()}`,
+        category: 'milestone' as const,
+        headline: 'ALL-STAR GAME FINAL',
+        content: `${confWon} defeats ${confWon === 'East' ? 'West' : 'East'} ${Math.max(r.eastScore, r.westScore)}-${Math.min(r.eastScore, r.westScore)}! ${r.mvp.playerName} (${r.mvp.statLine}) named All-Star Game MVP!`,
+        timestamp: prev.currentDay,
+        realTimestamp: Date.now(),
+        isBreaking: true,
+      }, ...prev.newsFeed],
+    }));
+    setWatchGameResult(r);
+  };
+  const handleWatchSkills = () => {
+    const r = simulateSkillsChallenge(league, asd.skillsParticipants);
+    updateLeague(prev => ({ ...prev, allStarWeekend: prev.allStarWeekend ? { ...prev.allStarWeekend, skillsChallenge: r } : prev.allStarWeekend }));
+    setWatchEventResult(r);
+  };
+  const handleWatch3Pt = () => {
+    const r = simulate3PtContest(league, asd.threePtParticipants);
+    updateLeague(prev => ({ ...prev, allStarWeekend: prev.allStarWeekend ? { ...prev.allStarWeekend, threePtContest: r } : prev.allStarWeekend }));
+    setWatchEventResult(r);
+  };
+  const handleWatchDunk = () => {
+    const r = simulateDunkContest(league, asd.dunkParticipants);
+    updateLeague(prev => ({ ...prev, allStarWeekend: prev.allStarWeekend ? { ...prev.allStarWeekend, dunkContest: r } : prev.allStarWeekend }));
+    setWatchEventResult(r);
   };
 
   // Only the game is required to unlock "Continue Season" — contests are bonus
@@ -949,10 +1309,16 @@ const AllStar: React.FC<AllStarProps> = ({ league, updateLeague, onAdvancePhase 
                 <div className="flex flex-col items-center gap-3">
                   <div className="text-5xl">🏀</div>
                   <div className="font-display font-bold text-3xl text-slate-600">VS</div>
-                  <button onClick={() => { handleSimGame(); }}
-                    className="px-8 py-3 bg-orange-500 hover:bg-orange-400 active:scale-95 text-slate-950 font-bold text-base rounded-xl transition-all shadow-lg shadow-orange-500/20 mt-2">
-                    Simulate Game
-                  </button>
+                  <div className="flex flex-col gap-2 mt-2">
+                    <button onClick={handleWatchGame}
+                      className="px-8 py-3 bg-orange-500 hover:bg-orange-400 active:scale-95 text-slate-950 font-bold text-base rounded-xl transition-all shadow-lg shadow-orange-500/20 flex items-center justify-center gap-2">
+                      <span>▶</span> Watch Live
+                    </button>
+                    <button onClick={handleSimGame}
+                      className="px-8 py-2.5 bg-slate-800 hover:bg-slate-700 active:scale-95 text-slate-300 font-bold text-sm rounded-xl transition-all border border-slate-700">
+                      Quick Sim
+                    </button>
+                  </div>
                 </div>
                 {/* West */}
                 <div>
@@ -1118,13 +1484,13 @@ const AllStar: React.FC<AllStarProps> = ({ league, updateLeague, onAdvancePhase 
           <div className="space-y-4">
             <EventCard title="Skills Challenge" icon="🏃"
               result={asd.skillsChallenge} participants={asd.skillsParticipants}
-              league={league} onSim={handleSimSkills} />
+              league={league} onSim={handleSimSkills} onWatch={handleWatchSkills} />
             <EventCard title="3-Point Contest" icon="🎯"
               result={asd.threePtContest} participants={asd.threePtParticipants}
-              league={league} onSim={handleSim3Pt} />
+              league={league} onSim={handleSim3Pt} onWatch={handleWatch3Pt} />
             <EventCard title="Dunk Contest" icon="🔥"
               result={asd.dunkContest} participants={asd.dunkParticipants}
-              league={league} onSim={handleSimDunk} />
+              league={league} onSim={handleSimDunk} onWatch={handleWatchDunk} />
           </div>
         </div>
       )}
@@ -1143,6 +1509,14 @@ const AllStar: React.FC<AllStarProps> = ({ league, updateLeague, onAdvancePhase 
             Continue Season →
           </button>
         </div>
+      )}
+
+      {/* ── Watch modals ── */}
+      {watchGameResult && (
+        <WatchGameModal result={watchGameResult} onClose={() => setWatchGameResult(null)} />
+      )}
+      {watchEventResult && (
+        <WatchEventModal result={watchEventResult} onClose={() => setWatchEventResult(null)} />
       )}
     </div>
   );
