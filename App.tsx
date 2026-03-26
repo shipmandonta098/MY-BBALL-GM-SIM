@@ -378,7 +378,7 @@ const App: React.FC = () => {
     };
 
     const requestedTeams = partialSettings.numTeams ?? 30;
-    const freshTeams = generateLeagueTeams(genderRatio, year).slice(0, requestedTeams).map(t => ({
+    const freshTeams = generateLeagueTeams(genderRatio, year, finalSettings.tradableDraftPickSeasons ?? 4).slice(0, requestedTeams).map(t => ({
       ...t, needs: ['PG', 'C', 'SG', 'PF', 'SF'].sort(() => 0.5 - Math.random()).slice(0, 2) as Position[]
     }));
     const freshSchedule = generateSeasonSchedule(freshTeams, finalSettings.seasonLength, finalSettings.divisionGames, finalSettings.conferenceGames);
@@ -1652,18 +1652,20 @@ const App: React.FC = () => {
     setLeague(prev => {
       if (!prev) return null;
       const nextSeason = prev.season;
-      // Seed future picks (next 2 seasons) for every team that doesn't already have them
+      const futureWindow = prev.settings.tradableDraftPickSeasons ?? 4;
+      // Seed future picks (next N seasons per setting) for every team that doesn't already have them
       const teamsWithPicks = prev.teams.map(t => {
         const existingPickYears = new Set(t.picks.map(p => p.year));
         const newPicks = [] as typeof t.picks;
-        [nextSeason + 1, nextSeason + 2].forEach(yr => {
+        for (let f = 1; f <= futureWindow; f++) {
+          const yr = nextSeason + f;
           if (!existingPickYears.has(yr)) {
             newPicks.push(
               { round: 1, pick: 0, originalTeamId: t.id, currentTeamId: t.id, year: yr },
               { round: 2, pick: 0, originalTeamId: t.id, currentTeamId: t.id, year: yr },
             );
           }
-        });
+        }
         return newPicks.length > 0 ? { ...t, picks: [...t.picks, ...newPicks] } : t;
       });
       return {

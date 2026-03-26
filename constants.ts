@@ -1533,15 +1533,24 @@ export const generateDefaultRotation = (roster: Player[]): TeamRotation => {
   return { starters, bench, reserves, minutes };
 };
 
-export const generateLeagueTeams = (genderRatio: number = 0, season: number = 2026): Team[] => {
+export const generateLeagueTeams = (genderRatio: number = 0, season: number = 2026, futureSeasonsToSeed: number = 4): Team[] => {
   const teamNames = TEAM_DATA.map(t => t.name);
   const usedPicks = new Map<number, Set<string>>();
 
   return TEAM_DATA.map((data, i) => {
     const teamId = `team-${i}`;
+    const futurePicks: DraftPick[] = [];
+    for (let f = 1; f <= futureSeasonsToSeed; f++) {
+      const yr = season + f;
+      futurePicks.push(
+        { round: 1, pick: 0, originalTeamId: teamId, currentTeamId: teamId, year: yr },
+        { round: 2, pick: 0, originalTeamId: teamId, currentTeamId: teamId, year: yr },
+      );
+    }
     const picks: DraftPick[] = [
       { round: 1, pick: 0, originalTeamId: teamId, currentTeamId: teamId },
-      { round: 2, pick: 0, originalTeamId: teamId, currentTeamId: teamId }
+      { round: 2, pick: 0, originalTeamId: teamId, currentTeamId: teamId },
+      ...futurePicks,
     ];
 
     const ownerGoals: OwnerGoal[] = ['Win Now', 'Rebuild', 'Profit'];
