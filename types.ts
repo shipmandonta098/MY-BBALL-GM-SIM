@@ -392,6 +392,7 @@ export interface DraftPick {
   originalTeamId: string;
   currentTeamId: string;
   year?: number;
+  protection?: 'unprotected' | 'top-10-protected' | 'lottery-protected';
 }
 
 export interface TeamStaff {

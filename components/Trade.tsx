@@ -20,6 +20,7 @@ const Trade: React.FC<TradeProps> = ({ league, updateLeague, recordTransaction }
     status: 'neutral',
     message: 'Assemble a package to start negotiations.'
   });
+  const [counterPick, setCounterPick] = useState<DraftPick | null>(null);
 
   // Finder State
   const [finderPos, setFinderPos] = useState<Position | 'ALL'>('ALL');
@@ -48,12 +49,7 @@ const Trade: React.FC<TradeProps> = ({ league, updateLeague, recordTransaction }
 
       return Math.max(100, (baseValue - agePenalty + contractModifier) * onBlock * needBonus);
     } else {
-      const pick = piece.data as DraftPick;
-      const originalTeam = league.teams.find(t => t.id === pick.originalTeamId);
-      const pickValueBase = pick.round === 1 ? 2800 : 900;
-      // If original team is bad, pick is worth more
-      const badTeamMultiplier = originalTeam ? (1 + (originalTeam.losses / (originalTeam.wins + originalTeam.losses || 1)) * 0.5) : 1;
-      return pickValueBase * badTeamMultiplier;
+      return pickTradeValue(piece.data as DraftPick);
     }
   };
 
@@ -64,6 +60,53 @@ const Trade: React.FC<TradeProps> = ({ league, updateLeague, recordTransaction }
   const partnerOutgoingSalary = partnerPieces.reduce((sum, p) => sum + (p.type === 'player' ? (p.data as Player).salary : 0), 0);
 
   const formatMoney = (val: number) => `$${(val / 1000000).toFixed(1)}M`;
+
+  // ── Pick helpers ──────────────────────────────────────────────────────────
+  const pickLabel = (pick: DraftPick): string => {
+    const yr = pick.year ?? league.season;
+    const round = pick.round === 1 ? '1st' : '2nd';
+    return `${yr} ${round}`;
+  };
+
+  const pickProtectionLabel = (pick: DraftPick): string => {
+    if (pick.protection === 'top-10-protected') return 'Top-10 Prot.';
+    if (pick.protection === 'lottery-protected') return 'Lottery Prot.';
+    return 'Unprotected';
+  };
+
+  const pickTier = (pick: DraftPick): { label: string; color: string } => {
+    if (pick.round === 2) return { label: 'LOW', color: 'text-slate-400' };
+    const pos = pick.pick > 0 ? pick.pick : 15;
+    if (pos <= 5) return { label: 'HIGH', color: 'text-amber-400' };
+    if (pos <= 14) return { label: 'MED', color: 'text-blue-400' };
+    return { label: 'LOW', color: 'text-slate-400' };
+  };
+
+  // Trade machine pick value (separate from aiGMEngine.ts — uses UI-scale numbers)
+  const pickTradeValue = (pick: DraftPick): number => {
+    const pos = pick.pick > 0 ? pick.pick : 15;
+    let base: number;
+    if (pick.round === 1) {
+      if (pos <= 5)       base = 3500;
+      else if (pos <= 14) base = 2500;
+      else                base = 1600;
+    } else {
+      base = 700;
+    }
+    const originalTeam = league.teams.find(t => t.id === pick.originalTeamId);
+    const badTeamMult = originalTeam
+      ? 1 + (originalTeam.losses / ((originalTeam.wins + originalTeam.losses) || 1)) * 0.5
+      : 1;
+    base *= badTeamMult;
+    // 15% year discount per season out
+    if (pick.year && pick.year > league.season) {
+      base *= Math.pow(0.85, pick.year - league.season);
+    }
+    // Protection discount
+    if (pick.protection === 'top-10-protected') base *= 0.85;
+    if (pick.protection === 'lottery-protected') base *= 0.70;
+    return base;
+  };
 
   const userTeamSalary = userTeam.roster.reduce((sum, p) => sum + p.salary, 0);
   const partnerTeamSalary = partnerTeam.roster.reduce((sum, p) => sum + p.salary, 0);
@@ -83,11 +126,34 @@ const Trade: React.FC<TradeProps> = ({ league, updateLeague, recordTransaction }
       setAiResponse({ status: 'reject', message: 'Salary cap rules violation. Salaries must match within 125%.' });
       return;
     }
+    setCounterPick(null);
     const valueRatio = userPiecesValue / (partnerPiecesValue || 1);
     if (valueRatio >= 1.15) {
       setAiResponse({ status: 'accept', message: `We accept! The ${partnerTeam.name} front office is thrilled with this value.` });
-    } else if (valueRatio >= 0.95) {
-      setAiResponse({ status: 'reject', message: 'Interesting, but you need to sweeten the deal. Add a 2nd rounder or a prospect.' });
+    } else if (valueRatio >= 0.80) {
+      // Try to find a partner future pick that bridges the value gap
+      const gap = userPiecesValue - partnerPiecesValue;
+      const alreadyInPackage = new Set(
+        partnerPieces.filter(p => p.type === 'pick').map(p => {
+          const pk = p.data as DraftPick;
+          return `${pk.originalTeamId}-${pk.round}-${pk.year}`;
+        })
+      );
+      const bridgePick = [...partnerTeam.picks]
+        .filter(p => p.year !== undefined && p.year > league.season &&
+          !alreadyInPackage.has(`${p.originalTeamId}-${p.round}-${p.year}`)
+        )
+        .sort((a, b) => Math.abs(pickTradeValue(a) - gap) - Math.abs(pickTradeValue(b) - gap))[0] ?? null;
+
+      if (bridgePick) {
+        setCounterPick(bridgePick);
+        const yr = bridgePick.year!;
+        const rd = bridgePick.round === 1 ? '1st' : '2nd';
+        const prot = pickProtectionLabel(bridgePick);
+        setAiResponse({ status: 'reject', message: `Interesting. We could sweeten this by adding our ${yr} ${rd}-round pick (${prot}). See counter below.` });
+      } else {
+        setAiResponse({ status: 'reject', message: 'Interesting, but you need to sweeten the deal. Add a future pick or a young prospect.' });
+      }
     } else {
       setAiResponse({ status: 'insulted', message: 'This is not even close. We are hanging up the phone.' });
     }
@@ -106,23 +172,36 @@ const Trade: React.FC<TradeProps> = ({ league, updateLeague, recordTransaction }
     let updatedTeams = league.teams.map(t => {
       let roster = [...t.roster];
       let picks = [...t.picks];
+      const pickMatch = (tradePiece: TradePiece, teamPick: DraftPick) => {
+        if (tradePiece.type !== 'pick') return false;
+        const tp = tradePiece.data as DraftPick;
+        return tp.originalTeamId === teamPick.originalTeamId && tp.round === teamPick.round && tp.year === teamPick.year;
+      };
       if (t.id === userTeam.id) {
         roster = roster.filter(p => !userPieces.some(up => up.type === 'player' && (up.data as Player).id === p.id));
-        picks = picks.filter(p => !userPieces.some(up => up.type === 'pick' && (up.data as DraftPick).originalTeamId === p.originalTeamId && (up.data as DraftPick).round === p.round));
+        picks = picks.filter(p => !userPieces.some(up => pickMatch(up, p)));
         roster = [...roster, ...snappedPartnerPlayers];
-        picks = [...picks, ...partnerPieces.filter(p => p.type === 'pick').map(p => p.data as DraftPick)];
+        picks = [...picks, ...partnerPieces.filter(p => p.type === 'pick').map(p => ({ ...(p.data as DraftPick), currentTeamId: userTeam.id }))];
       }
       if (t.id === partnerTeam.id) {
         roster = roster.filter(p => !partnerPieces.some(pp => pp.type === 'player' && (pp.data as Player).id === p.id));
-        picks = picks.filter(p => !partnerPieces.some(pp => pp.type === 'pick' && (pp.data as DraftPick).originalTeamId === p.originalTeamId && (pp.data as DraftPick).round === p.round));
+        picks = picks.filter(p => !partnerPieces.some(pp => pickMatch(pp, p)));
         roster = [...roster, ...snappedUserPlayers];
-        picks = [...picks, ...userPieces.filter(p => p.type === 'pick').map(p => p.data as DraftPick)];
+        picks = [...picks, ...userPieces.filter(p => p.type === 'pick').map(p => ({ ...(p.data as DraftPick), currentTeamId: partnerTeam.id }))];
       }
       return { ...t, roster, picks };
     });
 
-    const userGiving = userPieces.map(p => p.type === 'player' ? (p.data as Player).name : `${(p.data as DraftPick).originalTeamId} rd ${(p.data as DraftPick).round}`).join(', ');
-    const partnerGiving = partnerPieces.map(p => p.type === 'player' ? (p.data as Player).name : `${(p.data as DraftPick).originalTeamId} rd ${(p.data as DraftPick).round}`).join(', ');
+    const fmtPiece = (p: TradePiece) => {
+      if (p.type === 'player') return (p.data as Player).name;
+      const pk = p.data as DraftPick;
+      const yr = pk.year ?? league.season;
+      const rd = pk.round === 1 ? '1st' : '2nd';
+      const prot = pk.protection === 'top-10-protected' ? ' (Top-10 Prot.)' : pk.protection === 'lottery-protected' ? ' (Lottery Prot.)' : ' (Unprotected)';
+      return `${yr} ${rd}${prot}`;
+    };
+    const userGiving = userPieces.map(fmtPiece).join(', ');
+    const partnerGiving = partnerPieces.map(fmtPiece).join(', ');
     const description = `${userTeam.name} trade ${userGiving} to ${partnerTeam.name} for ${partnerGiving}.`;
     const playerIds = [
       ...userPieces.filter(p => p.type === 'player').map(p => (p.data as Player).id),
@@ -195,38 +274,54 @@ const Trade: React.FC<TradeProps> = ({ league, updateLeague, recordTransaction }
     setFinderResults(results);
   };
 
+  const isSamePiece = (a: TradePiece, b: TradePiece): boolean => {
+    if (a.type !== b.type) return false;
+    if (a.type === 'player') return (a.data as Player).id === (b.data as Player).id;
+    const pa = a.data as DraftPick, pb = b.data as DraftPick;
+    return pa.originalTeamId === pb.originalTeamId && pa.round === pb.round && pa.year === pb.year;
+  };
+
   const TogglePiece = (piece: TradePiece, isUser: boolean) => {
     const list = isUser ? userPieces : partnerPieces;
     const setter = isUser ? setUserPieces : setPartnerPieces;
-    const exists = list.some(p => 
-      p.type === piece.type && (p.type === 'player' ? (p.data as Player).id === (piece.data as Player).id : (p.data as DraftPick).originalTeamId === (piece.data as DraftPick).originalTeamId && (p.data as DraftPick).round === (piece.data as DraftPick).round)
-    );
-    if (exists) setter(list.filter(p => !(p.type === piece.type && (p.type === 'player' ? (p.data as Player).id === (piece.data as Player).id : (p.data as DraftPick).originalTeamId === (piece.data as DraftPick).originalTeamId && (p.data as DraftPick).round === (piece.data as DraftPick).round))));
+    const exists = list.some(p => isSamePiece(p, piece));
+    if (exists) setter(list.filter(p => !isSamePiece(p, piece)));
     else setter([...list, piece]);
     setAiResponse({ status: 'neutral', message: 'Negotiating...' });
+    setCounterPick(null);
   };
 
-  const PieceItem: React.FC<{ piece: TradePiece, isUser: boolean, isSelected: boolean }> = ({ piece, isUser, isSelected }) => (
-    <button 
-      onClick={() => TogglePiece(piece, isUser)}
-      className={`w-full text-left p-3 rounded-xl border transition-all mb-2 flex items-center justify-between group ${isSelected ? 'bg-amber-500 border-amber-400 text-slate-950' : 'bg-slate-800 border-slate-700 text-slate-300 hover:border-slate-500'}`}
-    >
-      <div className="flex items-center gap-3">
-        <div className={`w-8 h-8 rounded-lg flex items-center justify-center font-bold text-xs ${isSelected ? 'bg-slate-950 text-amber-500' : 'bg-slate-900 text-slate-500'}`}>
-          {piece.type === 'player' ? (piece.data as Player).position : (piece.data as DraftPick).round}
+  const PieceItem: React.FC<{ piece: TradePiece, isUser: boolean, isSelected: boolean }> = ({ piece, isUser, isSelected }) => {
+    const isPick = piece.type === 'pick';
+    const pick = isPick ? piece.data as DraftPick : null;
+    const tier = pick ? pickTier(pick) : null;
+    const origAbbr = pick ? (league.teams.find(t => t.id === pick.originalTeamId)?.abbreviation ?? pick.originalTeamId) : null;
+    return (
+      <button
+        onClick={() => TogglePiece(piece, isUser)}
+        className={`w-full text-left p-3 rounded-xl border transition-all mb-2 flex items-center justify-between group ${isSelected ? 'bg-amber-500 border-amber-400 text-slate-950' : 'bg-slate-800 border-slate-700 text-slate-300 hover:border-slate-500'}`}
+      >
+        <div className="flex items-center gap-3">
+          <div className={`w-8 h-8 rounded-lg flex items-center justify-center font-bold text-xs ${isSelected ? 'bg-slate-950 text-amber-500' : 'bg-slate-900 text-slate-500'}`}>
+            {isPick ? (pick!.round === 1 ? 'R1' : 'R2') : (piece.data as Player).position}
+          </div>
+          <div>
+            <p className="font-bold text-sm uppercase truncate max-w-[130px]">
+              {isPick ? pickLabel(pick!) : (piece.data as Player).name}
+            </p>
+            <p className={`text-[9px] font-black uppercase ${isSelected ? 'text-slate-800' : 'text-slate-500'}`}>
+              {isPick
+                ? `${origAbbr} • ${pickProtectionLabel(pick!)} • `
+                : `Rating: ${(piece.data as Player).rating} • ${formatMoney((piece.data as Player).salary)}`
+              }
+              {isPick && <span className={isSelected ? 'text-slate-800' : tier!.color}>{tier!.label}</span>}
+            </p>
+          </div>
         </div>
-        <div>
-          <p className="font-bold text-sm uppercase truncate max-w-[120px]">
-            {piece.type === 'player' ? (piece.data as Player).name : `${(piece.data as DraftPick).round}${ (piece.data as DraftPick).round === 1 ? 'st' : 'nd'} Rd Pick`}
-          </p>
-          <p className={`text-[9px] font-black uppercase ${isSelected ? 'text-slate-800' : 'text-slate-500'}`}>
-            {piece.type === 'player' ? `Rating: ${(piece.data as Player).rating} • ${formatMoney((piece.data as Player).salary)}` : `Orig: ${league.teams.find(t => t.id === (piece.data as DraftPick).originalTeamId)?.name}`}
-          </p>
-        </div>
-      </div>
-      <span className="opacity-0 group-hover:opacity-100 transition-opacity text-xs">{isSelected ? '−' : '+'}</span>
-    </button>
-  );
+        <span className="opacity-0 group-hover:opacity-100 transition-opacity text-xs">{isSelected ? '−' : '+'}</span>
+      </button>
+    );
+  };
 
   return (
     <div className="space-y-8 animate-in fade-in duration-500 pb-40">
@@ -278,10 +373,22 @@ const Trade: React.FC<TradeProps> = ({ league, updateLeague, recordTransaction }
                  <PieceItem key={p.id} piece={{ type: 'player', data: p }} isUser={true} isSelected={userPieces.some(up => up.type === 'player' && (up.data as Player).id === p.id)} />
                ))}
                <div className="mt-6 pt-6 border-t border-slate-800">
-                 <h4 className="text-[10px] font-black text-slate-600 uppercase mb-4 tracking-widest">Draft Picks</h4>
-                 {userTeam.picks.map((pick, i) => (
-                   <PieceItem key={i} piece={{ type: 'pick', data: pick }} isUser={true} isSelected={userPieces.some(up => up.type === 'pick' && (up.data as DraftPick).originalTeamId === pick.originalTeamId && (up.data as DraftPick).round === pick.round)} />
-                 ))}
+                 {(() => {
+                   const curPicks = userTeam.picks.filter(p => !p.year || p.year <= league.season);
+                   const futurePicks = userTeam.picks.filter(p => p.year && p.year > league.season).sort((a, b) => (a.year! - b.year!) || (a.round - b.round));
+                   const isPickSel = (pick: DraftPick) => userPieces.some(up => up.type === 'pick' && isSamePiece(up, { type: 'pick', data: pick }));
+                   return (<>
+                     {curPicks.length > 0 && (<>
+                       <h4 className="text-[10px] font-black text-slate-600 uppercase mb-3 tracking-widest">This Season's Picks</h4>
+                       {curPicks.map((pick, i) => <PieceItem key={`cur-${i}`} piece={{ type: 'pick', data: pick }} isUser={true} isSelected={isPickSel(pick)} />)}
+                     </>)}
+                     {futurePicks.length > 0 && (<>
+                       <h4 className="text-[10px] font-black text-slate-600 uppercase mb-3 mt-4 tracking-widest">Future Draft Picks</h4>
+                       {futurePicks.map((pick, i) => <PieceItem key={`fut-${i}-${pick.year}-${pick.round}`} piece={{ type: 'pick', data: pick }} isUser={true} isSelected={isPickSel(pick)} />)}
+                     </>)}
+                     {curPicks.length === 0 && futurePicks.length === 0 && <p className="text-[10px] text-slate-600 italic">No picks available.</p>}
+                   </>);
+                 })()}
                </div>
             </div>
           </div>
@@ -310,6 +417,18 @@ const Trade: React.FC<TradeProps> = ({ league, updateLeague, recordTransaction }
                <div className="space-y-3">
                  <button onClick={handlePropose} disabled={!canPropose} className="w-full py-5 bg-amber-500 hover:bg-amber-400 disabled:opacity-20 text-slate-950 font-display font-bold uppercase rounded-2xl shadow-xl">Propose Trade</button>
                  {aiResponse.status === 'accept' && <button onClick={executeTrade} className="w-full py-5 bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-display font-bold uppercase rounded-2xl animate-bounce">Confirm Trade</button>}
+                 {counterPick && (
+                   <button
+                     onClick={() => {
+                       setPartnerPieces([...partnerPieces, { type: 'pick', data: counterPick }]);
+                       setCounterPick(null);
+                       setAiResponse({ status: 'neutral', message: `Counter accepted — ${pickLabel(counterPick)} (${pickProtectionLabel(counterPick)}) added to their package.` });
+                     }}
+                     className="w-full py-3 bg-blue-500/10 hover:bg-blue-500/20 border border-blue-500/40 text-blue-300 font-display font-bold uppercase text-sm rounded-2xl transition-all"
+                   >
+                     Accept Counter: + {pickLabel(counterPick)} ({pickProtectionLabel(counterPick)})
+                   </button>
+                 )}
                  <button onClick={handleSaveTrade} className="w-full py-3 bg-slate-800 hover:bg-slate-700 text-slate-300 font-display font-bold uppercase rounded-2xl">Save Package</button>
                </div>
 
@@ -342,9 +461,22 @@ const Trade: React.FC<TradeProps> = ({ league, updateLeague, recordTransaction }
                  <PieceItem key={p.id} piece={{ type: 'player', data: p }} isUser={false} isSelected={partnerPieces.some(pp => pp.type === 'player' && (pp.data as Player).id === p.id)} />
                ))}
                <div className="mt-6 pt-6 border-t border-slate-800">
-                 {partnerTeam.picks.map((pick, i) => (
-                   <PieceItem key={i} piece={{ type: 'pick', data: pick }} isUser={false} isSelected={partnerPieces.some(pp => pp.type === 'pick' && (pp.data as DraftPick).originalTeamId === pick.originalTeamId && (pp.data as DraftPick).round === pick.round)} />
-                 ))}
+                 {(() => {
+                   const curPicks = partnerTeam.picks.filter(p => !p.year || p.year <= league.season);
+                   const futurePicks = partnerTeam.picks.filter(p => p.year && p.year > league.season).sort((a, b) => (a.year! - b.year!) || (a.round - b.round));
+                   const isPickSel = (pick: DraftPick) => partnerPieces.some(pp => pp.type === 'pick' && isSamePiece(pp, { type: 'pick', data: pick }));
+                   return (<>
+                     {curPicks.length > 0 && (<>
+                       <h4 className="text-[10px] font-black text-slate-600 uppercase mb-3 tracking-widest">This Season's Picks</h4>
+                       {curPicks.map((pick, i) => <PieceItem key={`cur-${i}`} piece={{ type: 'pick', data: pick }} isUser={false} isSelected={isPickSel(pick)} />)}
+                     </>)}
+                     {futurePicks.length > 0 && (<>
+                       <h4 className="text-[10px] font-black text-slate-600 uppercase mb-3 mt-4 tracking-widest">Future Draft Picks</h4>
+                       {futurePicks.map((pick, i) => <PieceItem key={`fut-${i}-${pick.year}-${pick.round}`} piece={{ type: 'pick', data: pick }} isUser={false} isSelected={isPickSel(pick)} />)}
+                     </>)}
+                     {curPicks.length === 0 && futurePicks.length === 0 && <p className="text-[10px] text-slate-600 italic">No picks available.</p>}
+                   </>);
+                 })()}
                </div>
             </div>
           </div>
