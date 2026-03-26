@@ -1649,15 +1649,34 @@ const App: React.FC = () => {
     const newSchedule = needsFreshSchedule
       ? generateSeasonSchedule(league.teams, league.settings.seasonLength, league.settings.divisionGames, league.settings.conferenceGames)
       : league.schedule;
-    setLeague(prev => prev ? {
-      ...prev,
-      schedule: newSchedule,
-      currentDay: 1,
-      isOffseason: false,
-      seasonPhase: 'Regular Season' as SeasonPhase,
-      tradeDeadlinePassed: false,
-      allStarWeekend: undefined,
-    } : null);
+    setLeague(prev => {
+      if (!prev) return null;
+      const nextSeason = prev.season;
+      // Seed future picks (next 2 seasons) for every team that doesn't already have them
+      const teamsWithPicks = prev.teams.map(t => {
+        const existingPickYears = new Set(t.picks.map(p => p.year));
+        const newPicks = [] as typeof t.picks;
+        [nextSeason + 1, nextSeason + 2].forEach(yr => {
+          if (!existingPickYears.has(yr)) {
+            newPicks.push(
+              { round: 1, pick: 0, originalTeamId: t.id, currentTeamId: t.id, year: yr },
+              { round: 2, pick: 0, originalTeamId: t.id, currentTeamId: t.id, year: yr },
+            );
+          }
+        });
+        return newPicks.length > 0 ? { ...t, picks: [...t.picks, ...newPicks] } : t;
+      });
+      return {
+        ...prev,
+        teams: teamsWithPicks,
+        schedule: newSchedule,
+        currentDay: 1,
+        isOffseason: false,
+        seasonPhase: 'Regular Season' as SeasonPhase,
+        tradeDeadlinePassed: false,
+        allStarWeekend: undefined,
+      };
+    });
   };
 
   const handleScoutPlayer = async (player: Player | Prospect) => { setLoading(true); const report = await generateScoutingReport(player); setScoutingReport({ playerId: player.id, report }); setLoading(false); };
