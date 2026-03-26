@@ -122,15 +122,31 @@ export function playerTradeValue(
 function draftPickValue(
   pick: DraftPick,
   personality: AIGMPersonality,
-  totalTeams: number
+  totalTeams: number,
+  currentSeason?: number
 ): number {
   const round = pick.round;
-  const estimatedPick = pick.pick || Math.floor(totalTeams / 2);
-  const base = round === 1
-    ? Math.max(25, 55 - estimatedPick * 0.8)
-    : Math.max(5, 20 - estimatedPick * 0.3);
-  if (personality === 'Rebuilder')       return base * 1.2;
-  if (personality === 'Win Now')         return base * 0.7;
+  // Use pick position if known; otherwise assume ~40th percentile (mid-first range)
+  const estimatedPick = pick.pick > 0 ? pick.pick : Math.floor(totalTeams * 0.4);
+
+  let base: number;
+  if (round === 1) {
+    if (estimatedPick <= 5)       base = 55; // lottery
+    else if (estimatedPick <= 14) base = 40; // mid-first
+    else                          base = 28; // late-first
+  } else {
+    base = Math.max(5, 20 - estimatedPick * 0.2);
+  }
+
+  // 15% discount per year into the future
+  if (currentSeason && pick.year && pick.year > currentSeason) {
+    const yearsOut = pick.year - currentSeason;
+    base *= Math.pow(0.85, yearsOut);
+  }
+
+  if (personality === 'Rebuilder')        return base * 1.35;
+  if (personality === 'Win Now')          return base * 0.60;
+  if (personality === 'Superstar Chaser') return base * 0.55;
   return base;
 }
 
@@ -689,10 +705,11 @@ export function evaluateTrade(
   personality: AIGMPersonality,
   totalTeams: number,
   tradeDifficulty?: string,
+  currentSeason?: number,
 ): boolean {
   const valueOf = (pkg: TradePackage) => {
     const pVal = pkg.players.reduce((s, p) => s + playerTradeValue(p, personality), 0);
-    const dVal = pkg.picks.reduce((s, pick) => s + draftPickValue(pick, personality, totalTeams), 0);
+    const dVal = pkg.picks.reduce((s, pick) => s + draftPickValue(pick, personality, totalTeams, currentSeason), 0);
     return pVal + dVal;
   };
 
@@ -723,48 +740,180 @@ export function aiGMTradeDeadlineAction(
   state: LeagueState
 ): { newsItems: NewsItem[]; updatedState: LeagueState } {
   const newsItems: NewsItem[] = [];
-  let s = { ...state };
+  const transactions: Transaction[] = [];
+  let s = { ...state, teams: [...state.teams] };
 
-  const totalGames = s.settings.seasonLength ?? 82;
+  const aiTeams = s.teams.filter(t => t.id !== s.userTeamId && !!t.aiGM);
+  const tradedTeams = new Set<string>();
 
-  s = {
-    ...s,
-    teams: s.teams.map(t => {
-      if (t.id === s.userTeamId || !t.aiGM) return t;
-      const { personality } = t.aiGM;
-      const totalPlayed = t.wins + t.losses;
-      if (totalPlayed < 20) return t; // Too early
+  // Identify rebuilders (sellers) and contenders (buyers)
+  const rebuilders = aiTeams.filter(t => {
+    const gab = t.wins - t.losses;
+    return (t.aiGM!.personality === 'Rebuilder' || gab <= -5) && t.wins + t.losses >= 20;
+  });
+  const contenders = aiTeams.filter(t => {
+    const gab = t.wins - t.losses;
+    return (t.aiGM!.personality === 'Win Now' || t.aiGM!.personality === 'Superstar Chaser' || gab >= 5) && t.wins + t.losses >= 20;
+  });
 
-      const winPct = totalPlayed > 0 ? t.wins / totalPlayed : 0.5;
-      const gamesAbove = t.wins - t.losses;
+  // Shuffled for variety
+  const shuffledRebuilders = [...rebuilders].sort(() => Math.random() - 0.5);
+  const shuffledContenders = [...contenders].sort(() => Math.random() - 0.5);
 
-      // Rebuilder sells veterans if 5+ below .500
-      if (personality === 'Rebuilder' && gamesAbove <= -5) {
-        const veterans = t.roster.filter(p => p.age >= 30 && p.rating >= 75 && p.contractYears <= 2);
-        if (veterans.length > 0) {
-          const v = veterans[0];
+  let tradesExecuted = 0;
+  const maxDeadlineTrades = 3;
+
+  for (const rebuilder of shuffledRebuilders) {
+    if (tradesExecuted >= maxDeadlineTrades) break;
+    if (tradedTeams.has(rebuilder.id)) continue;
+
+    const rebuilderData = s.teams.find(t => t.id === rebuilder.id)!;
+    // Find a veteran to move — older, expiring, good enough to interest contenders
+    const vetCandidates = rebuilderData.roster
+      .filter(p => p.age >= 28 && p.rating >= 75 && p.contractYears <= 2)
+      .sort((a, b) => b.rating - a.rating);
+    if (vetCandidates.length === 0) continue;
+    const vet = vetCandidates[0];
+
+    let dealMade = false;
+    for (const contender of shuffledContenders) {
+      if (dealMade || tradedTeams.has(contender.id)) continue;
+      const contenderData = s.teams.find(t => t.id === contender.id)!;
+
+      // Contender offers: a future first pick + possibly a young player
+      const futurePick = contenderData.picks.find(p =>
+        p.round === 1 && p.currentTeamId === contenderData.id &&
+        p.year !== undefined && p.year > s.season
+      );
+
+      // Try pick + young player deal first
+      const youngAssets = contenderData.roster
+        .filter(p => p.age <= 25 && p.rating >= 65 && p.rating <= vet.rating + 5)
+        .sort((a, b) => a.salary - b.salary);
+
+      if (futurePick && youngAssets.length > 0) {
+        const youngPlayer = youngAssets[0];
+        const rebuilderGets: TradePackage = { players: [youngPlayer], picks: [futurePick] };
+        const rebuilderSends: TradePackage = { players: [vet], picks: [] };
+        const contenderGets: TradePackage = { players: [vet], picks: [] };
+        const contenderSends: TradePackage = { players: [youngPlayer], picks: [futurePick] };
+
+        if (
+          evaluateTrade(rebuilderGets, rebuilderSends, rebuilder.aiGM!.personality, s.teams.length, s.settings?.tradeDifficulty, s.season) &&
+          evaluateTrade(contenderGets, contenderSends, contender.aiGM!.personality, s.teams.length, s.settings?.tradeDifficulty, s.season)
+        ) {
+          const snappedVet = snapshotPlayerStats(vet, rebuilderData.id, rebuilderData.name, rebuilderData.abbreviation, s.season, true);
+          const snappedYoung = snapshotPlayerStats(youngPlayer, contenderData.id, contenderData.name, contenderData.abbreviation, s.season, true);
+          s = {
+            ...s,
+            teams: s.teams.map(t => {
+              if (t.id === rebuilderData.id) return {
+                ...t,
+                roster: [...t.roster.filter(p => p.id !== vet.id), { ...snappedYoung, lastTeamId: contenderData.id }],
+                picks: [...t.picks, { ...futurePick, currentTeamId: t.id }],
+              };
+              if (t.id === contenderData.id) return {
+                ...t,
+                roster: [...t.roster.filter(p => p.id !== youngPlayer.id), { ...snappedVet, lastTeamId: rebuilderData.id }],
+                picks: t.picks.filter(p => !(p.round === futurePick.round && p.year === futurePick.year && p.originalTeamId === futurePick.originalTeamId)),
+              };
+              return t;
+            }),
+          };
+          tradedTeams.add(rebuilder.id);
+          tradedTeams.add(contender.id);
+          tradesExecuted++;
+          dealMade = true;
+          const yearStr = futurePick.year ? `${futurePick.year}` : 'future';
           newsItems.push(makeNewsItem(
-            'signing',
-            `${t.abbreviation} TRADE DEADLINE`,
-            `${t.name} are making veteran ${v.name} available, signaling the start of a full rebuild.`,
-            s.currentDay, t.id, v.id, false
+            'trade',
+            `DEADLINE TRADE: ${vet.name} → ${contenderData.abbreviation}`,
+            `${contenderData.name} acquired ${vet.name} (${vet.position}, ${vet.rating} OVR) from ${rebuilderData.name} for ${youngPlayer.name} and a ${yearStr} 1st-round pick.`,
+            s.currentDay, rebuilderData.id, vet.id, true
           ));
+          transactions.push(makeTransaction(
+            s, 'trade', [rebuilderData.id, contenderData.id],
+            `DEADLINE: ${rebuilderData.name} trades ${vet.name} to ${contenderData.name} for ${youngPlayer.name} + ${yearStr} 1st.`,
+            [vet.id, youngPlayer.id]
+          ));
+          continue;
         }
       }
 
-      // Win Now buys if 5+ above .500
-      if ((personality === 'Win Now' || personality === 'Superstar Chaser') && gamesAbove >= 5) {
+      // Try pure pick-for-vet deal
+      if (futurePick && !dealMade) {
+        const rebuilderGets: TradePackage = { players: [], picks: [futurePick] };
+        const rebuilderSends: TradePackage = { players: [vet], picks: [] };
+        const contenderGets: TradePackage = { players: [vet], picks: [] };
+        const contenderSends: TradePackage = { players: [], picks: [futurePick] };
+
+        if (
+          evaluateTrade(rebuilderGets, rebuilderSends, rebuilder.aiGM!.personality, s.teams.length, s.settings?.tradeDifficulty, s.season) &&
+          evaluateTrade(contenderGets, contenderSends, contender.aiGM!.personality, s.teams.length, s.settings?.tradeDifficulty, s.season)
+        ) {
+          const snappedVet = snapshotPlayerStats(vet, rebuilderData.id, rebuilderData.name, rebuilderData.abbreviation, s.season, true);
+          s = {
+            ...s,
+            teams: s.teams.map(t => {
+              if (t.id === rebuilderData.id) return {
+                ...t,
+                roster: t.roster.filter(p => p.id !== vet.id),
+                picks: [...t.picks, { ...futurePick, currentTeamId: t.id }],
+              };
+              if (t.id === contenderData.id) return {
+                ...t,
+                roster: [...t.roster, { ...snappedVet, lastTeamId: rebuilderData.id }],
+                picks: t.picks.filter(p => !(p.round === futurePick.round && p.year === futurePick.year && p.originalTeamId === futurePick.originalTeamId)),
+              };
+              return t;
+            }),
+          };
+          tradedTeams.add(rebuilder.id);
+          tradedTeams.add(contender.id);
+          tradesExecuted++;
+          dealMade = true;
+          const yearStr = futurePick.year ? `${futurePick.year}` : 'future';
+          newsItems.push(makeNewsItem(
+            'trade',
+            `DEADLINE TRADE: ${vet.name} → ${contenderData.abbreviation}`,
+            `${contenderData.name} acquired ${vet.name} (${vet.position}, ${vet.rating} OVR) from ${rebuilderData.name} in exchange for a ${yearStr} 1st-round pick.`,
+            s.currentDay, rebuilderData.id, vet.id, true
+          ));
+          transactions.push(makeTransaction(
+            s, 'trade', [rebuilderData.id, contenderData.id],
+            `DEADLINE: ${rebuilderData.name} trades ${vet.name} to ${contenderData.name} for a ${yearStr} first-round pick.`,
+            [vet.id]
+          ));
+        }
+      }
+    }
+  }
+
+  // Add flavor news for teams that didn't land a trade
+  for (const t of aiTeams) {
+    if (tradedTeams.has(t.id)) continue;
+    const { personality } = t.aiGM!;
+    const gab = t.wins - t.losses;
+    if (personality === 'Rebuilder' && gab <= -5) {
+      const veterans = t.roster.filter(p => p.age >= 30 && p.rating >= 75 && p.contractYears <= 2);
+      if (veterans.length > 0) {
         newsItems.push(makeNewsItem(
-          'trade_request',
-          `${t.abbreviation} BUYING AT DEADLINE`,
-          `${t.name} are aggressive buyers at the trade deadline, seeking help to push for a title.`,
-          s.currentDay, t.id, undefined, false
+          'signing',
+          `${t.abbreviation} TRADE DEADLINE`,
+          `${t.name} explored deals for ${veterans[0].name} but couldn't find the right return.`,
+          s.currentDay, t.id, veterans[0].id, false
         ));
       }
-
-      return t;
-    }),
-  };
+    }
+    if ((personality === 'Win Now' || personality === 'Superstar Chaser') && gab >= 5 && Math.random() < 0.5) {
+      newsItems.push(makeNewsItem(
+        'trade_request',
+        `${t.abbreviation} BUYING AT DEADLINE`,
+        `${t.name} were aggressive buyers at the deadline, seeking upgrades for a title push.`,
+        s.currentDay, t.id, undefined, false
+      ));
+    }
+  }
 
   return { newsItems, updatedState: s };
 }
@@ -943,6 +1092,83 @@ export function aiGMInSeasonTrades(
           s, 'trade', [team.id, foundSellerId],
           `TRADE: ${contenderData.name} acquires ${targetPlayer.name} from ${sellerData.name} for ${returnPlayer.name}.`,
           [targetPlayer.id, returnPlayer.id]
+        ));
+      }
+    }
+  }
+
+  // ── PICK-CENTRIC TRADES: Rebuilder sells veteran for future first ────────────
+  for (const team of shuffled) {
+    if (tradedTeams.has(team.id) || tradesThisCycle >= maxTradesPerCycle) break;
+    const { personality } = team.aiGM!;
+    const gamesAbove = team.wins - team.losses;
+    const isRebuilding = gamesAbove <= -3 || personality === 'Rebuilder';
+    if (!isRebuilding) continue;
+    if (Math.random() > 0.28) continue; // ~28% chance per cycle
+
+    const teamData = s.teams.find(t => t.id === team.id)!;
+    const vetCandidates = teamData.roster
+      .filter(p => p.age >= 29 && p.rating >= 74 && p.contractYears <= 2)
+      .sort((a, b) => b.rating - a.rating);
+    if (vetCandidates.length === 0) continue;
+    const vet = vetCandidates[0];
+
+    // Find a contending team that owns a future first-round pick
+    const contenders = shuffled.filter(t =>
+      t.id !== team.id && !tradedTeams.has(t.id) && (t.wins - t.losses) >= 3
+    );
+    let dealMade = false;
+    for (const contender of contenders) {
+      if (dealMade) break;
+      const contenderData = s.teams.find(t => t.id === contender.id)!;
+      const futurePick = contenderData.picks.find(p =>
+        p.round === 1 && p.currentTeamId === contenderData.id &&
+        p.year !== undefined && p.year > s.season
+      );
+      if (!futurePick) continue;
+
+      const rebuilderGets: TradePackage = { players: [], picks: [futurePick] };
+      const rebuilderSends: TradePackage = { players: [vet], picks: [] };
+      const contenderGets: TradePackage = { players: [vet], picks: [] };
+      const contenderSends: TradePackage = { players: [], picks: [futurePick] };
+
+      if (
+        evaluateTrade(rebuilderGets, rebuilderSends, personality, s.teams.length, s.settings?.tradeDifficulty, s.season) &&
+        evaluateTrade(contenderGets, contenderSends, contender.aiGM!.personality, s.teams.length, s.settings?.tradeDifficulty, s.season)
+      ) {
+        const snappedVet = snapshotPlayerStats(vet, teamData.id, teamData.name, teamData.abbreviation, s.season, true);
+        s = {
+          ...s,
+          teams: s.teams.map(t => {
+            if (t.id === teamData.id) return {
+              ...t,
+              roster: t.roster.filter(p => p.id !== vet.id),
+              picks: [...t.picks, { ...futurePick, currentTeamId: t.id }],
+            };
+            if (t.id === contenderData.id) return {
+              ...t,
+              roster: [...t.roster, { ...snappedVet, lastTeamId: teamData.id }],
+              picks: t.picks.filter(p => !(p.round === futurePick.round && p.year === futurePick.year && p.originalTeamId === futurePick.originalTeamId)),
+            };
+            return t;
+          }),
+        };
+        tradedTeams.add(team.id);
+        tradedTeams.add(contender.id);
+        tradesThisCycle++;
+        dealMade = true;
+
+        const yearStr = futurePick.year ? `${futurePick.year}` : 'future';
+        newsItems.push(makeNewsItem(
+          'trade',
+          `TRADE: ${vet.name} → ${contenderData.abbreviation}`,
+          `${contenderData.name} acquired ${vet.name} (${vet.position}, ${vet.rating} OVR) from ${teamData.name} in exchange for a ${yearStr} 1st-round pick.`,
+          s.currentDay, teamData.id, vet.id, true
+        ));
+        transactions.push(makeTransaction(
+          s, 'trade', [teamData.id, contenderData.id],
+          `TRADE: ${teamData.name} sends ${vet.name} to ${contenderData.name} for a ${yearStr} first-round pick.`,
+          [vet.id]
         ));
       }
     }
