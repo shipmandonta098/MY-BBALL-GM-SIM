@@ -1219,7 +1219,7 @@ const applyPhysical = (attrs: AttrMap, pos: string, gender: 'Male'|'Female', hei
   return a;
 };
 
-export const generatePlayer = (id: string, ageRange: [number, number] = [19, 38], genderRatio: number = 0, draftCtx?: DraftContext, leagueYear?: number): Player => {
+export const generatePlayer = (id: string, ageRange: [number, number] = [19, 38], genderRatio: number = 0, draftCtx?: DraftContext, leagueYear?: number, minRating = 68): Player => {
   const gender = getRandomGender(genderRatio);
   
   // Pick a region based on weights
@@ -1238,8 +1238,12 @@ export const generatePlayer = (id: string, ageRange: [number, number] = [19, 38]
   const lastNames = gender === 'Male' ? region.lastNamesMale : NAMES_FEMALE.last;
   
   const rand = Math.random();
-  let baseRating = rand > 0.96 ? 88 + Math.floor(Math.random() * 10) : rand > 0.85 ? 80 + Math.floor(Math.random() * 10) : rand > 0.5 ? 70 + Math.floor(Math.random() * 15) : 60 + Math.floor(Math.random() * 10);
-  const rating = Math.min(99, Math.max(60, baseRating));
+  // Shifted distribution — avg ~78, producing realistic NBA-caliber league quality
+  let baseRating = rand > 0.97 ? 91 + Math.floor(Math.random() * 8)  // 3%: 91–98 (stars)
+                 : rand > 0.83 ? 83 + Math.floor(Math.random() * 9)  // 14%: 83–91 (good starters)
+                 : rand > 0.45 ? 76 + Math.floor(Math.random() * 8)  // 38%: 76–83 (starters/rotation)
+                               : 68 + Math.floor(Math.random() * 9); // 45%: 68–76 (role players)
+  const rating = Math.min(99, Math.max(minRating, baseRating));
   const potential = Math.min(99, rating + Math.floor(Math.random() * 12));
   const pos = POSITIONS[Math.floor(Math.random() * POSITIONS.length)];
   const age = Math.floor(Math.random() * (ageRange[1] - ageRange[0]) + ageRange[0]);
@@ -1533,9 +1537,36 @@ export const generateDefaultRotation = (roster: Player[]): TeamRotation => {
   return { starters, bench, reserves, minutes };
 };
 
+// ── Roster slot floors by team tier ─────────────────────────────────────────
+// 14 values per tier, sorted best-to-worst (franchise player → 14th man).
+// These are minimum ratings per roster slot so teams have a realistic spread.
+const TIER_SLOT_FLOORS: Record<string, number[]> = {
+  // elite: full-roster avg ≈ 85–87  (2–4 per 30-team league)
+  elite:      [96, 93, 90, 88, 87, 86, 85, 84, 83, 83, 82, 81, 80, 79],
+  // solid: full-roster avg ≈ 82–84  (6–8 teams)
+  solid:      [92, 89, 87, 85, 84, 83, 82, 81, 80, 80, 79, 78, 77, 76],
+  // average: full-roster avg ≈ 78–80 (bulk of the league)
+  average:    [87, 84, 82, 80, 80, 79, 78, 77, 76, 76, 75, 74, 74, 74],
+  // rebuilding: full-roster avg ≈ 75–77 (floor teams; normalizeOVRs lifts to 76 min)
+  rebuilding: [84, 81, 79, 77, 77, 76, 75, 74, 74, 73, 73, 72, 71, 71],
+};
+
 export const generateLeagueTeams = (genderRatio: number = 0, season: number = 2026, futureSeasonsToSeed: number = 4): Team[] => {
   const teamNames = TEAM_DATA.map(t => t.name);
   const usedPicks = new Map<number, Set<string>>();
+
+  // Assign tiers proportionally, then shuffle for random distribution across franchises
+  const n = TEAM_DATA.length;
+  const nElite      = Math.max(2, Math.round(n * 0.10));
+  const nSolid      = Math.max(4, Math.round(n * 0.23));
+  const nRebuilding = Math.max(3, Math.round(n * 0.20));
+  const nAverage    = n - nElite - nSolid - nRebuilding;
+  const tierList = [
+    ...Array(nElite).fill('elite'),
+    ...Array(nSolid).fill('solid'),
+    ...Array(Math.max(0, nAverage)).fill('average'),
+    ...Array(nRebuilding).fill('rebuilding'),
+  ].sort(() => Math.random() - 0.5);
 
   return TEAM_DATA.map((data, i) => {
     const teamId = `team-${i}`;
@@ -1555,7 +1586,11 @@ export const generateLeagueTeams = (genderRatio: number = 0, season: number = 20
 
     const ownerGoals: OwnerGoal[] = ['Win Now', 'Rebuild', 'Profit'];
     const draftCtx: DraftContext = { season, teamNames, usedPicks };
-    const roster = Array.from({ length: 14 }).map((_, j) => generatePlayer(`p-${i}-${j}`, [19, 38], genderRatio, draftCtx, season));
+    const tier = (tierList[i] ?? 'average') as keyof typeof TIER_SLOT_FLOORS;
+    const slotFloors = TIER_SLOT_FLOORS[tier];
+    const roster = Array.from({ length: 14 }).map((_, j) =>
+      generatePlayer(`p-${i}-${j}`, [19, 38], genderRatio, draftCtx, season, slotFloors[j] ?? 68)
+    );
 
     return {
       id: teamId,
