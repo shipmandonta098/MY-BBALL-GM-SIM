@@ -13,6 +13,9 @@ interface StatsProps {
 type StatTab = 'leaderboards' | 'advanced' | 'compare' | 'teams' | 'players';
 type PlayerSubTab = 'traditional' | 'advanced' | 'per36' | 'shooting' | 'totals' | 'clutch';
 type PlayerStatsView = 'season' | 'career';
+type StatsSource = 'regular' | 'playoffs';
+
+const EMPTY_PS = { points: 0, rebounds: 0, offReb: 0, defReb: 0, assists: 0, steals: 0, blocks: 0, gamesPlayed: 0, gamesStarted: 0, minutes: 0, fgm: 0, fga: 0, threepm: 0, threepa: 0, ftm: 0, fta: 0, tov: 0, pf: 0, techs: 0, flagrants: 0, ejections: 0, plusMinus: 0 };
 
 const Stats: React.FC<StatsProps> = ({ league, onViewRoster, onManageTeam, onViewPlayer }) => {
   const [activeTab, setActiveTab] = useState<StatTab>('leaderboards');
@@ -27,6 +30,7 @@ const Stats: React.FC<StatsProps> = ({ league, onViewRoster, onManageTeam, onVie
   const [page, setPage] = useState(0);
   const [playerStatsView, setPlayerStatsView] = useState<PlayerStatsView>('season');
   const [minClutchMin, setMinClutchMin] = useState(10);
+  const [statsSource, setStatsSource] = useState<StatsSource>('regular');
 
   const allPlayers = useMemo(() => {
     return league.teams.flatMap(t => t.roster.map(p => ({
@@ -40,57 +44,72 @@ const Stats: React.FC<StatsProps> = ({ league, onViewRoster, onManageTeam, onVie
   }, [league.teams]);
 
   const teamStats = useMemo(() => {
+    const isPlayoffs = statsSource === 'playoffs';
     return league.teams.map(t => {
       const roster = t.roster;
-      const fgm = roster.reduce((s, p) => s + p.stats.fgm, 0);
-      const fga = roster.reduce((s, p) => s + p.stats.fga, 0);
-      const threepm = roster.reduce((s, p) => s + p.stats.threepm, 0);
-      const threepa = roster.reduce((s, p) => s + p.stats.threepa, 0);
-      const ftm = roster.reduce((s, p) => s + p.stats.ftm, 0);
-      const fta = roster.reduce((s, p) => s + p.stats.fta, 0);
-      const orb = roster.reduce((s, p) => s + p.stats.offReb, 0);
-      const drb = roster.reduce((s, p) => s + p.stats.defReb, 0);
-      const trb = roster.reduce((s, p) => s + p.stats.rebounds, 0);
-      const ast = roster.reduce((s, p) => s + p.stats.assists, 0);
-      const stl = roster.reduce((s, p) => s + p.stats.steals, 0);
-      const blk = roster.reduce((s, p) => s + p.stats.blocks, 0);
-      const tov = roster.reduce((s, p) => s + p.stats.tov, 0);
-      const pf  = roster.reduce((s, p) => s + p.stats.pf, 0);
-      const pts = roster.reduce((s, p) => s + p.stats.points, 0);
+      // Use playoffStats or regular stats depending on source
+      const ps = (p: typeof roster[0]) => isPlayoffs ? (p.playoffStats ?? EMPTY_PS) : p.stats;
 
-      const games = t.wins + t.losses;
-      const winPct = games > 0 ? t.wins / games : 0;
+      const fgm = roster.reduce((s, p) => s + ps(p).fgm, 0);
+      const fga = roster.reduce((s, p) => s + ps(p).fga, 0);
+      const threepm = roster.reduce((s, p) => s + ps(p).threepm, 0);
+      const threepa = roster.reduce((s, p) => s + ps(p).threepa, 0);
+      const ftm = roster.reduce((s, p) => s + ps(p).ftm, 0);
+      const fta = roster.reduce((s, p) => s + ps(p).fta, 0);
+      const orb = roster.reduce((s, p) => s + ps(p).offReb, 0);
+      const drb = roster.reduce((s, p) => s + ps(p).defReb, 0);
+      const trb = roster.reduce((s, p) => s + ps(p).rebounds, 0);
+      const ast = roster.reduce((s, p) => s + ps(p).assists, 0);
+      const stl = roster.reduce((s, p) => s + ps(p).steals, 0);
+      const blk = roster.reduce((s, p) => s + ps(p).blocks, 0);
+      const tov = roster.reduce((s, p) => s + ps(p).tov, 0);
+      const pf  = roster.reduce((s, p) => s + ps(p).pf, 0);
+      const pts = roster.reduce((s, p) => s + ps(p).points, 0);
+
       const avgAge = roster.reduce((s, p) => s + p.age, 0) / (roster.length || 1);
       const twopm = fgm - threepm;
       const twopa = fga - threepa;
 
-      // Opponent box-score totals from game history
+      // Opponent box-score totals from game history — filter to the appropriate source
       let ptsScored = 0, ptsAllowed = 0;
+      let histGames = 0, histWins = 0, histLosses = 0;
       let oppFgm = 0, oppFga = 0, oppThreepm = 0, oppThreepa = 0;
       let oppFtm = 0, oppFta = 0;
       let oppOrb = 0, oppDrb = 0, oppTrb = 0;
       let oppAst = 0, oppStl = 0, oppBlk = 0, oppTov = 0, oppPf = 0;
 
-      league.history.filter(g => g.season === league.season).forEach(g => {
-        let oppLines: typeof g.homePlayerStats;
-        if (g.homeTeamId === t.id) {
-          ptsScored += g.homeScore; ptsAllowed += g.awayScore;
-          oppLines = g.awayPlayerStats;
-        } else if (g.awayTeamId === t.id) {
-          ptsScored += g.awayScore; ptsAllowed += g.homeScore;
-          oppLines = g.homePlayerStats;
-        } else { return; }
-        (oppLines || []).forEach(p => {
-          if (p.dnp) return;
-          oppFgm += p.fgm; oppFga += p.fga;
-          oppThreepm += p.threepm; oppThreepa += p.threepa;
-          oppFtm += p.ftm; oppFta += p.fta;
-          oppOrb += p.offReb; oppDrb += p.defReb; oppTrb += p.reb;
-          oppAst += p.ast; oppStl += p.stl; oppBlk += p.blk;
-          oppTov += p.tov; oppPf += p.pf;
+      league.history
+        .filter(g => g.season === league.season &&
+          (isPlayoffs ? g.id.startsWith('playoff-') : !g.id.startsWith('playoff-')))
+        .forEach(g => {
+          let oppLines: typeof g.homePlayerStats;
+          if (g.homeTeamId === t.id) {
+            ptsScored += g.homeScore; ptsAllowed += g.awayScore;
+            if (g.homeScore > g.awayScore) histWins++; else histLosses++;
+            histGames++;
+            oppLines = g.awayPlayerStats;
+          } else if (g.awayTeamId === t.id) {
+            ptsScored += g.awayScore; ptsAllowed += g.homeScore;
+            if (g.awayScore > g.homeScore) histWins++; else histLosses++;
+            histGames++;
+            oppLines = g.homePlayerStats;
+          } else { return; }
+          (oppLines || []).forEach(p => {
+            if (p.dnp) return;
+            oppFgm += p.fgm; oppFga += p.fga;
+            oppThreepm += p.threepm; oppThreepa += p.threepa;
+            oppFtm += p.ftm; oppFta += p.fta;
+            oppOrb += p.offReb; oppDrb += p.defReb; oppTrb += p.reb;
+            oppAst += p.ast; oppStl += p.stl; oppBlk += p.blk;
+            oppTov += p.tov; oppPf += p.pf;
+          });
         });
-      });
 
+      // For regular season use team record (more accurate); for playoffs use history-derived
+      const games    = isPlayoffs ? histGames   : (t.wins + t.losses);
+      const teamWins = isPlayoffs ? histWins    : t.wins;
+      const teamLoss = isPlayoffs ? histLosses  : t.losses;
+      const winPct   = games > 0 ? teamWins / games : 0;
       const mov = games > 0 ? (ptsScored - ptsAllowed) / games : 0;
       const gp  = Math.max(1, games);
 
@@ -102,7 +121,7 @@ const Stats: React.FC<StatsProps> = ({ league, onViewRoster, onManageTeam, onVie
 
       return {
         id: t.id, name: t.name, logo: t.logo,
-        games, wins: t.wins, losses: t.losses, winPct, avgAge,
+        games, wins: teamWins, losses: teamLoss, winPct, avgAge,
         // Traditional per-game
         fgm: fgm / gp, fga: fga / gp, fgPct: fga > 0 ? fgm / fga : 0,
         threepm: threepm / gp, threepa: threepa / gp, threePct: threepa > 0 ? threepm / threepa : 0,
@@ -134,7 +153,7 @@ const Stats: React.FC<StatsProps> = ({ league, onViewRoster, onManageTeam, onVie
         oppTov:      oppTov / gp, oppPf: oppPf / gp,
       };
     });
-  }, [league.teams, league.history]);
+  }, [league.teams, league.history, statsSource]);
 
   // Advanced Stats Calculation
   const calculateAdvanced = (p: Player) => {
@@ -305,7 +324,28 @@ const Stats: React.FC<StatsProps> = ({ league, onViewRoster, onManageTeam, onVie
           let tpm: number, tpa: number, ftm: number, fta: number, pm: number;
           let gs: number, orb: number, drb: number, pf: number;
 
-          if (playerStatsView === 'career' && p.careerStats && p.careerStats.length > 0) {
+          if (statsSource === 'playoffs') {
+            const po = p.playoffStats ?? EMPTY_PS;
+            gp  = po.gamesPlayed;
+            gs  = po.gamesStarted ?? 0;
+            min = po.minutes;
+            pts = po.points;
+            reb = po.rebounds;
+            ast = po.assists;
+            stl = po.steals;
+            blk = po.blocks;
+            tov = po.tov;
+            fgm = po.fgm;
+            fga = po.fga;
+            tpm = po.threepm;
+            tpa = po.threepa;
+            ftm = po.ftm;
+            fta = po.fta;
+            orb = po.offReb ?? 0;
+            drb = po.defReb ?? 0;
+            pf  = po.pf ?? 0;
+            pm  = po.plusMinus;
+          } else if (playerStatsView === 'career' && p.careerStats && p.careerStats.length > 0) {
             const cs = p.careerStats;
             const sum = <K extends keyof typeof cs[0]>(k: K) =>
               cs.reduce((acc, s) => acc + ((s[k] as number) ?? 0), 0);
@@ -416,7 +456,7 @@ const Stats: React.FC<StatsProps> = ({ league, onViewRoster, onManageTeam, onVie
           };
         })
       );
-    }, [league.teams, playerStatsView]);
+    }, [league.teams, playerStatsView, statsSource]);
 
     // Aggregate clutch stats from game history per player
     const clutchByPlayer = useMemo(() => {
@@ -553,19 +593,27 @@ const Stats: React.FC<StatsProps> = ({ league, onViewRoster, onManageTeam, onVie
           <SpotCard title="Blocks Leader"   row={blocksLeader}   stat={blocksLeader?.bpg   ?? 0} label="BPG" />
         </div>
 
-        {/* Season / Career toggle */}
+        {/* Season / Career toggle — hidden in playoffs mode */}
         <div className="flex items-center justify-between flex-wrap gap-3">
-          <div className="flex gap-1 bg-slate-900 border border-slate-800 rounded-full p-0.5">
-            {(['season', 'career'] as PlayerStatsView[]).map(v => (
-              <button
-                key={v}
-                onClick={() => { setPlayerStatsView(v); setPage(0); }}
-                className={`px-5 py-1.5 text-[10px] font-black uppercase tracking-widest rounded-full transition-all ${
-                  playerStatsView === v ? 'bg-amber-500 text-slate-950' : 'text-slate-500 hover:text-white'
-                }`}
-              >{v}</button>
-            ))}
-          </div>
+          {statsSource !== 'playoffs' && (
+            <div className="flex gap-1 bg-slate-900 border border-slate-800 rounded-full p-0.5">
+              {(['season', 'career'] as PlayerStatsView[]).map(v => (
+                <button
+                  key={v}
+                  onClick={() => { setPlayerStatsView(v); setPage(0); }}
+                  className={`px-5 py-1.5 text-[10px] font-black uppercase tracking-widest rounded-full transition-all ${
+                    playerStatsView === v ? 'bg-amber-500 text-slate-950' : 'text-slate-500 hover:text-white'
+                  }`}
+                >{v}</button>
+              ))}
+            </div>
+          )}
+          {statsSource === 'playoffs' && (
+            <div className="flex items-center gap-2 px-1">
+              <span className="w-2 h-2 rounded-full bg-amber-500 inline-block"></span>
+              <span className="text-[10px] font-black text-amber-500 uppercase tracking-widest">Playoff Stats</span>
+            </div>
+          )}
           {/* Sub-tabs */}
           <div className="flex gap-2 flex-wrap">
             {(['traditional', 'advanced', 'per36', 'shooting', 'totals', 'clutch'] as PlayerSubTab[]).filter(t => t !== 'advanced' || league.settings.showAdvancedStats !== false).map(t => (
@@ -885,11 +933,15 @@ const Stats: React.FC<StatsProps> = ({ league, onViewRoster, onManageTeam, onVie
       };
     }, [teamStats]);
 
-    // Aggregate team clutch stats from game history
+    // Aggregate team clutch stats from game history (filtered by statsSource)
     const teamClutchStats = useMemo(() => {
+      const isPlayoffs = statsSource === 'playoffs';
       const map = new Map<string, { clutchWins: number; clutchLosses: number; clutchPts: number; clutchOppPts: number; clutchMin: number; clutchFga: number; clutchFgm: number; clutchOppFga: number; clutchOppFgm: number; }>();
       league.teams.forEach(t => map.set(t.id, { clutchWins: 0, clutchLosses: 0, clutchPts: 0, clutchOppPts: 0, clutchMin: 0, clutchFga: 0, clutchFgm: 0, clutchOppFga: 0, clutchOppFgm: 0 }));
-      league.history.forEach(g => {
+      league.history.filter(g =>
+        g.season === league.season &&
+        (isPlayoffs ? g.id.startsWith('playoff-') : !g.id.startsWith('playoff-'))
+      ).forEach(g => {
         if (!g.hasClutchSituation) return;
         const homeEntry = map.get(g.homeTeamId);
         const awayEntry = map.get(g.awayTeamId);
@@ -945,7 +997,7 @@ const Stats: React.FC<StatsProps> = ({ league, onViewRoster, onManageTeam, onVie
           clutchNetRtg:   clutchOrtg - clutchDrtg,
         };
       });
-    }, [league.history, league.teams]);
+    }, [league.history, league.teams, statsSource]);
 
     // Sorted clutch teams
     const sortedClutchTeams = useMemo(() => {
@@ -962,11 +1014,15 @@ const Stats: React.FC<StatsProps> = ({ league, onViewRoster, onManageTeam, onVie
 
     // ── BY-QUARTER STATS ─────────────────────────────────────────────────────
     const teamQuarterStats = useMemo(() => {
+      const isPlayoffs = statsSource === 'playoffs';
       type QEntry = { games: number; wins: number; losses: number; qScored: number[]; qAllowed: number[]; otScored: number; otAllowed: number; otGames: number; };
       const map = new Map<string, QEntry>();
       league.teams.forEach(t => map.set(t.id, { games: 0, wins: 0, losses: 0, qScored: [0, 0, 0, 0], qAllowed: [0, 0, 0, 0], otScored: 0, otAllowed: 0, otGames: 0 }));
 
-      league.history.forEach(g => {
+      league.history
+        .filter(g => g.season === league.season &&
+          (isPlayoffs ? g.id.startsWith('playoff-') : !g.id.startsWith('playoff-')))
+        .forEach(g => {
         const homeQ = g.quarterScores?.home ?? [];
         const awayQ = g.quarterScores?.away ?? [];
         const isOT  = homeQ.length > 4;
@@ -1005,7 +1061,7 @@ const Stats: React.FC<StatsProps> = ({ league, onViewRoster, onManageTeam, onVie
           otPts, otOpp, otGames: e.otGames,
         };
       });
-    }, [league.history, league.teams]);
+    }, [league.history, league.teams, statsSource]);
 
     const sortedQuarterTeams = useMemo(() => {
       return [...teamQuarterStats]
@@ -1485,10 +1541,34 @@ const Stats: React.FC<StatsProps> = ({ league, onViewRoster, onManageTeam, onVie
           </div>
           
           <div className="flex gap-3 w-full lg:w-auto items-center flex-wrap">
+            {/* Regular Season / Playoffs toggle — Teams and Players tabs only */}
+            {(activeTab === 'teams' || activeTab === 'players') && (
+              <div className="flex gap-0.5 bg-slate-950 border border-slate-800 rounded-full p-0.5 shrink-0">
+                {(['regular', 'playoffs'] as StatsSource[]).map(src => {
+                  const hasPlayoffs = !!league.playoffBracket;
+                  const disabled = src === 'playoffs' && !hasPlayoffs;
+                  return (
+                    <button
+                      key={src}
+                      disabled={disabled}
+                      onClick={() => { setStatsSource(src); setPage(0); }}
+                      title={disabled ? 'Playoffs not started yet' : undefined}
+                      className={`px-4 py-1.5 text-[10px] font-black uppercase tracking-widest rounded-full transition-all disabled:opacity-30 disabled:cursor-not-allowed ${
+                        statsSource === src
+                          ? src === 'playoffs' ? 'bg-amber-500 text-slate-950' : 'bg-slate-600 text-white'
+                          : 'text-slate-500 hover:text-white'
+                      }`}
+                    >
+                      {src === 'regular' ? 'Reg Season' : 'Playoffs'}
+                    </button>
+                  );
+                })}
+              </div>
+            )}
              <div className="flex-1 lg:w-52 relative">
-                <input 
-                  type="text" 
-                  placeholder={activeTab === 'teams' ? 'Filter Team...' : 'Filter Player...'} 
+                <input
+                  type="text"
+                  placeholder={activeTab === 'teams' ? 'Filter Team...' : 'Filter Player...'}
                   className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-3 text-sm focus:outline-none focus:border-amber-500/50"
                   value={searchTerm}
                   onChange={(e) => { setSearchTerm(e.target.value); setPage(0); }}
