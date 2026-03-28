@@ -353,7 +353,7 @@ export function getAssistEfficiency(
   // High-TO passers force broken plays: penalty ramps 0→8% as toRate > 13%
   const toPenalty = Math.max(0, Math.min(0.08, (toRate - 0.13) / 0.07 * 0.08));
 
-  return Math.max(0.15, Math.min(1.40, blend + iqBonus + kickOutBonus - toPenalty));
+  return Math.max(0.15, Math.min(1.80, blend + iqBonus + kickOutBonus - toPenalty));
 }
 
 // ─── Steal & Block Chance Functions ──────────────────────────────────────────
@@ -3347,15 +3347,18 @@ const simulatePlayerGameLine = (
   const ftm = Math.min(fta, Math.round(fta * ftPct));
   const pts = midFgm * 2 + insFgm * 2 + threepm * 3 + ftm;
 
-  // Use minutes-based driver (minFac = minutes/48) instead of adjUsage so that
-  // playing time — not offensive usage — determines rebounding share.
-  // Post-normalization in distributeToPlayers scales all values so the team
-  // total equals teamReb exactly, making the multiplier here irrelevant.
-  // Power-curve (squared) concentrates rebounds in high-rebounding players —
-  // a C with rebounding=90 gets ~4× the raw weight of a PG with rebounding=50,
-  // matching NBA reality where elite big men average 13–15 RPG vs guards at 3–5.
+  // Independent per-player rebound formula — no normalization to teamReb.
+  // posRebMult encodes positional rebounding rates (C highest, guards lowest).
+  // Power-curve (squared) concentrates boards in high-rebounding players.
+  // 28.0 calibration: C at reb=90, 36 min → ~(0.90²)×1.00×0.75×28 ≈ 17 raw boards.
+  // Random noise ±3 allows natural game-to-game variance.
+  const posRebMult =
+    player.position === 'C'  ? 1.00 :
+    player.position === 'PF' ? 0.72 :
+    player.position === 'SF' ? 0.50 : 0.32;
   const totalReb = Math.max(0, Math.round(
-    teamReb * Math.pow(player.attributes.rebounding / 100, 2) * minFac,
+    Math.pow(player.attributes.rebounding / 100, 2) * posRebMult * minFac * 28.0
+    + (Math.random() * 6 - 3),
   ));
   // ORB/DRB split: use position-based base (bigs ~27% of their boards are ORBs,
   // guards ~19%) + small attribute modifier. This replaces orbChance/drbChance
@@ -3391,7 +3394,19 @@ const simulatePlayerGameLine = (
   const shootingEffBoost = (teammateShootingEff - 0.48) * 0.60;
 
   const contextMult = Math.max(0.80, 1.0 + spacingBoost + shootingEffBoost);
-  const adjAstShare = Math.max(0.01, astEff * adjUsage * 2.2 * (1 + tm.astBoost) * contextMult);
+
+  // handlerFrac: position-based ball-handling time share, decoupled from scoring usage.
+  // PGs naturally run more pick-and-roll/transition — their high BH + playmaking raises this.
+  // Pure scorers with low BH/playmaking won't inflate their own assist totals.
+  const posPlayBase =
+    player.position === 'PG' ? 0.34 : player.position === 'SG' ? 0.22 :
+    player.position === 'SF' ? 0.16 : player.position === 'PF' ? 0.12 : 0.09;
+  const handlerFrac = Math.max(0.05,
+    posPlayBase
+    + ((player.attributes.ballHandling ?? 60) - 65) / 160
+    + ((player.attributes.playmaking   ?? 60) - 65) / 220
+  );
+  const adjAstShare = Math.max(0.01, astEff * handlerFrac * minFac * 1.10 * (1 + tm.astBoost) * contextMult);
   const ast = Math.max(0, Math.round(teamAst * adjAstShare));
 
   // STL: getStealChance × 80 steal-opportunities per 48 min × minutes fraction.
@@ -3819,23 +3834,8 @@ export const simulateGame = (
       return { ...line, techs: 0, flagrants: 0, ejected: false };
     });
 
-    // Post-normalize rebounds so team total = teamReb exactly.
-    // The per-player formula uses minFac as a proportional driver; the raw sum
-    // won't equal teamReb precisely, so we scale every player's boards uniformly.
-    const totalRebRaw = raw.reduce((s, p) => s + (p.reb ?? 0), 0);
-    if (totalRebRaw > 0) {
-      const rebScale = teamReb / totalRebRaw;
-      return raw.map(p => {
-        if (p.dnp || !p.reb) return p;
-        const newReb = Math.max(0, Math.round(p.reb * rebScale));
-        // Preserve the player's ORB/DRB ratio through normalization — scaling the
-        // raw offReb integer directly causes aggressive rounding-to-zero for players
-        // with few boards (1 raw reb × 0.3 scale = 0), hiding their ORBs entirely.
-        const rawOrbRatio = p.reb > 0 ? (p.offReb ?? 0) / p.reb : 0;
-        const newOrb = Math.max(0, Math.round(newReb * rawOrbRatio));
-        return { ...p, reb: newReb, offReb: newOrb, defReb: Math.max(0, newReb - newOrb) };
-      });
-    }
+    // No post-normalization — each player's rebounds are independent of teamReb.
+    // Dominant bigs keep their raw boards; no uniform scaling suppresses elite performances.
     return raw;
   };
 

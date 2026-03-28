@@ -80,34 +80,36 @@ const Playoffs: React.FC<PlayoffsProps> = ({ league, updateLeague, onStartOffsea
       if (p.techs > 0) rivalry!.badBloodScore += p.techs;
     });
 
-    // Update Player Stats
+    // Update Playoff Stats (separate from regular season stats)
+    const EMPTY_PO = { gamesPlayed: 0, gamesStarted: 0, points: 0, rebounds: 0, offReb: 0, defReb: 0, assists: 0, steals: 0, blocks: 0, minutes: 0, fgm: 0, fga: 0, threepm: 0, threepa: 0, ftm: 0, fta: 0, tov: 0, pf: 0, techs: 0, flagrants: 0, ejections: 0, plusMinus: 0 };
     const updateStats = (team: Team, lines: any[]) => {
       return {
         ...team,
         roster: team.roster.map(p => {
           const line = lines.find(l => l.playerId === p.id);
           if (!line) return p;
+          const ps = p.playoffStats ?? EMPTY_PO;
           return {
-            ...p, 
-            stats: { 
-              ...p.stats, 
-              gamesPlayed: p.stats.gamesPlayed + 1, 
-              points: p.stats.points + line.pts, 
-              rebounds: p.stats.rebounds + line.reb, 
-              offReb: p.stats.offReb + line.offReb,
-              defReb: p.stats.defReb + line.defReb,
-              assists: p.stats.assists + line.ast, 
-              steals: p.stats.steals + line.stl, 
-              blocks: p.stats.blocks + line.blk, 
-              minutes: p.stats.minutes + line.min, 
-              fgm: p.stats.fgm + line.fgm, 
-              fga: p.stats.fga + line.fga, 
-              threepm: p.stats.threepm + line.threepm, 
-              threepa: p.stats.threepa + line.threepa, 
-              ftm: p.stats.ftm + line.ftm, 
-              fta: p.stats.fta + line.fta, 
-              tov: p.stats.tov + line.tov, 
-              pf: p.stats.pf + line.pf,
+            ...p,
+            playoffStats: {
+              ...ps,
+              gamesPlayed: ps.gamesPlayed + 1,
+              points:   ps.points   + line.pts,
+              rebounds: ps.rebounds + line.reb,
+              offReb:   ps.offReb   + line.offReb,
+              defReb:   ps.defReb   + line.defReb,
+              assists:  ps.assists  + line.ast,
+              steals:   ps.steals   + line.stl,
+              blocks:   ps.blocks   + line.blk,
+              minutes:  ps.minutes  + line.min,
+              fgm:      ps.fgm      + line.fgm,
+              fga:      ps.fga      + line.fga,
+              threepm:  ps.threepm  + line.threepm,
+              threepa:  ps.threepa  + line.threepa,
+              ftm:      ps.ftm      + line.ftm,
+              fta:      ps.fta      + line.fta,
+              tov:      ps.tov      + line.tov,
+              pf:       ps.pf       + line.pf,
             }
           };
         })
@@ -318,6 +320,123 @@ const Playoffs: React.FC<PlayoffsProps> = ({ league, updateLeague, onStartOffsea
     setIsSimulating(false);
   };
 
+  // ── Playoff Stats Table ──────────────────────────────────────────────────
+  const PlayoffStatsTable: React.FC = () => {
+    const [poSort, setPoSort] = useState<string>('ppg');
+    const [poAsc, setPoAsc] = useState(false);
+
+    const playoffTeamIds = useMemo(() => new Set(
+      bracket!.series.flatMap(s => [s.team1Id, s.team2Id])
+    ), []);
+
+    const rows = useMemo(() => {
+      return league.teams
+        .filter(t => playoffTeamIds.has(t.id))
+        .flatMap(t => t.roster.map(p => {
+          const ps = p.playoffStats;
+          if (!ps || ps.gamesPlayed === 0) return null;
+          const gp = ps.gamesPlayed;
+          return {
+            id: p.id, name: p.name, pos: p.position, team: t, teamName: t.name,
+            gp,
+            mpg:   ps.minutes  / gp,
+            ppg:   ps.points   / gp,
+            rpg:   ps.rebounds / gp,
+            apg:   ps.assists  / gp,
+            spg:   ps.steals   / gp,
+            bpg:   ps.blocks   / gp,
+            tpg:   ps.tov      / gp,
+            fgPct: ps.fga  > 0 ? ps.fgm     / ps.fga     : 0,
+            tpPct: ps.threepa > 0 ? ps.threepm / ps.threepa : 0,
+            ftPct: ps.fta  > 0 ? ps.ftm     / ps.fta     : 0,
+            threepa: ps.threepa, fta: ps.fta,
+          };
+        }))
+        .filter(Boolean) as NonNullable<ReturnType<typeof league.teams[0]['roster'][0]['playoffStats']> extends infer _S ? { id: string; name: string; pos: string; team: typeof league.teams[0]; teamName: string; gp: number; mpg: number; ppg: number; rpg: number; apg: number; spg: number; bpg: number; tpg: number; fgPct: number; tpPct: number; ftPct: number; threepa: number; fta: number; } : never>[];
+    }, [league.teams, playoffTeamIds]);
+
+    const sorted = useMemo(() =>
+      [...rows].sort((a, b) => {
+        const av = (a as any)[poSort] ?? 0;
+        const bv = (b as any)[poSort] ?? 0;
+        return poAsc ? av - bv : bv - av;
+      }),
+    [rows, poSort, poAsc]);
+
+    const handleSort = (k: string) => {
+      if (poSort === k) setPoAsc(v => !v);
+      else { setPoSort(k); setPoAsc(false); }
+    };
+
+    const Th = ({ k, label }: { k: string; label: string }) => (
+      <th
+        className={`px-3 py-3 text-center cursor-pointer select-none text-[10px] font-black uppercase tracking-widest hover:text-white transition-colors ${poSort === k ? 'text-amber-500' : 'text-slate-500'}`}
+        onClick={() => handleSort(k)}
+      >
+        {label}{poSort === k ? (poAsc ? ' ↑' : ' ↓') : ''}
+      </th>
+    );
+
+    const pct  = (v: number) => (v * 100).toFixed(1) + '%';
+    const fix1 = (v: number) => v.toFixed(1);
+    const rowTint = (i: number) => i === 0 ? 'bg-yellow-500/5' : i === 1 ? 'bg-slate-400/5' : i === 2 ? 'bg-amber-700/5' : '';
+
+    if (rows.length === 0) return (
+      <div className="py-10 text-center border-2 border-dashed border-slate-800 rounded-3xl text-slate-600">
+        <p className="font-display text-xl uppercase tracking-widest">No playoff games played yet</p>
+      </div>
+    );
+
+    return (
+      <div className="bg-slate-900 border border-slate-800 rounded-3xl overflow-hidden shadow-2xl">
+        <div className="overflow-x-auto">
+          <table className="w-full text-left border-collapse text-xs">
+            <thead>
+              <tr className="border-b border-slate-800 bg-slate-950/50">
+                <th className="px-3 py-3 text-center text-slate-500 text-[10px] font-black uppercase tracking-widest">#</th>
+                <th className="px-4 py-3 text-slate-500 text-[10px] font-black uppercase tracking-widest">Player</th>
+                <th className="px-2 py-3 text-center text-slate-500 text-[10px] font-black uppercase tracking-widest">Team</th>
+                <th className="px-2 py-3 text-center text-slate-500 text-[10px] font-black uppercase tracking-widest">Pos</th>
+                <Th k="gp"    label="GP"  />
+                <Th k="mpg"   label="MPG" />
+                <Th k="ppg"   label="PPG" />
+                <Th k="rpg"   label="RPG" />
+                <Th k="apg"   label="APG" />
+                <Th k="spg"   label="SPG" />
+                <Th k="bpg"   label="BPG" />
+                <Th k="tpg"   label="TOV" />
+                <Th k="fgPct" label="FG%" />
+                <Th k="tpPct" label="3P%" />
+                <Th k="ftPct" label="FT%" />
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-800/40">
+              {sorted.map((r, idx) => (
+                <tr key={r.id} className={`hover:bg-slate-800/30 transition-all ${rowTint(idx)}`}>
+                  <td className="px-3 py-3 text-center font-mono text-slate-500">{idx + 1}</td>
+                  <td className="px-4 py-3 font-bold text-slate-200 uppercase tracking-tight whitespace-nowrap">{r.name}</td>
+                  <td className="px-2 py-3 text-center"><TeamBadge team={r.team} size="xs" /></td>
+                  <td className="px-2 py-3 text-center font-black text-[10px] text-slate-400 uppercase">{r.pos}</td>
+                  <td className="px-2 py-3 text-center font-mono">{r.gp}</td>
+                  <td className="px-2 py-3 text-center font-mono text-slate-400">{fix1(r.mpg)}</td>
+                  <td className="px-2 py-3 text-center font-mono font-bold text-amber-400">{fix1(r.ppg)}</td>
+                  <td className="px-2 py-3 text-center font-mono">{fix1(r.rpg)}</td>
+                  <td className="px-2 py-3 text-center font-mono">{fix1(r.apg)}</td>
+                  <td className="px-2 py-3 text-center font-mono">{fix1(r.spg)}</td>
+                  <td className="px-2 py-3 text-center font-mono">{fix1(r.bpg)}</td>
+                  <td className="px-2 py-3 text-center font-mono text-rose-400/70">{fix1(r.tpg)}</td>
+                  <td className="px-2 py-3 text-center font-mono">{r.fgPct > 0 ? pct(r.fgPct) : '—'}</td>
+                  <td className="px-2 py-3 text-center font-mono">{r.threepa > 0 ? pct(r.tpPct) : '—'}</td>
+                  <td className="px-2 py-3 text-center font-mono">{r.fta > 0 ? pct(r.ftPct) : '—'}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    );
+  };
+
   const SeriesCard: React.FC<{ series: PlayoffSeries }> = ({ series }) => {
     const t1 = league.teams.find(t => t.id === series.team1Id)!;
     const t2 = league.teams.find(t => t.id === series.team2Id)!;
@@ -493,6 +612,17 @@ const Playoffs: React.FC<PlayoffsProps> = ({ league, updateLeague, onStartOffsea
             <div className="order-2"><RoundView round={2} title="West Semis" conference="Western" /></div>
             <div className="order-1"><RoundView round={3} title="West Finals" conference="Western" /></div>
          </div>
+      </div>
+
+      {/* Playoff Stats Table */}
+      <div className="space-y-4">
+        <div className="flex items-center justify-between">
+          <h3 className="text-2xl font-display font-bold uppercase tracking-tight text-white">
+            Playoff <span className="text-amber-500">Leaders</span>
+          </h3>
+          <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Current Playoffs · Per Game</span>
+        </div>
+        <PlayoffStatsTable />
       </div>
 
       <style dangerouslySetInnerHTML={{ __html: `
