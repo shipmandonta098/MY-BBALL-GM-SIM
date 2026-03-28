@@ -315,39 +315,45 @@ export function getTurnoverPercentage(
 }
 
 /**
- * Returns an AST-efficiency multiplier that replaces raw (playmaking/100) in
- * the adjAstShare formula, blending passing vision + playmaking court command.
+ * Returns an AST-efficiency multiplier driven by passing, playmaking, ball handling,
+ * offensive IQ, kick-out tendency, and turnover rate.
  *
- * Penalises high-TO% passers: a player who forces turnovers on 17 %+ of
- * possessions converts fewer potential assists (risky threading = more broken
- * plays, fewer scoring reads completed).
+ * Primary factors (what determines a playmaker's ceiling):
+ *   passing (50%) — vision and accuracy on the pass
+ *   playmaking (35%) — court command, finding openings
+ *   ballHandling (15%) — securing the ball under pressure on drives/passes
  *
- * Output is a multiplier on [0.20, 1.05]:
- *   Elite playmaker (pass=90, pm=88, iq=85, toRate=0.09)  → ~0.89
- *   Avg creator     (pass=75, pm=72, iq=70, toRate=0.13)  → ~0.73
- *   Poor passer     (pass=55, pm=50, iq=60, toRate=0.17)  → ~0.48
+ * Contextual modifiers:
+ *   offIQ bonus  — sharp readers anticipate cuts, deliver on-time passes
+ *   kickOut bonus — high kick-out tendency = more willing to pass vs. forcing shots
+ *   toPenalty    — sloppy passers break possessions before the assist can happen
  *
- * Tuning:
- *   • Blend weights (0.55 pass / 0.45 playmaking) — shift toward passing for
- *     pure distributors, toward playmaking for self-created shot creators.
- *   • iqBonus scale (0.03) and toPenalty ramp (0.08 over toRate 13→20 %)
- *     control how much IQ and ball security matter independently.
+ * Output range [0.15, 1.40] (was 0.20–1.05) to allow elite playmakers to reach
+ * 12–18+ assists on exceptional nights without an artificial ceiling.
+ *   Elite playmaker (pass=92, pm=88, bh=87, iq=88, ko=78, toRate=0.09) → ~1.18
+ *   Good creator   (pass=82, pm=78, bh=80, iq=74, ko=62, toRate=0.12) → ~0.90
+ *   Avg creator    (pass=74, pm=70, bh=72, iq=70, ko=50, toRate=0.14) → ~0.73
+ *   Poor passer    (pass=55, pm=50, bh=52, iq=60, ko=35, toRate=0.18) → ~0.44
  */
 export function getAssistEfficiency(
-  passing:    number,
-  playmaking: number,
-  offIQ:      number,
-  toRate:     number,
+  passing:         number,
+  playmaking:      number,
+  offIQ:           number,
+  toRate:          number,
+  ballHandling:    number = 70,   // direct ball security on passes; defaults to league avg
+  kickOutTendency: number = 50,   // 0–100 willingness to kick out vs. forcing shots
 ): number {
-  // Passing vision (55 %) + playmaking court command (45 %)
-  const blend    = (passing * 0.55 + playmaking * 0.45) / 100;
-  // Sharp readers anticipate teammate cuts and deliver on-time passes.
-  // IQ 90 → +1.2 % efficiency; IQ 50 → −1.2 % (wastes reads with hesitation).
-  const iqBonus  = (offIQ - 70) / 100 * 0.06;
-  // High-TO passers force broken plays: penalty ramps 0→8 % as toRate > 13 %
+  // Primary blend: passing vision (50%) + playmaking (35%) + ball security (15%)
+  const blend = (passing * 0.50 + playmaking * 0.35 + ballHandling * 0.15) / 100;
+  // Sharp readers anticipate cuts — IQ 90 → +2.4%; IQ 50 → −2.4%
+  const iqBonus = (offIQ - 70) / 100 * 0.12;
+  // Kick-out tendency: willingness to pass creates extra assist chances
+  // kickOut 80 → +3.6%; kickOut 20 → −3.6%
+  const kickOutBonus = (kickOutTendency - 50) / 100 * 0.09;
+  // High-TO passers force broken plays: penalty ramps 0→8% as toRate > 13%
   const toPenalty = Math.max(0, Math.min(0.08, (toRate - 0.13) / 0.07 * 0.08));
 
-  return Math.max(0.20, Math.min(1.05, blend + iqBonus - toPenalty));
+  return Math.max(0.15, Math.min(1.40, blend + iqBonus + kickOutBonus - toPenalty));
 }
 
 // ─── Steal & Block Chance Functions ──────────────────────────────────────────
@@ -3162,6 +3168,8 @@ const simulatePlayerGameLine = (
   opponentMidDefMod = 0,       // team-level mid-range suppression (getMidRangeContestMod)
   opponentPostDefMod = 0,      // team-level post suppression (getPostDefenseMod)
   morale = 75,                 // player morale (0-100); affects FG%, TOV, STL, BLK
+  teammateSpacing = 75,        // avg shooting3pt of teammates; high = more kick-out opportunities
+  teammateShootingEff = 0.48,  // implied team FG% for this game; hot teams get more AST
 ): GamePlayerLine => {
   // Morale modifiers: centered at 75 so an average player is neutral.
   // Critical (<50): FG -3%, TOV +25%, effort -15% | High (>85): FG +2%, effort +10%
@@ -3296,14 +3304,30 @@ const simulatePlayerGameLine = (
   const offReb    = Math.round(totalReb * orbRatio);
   const defReb    = totalReb - offReb;
 
-  // AST efficiency blends passing (55 %) + playmaking (45 %), with an IQ bonus
-  // and a penalty for high-TO% passers who force broken plays over scoring reads.
-  const astEff      = getAssistEfficiency(player.attributes.passing, player.attributes.playmaking, player.attributes.offensiveIQ, toRate);
-  // Multiplier 2.0 replaces 3.0: share-sum across a 10-man rotation ≈ 0.99,
-  // so distributed totals now land at ~teamAst instead of ~1.48×teamAst.
-  // Individual ceiling: cap at 15 to prevent impossible single-game outliers.
-  const adjAstShare = Math.max(0.01, astEff * adjUsage * 2.0 * (1 + tm.astBoost));
-  const ast = Math.max(0, Math.min(15, Math.round(teamAst * adjAstShare)));
+  // ── Assist calculation ────────────────────────────────────────────────────
+  // Primary efficiency: passing + playmaking + ball handling + IQ + kick-out tendency.
+  // No artificial ceiling — elite playmakers are allowed to reach 12–18+ on
+  // exceptional nights; the math naturally constrains realistic totals since
+  // teamAst ≈ 22–28 and adjAstShare < 1.0 for all but the rarest performances.
+  const kickOutTendency = player.tendencies?.kickOutPasser ?? 50;
+  const astEff = getAssistEfficiency(
+    player.attributes.passing,
+    player.attributes.playmaking,
+    player.attributes.offensiveIQ,
+    toRate,
+    player.attributes.ballHandling ?? 70,
+    kickOutTendency,
+  );
+
+  // Contextual: elite spacers create kick-out lanes (spacing 80 → +6%; 50 → 0%)
+  const spacingBoost = (teammateSpacing - 65) / 100 * 0.14;
+  // Contextual: hot-shooting team = more makes off passes = more assists recorded
+  // FG% 0.52 → +4.8%; FG% 0.44 → −2.4%  (centered at NBA avg 0.48)
+  const shootingEffBoost = (teammateShootingEff - 0.48) * 0.60;
+
+  const contextMult = Math.max(0.80, 1.0 + spacingBoost + shootingEffBoost);
+  const adjAstShare = Math.max(0.01, astEff * adjUsage * 2.2 * (1 + tm.astBoost) * contextMult);
+  const ast = Math.max(0, Math.round(teamAst * adjAstShare));
 
   // STL: getStealChance × 65 steal-opportunities per 48 min × minutes fraction.
   // stlBoost from defensive tendencies (pass-denial, gambles, helpDefender).
@@ -3658,6 +3682,11 @@ export const simulateGame = (
     const totalRawUsage = rawUsageArr.reduce((s, u) => s + u, 0);
     const usageShares   = rawUsageArr.map(u => u / Math.max(1, totalRawUsage));
 
+    // Team spacing: avg 3PT attribute — drives kick-out assist opportunities for playmakers
+    const teamAvg3pt = roster.reduce((s, p) => s + (p.attributes.shooting3pt ?? 70), 0) / Math.max(1, roster.length);
+    // Implied team FG% from this game's points/FGA — hot-shooting teams record more assists
+    const impliedFgPct = teamFga > 0 ? Math.min(0.65, Math.max(0.38, (totalPts / 2.2) / teamFga)) : 0.48;
+
     // Rating rank (0 = best player on roster) for star-minutes differentiation
     const sortedByRating = roster
       .map((p, idx) => ({ id: p.id, rating: p.rating, idx }))
@@ -3701,7 +3730,7 @@ export const simulateGame = (
       const ftBonus    = isHome ? 0.03 : 0;
       const varRoll    = playerVariance.get(p.id) ?? 0;
       const usageShare = usageShares[i];
-      const line = simulatePlayerGameLine(p, totalPts, teamFga, teamReb, teamAst, mins, usageShare, varRoll, ftBonus, oppPerimDefMod, oppInteriorDefMod, oppMidDefMod, oppPostDefMod, p.morale ?? 75);
+      const line = simulatePlayerGameLine(p, totalPts, teamFga, teamReb, teamAst, mins, usageShare, varRoll, ftBonus, oppPerimDefMod, oppInteriorDefMod, oppMidDefMod, oppPostDefMod, p.morale ?? 75, teamAvg3pt, impliedFgPct);
       return { ...line, techs: 0, flagrants: 0, ejected: false };
     });
 
