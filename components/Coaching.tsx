@@ -1,6 +1,7 @@
 
 import React, { useState, useRef } from 'react';
 import { LeagueState, Team, Coach, CoachScheme } from '../types';
+import { getCoachPreferredScheme } from '../constants';
 
 interface CoachingProps {
   league: LeagueState;
@@ -108,8 +109,11 @@ const Coaching: React.FC<CoachingProps> = ({ league, updateLeague, godMode = fal
         ? {
             ...t,
             staff: updatedStaff,
-            // Clear search flag when user manually fills the HC slot
-            ...(hiringRole === 'headCoach' ? { coachSearchDaysLeft: undefined } : {}),
+            // When hiring an HC, auto-switch team playbook to coach's preferred scheme
+            ...(hiringRole === 'headCoach' ? {
+              coachSearchDaysLeft: undefined,
+              activeScheme: getCoachPreferredScheme(hiredCoach),
+            } : {}),
           }
         : t,
     );
@@ -231,27 +235,93 @@ const Coaching: React.FC<CoachingProps> = ({ league, updateLeague, godMode = fal
         {/* Left: Strategy / Schemes */}
         <div className="space-y-6">
            <section className="bg-slate-900 border border-slate-800 rounded-3xl p-8 shadow-2xl">
-              <h3 className="text-xs font-black uppercase tracking-[0.3em] text-slate-500 mb-6 pb-2 border-b border-slate-800">Team Playbook</h3>
-              <div className="space-y-3">
-                 {['Balanced', 'Pace and Space', 'Grit and Grind', 'Triangle', 'Small Ball', 'Showtime'].map((s) => (
-                    <button 
-                      key={s}
-                      onClick={() => setScheme(s as any)}
-                      className={`w-full text-left p-4 rounded-2xl transition-all border ${userTeam.activeScheme === s ? 'bg-amber-500 border-amber-400 text-slate-950' : 'bg-slate-950 border-slate-800 text-slate-400 hover:border-slate-700'}`}
+              <h3 className="text-xs font-black uppercase tracking-[0.3em] text-slate-500 mb-1 pb-2 border-b border-slate-800">Team Playbook</h3>
+
+              {/* Coach fit indicator */}
+              {(() => {
+                const hc = userTeam.staff.headCoach;
+                if (!hc) return null;
+                const preferred = getCoachPreferredScheme(hc);
+                const isMatch = userTeam.activeScheme === preferred;
+                return (
+                  <div className={`mt-4 mb-5 p-3 rounded-xl border text-[10px] font-bold flex items-start gap-2 ${
+                    isMatch
+                      ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400'
+                      : 'bg-orange-500/10 border-orange-500/30 text-orange-400'
+                  }`}>
+                    <span className="text-base leading-none mt-0.5">{isMatch ? '✓' : '⚠'}</span>
+                    <div>
+                      <p className="uppercase tracking-widest">
+                        {isMatch ? 'Scheme match' : 'Scheme mismatch'}
+                      </p>
+                      <p className="font-normal text-slate-400 mt-0.5">
+                        {hc.name.split(' ').at(-1)} runs <span className="font-bold text-slate-200">{preferred}</span>
+                        {isMatch
+                          ? ' — players thrive in their natural system (+morale)'
+                          : ` — current playbook is ${userTeam.activeScheme}. Expect reduced morale for scorers and Diva players.`}
+                      </p>
+                    </div>
+                  </div>
+                );
+              })()}
+
+              <div className="space-y-2">
+                {([
+                  { scheme: 'Balanced',       icon: '⚖️',  desc: 'All-around execution, no weaknesses',               tags: ['Balanced', 'Versatile'] },
+                  { scheme: 'Pace and Space', icon: '🏃',  desc: '+3PT looks, kick-outs, fast tempo',                  tags: ['+3PT', '+Speed', '-Post'] },
+                  { scheme: 'Grit and Grind', icon: '💪',  desc: 'Post-heavy, interior defence, slow it down',         tags: ['+Post', '+Defense', '-3PT'] },
+                  { scheme: 'Triangle',       icon: '🔺',  desc: 'Ball movement, cuts, punishes iso ball',             tags: ['+Cuts', '+Passing', '-ISO'] },
+                  { scheme: 'Small Ball',     icon: '⚡',  desc: 'Drive-heavy, switching D, speed over size',           tags: ['+Drives', '+Speed', '-Post'] },
+                  { scheme: 'Showtime',       icon: '🎬',  desc: 'Transition dunks, lobs, run-and-gun',                tags: ['+Transition', '+Dunks', '-HalfCourt'] },
+                ] as { scheme: CoachScheme; icon: string; desc: string; tags: string[] }[]).map(({ scheme, icon, desc, tags }) => {
+                  const hc = userTeam.staff.headCoach;
+                  const preferred = hc ? getCoachPreferredScheme(hc) : null;
+                  const isActive   = userTeam.activeScheme === scheme;
+                  const isPreferred = preferred === scheme;
+                  return (
+                    <button
+                      key={scheme}
+                      onClick={() => setScheme(scheme)}
+                      className={`w-full text-left p-3 rounded-2xl transition-all border relative ${
+                        isActive
+                          ? 'bg-amber-500 border-amber-400 text-slate-950'
+                          : 'bg-slate-950 border-slate-800 text-slate-400 hover:border-slate-600 hover:bg-slate-900'
+                      }`}
                     >
-                       <p className="font-display font-bold uppercase text-lg">{s}</p>
-                       <p className={`text-[10px] font-bold ${userTeam.activeScheme === s ? 'text-slate-800' : 'text-slate-600'}`}>
-                          {s === 'Pace and Space' ? '+3PT, +Speed, -Reb' : s === 'Grit and Grind' ? '+Def, +Int, -3PT' : 'Balanced execution'}
-                       </p>
+                      <div className="flex items-center justify-between gap-2">
+                        <div className="flex items-center gap-2">
+                          <span className="text-base">{icon}</span>
+                          <p className={`font-display font-bold uppercase text-sm ${isActive ? 'text-slate-950' : 'text-slate-200'}`}>{scheme}</p>
+                        </div>
+                        <div className="flex items-center gap-1.5">
+                          {isPreferred && (
+                            <span className={`text-[8px] font-black uppercase px-1.5 py-0.5 rounded border ${
+                              isActive ? 'bg-slate-900/30 border-slate-900/30 text-slate-900' : 'bg-emerald-500/10 border-emerald-500/40 text-emerald-400'
+                            }`}>Coach's Pick</span>
+                          )}
+                        </div>
+                      </div>
+                      <p className={`text-[9px] mt-0.5 ml-7 ${isActive ? 'text-slate-700' : 'text-slate-600'}`}>{desc}</p>
+                      <div className="flex flex-wrap gap-1 mt-1.5 ml-7">
+                        {tags.map(t => (
+                          <span key={t} className={`text-[8px] font-black px-1.5 py-0.5 rounded ${
+                            isActive ? 'bg-slate-900/20 text-slate-800' : 'bg-slate-800 text-slate-500'
+                          }`}>{t}</span>
+                        ))}
+                      </div>
+                      {!isActive && userTeam.staff.headCoach && preferred !== scheme && (
+                        <p className="text-[8px] text-orange-400/70 ml-7 mt-0.5">⚠ Not coach's system — morale risk</p>
+                      )}
                     </button>
-                 ))}
+                  );
+                })}
               </div>
            </section>
 
            <div className="bg-amber-500/5 border border-amber-500/10 p-6 rounded-3xl">
-              <h4 className="text-[10px] font-black uppercase text-amber-500 mb-2">Staff Projections</h4>
+              <h4 className="text-[10px] font-black uppercase text-amber-500 mb-2">Playbook Impact</h4>
               <p className="text-xs text-slate-400 leading-relaxed italic">
-                "With Coach {userTeam.staff.headCoach?.name || 'N/A'} at the helm, we project an additional 2-4 sim wins based on scheme fit alone."
+                Playbook directly shapes shot selection, PBP tempo, and player morale. Matching coach style gives players a +morale boost each game and unlocks scheme-specific commentary.
               </p>
            </div>
         </div>
