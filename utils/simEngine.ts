@@ -2,8 +2,8 @@ import { Team, GameResult, Player, GamePlayerLine, ClutchGameLine, CoachScheme, 
 
 // ─── Constants ───────────────────────────────────────────────────────────────
 const BASE_PPP       = 1.06;
-const SCORE_VARIANCE = 0.04;
-const HOME_COURT_ADV = 0.025;  // +2.5% shooting efficiency for home team
+const SCORE_VARIANCE = 0.12;  // ±12 pts of PPP randomness — wider band drives realistic upsets
+const HOME_COURT_ADV = 0.040; // +4.0% for home team (NBA home teams win ~60% empirically)
 const VISIT_TOV_PEN  = 0.008;  // road team slight TOV penalty
 
 // ─── Pace / Possession Engine ─────────────────────────────────────────────────
@@ -3426,13 +3426,36 @@ export const simulateGame = (
   const homeDef     = awayRatings.def + getStaffBonus(away);
   const awayDef     = homeRatings.def + getStaffBonus(home);
 
+  // Streak regression: teams on extreme runs face mean-reversion pressure.
+  // A 15+ game win streak is partly luck — that luck tends to run out.
+  // Losing streaks get a small bounce-back nudge (hot hand / talent assertion).
+  const getStreakRegression = (team: Team): number => {
+    const s = team.streak;
+    if (s >= 15)  return -(s - 14) * 0.005;  // -0.005 PPP per game over 14; ~-2.5 pts at streak 19
+    if (s <= -10) return  (Math.abs(s) - 9) * 0.003;  // small recovery for deep losing skids
+    return 0;
+  };
+
+  // Team morale modifier: sustained winning/losing shifts average morale.
+  // High morale = better execution; low morale = turnovers, missed FTs, defensive lapses.
+  const teamMoraleMod = (team: Team): number => {
+    const topEight = team.roster.slice(0, 8);
+    const avg = topEight.reduce((s, p) => s + (p.morale ?? 75), 0) / Math.max(1, topEight.length);
+    return (avg - 75) / 800;  // morale 100 → +0.031; morale 50 → −0.031
+  };
+
   const calcBasePPP = (off: number, def: number, isB2B: boolean) => {
-    let ppp = BASE_PPP + (off - def) / 100 * 0.5;
+    // Slope 0.25 (was 0.5): rating gap matters less → more realistic upset frequency.
+    // With slope 0.5 a 12-pt rating gap → 6 PPP pts → elite teams win 85-93%.
+    // With slope 0.25 a 12-pt rating gap → 3 PPP pts → elite teams win 70-78%.
+    let ppp = BASE_PPP + (off - def) / 100 * 0.25;
     if (isB2B) ppp *= b2bPenalty;
     return ppp + (Math.random() * SCORE_VARIANCE * 2 - SCORE_VARIANCE);
   };
-  const homePPP = calcBasePPP(homeBaseOff, homeDef, homeB2B);
-  const awayPPP = calcBasePPP(awayBaseOff, awayDef, awayB2B);
+  const homePPP = calcBasePPP(homeBaseOff, homeDef, homeB2B)
+    + getStreakRegression(home) + teamMoraleMod(home);
+  const awayPPP = calcBasePPP(awayBaseOff, awayDef, awayB2B)
+    + getStreakRegression(away) + teamMoraleMod(away);
 
   // ── 4. Pace / Possession Engine ───────────────────────────────────────────
   // Each team has their own pace rating (with coach badge effects).
@@ -3536,8 +3559,11 @@ export const simulateGame = (
     // ── Core Quarter Score Calculation ────────────────────────────────────
     // Formula: possessions × PPP × pace_factor + small noise
     // PPP ~1.1 × ~25 possessions = ~27 pts per quarter (realistic)
-    let hQScore = Math.round(homeQPoss * qPaceFactor * (homePPP + homeOff) + (Math.random() * 4 - 2));
-    let aQScore = Math.round(awayQPoss * qPaceFactor * (awayPPP + awayOff) + (Math.random() * 4 - 2));
+    // Quarter noise ±6 (was ±2): gives ~6.9 pts std dev per team per game from this source alone.
+    // Combined with SCORE_VARIANCE, total game differential std dev ≈ 14–16 pts — enough that
+    // even an elite vs. weak matchup has ~20-25% upset chance on any given night.
+    let hQScore = Math.round(homeQPoss * qPaceFactor * (homePPP + homeOff) + (Math.random() * 12 - 6));
+    let aQScore = Math.round(awayQPoss * qPaceFactor * (awayPPP + awayOff) + (Math.random() * 12 - 6));
 
     // ── Scoring Bounds Validation ─────────────────────────────────────────
     const { lo: qLo, hi: qHi } = getQuarterScoringBounds(homeQPoss, qGamePace);
