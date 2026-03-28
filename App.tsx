@@ -2129,6 +2129,7 @@ const App: React.FC = () => {
               teamScheme: playerTeam?.activeScheme,
               teamWins: playerTeam?.wins,
               teamLosses: playerTeam?.losses,
+              teamRotation: playerTeam?.rotation,
             }}
             teams={league.teams.map(t => t.name)}
           />

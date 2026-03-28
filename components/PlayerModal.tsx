@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Player, PlayerStatus, PersonalityTrait, Position, PlayerTendencies } from '../types';
+import { Player, PlayerStatus, PersonalityTrait, Position, PlayerTendencies, TeamRotation } from '../types';
 import { getFlag, countryFromHometown, POS_ATTR_RANGES, PosAttrRangeKey, enforcePositionalBounds, FEMALE_ATTR_CAPS, NAMES_MALE, NAMES_FEMALE, COLLEGES_HIGH_MAJOR, COLLEGES_MID_MAJOR, ALL_HOMETOWNS, deriveComposites, deriveArchetype } from '../constants';
 
 const POS_RANGE_KEYS: PosAttrRangeKey[] = ['shooting', 'playmaking', 'defense', 'rebounding', 'athleticism'];
@@ -32,6 +32,8 @@ interface PlayerModalProps {
     teamScheme?: string;
     teamWins?: number;
     teamLosses?: number;
+    /** Team's actual rotation — used to derive true role (Starter/Rotation/Bench) */
+    teamRotation?: TeamRotation;
   };
   /** All team names for the draft-team dropdown in god mode */
   teams?: string[];
@@ -832,9 +834,27 @@ const PlayerModal: React.FC<PlayerModalProps> = ({
                 <span className="text-slate-100 font-display font-bold text-xl uppercase tracking-wider">
                    {formatPhysicals(player.height, player.weight)}
                 </span>
-                <span className={`px-3 py-1 text-[10px] font-black uppercase tracking-widest rounded border ${player.status === 'Starter' ? 'bg-emerald-500/10 text-emerald-500 border-emerald-500/30' : 'bg-slate-800/50 text-slate-400 border-slate-700/50'}`}>
-                  {player.status}
-                </span>
+                {(() => {
+                  // Derive true role from team rotation; fall back to player.status
+                  const rot = leagueContext?.teamRotation;
+                  const effectiveRole: PlayerStatus = (() => {
+                    if (!rot) return player.status;
+                    if (Object.values(rot.starters).includes(player.id)) return 'Starter';
+                    if (rot.bench.includes(player.id)) return 'Rotation';
+                    if (rot.reserves.includes(player.id)) return 'Bench';
+                    return player.status;
+                  })();
+                  const roleStyle = effectiveRole === 'Starter'
+                    ? 'bg-emerald-500/10 text-emerald-500 border-emerald-500/30'
+                    : effectiveRole === 'Injured'
+                    ? 'bg-red-500/10 text-red-400 border-red-500/30'
+                    : 'bg-slate-800/50 text-slate-400 border-slate-700/50';
+                  return (
+                    <span className={`px-3 py-1 text-[10px] font-black uppercase tracking-widest rounded border ${roleStyle}`}>
+                      {effectiveRole}
+                    </span>
+                  );
+                })()}
                 {isCurrentAllStar && (
                   <span className={`px-3 py-1 text-[10px] font-black uppercase tracking-widest rounded-full border flex items-center gap-1.5 shadow-lg ${
                     currentAllStarRole === 'Starter'
