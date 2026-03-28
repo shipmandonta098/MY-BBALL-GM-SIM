@@ -1778,6 +1778,28 @@ const simulatePossession = (
       scores[k] = (scores[k] ?? 0) + (Math.random() * 10 - 5);
     }
 
+    // ── Playbook multipliers: coach's scheme biases shot selection ───────────
+    // Pace and Space → more spot-up 3s, fewer posts.
+    // Grit and Grind → heavy post emphasis, fewer perimeter shots.
+    // Triangle → ball-movement cuts, punishes iso ball.
+    // Small Ball → drive-heavy, no post-ups.
+    // Showtime → transition/drive focus, minimal half-court post.
+    // Balanced → no adjustments.
+    const schemeActionMults: Partial<Record<OffAction, number>> = (() => {
+      switch (scheme) {
+        case 'Pace and Space': return { ISO: 0.70, POST_UP: 0.45, DRIVE: 1.25, PASS_FIRST: 1.15, SPOT_UP: 2.20, CUT: 1.30 };
+        case 'Grit and Grind': return { ISO: 1.40, POST_UP: 2.20, DRIVE: 0.75, PASS_FIRST: 0.85, SPOT_UP: 0.55, CUT: 0.80 };
+        case 'Triangle':       return { ISO: 0.45, POST_UP: 1.00, DRIVE: 0.90, PASS_FIRST: 2.10, SPOT_UP: 1.20, CUT: 2.30 };
+        case 'Small Ball':     return { ISO: 0.65, POST_UP: 0.35, DRIVE: 1.90, PASS_FIRST: 1.25, SPOT_UP: 1.70, CUT: 1.50 };
+        case 'Showtime':       return { ISO: 0.60, POST_UP: 0.40, DRIVE: 2.00, PASS_FIRST: 1.55, SPOT_UP: 1.35, CUT: 1.80 };
+        default: return {};  // Balanced: no adjustments
+      }
+    })();
+    for (const k of Object.keys(scores) as OffAction[]) {
+      const m = schemeActionMults[k];
+      if (m !== undefined) scores[k] = (scores[k] ?? 0) * m;
+    }
+
     // ── Weighted pick (floor at 0 to avoid negative weights) ───────────────
     const pool: { value: OffAction; weight: number }[] = (
       Object.entries(scores) as [OffAction, number][]
@@ -3039,6 +3061,48 @@ const generateQuarterPBP = (
       events.push({ time: tickSub(1), text: cinematic.result, type: evType,  quarter });
     } else {
       events.push({ time, text: finalPbpText, type: evType, quarter });
+    }
+
+    // ── Scheme flavor narration (12% per possession, non-garbage) ───────────
+    // Fires after the possession event so the flavor line feels like analyst commentary.
+    if (!isGarbageTime && Math.random() < 0.12) {
+      const coachLn = offTeam.staff.headCoach?.name?.split(' ').at(-1) ?? 'Coach';
+      const schemeLines: Partial<Record<CoachScheme, string[]>> = {
+        'Pace and Space': [
+          `${offTeam.name} spreading the floor — shooters in every corner`,
+          `Kick-out pass, catch-and-shoot — ${coachLn}'s system getting quality looks`,
+          `Push the pace! ${offTeam.name} looking to shoot before the defense sets`,
+          `Three-ball off movement — Pace and Space at its best`,
+        ],
+        'Grit and Grind': [
+          `${offTeam.name} demanding a post entry — forcing their physicality`,
+          `Grit and Grind — ${offTeam.name} making this an ugly game on purpose`,
+          `Interior force — ${coachLn} wants the ball in the paint`,
+          `${offTeam.name} grinding it out — this is exactly what ${coachLn} draws up`,
+        ],
+        'Triangle': [
+          `Triangle movement — three players rotating through the elbow`,
+          `Ball reversal through the post — Triangle spacing opens the weak side`,
+          `${coachLn}'s Triangle reads — patience rewarded with a quality look`,
+          `Post → wing → reversal — beautiful Triangle execution`,
+        ],
+        'Small Ball': [
+          `Small ball lineup on the floor — speed over size`,
+          `${offTeam.name} using quickness advantage in space`,
+          `Switch everything! ${coachLn}'s switching scheme forces mismatches`,
+          `Go small, go fast — ${offTeam.name} pushing tempo`,
+        ],
+        'Showtime': [
+          `SHOWTIME! ${offTeam.name} in transition again!`,
+          `Run and gun — ${offTeam.name} not letting the defense set`,
+          `${coachLn}'s high-octane system — they want to lob and dunk all night`,
+          `Fast break! ${offTeam.name} pushing before the defense can recover`,
+        ],
+      };
+      const lines = schemeLines[scheme];
+      if (lines?.length) {
+        events.push({ time: tickSub(1), text: lines[Math.floor(Math.random() * lines.length)], type: 'info', quarter });
+      }
     }
 
     // ── Miss resolution: OOB → OREB → DREB (strictly ordered) ──────────────

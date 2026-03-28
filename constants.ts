@@ -825,6 +825,22 @@ export const generateCoach = (id: string, tier: 'A' | 'B' | 'C' | 'D' = 'C', gen
   };
 };
 
+/**
+ * Derives a coach's preferred playbook from their badges.
+ * Badge priority: Offensive Architect + Pace Master → Showtime; Defensive Guru → Grit and Grind;
+ * Pace Master alone → Pace and Space; Offensive Architect alone → Pace and Space;
+ * Star Handler → Triangle. Falls back to coach.scheme for coaches with no relevant badges.
+ */
+export const getCoachPreferredScheme = (coach: Coach): CoachScheme => {
+  const b = coach.badges ?? [];
+  if (b.includes('Offensive Architect') && b.includes('Pace Master')) return 'Showtime';
+  if (b.includes('Pace Master'))        return 'Pace and Space';
+  if (b.includes('Offensive Architect')) return 'Pace and Space';
+  if (b.includes('Defensive Guru'))     return 'Grit and Grind';
+  if (b.includes('Star Handler'))       return 'Triangle';
+  return coach.scheme; // no playbook-specific badge — use the coach's native scheme
+};
+
 export const generateCoachPool = (count: number, genderRatio: number = 10, leagueYear?: number): Coach[] => {
   return Array.from({ length: count }).map((_, i) => {
     const tier = i < 5 ? 'A' : i < 15 ? 'B' : i < 35 ? 'C' : 'D';

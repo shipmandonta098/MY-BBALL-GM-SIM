@@ -1,7 +1,7 @@
 
 import React, { useState, useEffect, useCallback } from 'react';
 import { LeagueState, Player, Team, GameResult, PlayerStatus, ScheduleGame, BulkSimSummary, Prospect, Coach, TradeProposal, Position, NewsItem, NewsCategory, LeagueSettings, SeasonAwards, PlayoffBracket, PlayoffSeries, Transaction, TransactionType, PowerRankingSnapshot, PowerRankingEntry, GMProfile, GMMilestone, RivalryStats, InjuryType, SeasonPhase, AllStarWeekendData, AllStarVoteEntry } from './types';
-import { generateLeagueTeams, generateSeasonSchedule, generateProspects, generateFreeAgentPool, generateCoachPool, EXPANSION_TEAM_POOL, generateCoach, generatePlayer, generateDefaultRotation, enforcePositionalBounds, ageFromBirthdate } from './constants';
+import { generateLeagueTeams, generateSeasonSchedule, generateProspects, generateFreeAgentPool, generateCoachPool, EXPANSION_TEAM_POOL, generateCoach, generatePlayer, generateDefaultRotation, enforcePositionalBounds, ageFromBirthdate, getCoachPreferredScheme } from './constants';
 import { simulateGame, normalizeLeagueOVRs } from './utils/simEngine';
 import { autoSimAllStarWeekend } from './utils/allStarSim';
 import { snapshotPlayerStats } from './utils/playerUtils';
@@ -739,7 +739,13 @@ const App: React.FC = () => {
           ...newState,
           teams: newState.teams.map(t =>
             t.id === searchTeam.id
-              ? { ...t, staff: { ...t.staff, headCoach: permanent }, coachSearchDaysLeft: undefined }
+              ? {
+                  ...t,
+                  staff: { ...t.staff, headCoach: permanent },
+                  coachSearchDaysLeft: undefined,
+                  // AI teams automatically adopt their new HC's preferred playbook
+                  activeScheme: getCoachPreferredScheme(permanent),
+                }
               : t,
           ),
           coachPool: poolAfterReturn,
@@ -918,6 +924,26 @@ const App: React.FC = () => {
           if (traits.includes('Hot Head') && !isWinner) morale -= 0.8;
           if (traits.includes('Clutch') && isWinner)  morale += 0.4;
           if (traits.includes('Diva/Star') && p.status === 'Bench') morale -= 0.8;
+
+          // ── Playbook fit (per-game, small accumulation) ───────────────────
+          // Matching the coach's preferred scheme makes players more comfortable;
+          // mismatches frustrate scorers and Diva/Star personalities.
+          {
+            const hc = team.staff?.headCoach;
+            if (hc) {
+              const preferred = getCoachPreferredScheme(hc);
+              const isMatch = team.activeScheme === preferred;
+              if (isMatch) {
+                // Good fit: small morale boost for offensive players
+                if (p.rating >= 78) morale += 0.10;
+              } else {
+                // Mismatch: scorers and divas chafe under a foreign system
+                if (traits.includes('Diva/Star'))             morale -= 0.25;
+                if (p.attributes.shooting > 82 && team.activeScheme === 'Grit and Grind') morale -= 0.15;
+                if ((p.attributes.postScoring ?? 50) < 60 && team.activeScheme === 'Grit and Grind') morale -= 0.10;
+              }
+            }
+          }
 
           // ── Streak momentum ──────────────────────────────────────────────
           if (teamStreak >= 4) morale += 0.5;
