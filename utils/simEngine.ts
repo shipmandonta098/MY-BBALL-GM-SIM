@@ -410,7 +410,7 @@ export function getStealChance(attr: number, position?: string, defIQ?: number):
     base *= (1 + (defIQ - 50) / 100 * 0.15);
   }
 
-  return Math.max(0.005, Math.min(0.050, base));
+  return Math.max(0.005, Math.min(0.080, base));
 }
 
 /**
@@ -466,7 +466,7 @@ export function getBlockChance(attr: number, position?: string, defIQ?: number):
     base *= (1 + (defIQ - 50) / 100 * 0.10);
   }
 
-  return Math.max(0.005, Math.min(0.100, base));
+  return Math.max(0.005, Math.min(0.160, base));
 }
 
 // ─── 3PT Defensive Contest Modifier ──────────────────────────────────────────
@@ -3300,7 +3300,8 @@ const simulatePlayerGameLine = (
     player.position === 'C' || player.position === 'PF' ? 0.270 :
     player.position === 'SF'                            ? 0.235 : 0.195;
   const orbAttrMod = (player.attributes.offReb - player.attributes.defReb) / 300;
-  const orbRatio   = Math.max(0.14, Math.min(0.38, posOrbBase + orbAttrMod));
+  // No artificial ceiling — elite offensive rebounders (Dennis Rodman-tier) can reach 45–50% ORB ratio
+  const orbRatio   = Math.max(0.14, Math.min(0.50, posOrbBase + orbAttrMod));
   const offReb    = Math.round(totalReb * orbRatio);
   const defReb    = totalReb - offReb;
 
@@ -3329,18 +3330,20 @@ const simulatePlayerGameLine = (
   const adjAstShare = Math.max(0.01, astEff * adjUsage * 2.2 * (1 + tm.astBoost) * contextMult);
   const ast = Math.max(0, Math.round(teamAst * adjAstShare));
 
-  // STL: getStealChance × 65 steal-opportunities per 48 min × minutes fraction.
+  // STL: getStealChance × 80 steal-opportunities per 48 min × minutes fraction.
   // stlBoost from defensive tendencies (pass-denial, gambles, helpDefender).
   // Stamina: fatigued defenders lose a step — up to 15 % reduction at stamina=40.
-  const STL_OPP_SCALE = 65;
+  // No artificial per-player cap — elite thieves can reach 5–7 STL on exceptional nights.
+  const STL_OPP_SCALE = 80;
   const stlBase    = getStealChance(player.attributes.steals, player.position, player.attributes.defensiveIQ)
     * STL_OPP_SCALE * minFac * (1 + tm.stlBoost) * (1 + moraleEffMod);
   const stlFatigue = Math.max(0, (65 - (player.attributes.stamina ?? 70)) / 100 * 0.15);
   const stl        = Math.max(0, Math.floor(stlBase * (1 - stlFatigue) + Math.random() * 0.8));
 
-  // BLK: getBlockChance × 50 block-opportunities per 48 min × minutes fraction.
+  // BLK: getBlockChance × 65 block-opportunities per 48 min × minutes fraction.
   // blkBoost from helpDefender/physicality tendencies; stamina reduction for tired bigs.
-  const BLK_OPP_SCALE = 50;
+  // No artificial per-player cap — elite rim protectors can reach 7–10 BLK on dominant nights.
+  const BLK_OPP_SCALE = 65;
   const blkBase    = getBlockChance(player.attributes.blocks, player.position, player.attributes.defensiveIQ)
     * BLK_OPP_SCALE * minFac * (1 + tm.blkBoost) * (1 + moraleEffMod);
   const blkFatigue = Math.max(0, (65 - (player.attributes.stamina ?? 70)) / 100 * 0.12);
@@ -3621,21 +3624,12 @@ export const simulateGame = (
     }
   }
 
-  // ── 6. Validation Flags ───────────────────────────────────────────────────
-  const combined = runningHome + runningAway;
-  if (combined > 280) {
-    // Unrealistically high: soft clamp both quarterly totals by pulling each down
-    const factor = 280 / combined;
-    runningHome = Math.round(runningHome * factor);
-    runningAway = Math.round(runningAway * factor);
-  } else if (combined < 150) {
-    const factor = 150 / combined;
-    runningHome = Math.round(runningHome * factor);
-    runningAway = Math.round(runningAway * factor);
-  }
-
-  let totalHome = Math.max(90, Math.min(160, runningHome));
-  let totalAway = Math.max(90, Math.min(160, runningAway));
+  // ── 6. Final Score ────────────────────────────────────────────────────────
+  // No artificial floor or ceiling — scores are driven purely by pace, efficiency,
+  // and team attributes. Elite offenses can exceed 160; defensive slogs can finish
+  // in the 70s. Only floor each team at 40 to prevent nonsensical negatives.
+  let totalHome = Math.max(40, runningHome);
+  let totalAway = Math.max(40, runningAway);
 
   // ── 7. Player stat distribution ──────────────────────────────────────────
   const statPace = totalPoss; // use actual total possessions for FGA/REB scaling
@@ -3645,7 +3639,8 @@ export const simulateGame = (
     const teamFga     = Math.round(statPace * 1.10);
     // teamReb: ~42–52 boards/team at NBA pace. 0.50 coefficient (was 0.44) accounts
     // for offensive boards — each missed shot is a rebound opportunity for either team.
-    const teamReb     = Math.min(56, Math.round(statPace * 0.50));
+    // No artificial cap — fast-paced games with many missed shots can yield 60+ team boards.
+    const teamReb     = Math.round(statPace * 0.50);
     // NBA reality: ~60% of FGM are assisted; FGM ≈ pts / 2.2.
     // Old coefficient (0.6) applied to estimated FGM, but the share-sum across all
     // players exceeds 1.0 by ~1.48×, causing reported team assists to balloon to 45+.
