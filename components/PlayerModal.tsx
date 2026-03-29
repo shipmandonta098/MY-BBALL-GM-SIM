@@ -73,7 +73,7 @@ const PlayerModal: React.FC<PlayerModalProps> = ({
   teams = [],
 }) => {
   const [isEditing, setIsEditing] = React.useState(false);
-  const [statsTab, setStatsTab] = useState<'season' | 'career' | 'advanced'>('season');
+  const [statsTab, setStatsTab] = useState<'season' | 'career' | 'advanced' | 'playoffs'>('season');
 
   const defaultAttributes = {
     shooting: 50, defense: 50, rebounding: 50, playmaking: 50, athleticism: 50,
@@ -1140,8 +1140,9 @@ const PlayerModal: React.FC<PlayerModalProps> = ({
               ? (player.careerStats ?? []).filter(cs => cs.year === currentSeason && cs.isSplit)
               : [];
 
-            const hasCareer  = player.careerStats && player.careerStats.length > 0;
-            const hasCurr    = s.gamesPlayed > 0 || currentSeasonSplits.length > 0;
+            const hasCareer   = player.careerStats && player.careerStats.length > 0;
+            const hasCurr     = s.gamesPlayed > 0 || currentSeasonSplits.length > 0;
+            const hasPlayoffs = !!player.playoffStats && player.playoffStats.gamesPlayed > 0;
             const hasHighs   = player.careerHighs && (
               player.careerHighs.points   > 0 ||
               player.careerHighs.rebounds > 0 ||
@@ -1348,6 +1349,9 @@ const PlayerModal: React.FC<PlayerModalProps> = ({
                         {currentSeason}–{String(currentSeason + 1).slice(2)} Season
                       </p>
                     )}
+                    {statsTab === 'playoffs' && (
+                      <p className="text-[10px] text-amber-500/70 font-bold uppercase tracking-widest mt-0.5">Playoff Statistics</p>
+                    )}
                     {statsTab === 'advanced' && (
                       <p className="text-[10px] text-slate-500 font-bold uppercase tracking-widest mt-0.5">Advanced Analytics</p>
                     )}
@@ -1367,6 +1371,14 @@ const PlayerModal: React.FC<PlayerModalProps> = ({
                         className={`px-3 py-1 text-[10px] font-black uppercase rounded-full transition-all ${statsTab === 'career' ? 'bg-amber-500 text-slate-950' : 'text-slate-500 hover:text-white'}`}
                       >
                         Career
+                      </button>
+                    )}
+                    {hasPlayoffs && (
+                      <button
+                        onClick={() => setStatsTab('playoffs')}
+                        className={`px-3 py-1 text-[10px] font-black uppercase rounded-full transition-all ${statsTab === 'playoffs' ? 'bg-amber-500 text-slate-950' : 'text-slate-500 hover:text-white'}`}
+                      >
+                        Playoffs
                       </button>
                     )}
                     {hasCurr && (
@@ -1477,6 +1489,102 @@ const PlayerModal: React.FC<PlayerModalProps> = ({
                     </div>
                   </div>
                 )}
+
+                {/* ── Playoff Stats ───────────────────────────────────────────── */}
+                {statsTab === 'playoffs' && hasPlayoffs && (() => {
+                  const po   = player.playoffStats!;
+                  const pgp  = Math.max(1, po.gamesPlayed);
+                  const pmpg = po.minutes    / pgp;
+                  const pppg = po.points     / pgp;
+                  const prpg = po.rebounds   / pgp;
+                  const papg = po.assists    / pgp;
+                  const pspg = po.steals     / pgp;
+                  const pbpg = po.blocks     / pgp;
+                  const ptpg = po.tov        / pgp;
+                  const pfgp = po.fga  > 0 ? po.fgm  / po.fga  : 0;
+                  const ptpp = po.threepa > 0 ? po.threepm / po.threepa : 0;
+                  const pftp = po.fta  > 0 ? po.ftm  / po.fta  : 0;
+                  const peFG = po.fga  > 0 ? (po.fgm + 0.5 * po.threepm) / po.fga : 0;
+                  const pTwo = po.fgm - po.threepm;
+                  const pTwoA = po.fga - po.threepa;
+                  const pTs  = (po.fga + 0.44 * po.fta) > 0
+                    ? po.points / (2 * (po.fga + 0.44 * po.fta)) : 0;
+                  const pPer = po.minutes > 0
+                    ? (po.points + po.rebounds + po.assists + po.steals + po.blocks
+                        - (po.fga - po.fgm) - (po.fta - po.ftm) - po.tov)
+                      / po.minutes * 30 : 0;
+
+                  const poCols = [
+                    { label: 'GP',   value: String(po.gamesPlayed) },
+                    { label: 'GS',   value: String(po.gamesStarted ?? 0) },
+                    { label: 'MIN',  value: pmpg.toFixed(1) },
+                    { label: 'PTS',  value: pppg.toFixed(1), hi: pppg >= 20 },
+                    { label: 'REB',  value: prpg.toFixed(1), hi: prpg >= 8 },
+                    { label: 'ORB',  value: (po.offReb / pgp).toFixed(1) },
+                    { label: 'DRB',  value: (po.defReb / pgp).toFixed(1) },
+                    { label: 'AST',  value: papg.toFixed(1), hi: papg >= 6 },
+                    { label: 'STL',  value: pspg.toFixed(1), hi: pspg >= 1.5 },
+                    { label: 'BLK',  value: pbpg.toFixed(1), hi: pbpg >= 1.5 },
+                    { label: 'TO',   value: ptpg.toFixed(1) },
+                    { label: 'PF',   value: (po.pf / pgp).toFixed(1) },
+                    { label: 'FGM',  value: (po.fgm / pgp).toFixed(1) },
+                    { label: 'FGA',  value: (po.fga / pgp).toFixed(1) },
+                    { label: 'FG%',  value: po.fga > 0 ? (pfgp * 100).toFixed(1) + '%' : '—', hi: pfgp >= 0.5 },
+                    { label: '3PM',  value: (po.threepm / pgp).toFixed(1) },
+                    { label: '3PA',  value: (po.threepa / pgp).toFixed(1) },
+                    { label: '3P%',  value: po.threepa > 0 ? (ptpp * 100).toFixed(1) + '%' : '—', hi: ptpp >= 0.38 },
+                    { label: '2PM',  value: (pTwo / pgp).toFixed(1) },
+                    { label: '2PA',  value: (pTwoA / pgp).toFixed(1) },
+                    { label: '2P%',  value: pTwoA > 0 ? ((pTwo / pTwoA) * 100).toFixed(1) + '%' : '—' },
+                    { label: 'FTM',  value: (po.ftm / pgp).toFixed(1) },
+                    { label: 'FTA',  value: (po.fta / pgp).toFixed(1) },
+                    { label: 'FT%',  value: po.fta > 0 ? (pftp * 100).toFixed(1) + '%' : '—' },
+                    { label: 'eFG%', value: po.fga > 0 ? (peFG * 100).toFixed(1) + '%' : '—' },
+                  ] as { label: string; value: string; hi?: boolean }[];
+
+                  return (
+                    <div className="bg-slate-950/50 border border-amber-500/20 rounded-3xl overflow-hidden">
+                      <div className="px-4 py-2 border-b border-amber-500/20 bg-amber-500/5 flex items-center gap-2">
+                        <span className="w-1.5 h-1.5 rounded-full bg-amber-500 inline-block"></span>
+                        <span className="text-[10px] font-black text-amber-500 uppercase tracking-[0.4em]">Playoff Statistics · Per Game</span>
+                      </div>
+                      <div className="overflow-x-auto">
+                        <table className="w-full text-center">
+                          <thead>
+                            <tr className="border-b border-slate-800/60">
+                              {poCols.map(c => (
+                                <th key={c.label} className="px-3 py-3 text-[10px] font-black uppercase tracking-widest text-slate-500">
+                                  {c.label}
+                                </th>
+                              ))}
+                            </tr>
+                          </thead>
+                          <tbody>
+                            <tr>
+                              {poCols.map(c => (
+                                <td key={c.label} className={`px-3 py-4 font-display font-bold tabular-nums text-sm ${c.hi ? 'text-amber-400' : 'text-slate-200'}`}>
+                                  {c.value}
+                                </td>
+                              ))}
+                            </tr>
+                          </tbody>
+                        </table>
+                      </div>
+                      <div className="border-t border-slate-800/60 grid grid-cols-3 divide-x divide-slate-800/60">
+                        {[
+                          { label: 'PER',  value: isNaN(pPer) ? '—' : pPer.toFixed(1) },
+                          { label: 'TS%',  value: isNaN(pTs)  ? '—' : (pTs * 100).toFixed(1) + '%' },
+                          { label: 'GP',   value: String(po.gamesPlayed) },
+                        ].map(c => (
+                          <div key={c.label} className="py-3 text-center">
+                            <div className="text-[10px] font-black uppercase tracking-widest text-slate-500">{c.label}</div>
+                            <div className="font-display font-bold text-slate-300 tabular-nums mt-0.5">{c.value}</div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  );
+                })()}
 
                 {/* ── Advanced Stats ──────────────────────────────────────────── */}
                 {statsTab === 'advanced' && hasCurr && (() => {
