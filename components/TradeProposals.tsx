@@ -18,6 +18,17 @@ const TradeProposals: React.FC<TradeProposalsProps> = ({
   const pending  = useMemo(() => (league.incomingTradeProposals ?? []).filter(p => p.status === 'incoming'), [league.incomingTradeProposals]);
   const history  = useMemo(() => (league.incomingTradeProposals ?? []).filter(p => p.status === 'rejected').slice(0, 10), [league.incomingTradeProposals]);
 
+  // Determine whether the trade window is currently open
+  const isPlayoffs    = !!league.playoffBracket;
+  const isOffseason   = !!league.isOffseason;
+  const deadlinePassed = !!league.tradeDeadlinePassed;
+  const windowOpen    = !isOffseason && !deadlinePassed && !isPlayoffs;
+  const windowLabel   =
+    isPlayoffs    ? 'Playoffs are active — trades are frozen until next season.'
+    : deadlinePassed ? 'The trade deadline has passed — no new proposals until next season.'
+    : isOffseason   ? 'Trades resume once the regular season begins.'
+    : null; // window is open
+
   const fmtSalary = (n: number) => `$${(n / 1_000_000).toFixed(1)}M`;
 
   const formatPiece = (piece: TradePiece) => {
@@ -142,24 +153,30 @@ const TradeProposals: React.FC<TradeProposalsProps> = ({
         {/* Actions */}
         {isPending && (
           <div className="flex gap-2 px-4 pb-4 pt-3 border-t border-slate-800 bg-slate-950/30">
-            <button
-              onClick={() => onAccept(proposal)}
-              className="flex-1 py-2 px-3 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-[13px] font-bold transition-colors"
-            >
-              Accept
-            </button>
-            <button
-              onClick={() => onCounter(proposal)}
-              className="flex-1 py-2 px-3 rounded-xl bg-slate-700 hover:bg-slate-600 text-white text-[13px] font-semibold transition-colors"
-            >
-              Counter
-            </button>
-            <button
-              onClick={() => handleReject(proposal)}
-              className="flex-1 py-2 px-3 rounded-xl bg-rose-900/60 hover:bg-rose-800 text-rose-300 text-[13px] font-semibold transition-colors"
-            >
-              Reject
-            </button>
+            {windowOpen ? (
+              <>
+                <button
+                  onClick={() => onAccept(proposal)}
+                  className="flex-1 py-2 px-3 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-[13px] font-bold transition-colors"
+                >
+                  Accept
+                </button>
+                <button
+                  onClick={() => onCounter(proposal)}
+                  className="flex-1 py-2 px-3 rounded-xl bg-slate-700 hover:bg-slate-600 text-white text-[13px] font-semibold transition-colors"
+                >
+                  Counter
+                </button>
+                <button
+                  onClick={() => handleReject(proposal)}
+                  className="flex-1 py-2 px-3 rounded-xl bg-rose-900/60 hover:bg-rose-800 text-rose-300 text-[13px] font-semibold transition-colors"
+                >
+                  Reject
+                </button>
+              </>
+            ) : (
+              <p className="text-[11px] text-slate-600 italic px-1">Trade window closed — this offer has expired.</p>
+            )}
           </div>
         )}
         {!isPending && (
@@ -177,21 +194,39 @@ const TradeProposals: React.FC<TradeProposalsProps> = ({
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-3xl font-display font-black uppercase tracking-tight">Trade Proposals</h1>
-          <p className="text-slate-500 text-sm mt-1">Incoming offers from AI GMs. New proposals arrive periodically during the season.</p>
+          <p className="text-slate-500 text-sm mt-1">Incoming offers from AI GMs. Proposals are only generated during the regular season before the trade deadline.</p>
         </div>
-        {pending.length > 0 && (
+        {pending.length > 0 && windowOpen && (
           <span className="bg-amber-500 text-slate-950 text-sm font-black px-3 py-1 rounded-full animate-pulse">
             {pending.length} PENDING
           </span>
         )}
       </div>
 
+      {/* Trade window status banner */}
+      {windowLabel && (
+        <div className={`flex items-center gap-3 px-5 py-3 rounded-2xl border text-sm font-semibold ${
+          deadlinePassed || isPlayoffs
+            ? 'bg-rose-950/40 border-rose-800/50 text-rose-300'
+            : 'bg-slate-800/60 border-slate-700 text-slate-400'
+        }`}>
+          <span className="text-lg">{deadlinePassed || isPlayoffs ? '🔒' : '⏳'}</span>
+          <span>{windowLabel}</span>
+        </div>
+      )}
+
       {/* Pending proposals */}
       {pending.length === 0 ? (
         <div className="bg-slate-900 border border-slate-800 rounded-2xl p-12 text-center">
           <p className="text-5xl mb-4">📭</p>
-          <p className="text-slate-400 font-semibold text-lg">No incoming proposals right now.</p>
-          <p className="text-slate-600 text-sm mt-1">AI GMs will reach out as the season progresses. Check back soon.</p>
+          <p className="text-slate-400 font-semibold text-lg">
+            {windowOpen ? 'No incoming proposals right now.' : 'No active proposals.'}
+          </p>
+          <p className="text-slate-600 text-sm mt-1">
+            {windowOpen
+              ? 'AI GMs will reach out as the season progresses. Check back after simulating a few days.'
+              : 'Proposals will resume at the start of next season.'}
+          </p>
         </div>
       ) : (
         <div className="grid gap-4 md:grid-cols-2">
