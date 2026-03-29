@@ -744,10 +744,27 @@ const App: React.FC = () => {
     }
     if (newState.currentDay % 10 === 0) {
       const allPlayers = newState.teams.flatMap(t => t.roster);
-      const unhappyDiva = allPlayers.find(p => p.personalityTraits.includes('Diva/Star') && p.morale < 40);
-      if (unhappyDiva && Math.random() > 0.7) {
-        const team = newState.teams.find(t => t.roster.some(pl => pl.id === unhappyDiva.id))!;
-        newState = await addNewsItem(newState, 'trade_request', { player: unhappyDiva, team, detail: `${unhappyDiva.name} is reportedly frustrated with his role and has requested a trade.` }, true);
+      const unhappyDivas = allPlayers.filter(p => p.personalityTraits.includes('Diva/Star') && p.morale < 40);
+      for (const unhappyDiva of unhappyDivas) {
+        if (Math.random() > 0.7) {
+          // Cooldown: one major trade-request rumor per player per 14-day window
+          const cooldownId = `rumor-tradereq-${unhappyDiva.id}-w${Math.floor(newState.currentDay / 14)}`;
+          if (!(newState.newsFeed ?? []).some(n => n.id === cooldownId)) {
+            const team = newState.teams.find(t => t.roster.some(pl => pl.id === unhappyDiva.id))!;
+            const lastName = unhappyDiva.name.split(' ').slice(-1)[0];
+            const pick = <T>(arr: T[]): T => arr[Math.floor(Math.random() * arr.length)];
+            const detail = pick([
+              `${unhappyDiva.name} is reportedly frustrated with his role and has requested a trade.`,
+              `${lastName}'s camp has informed the front office: he wants out. A formal trade request is expected.`,
+              `${unhappyDiva.name} is seeking a change of scenery — sources say trade talks have quietly begun.`,
+              `Frustration has boiled over: ${unhappyDiva.name} wants a trade and his morale is at an all-time low.`,
+            ]);
+            newState = {
+              ...newState,
+              newsFeed: [{ id: cooldownId, category: 'trade_request' as const, headline: 'TRADE_REQUEST', content: detail, timestamp: newState.currentDay, realTimestamp: Date.now(), teamId: team?.id, playerId: unhappyDiva.id, isBreaking: true }, ...(newState.newsFeed ?? [])].slice(0, 100),
+            };
+          }
+        }
       }
     }
 
@@ -1093,23 +1110,51 @@ const App: React.FC = () => {
     const rivalryHistory = updateRivalryStats(state, result);
     newState = { ...state, teams: updatedTeams, history: [result, ...state.history], schedule: state.schedule.map(sg => sg.id === gameId ? { ...sg, played: true, resultId: result.id } : sg), rivalryHistory };
 
-    // Generate morale-based news (only for user team, at most once per player per 15 games)
+    // Generate morale-based news (only for user team, deduplicated per player per cooldown window)
     const userTeamUpdated = newState.teams.find(t => t.id === newState.userTeamId);
     if (userTeamUpdated) {
+      const pick = <T>(arr: T[]): T => arr[Math.floor(Math.random() * arr.length)];
       for (const p of userTeamUpdated.roster) {
         const prevMorale = moraleBeforeById.get(p.id) ?? 75;
         const gp = p.stats.gamesPlayed;
-        // Big single-game drop crossing a threshold
+
+        // Morale crosses 50 — post at most once per 7-day window per player
         if (prevMorale >= 50 && p.morale < 50 && gp % 5 === 0) {
-          newState = await addNewsItem(newState, 'transaction', {
-            player: p, team: userTeamUpdated,
-            detail: `${p.name} is frustrated — morale has dropped to a concerning level. Expect a performance dip.`
-          }, false);
+          const cooldownId = `rumor-frustrated-${p.id}-w${Math.floor(newState.currentDay / 7)}`;
+          if (!(newState.newsFeed ?? []).some(n => n.id === cooldownId)) {
+            const avgMpg = gp > 0 ? (p.stats.minutes / gp).toFixed(1) : null;
+            const lastName = p.name.split(' ').slice(-1)[0];
+            const detail = pick([
+              `${p.name} is frustrated — morale has dropped to a concerning level. Expect a performance dip.`,
+              `${lastName}'s confidence is wavering. Sources inside the locker room say he's not happy with his situation.`,
+              ...(avgMpg ? [`${p.name} is struggling with his usage. Averaging ${avgMpg} MPG isn't what he expected when he signed.`] : []),
+            ]);
+            newState = {
+              ...newState,
+              newsFeed: [{ id: cooldownId, category: 'transaction' as const, headline: 'TRANSACTION', content: detail, timestamp: newState.currentDay, realTimestamp: Date.now(), teamId: userTeamUpdated.id, playerId: p.id, isBreaking: false }, ...(newState.newsFeed ?? [])].slice(0, 100),
+            };
+          }
         } else if (prevMorale >= 35 && p.morale < 35 && p.personalityTraits?.includes('Diva/Star')) {
-          newState = await addNewsItem(newState, 'transaction', {
-            player: p, team: userTeamUpdated,
-            detail: `${p.name} is deeply unhappy with their current role. Trade rumors may follow.`
-          }, true);
+          // Deeply unhappy Diva — cooldown of 12 sim days per player
+          const cooldownId = `rumor-deeplyunhappy-${p.id}-w${Math.floor(newState.currentDay / 12)}`;
+          if (!(newState.newsFeed ?? []).some(n => n.id === cooldownId)) {
+            const avgMpg = gp > 0 ? (p.stats.minutes / gp).toFixed(1) : null;
+            const onLossStreak = userTeamUpdated.streak <= -3;
+            const lastName = p.name.split(' ').slice(-1)[0];
+            const city = userTeamUpdated.city;
+            const detail = pick([
+              `${p.name} is frustrated with his limited role — sources say he's exploring trade options.`,
+              `${lastName}'s morale has dropped significantly. He's been vocal about wanting more minutes.`,
+              `Tension in ${city}: ${lastName} reportedly unhappy with his usage. Trade talks could heat up.`,
+              `${p.name} feels underutilized — expects a bigger role or a change of scenery.`,
+              ...(avgMpg ? [`${p.name} averaging just ${avgMpg} MPG — his camp has made clear this isn't what he signed up for.`] : []),
+              ...(onLossStreak ? [`${city}'s losing skid has taken a toll: ${lastName} is reportedly unhappy and his future with the team is uncertain.`] : []),
+            ]);
+            newState = {
+              ...newState,
+              newsFeed: [{ id: cooldownId, category: 'rumor' as const, headline: 'RUMOR', content: detail, timestamp: newState.currentDay, realTimestamp: Date.now(), teamId: userTeamUpdated.id, playerId: p.id, isBreaking: true }, ...(newState.newsFeed ?? [])].slice(0, 100),
+            };
+          }
         }
       }
     }

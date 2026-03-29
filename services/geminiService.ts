@@ -37,6 +37,11 @@ export const generateNewsHeadline = async (category: NewsCategory, data: { playe
       `Sources close to ${name}'s camp say he's grown restless. A change of scenery could come before the deadline.`,
       `Rumblings out of ${name}'s locker room: his relationship with the front office is frosty.`,
       `Multiple scouts spotted at ${name}'s last three games — never a coincidence this late in the season.`,
+      `${name} is frustrated with his limited role — sources say he's quietly exploring trade options.`,
+      `${name} feels underutilized. His camp expects a bigger role or they'll push for a move.`,
+      `Whispers around the league: ${name} has grown unhappy. His morale has been slipping for weeks.`,
+      `${name} hasn't been his usual self lately. Insiders point to tension with the coaching staff over usage.`,
+      `Tension is building: ${name} reportedly wants more minutes and has voiced his frustration internally.`,
     ]);
     case 'transaction': return p([
       `${name} has been officially acquired. Expect an immediate impact on the rotation.`,
