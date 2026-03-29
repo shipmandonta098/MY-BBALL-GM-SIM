@@ -1312,7 +1312,11 @@ const App: React.FC = () => {
           : tdSetting === 'Week 16' ? 0.63
           : 0.49;
         if (deadlinePct !== null && pct >= deadlinePct) {
-          newState = { ...newState, tradeDeadlinePassed: true, seasonPhase: 'Trade Deadline' as SeasonPhase };
+          // Expire any pending incoming trade proposals — window is now closed
+          const expiredProposals = (newState.incomingTradeProposals ?? []).map(p =>
+            p.status === 'incoming' ? { ...p, status: 'rejected' as const } : p
+          );
+          newState = { ...newState, tradeDeadlinePassed: true, seasonPhase: 'Trade Deadline' as SeasonPhase, incomingTradeProposals: expiredProposals };
           try {
             const aiDeadlineResult = aiGMTradeDeadlineAction(newState);
             newState = aiDeadlineResult.updatedState;

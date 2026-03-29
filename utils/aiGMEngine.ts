@@ -1343,8 +1343,10 @@ export function generateAITradeProposalsForUser(
   const userTeam = state.teams.find(t => t.id === state.userTeamId);
   if (!userTeam) return [];
 
-  // Skip offseason and early season
+  // Only valid during regular season, before the trade deadline, and outside playoffs
   if (state.isOffseason) return [];
+  if (state.tradeDeadlinePassed) return [];
+  if (state.playoffBracket) return [];
   const totalPlayed = userTeam.wins + userTeam.losses;
   if (totalPlayed < 5) return [];
 
