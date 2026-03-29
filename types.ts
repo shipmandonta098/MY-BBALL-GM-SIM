@@ -753,6 +753,7 @@ export interface LeagueState {
   freeAgents: Player[];
   coachPool: Coach[];
   savedTrades: TradeProposal[];
+  incomingTradeProposals?: TradeProposal[];
   newsFeed: NewsItem[];
   transactions: Transaction[];
   powerRankingHistory?: PowerRankingSnapshot[];
