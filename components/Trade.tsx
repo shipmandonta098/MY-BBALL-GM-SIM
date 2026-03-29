@@ -7,9 +7,11 @@ interface TradeProps {
   league: LeagueState;
   updateLeague: (updated: Partial<LeagueState>) => void;
   recordTransaction: (state: LeagueState, type: any, teamIds: string[], description: string, playerIds?: string[], value?: number) => Transaction[];
+  initialProposal?: TradeProposal | null;
+  onClearInitialProposal?: () => void;
 }
 
-const Trade: React.FC<TradeProps> = ({ league, updateLeague, recordTransaction }) => {
+const Trade: React.FC<TradeProps> = ({ league, updateLeague, recordTransaction, initialProposal, onClearInitialProposal }) => {
   const [activeSubTab, setActiveSubTab] = useState<'machine' | 'finder' | 'block' | 'saved'>('machine');
   const [partnerTeamId, setPartnerTeamId] = useState<string>(
     league.teams.find(t => t.id !== league.userTeamId)?.id || ''
@@ -31,6 +33,17 @@ const Trade: React.FC<TradeProps> = ({ league, updateLeague, recordTransaction }
   const partnerTeam = league.teams.find(t => t.id === partnerTeamId)!;
 
   const isDeadlinePassed = !!league.tradeDeadlinePassed;
+
+  // Pre-fill trade machine when counter-proposing from Trade Proposals tab
+  useEffect(() => {
+    if (!initialProposal) return;
+    setPartnerTeamId(initialProposal.partnerTeamId);
+    // For a counter: swap what user gives/receives so user can adjust from the AI's offer
+    setUserPieces(initialProposal.userPieces);
+    setPartnerPieces(initialProposal.partnerPieces);
+    setActiveSubTab('machine');
+    onClearInitialProposal?.();
+  }, [initialProposal]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Asset Value Calculation
   const getAssetValue = (piece: TradePiece, forTeam: Team): number => {

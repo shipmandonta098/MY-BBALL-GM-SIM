@@ -7,7 +7,7 @@ import { autoSimAllStarWeekend } from './utils/allStarSim';
 import { snapshotPlayerStats } from './utils/playerUtils';
 import { generateGameRecap, generateScoutingReport, generateSeasonNarrative, generateCoachScoutingReport, generateNewsHeadline } from './services/geminiService';
 import { generateAwards } from './utils/awardEngine';
-import { assignAIPersonalities, runAIGMOffseason, aiGMTradeDeadlineAction, aiGMInSeasonTrades, aiGMPreOffseasonAgreements } from './utils/aiGMEngine';
+import { assignAIPersonalities, runAIGMOffseason, aiGMTradeDeadlineAction, aiGMInSeasonTrades, aiGMPreOffseasonAgreements, generateAITradeProposalsForUser } from './utils/aiGMEngine';
 import { db } from './db';
 import { NavigationProvider } from './context/NavigationContext';
 
@@ -25,6 +25,7 @@ import Coaching from './components/Coaching';
 import Stats from './components/Stats';
 import Finances from './components/Finances';
 import Trade from './components/Trade';
+import TradeProposals from './components/TradeProposals';
 import NewsFeed from './components/NewsFeed';
 import Expansion from './components/Expansion';
 import Awards from './components/Awards';
@@ -104,7 +105,8 @@ function pickInterimCoach(
 const App: React.FC = () => {
   const [status, setStatus] = useState<AppStatus>('title');
   const [league, setLeague] = useState<LeagueState | null>(null);
-  const [activeTab, setActiveTab] = useState<'dashboard' | 'news' | 'roster' | 'rotations' | 'free_agency' | 'results' | 'standings' | 'schedule' | 'draft' | 'coaching' | 'stats' | 'finances' | 'trade' | 'expansion' | 'settings' | 'coach_market' | 'awards' | 'playoffs' | 'transactions' | 'power_rankings' | 'gm_profile' | 'team_management' | 'players' | 'allstar' | 'league_history' | 'franchise_history'>('dashboard');
+  const [activeTab, setActiveTab] = useState<'dashboard' | 'news' | 'roster' | 'rotations' | 'free_agency' | 'results' | 'standings' | 'schedule' | 'draft' | 'coaching' | 'stats' | 'finances' | 'trade' | 'trade_proposals' | 'expansion' | 'settings' | 'coach_market' | 'awards' | 'playoffs' | 'transactions' | 'power_rankings' | 'gm_profile' | 'team_management' | 'players' | 'allstar' | 'league_history' | 'franchise_history'>('dashboard');
+  const [counterProposal, setCounterProposal] = useState<import('./types').TradeProposal | null>(null);
   const [rosterTeamId, setRosterTeamId] = useState<string>('');
   const [teamManagementId, setTeamManagementId] = useState<string>('');
   const [loading, setLoading] = useState(false);
@@ -152,6 +154,64 @@ const App: React.FC = () => {
       value
     };
     return [newTransaction, ...(state.transactions || [])].slice(0, 1000);
+  };
+
+  /** Accept an incoming AI trade proposal: execute the trade and remove the proposal. */
+  const handleAcceptProposal = (proposal: TradeProposal) => {
+    if (!league) return;
+    const userTeam = league.teams.find(t => t.id === league.userTeamId)!;
+    const partnerTeam = league.teams.find(t => t.id === proposal.partnerTeamId);
+    if (!partnerTeam) return;
+
+    const season = league.season;
+    const snappedUserPlayers = proposal.userPieces
+      .filter(p => p.type === 'player')
+      .map(p => snapshotPlayerStats(p.data as Player, userTeam.id, userTeam.name, userTeam.abbreviation, season, true));
+    const snappedPartnerPlayers = proposal.partnerPieces
+      .filter(p => p.type === 'player')
+      .map(p => snapshotPlayerStats(p.data as Player, partnerTeam.id, partnerTeam.name, partnerTeam.abbreviation, season, true));
+
+    const pickMatch = (piece: { type: string; data: any }, teamPick: { originalTeamId: string; round: number; year?: number }) =>
+      piece.type === 'pick' &&
+      piece.data.originalTeamId === teamPick.originalTeamId &&
+      piece.data.round === teamPick.round &&
+      piece.data.year === teamPick.year;
+
+    const updatedTeams = league.teams.map(t => {
+      let roster = [...t.roster];
+      let picks  = [...t.picks];
+      if (t.id === userTeam.id) {
+        roster = roster.filter(p => !proposal.userPieces.some(up => up.type === 'player' && (up.data as Player).id === p.id));
+        picks  = picks.filter(pk => !proposal.userPieces.some(up => pickMatch(up, pk)));
+        roster = [...roster, ...snappedPartnerPlayers];
+        picks  = [...picks, ...proposal.partnerPieces.filter(p => p.type === 'pick').map(p => ({ ...p.data, currentTeamId: userTeam.id }))];
+      }
+      if (t.id === partnerTeam.id) {
+        roster = roster.filter(p => !proposal.partnerPieces.some(pp => pp.type === 'player' && (pp.data as Player).id === p.id));
+        picks  = picks.filter(pk => !proposal.partnerPieces.some(pp => pickMatch(pp, pk)));
+        roster = [...roster, ...snappedUserPlayers];
+        picks  = [...picks, ...proposal.userPieces.filter(p => p.type === 'pick').map(p => ({ ...p.data, currentTeamId: partnerTeam.id }))];
+      }
+      return { ...t, roster, picks };
+    });
+
+    const fmtPiece = (piece: { type: string; data: any }) => {
+      if (piece.type === 'player') return (piece.data as Player).name;
+      const pk = piece.data;
+      return `${pk.year ?? league.season} ${pk.round === 1 ? '1st' : '2nd'}`;
+    };
+    const description = `${userTeam.name} trade ${proposal.userPieces.map(fmtPiece).join(', ')} to ${partnerTeam.name} for ${proposal.partnerPieces.map(fmtPiece).join(', ')}.`;
+    const playerIds = [
+      ...proposal.userPieces.filter(p => p.type === 'player').map(p => (p.data as Player).id),
+      ...proposal.partnerPieces.filter(p => p.type === 'player').map(p => (p.data as Player).id),
+    ];
+    const updatedTransactions = recordTransaction(league, 'trade', [userTeam.id, partnerTeam.id], description, playerIds);
+
+    updateLeagueState({
+      teams: updatedTeams,
+      transactions: updatedTransactions,
+      incomingTradeProposals: (league.incomingTradeProposals ?? []).filter(p => p.id !== proposal.id),
+    });
   };
 
   /** Compute the current season phase from state */
@@ -1178,6 +1238,20 @@ const App: React.FC = () => {
           newState = tradeResult.updatedState;
         }
       } catch (_e) { /* non-fatal */ }
+
+      // ── Generate incoming AI-to-user trade proposals ──
+      try {
+        const newProposals = generateAITradeProposalsForUser(newState, newState.settings.difficulty ?? 'Medium');
+        if (newProposals.length > 0) {
+          newState = {
+            ...newState,
+            incomingTradeProposals: [
+              ...newProposals,
+              ...(newState.incomingTradeProposals ?? []),
+            ].slice(0, 20),
+          };
+        }
+      } catch (_e) { /* non-fatal */ }
     }
 
     // ── AI in-season signings (~30% chance per sim-day when FAs available) ──
@@ -2100,7 +2174,18 @@ const App: React.FC = () => {
           {activeTab === 'stats' && <Stats league={league} onViewRoster={handleViewRoster} onManageTeam={handleManageTeam} onViewPlayer={p => setSelectedPlayer(p)} />}
           {activeTab === 'players' && <Players league={league} onViewPlayer={p => setSelectedPlayer(p)} />}
           {activeTab === 'finances' && <Finances league={league} updateLeague={updateLeagueState} />}
-          {activeTab === 'trade' && <Trade league={league} updateLeague={updateLeagueState} recordTransaction={recordTransaction} />}
+          {activeTab === 'trade' && <Trade league={league} updateLeague={updateLeagueState} recordTransaction={recordTransaction} initialProposal={counterProposal} onClearInitialProposal={() => setCounterProposal(null)} />}
+          {activeTab === 'trade_proposals' && (
+            <TradeProposals
+              league={league}
+              updateLeague={updateLeagueState}
+              onAccept={handleAcceptProposal}
+              onCounter={(proposal) => {
+                setCounterProposal(proposal);
+                setActiveTab('trade');
+              }}
+            />
+          )}
           {activeTab === 'settings' && <Settings league={league} updateLeague={updateLeagueState} onRegenerateSchedule={async () => {
             try {
               const cur = leagueRef.current;

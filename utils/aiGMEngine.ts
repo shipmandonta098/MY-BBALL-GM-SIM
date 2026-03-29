@@ -6,7 +6,7 @@
 import {
   LeagueState, Team, Player, Prospect, Coach, DraftPick,
   NewsItem, Transaction, TransactionType, PlayerStatus, Position,
-  CoachBadge, CoachScheme,
+  CoachBadge, CoachScheme, TradeProposal, TradePiece,
 } from '../types';
 import { generateCoach } from '../constants';
 import { snapshotPlayerStats } from './playerUtils';
@@ -1329,3 +1329,181 @@ export const AI_GM_PERSONALITY_INFO: Record<AIGMPersonality, {
   'Superstar Chaser':  { color: 'text-purple-400',  description: 'Sacrifices depth for elite talent', focus: 'Star Power' },
   'Balanced':          { color: 'text-slate-300',   description: 'Conventional decisions, adapts to record', focus: 'Stability' },
 };
+
+// ─── AI-to-User Trade Proposal Generator ──────────────────────────────────────
+/**
+ * Generates plausible incoming trade proposals from AI GMs directed at the user.
+ * Called periodically (~every 7 sim days). Returns new proposals to append to
+ * state.incomingTradeProposals. Ensures salary matching and mutual fairness.
+ */
+export function generateAITradeProposalsForUser(
+  state: LeagueState,
+  difficulty: string
+): TradeProposal[] {
+  const userTeam = state.teams.find(t => t.id === state.userTeamId);
+  if (!userTeam) return [];
+
+  // Skip offseason and early season
+  if (state.isOffseason) return [];
+  const totalPlayed = userTeam.wins + userTeam.losses;
+  if (totalPlayed < 5) return [];
+
+  // Don't flood — stop generating if 3+ pending proposals already exist
+  const pending = (state.incomingTradeProposals ?? []).filter(p => p.status === 'incoming');
+  if (pending.length >= 3) return [];
+
+  const alreadyPendingTeamIds = new Set(pending.map(p => p.partnerTeamId));
+  const aiTeams = state.teams.filter(t => t.id !== state.userTeamId && !!t.aiGM);
+  const shuffled = [...aiTeams].sort(() => Math.random() - 0.5).slice(0, 5);
+  const proposals: TradeProposal[] = [];
+
+  for (const aiTeam of shuffled) {
+    if (proposals.length >= 2) break;
+    if (alreadyPendingTeamIds.has(aiTeam.id)) continue;
+
+    const { personality } = aiTeam.aiGM!;
+    const gab = aiTeam.wins - aiTeam.losses;
+    const isContending = gab >= 3 || personality === 'Win Now' || personality === 'Superstar Chaser';
+    const isRebuilding = gab <= -3 || personality === 'Rebuilder';
+
+    // Activity chance — personality-gated
+    const propChance =
+      personality === 'Win Now'          ? 0.50 :
+      personality === 'Superstar Chaser' ? 0.45 :
+      personality === 'Rebuilder'        ? 0.38 :
+      personality === 'Analytics'        ? 0.28 :
+      personality === 'Balanced'         ? 0.20 :
+      0.12; // Loyalist
+    if (Math.random() > propChance) continue;
+
+    let userPieces: TradePiece[] = [];   // what user must give
+    let partnerPieces: TradePiece[] = []; // what AI offers
+
+    if (isContending) {
+      // ── Contender wants a user veteran, offers picks ± young player ──────
+      const vetTargets = userTeam.roster
+        .filter(p => p.age >= 27 && p.rating >= 76 && p.contractYears <= 3 && !p.onTradeBlock === false || p.onTradeBlock)
+        .sort((a, b) => b.rating - a.rating);
+      // Also consider non-block veterans, just weighted lower
+      const allVetTargets = userTeam.roster
+        .filter(p => p.age >= 27 && p.rating >= 76 && p.contractYears <= 3)
+        .sort((a, b) => b.rating - a.rating);
+      const pool = vetTargets.length > 0 ? vetTargets : allVetTargets;
+      if (pool.length === 0) continue;
+      const target = pool[Math.floor(Math.random() * Math.min(3, pool.length))];
+
+      const aiFirstPicks = aiTeam.picks.filter(p => p.round === 1).sort((a, b) => (a.year ?? 9999) - (b.year ?? 9999));
+      const aiYoung = aiTeam.roster
+        .filter(p => p.age <= 25 && p.rating >= 66)
+        .sort((a, b) => b.rating - a.rating);
+
+      if (aiFirstPicks.length === 0 && aiYoung.length === 0) continue;
+
+      userPieces = [{ type: 'player', data: target }];
+
+      // Build offer: start with best pick
+      if (aiFirstPicks.length >= 1) {
+        partnerPieces.push({ type: 'pick', data: aiFirstPicks[0] });
+      }
+      // Add second pick if one pick isn't enough value
+      if (aiFirstPicks.length >= 2 && target.rating >= 85) {
+        partnerPieces.push({ type: 'pick', data: aiFirstPicks[1] });
+      }
+      // Add a young player for salary matching if needed
+      const userOutSalary = target.salary;
+      const aiOutSalary = partnerPieces.filter(p => p.type === 'player').reduce((s, p) => s + (p.data as Player).salary, 0);
+      if (userOutSalary > 5_000_000 && aiOutSalary < userOutSalary * 0.5 && aiYoung.length > 0) {
+        const salaryGap = userOutSalary - aiOutSalary;
+        const matchPick = aiYoung.find(p => p.salary >= salaryGap * 0.3 && p.salary <= userOutSalary * 1.25 + 100_000);
+        if (matchPick) partnerPieces.push({ type: 'player', data: matchPick });
+      }
+
+      if (partnerPieces.length === 0) continue;
+
+    } else if (isRebuilding) {
+      // ── Rebuilder wants user's picks or young talent, offers a veteran ──
+      const aiVets = aiTeam.roster
+        .filter(p => p.age >= 28 && p.rating >= 74 && p.contractYears <= 3)
+        .sort((a, b) => b.rating - a.rating);
+      if (aiVets.length === 0) continue;
+      const vet = aiVets[0];
+
+      partnerPieces = [{ type: 'player', data: vet }];
+
+      const userFirst = userTeam.picks.filter(p => p.round === 1);
+      const userYoung = userTeam.roster
+        .filter(p => p.age <= 24 && p.rating >= 65)
+        .sort((a, b) => b.rating - a.rating);
+
+      if (userFirst.length > 0 && (Math.random() > 0.45 || userYoung.length === 0)) {
+        userPieces = [{ type: 'pick', data: userFirst[0] }];
+        // Add a cheap filler for salary matching
+        const vetSalary = vet.salary;
+        const fillerNeeded = vetSalary > 8_000_000;
+        if (fillerNeeded && userYoung.length > 0) {
+          const filler = userYoung.find(p => p.salary <= vetSalary * 0.80);
+          if (filler) userPieces.push({ type: 'player', data: filler });
+        }
+      } else if (userYoung.length > 0) {
+        const youngTarget = userYoung[Math.floor(Math.random() * Math.min(2, userYoung.length))];
+        userPieces = [{ type: 'player', data: youngTarget }];
+      }
+
+      if (userPieces.length === 0) continue;
+
+    } else {
+      // ── Balanced / Analytics: need-based player swap ─────────────────────
+      const neededPos = mostNeededPosition(aiTeam);
+      const posTargets = userTeam.roster
+        .filter(p => p.position === neededPos && p.rating >= 74)
+        .sort((a, b) => b.rating - a.rating);
+      if (posTargets.length === 0) continue;
+      const target = posTargets[0];
+
+      const aiEquivalent = aiTeam.roster
+        .filter(p => p.rating >= target.rating - 8 && p.rating <= target.rating + 4 && p.position !== neededPos)
+        .sort((a, b) => Math.abs(a.rating - target.rating) - Math.abs(b.rating - target.rating));
+      if (aiEquivalent.length === 0) continue;
+
+      userPieces = [{ type: 'player', data: target }];
+      partnerPieces = [{ type: 'player', data: aiEquivalent[0] }];
+    }
+
+    if (userPieces.length === 0 || partnerPieces.length === 0) continue;
+
+    // ── Salary matching (125% rule) ────────────────────────────────────────
+    const salaryCapType = state.settings.salaryCapType;
+    if (salaryCapType === 'Hard Cap' || salaryCapType === 'Soft Cap') {
+      const userOut = userPieces.filter(p => p.type === 'player').reduce((s, p) => s + (p.data as Player).salary, 0);
+      const aiOut  = partnerPieces.filter(p => p.type === 'player').reduce((s, p) => s + (p.data as Player).salary, 0);
+      if (userOut > 0 && aiOut > userOut * 1.25 + 100_000) continue;
+      if (aiOut  > 0 && userOut > aiOut  * 1.25 + 100_000) continue;
+    }
+
+    // ── Fairness gates — both sides must accept ────────────────────────────
+    const userReceiving: TradePackage = {
+      players: partnerPieces.filter(p => p.type === 'player').map(p => p.data as Player),
+      picks:   partnerPieces.filter(p => p.type === 'pick').map(p => p.data as DraftPick),
+    };
+    const userSending: TradePackage = {
+      players: userPieces.filter(p => p.type === 'player').map(p => p.data as Player),
+      picks:   userPieces.filter(p => p.type === 'pick').map(p => p.data as DraftPick),
+    };
+
+    // AI must genuinely want this trade
+    if (!evaluateTrade(userSending, userReceiving, personality, state.teams.length, difficulty, state.season)) continue;
+    // Proposal must not be exploitative of the user (no pure robbery)
+    if (!evaluateTrade(userReceiving, userSending, 'Balanced', state.teams.length, 'Easy', state.season)) continue;
+
+    proposals.push({
+      id: `incoming-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+      partnerTeamId: aiTeam.id,
+      userPieces,
+      partnerPieces,
+      date: state.currentDay,
+      status: 'incoming',
+    });
+  }
+
+  return proposals;
+}
