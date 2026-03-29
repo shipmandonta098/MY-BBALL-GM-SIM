@@ -443,8 +443,15 @@ const Playoffs: React.FC<PlayoffsProps> = ({ league, updateLeague, onStartOffsea
     const isUserInvolved = t1.id === league.userTeamId || t2.id === league.userTeamId;
     const totalGames = series.team1Wins + series.team2Wins;
 
+    // Resolve played games from history for box score access
+    const playedGames = useMemo(() =>
+      series.games
+        .map(gid => league.history.find(h => h.id === gid))
+        .filter(Boolean) as GameResult[],
+    [series.games, league.history]);
+
     return (
-      <div 
+      <div
         className={`bg-slate-900 border rounded-2xl p-4 flex flex-col gap-3 transition-all ${isUserInvolved ? 'border-amber-500 ring-1 ring-amber-500/20' : 'border-slate-800'} ${series.winnerId ? 'opacity-60' : ''}`}
       >
         <div className="flex justify-between items-center mb-1">
@@ -471,8 +478,40 @@ const Playoffs: React.FC<PlayoffsProps> = ({ league, updateLeague, onStartOffsea
           </div>
           <span className="font-mono text-lg">{series.team2Wins}</span>
         </div>
+
+        {/* Played games list — each with score + box score button */}
+        {playedGames.length > 0 && (
+          <div className="border-t border-slate-800/60 pt-2 space-y-1">
+            {playedGames.map((g, idx) => {
+              const homeTeam = league.teams.find(t => t.id === g.homeTeamId)!;
+              const awayTeam = league.teams.find(t => t.id === g.awayTeamId)!;
+              const homeWon  = g.homeScore > g.awayScore;
+              return (
+                <div key={g.id} className="flex items-center justify-between gap-2">
+                  <span className="text-[9px] font-black text-slate-600 uppercase w-8 shrink-0">G{idx + 1}</span>
+                  <span className={`text-[10px] font-bold uppercase truncate max-w-[60px] ${homeWon ? 'text-slate-200' : 'text-slate-500'}`}>
+                    {homeTeam?.abbreviation ?? homeTeam?.name?.slice(0, 3)}
+                  </span>
+                  <span className="font-mono text-[11px] font-bold text-slate-300 tabular-nums">
+                    {g.homeScore}–{g.awayScore}
+                  </span>
+                  <span className={`text-[10px] font-bold uppercase truncate max-w-[60px] ${!homeWon ? 'text-slate-200' : 'text-slate-500'}`}>
+                    {awayTeam?.abbreviation ?? awayTeam?.name?.slice(0, 3)}
+                  </span>
+                  <button
+                    onClick={() => onViewBoxScore(g, homeTeam, awayTeam)}
+                    className="shrink-0 px-2 py-0.5 text-[8px] font-black uppercase bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-white rounded-md transition-all"
+                  >
+                    Box
+                  </button>
+                </div>
+              );
+            })}
+          </div>
+        )}
+
         {!series.winnerId && (
-          <button 
+          <button
             onClick={() => simulatePlayoffGame(series.id)}
             disabled={isSimulating}
             className="w-full py-1.5 bg-slate-800 hover:bg-amber-500 hover:text-slate-950 text-[9px] font-black uppercase rounded-lg transition-all"

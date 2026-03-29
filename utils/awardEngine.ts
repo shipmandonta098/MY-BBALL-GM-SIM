@@ -61,12 +61,17 @@ export const generateAwards = async (teams: Team[], year: number): Promise<Seaso
   };
   roy.blurb = await generateAwardBlurb('Rookie of the Year', roy);
 
-  // 4. Sixth Man — must not be a rotation starter (check both player.status and actual rotation)
+  // 4. Sixth Man — bench players only; three independent checks to prevent any starter slipping through:
+  //    (a) player.status must be Bench or Rotation — never Starter
+  //    (b) not listed in the team's active rotation.starters object
+  //    (c) gamesStarted must be ≤ 20 % of gamesPlayed (guards against status being stale
+  //        when a bench player was promoted mid-season and accumulated starter stats)
   const sixthManCandidates = allPlayers.filter(entry => {
-    // Exclude anyone who is a genuine starter in the team's rotation
+    if (entry.p.status === 'Starter') return false;
     const rotationStarters = Object.values(entry.t.rotation?.starters ?? {});
     if (rotationStarters.includes(entry.p.id)) return false;
-    // Also respect player.status — Starter status means not eligible
+    const gp = Math.max(1, entry.p.stats.gamesPlayed);
+    if ((entry.p.stats.gamesStarted ?? 0) > Math.floor(gp * 0.20)) return false;
     return entry.p.status === 'Bench' || entry.p.status === 'Rotation';
   });
   const sixthManCandidate = sixthManCandidates.sort((a, b) => getPlayerStatsValue(b.p, b.t) - getPlayerStatsValue(a.p, a.t))[0];
