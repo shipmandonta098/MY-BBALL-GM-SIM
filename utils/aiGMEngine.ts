@@ -372,7 +372,14 @@ export function runAIGMOffseason(
       newsItems.push(makeNewsItem(
         'signing',
         `${t.abbreviation} ROSTER MOVE`,
-        `${t.name} have waived ${p.name} (${p.position}, ${p.rating} OVR).`,
+        (() => {
+          const templates = [
+            `${t.name} have released ${p.name}, clearing roster space as the front office reshapes the squad.`,
+            `${p.name} has been waived by ${t.name}. He'll clear waivers and become available to other teams.`,
+            `${t.name} part ways with ${p.name} in a roster move. He becomes an unrestricted free agent immediately.`,
+          ];
+          return templates[Math.floor(Math.random() * templates.length)];
+        })(),
         s.currentDay, t.id, p.id
       ));
       txs.push(makeTransaction(s, 'release', [t.id], `${t.name} released ${p.name}.`, [p.id]));
@@ -405,7 +412,16 @@ export function runAIGMOffseason(
       newsItems.push(makeNewsItem(
         'signing',
         `${t.abbreviation} RE-SIGNS`,
-        `${t.name} have re-signed ${fa.name} (${fa.position}, ${fa.rating} OVR) to a ${signedPlayer.contractYears}-year deal worth $${(offerAmt / 1_000_000).toFixed(1)}M.`,
+        (() => {
+          const yrs = signedPlayer.contractYears;
+          const sal = (offerAmt / 1_000_000).toFixed(1);
+          const templates = [
+            `${fa.name} stays in ${t.name} on a ${yrs}-year, $${sal}M deal. The front office locks up a key piece of the core.`,
+            `${t.name} keep ${fa.name} off the market — ${yrs} years, $${sal}M. He was a priority re-sign and the team got it done.`,
+            `${fa.name} is staying put. He and ${t.name} agreed to a ${yrs}-year extension worth $${sal}M per front-office sources.`,
+          ];
+          return templates[Math.floor(Math.random() * templates.length)];
+        })(),
         s.currentDay, t.id, fa.id, fa.rating >= 88
       ));
       txs.push(makeTransaction(s, 'signing', [t.id], `${t.name} re-signed ${fa.name}.`, [fa.id]));
@@ -480,7 +496,16 @@ export function runAIGMOffseason(
       newsItems.push(makeNewsItem(
         'signing',
         `${t.abbreviation} SIGNING`,
-        `${t.name} have signed ${fa.name} (${fa.position}, ${fa.rating} OVR) to a ${signedPlayer.contractYears}-year deal worth $${(offerAmt / 1_000_000).toFixed(1)}M.`,
+        (() => {
+          const yrs = signedPlayer.contractYears;
+          const sal = (offerAmt / 1_000_000).toFixed(1);
+          const templates = [
+            `${t.name} land ${fa.name} in free agency — ${yrs} years, $${sal}M. He fills a clear need and upgrades the rotation.`,
+            `${fa.name} picks ${t.name}, agreeing to a ${yrs}-year deal worth $${sal}M. A statement signing for the front office.`,
+            `The deal is done: ${fa.name} joins ${t.name} on a ${yrs}-year, $${sal}M contract. Expect him in the lineup immediately.`,
+          ];
+          return templates[Math.floor(Math.random() * templates.length)];
+        })(),
         s.currentDay, t.id, fa.id, fa.rating >= 85
       ));
       txs.push(makeTransaction(
@@ -501,7 +526,14 @@ export function runAIGMOffseason(
         newsItems.push(makeNewsItem(
           'firing',
           `${t.abbreviation} COACH FIRED`,
-          `${t.name} have parted ways with Head Coach ${hc.name} after a ${wins}-${losses} season.`,
+          (() => {
+            const templates = [
+              `${hc.name} is out in ${t.name} after a ${wins}-${losses} season. The front office decided a change was necessary to move forward.`,
+              `${t.name} fire Head Coach ${hc.name} following a disappointing ${wins}-${losses} campaign. A national search begins immediately.`,
+              `After going ${wins}-${losses}, ${hc.name} will not return as Head Coach of ${t.name}. The organization is pivoting in a new direction.`,
+            ];
+            return templates[Math.floor(Math.random() * templates.length)];
+          })(),
           s.currentDay, t.id, undefined, true
         ));
         txs.push(makeTransaction(s, 'firing', [t.id], `${t.name} fired Head Coach ${hc.name}.`));
@@ -523,7 +555,14 @@ export function runAIGMOffseason(
         newsItems.push(makeNewsItem(
           'hiring',
           `${t.abbreviation} NEW COACH`,
-          `${t.name} have hired Coach ${hiredCoach.name} as their new Head Coach.`,
+          (() => {
+            const templates = [
+              `${t.name} introduce ${hiredCoach.name} as their new Head Coach. He inherits a roster ready to be molded.`,
+              `${hiredCoach.name} is the new Head Coach of ${t.name}. The hire signals a clear shift in philosophy for the organization.`,
+              `${t.name} make it official — ${hiredCoach.name} takes the reins. He'll lead his first practice with the squad this week.`,
+            ];
+            return templates[Math.floor(Math.random() * templates.length)];
+          })(),
           s.currentDay, t.id, undefined, false
         ));
         txs.push(makeTransaction(s, 'hiring', [t.id], `${t.name} hired ${hiredCoach.name} as Head Coach.`));
@@ -828,7 +867,14 @@ export function aiGMTradeDeadlineAction(
           newsItems.push(makeNewsItem(
             'trade',
             `DEADLINE TRADE: ${vet.name} → ${contenderData.abbreviation}`,
-            `${contenderData.name} acquired ${vet.name} (${vet.position}, ${vet.rating} OVR) from ${rebuilderData.name} for ${youngPlayer.name} and a ${yearStr} 1st-round pick.`,
+            (() => {
+              const templates = [
+                `DEADLINE: ${contenderData.name} land ${vet.name} from ${rebuilderData.name} in exchange for ${youngPlayer.name} and a ${yearStr} first-round pick. A bold move for a title push.`,
+                `${rebuilderData.name} trade ${vet.name} to ${contenderData.name} for ${youngPlayer.name} and a ${yearStr} 1st. ${rebuilderData.name} collect assets; ${contenderData.name} go all in.`,
+                `${vet.name} is headed to ${contenderData.name}. The package back to ${rebuilderData.name}: ${youngPlayer.name} plus a ${yearStr} lottery pick. Both sides believe they won.`,
+              ];
+              return templates[Math.floor(Math.random() * templates.length)];
+            })(),
             s.currentDay, rebuilderData.id, vet.id, true
           ));
           transactions.push(makeTransaction(
@@ -876,7 +922,14 @@ export function aiGMTradeDeadlineAction(
           newsItems.push(makeNewsItem(
             'trade',
             `DEADLINE TRADE: ${vet.name} → ${contenderData.abbreviation}`,
-            `${contenderData.name} acquired ${vet.name} (${vet.position}, ${vet.rating} OVR) from ${rebuilderData.name} in exchange for a ${yearStr} 1st-round pick.`,
+            (() => {
+              const templates = [
+                `DEADLINE: ${contenderData.name} acquire ${vet.name} from ${rebuilderData.name} for a ${yearStr} first-round pick. A pure rental trade — ${contenderData.name} bet on themselves.`,
+                `${rebuilderData.name} flip ${vet.name} to ${contenderData.name} for a ${yearStr} 1st. A clean, straightforward deal as the deadline buzzer sounds.`,
+                `${vet.name} heads to ${contenderData.name} at the deadline. The price: a ${yearStr} first-rounder. ${rebuilderData.name} continue stacking future assets.`,
+              ];
+              return templates[Math.floor(Math.random() * templates.length)];
+            })(),
             s.currentDay, rebuilderData.id, vet.id, true
           ));
           transactions.push(makeTransaction(
