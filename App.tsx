@@ -752,7 +752,7 @@ const App: React.FC = () => {
           if (!(newState.newsFeed ?? []).some(n => n.id === cooldownId)) {
             const team = newState.teams.find(t => t.roster.some(pl => pl.id === unhappyDiva.id))!;
             const lastName = unhappyDiva.name.split(' ').slice(-1)[0];
-            const pick = <T>(arr: T[]): T => arr[Math.floor(Math.random() * arr.length)];
+            const pick = <T,>(arr: T[]): T => arr[Math.floor(Math.random() * arr.length)];
             const detail = pick([
               `${unhappyDiva.name} is reportedly frustrated with his role and has requested a trade.`,
               `${lastName}'s camp has informed the front office: he wants out. A formal trade request is expected.`,
@@ -1113,7 +1113,7 @@ const App: React.FC = () => {
     // Generate morale-based news (only for user team, deduplicated per player per cooldown window)
     const userTeamUpdated = newState.teams.find(t => t.id === newState.userTeamId);
     if (userTeamUpdated) {
-      const pick = <T>(arr: T[]): T => arr[Math.floor(Math.random() * arr.length)];
+      const pick = <T,>(arr: T[]): T => arr[Math.floor(Math.random() * arr.length)];
       for (const p of userTeamUpdated.roster) {
         const prevMorale = moraleBeforeById.get(p.id) ?? 75;
         const gp = p.stats.gamesPlayed;
