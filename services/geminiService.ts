@@ -26,16 +26,44 @@ export const generateAwardBlurb = async (awardName: string, winner: AwardWinner)
 };
 
 export const generateNewsHeadline = async (category: NewsCategory, data: { player?: Player, team?: Team, coach?: Coach, detail?: string }) => {
+  // If caller already provided rich detail, use it directly — it IS the content.
+  if (data.detail) return data.detail;
+
   const name = data.player?.name || data.coach?.name || data.team?.name || "League source";
-  
+  const p = <T>(arr: T[]): T => arr[Math.floor(Math.random() * arr.length)];
+
   switch(category) {
-    case 'rumor': return `LEAGUE INSIDER: Hearing whispers that ${name} is looking for a major change of scenery before the deadline.`;
-    case 'transaction': return `OFFICIAL: ${name} has finalized a move. Details internal but impact expected to be immediate.`;
-    case 'injury': return `MEDICAL UPDATE: ${name} is dealing with a significant physical setback. Staff optimistic but cautious on return timeline.`;
-    case 'firing': return `BREAKING: The organization has parted ways with ${name}. A search for a replacement begins immediately.`;
-    case 'trade_request': return `DRAMA: Sources indicate ${name} has formally requested a trade. The front office is exploring all options.`;
-    case 'award': return `CELEBRATION: ${name} has been recognized for outstanding performance. A career milestone reached.`;
-    default: return `UPDATE: ${name} continues to be a major talking point across the league landscape.`;
+    case 'rumor': return p([
+      `Sources close to ${name}'s camp say he's grown restless. A change of scenery could come before the deadline.`,
+      `Rumblings out of ${name}'s locker room: his relationship with the front office is frosty.`,
+      `Multiple scouts spotted at ${name}'s last three games — never a coincidence this late in the season.`,
+    ]);
+    case 'transaction': return p([
+      `${name} has been officially acquired. Expect an immediate impact on the rotation.`,
+      `The deal is done. ${name} joins his new team as the front office makes a statement.`,
+      `${name} has cleared waivers and the transaction is finalized. The move reshapes the roster.`,
+    ]);
+    case 'injury': return p([
+      `${name} will miss time after leaving practice early. More details expected from the medical staff.`,
+      `${name} listed as day-to-day after reporting discomfort. Team is monitoring the situation closely.`,
+      `Trainers escorted ${name} off the court during shootaround. Status uncertain heading into the next game.`,
+    ]);
+    case 'firing': return p([
+      `The organization has officially parted ways with ${name}. A nationwide search for a replacement begins now.`,
+      `${name} is out. Sources say the decision had been building for weeks before today's announcement.`,
+      `${name} will not return. The front office thanked him for his service but made clear it was time for a change.`,
+    ]);
+    case 'trade_request': return p([
+      `${name} has formally requested a trade, per league sources. The front office is weighing its options.`,
+      `The news is confirmed: ${name} wants out. His camp submitted a formal trade request this morning.`,
+      `Sources say ${name} informed team leadership of his desire to be moved. Talks with other teams have begun.`,
+    ]);
+    case 'award': return p([
+      `${name} has been honored for a remarkable season. A milestone moment in what is becoming a legendary career.`,
+      `The award goes to ${name} — and it's hard to argue with the choice. He was the best at his craft this year.`,
+      `${name} takes home the hardware. His peers voted, and the message was unanimous.`,
+    ]);
+    default: return `${name} remains a major talking point across the league.`;
   }
 };
 

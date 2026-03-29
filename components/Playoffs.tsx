@@ -135,15 +135,54 @@ const Playoffs: React.FC<PlayoffsProps> = ({ league, updateLeague, onStartOffsea
 
     let newsFeed = [...state.newsFeed];
 
+    // Helper: build an engaging series-complete headline
+    const buildSeriesContent = (winner: Team, loser: Team, winsW: number, winsL: number): string => {
+      const pick = (arr: string[]): string => arr[Math.floor(Math.random() * arr.length)];
+      const margin = Math.abs(result.homeScore - result.awayScore);
+      const topLine = result.topPerformers?.[0];
+      const topName = topLine ? (() => {
+        const allRoster = [...winner.roster, ...loser.roster];
+        return allRoster.find(p => p.id === topLine.playerId)?.name ?? null;
+      })() : null;
+      const seriesRecord = `${winsW}-${winsL}`;
+      const finalScore = `${Math.max(result.homeScore, result.awayScore)}-${Math.min(result.homeScore, result.awayScore)}`;
+      const roundName = newSeries.round === 4 ? 'Championship' : newSeries.round === 3 ? 'Conference Finals' : newSeries.round === 2 ? 'Semifinals' : 'First Round';
+
+      const isSweep = winsL === 0;
+      const isClose = winsL >= 3;
+      const isBlowout = margin >= 20;
+
+      if (isSweep) return pick([
+        `${winner.name} sweep the ${roundName} series in dominant fashion, dispatching ${loser.name} without dropping a single game. The message to the rest of the bracket is clear.`,
+        `Four and done. ${winner.name} eliminate ${loser.name} in a sweep to advance. ${topName ? `${topName} led the charge throughout.` : 'They never trailed in the series.'}`,
+        `${winner.name} roll through the ${roundName} — a clean sweep over ${loser.name}. They look like the team to beat.`,
+      ]);
+      if (isClose && isBlowout) return pick([
+        `After a grueling ${seriesRecord} series, ${winner.name} put it away emphatically — a ${finalScore} blowout in the deciding game ends ${loser.name}'s run.`,
+        `${winner.name} survive a back-and-forth ${roundName} series and close it out in convincing fashion, ${finalScore}. ${loser.name} fought hard but ran out of answers.`,
+      ]);
+      if (isClose) return pick([
+        `${winner.name} edge ${loser.name} in a hard-fought ${seriesRecord} series. The deciding game came down to the wire — final: ${finalScore}. ${topName ? `${topName} was brilliant.` : ''}`,
+        `A battle for the ages. ${winner.name} advance after a ${seriesRecord} war with ${loser.name}, winning the clincher ${finalScore}. Neither team gave an inch.`,
+        `${loser.name} pushed them to the brink, but ${winner.name} close out the ${roundName} ${seriesRecord}. A series that lived up to every expectation.`,
+      ]);
+      return pick([
+        `${winner.name} advance past ${loser.name} with a ${seriesRecord} series win, closing out ${finalScore}. ${topName ? `${topName} was the difference-maker.` : 'On to the next round.'}`,
+        `${winner.name} punch their ticket to the next round, beating ${loser.name} ${seriesRecord} in the ${roundName}. Final: ${finalScore}.`,
+        `The ${roundName} belongs to ${winner.name}. They eliminate ${loser.name} ${seriesRecord} and look primed for a deep run.`,
+      ]);
+    };
+
     if (newSeries.team1Wins === 4) {
       newSeries.winnerId = series.team1Id;
       rivalry.playoffSeriesCount += 1;
       const winner = updatedTeams.find(t => t.id === newSeries.winnerId)!;
+      const loser  = updatedTeams.find(t => t.id === series.team2Id)!;
       newsFeed.unshift({
         id: `playoff-win-${Date.now()}`,
         category: 'playoffs',
         headline: 'SERIES COMPLETE',
-        content: `${winner.name} have defeated their opponents and advanced!`,
+        content: buildSeriesContent(winner, loser, newSeries.team1Wins, newSeries.team2Wins),
         timestamp: state.currentDay,
         realTimestamp: Date.now(),
         teamId: winner.id,
@@ -154,11 +193,12 @@ const Playoffs: React.FC<PlayoffsProps> = ({ league, updateLeague, onStartOffsea
       newSeries.winnerId = series.team2Id;
       rivalry.playoffSeriesCount += 1;
       const winner = updatedTeams.find(t => t.id === newSeries.winnerId)!;
+      const loser  = updatedTeams.find(t => t.id === series.team1Id)!;
       newsFeed.unshift({
         id: `playoff-win-${Date.now()}`,
         category: 'playoffs',
         headline: 'SERIES COMPLETE',
-        content: `${winner.name} have defeated their opponents and advanced!`,
+        content: buildSeriesContent(winner, loser, newSeries.team2Wins, newSeries.team1Wins),
         timestamp: state.currentDay,
         realTimestamp: Date.now(),
         teamId: winner.id,

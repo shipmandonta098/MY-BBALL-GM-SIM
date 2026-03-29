@@ -621,7 +621,15 @@ const App: React.FC = () => {
     for (const { player, team } of recovering) {
       newState = await addNewsItem(newState, 'injury', {
         player, team,
-        detail: `${player.name} has been cleared and returns from ${player.injuryType ?? 'injury'}.`
+        detail: (() => {
+          const injType = player.injuryType ?? 'injury';
+          const templates = [
+            `${player.name} has been cleared by the medical staff and will return to the rotation after missing time with a ${injType}.`,
+            `Good news: ${player.name} is back. He's been given the green light following his ${injType} and is expected to make an immediate impact.`,
+            `${player.name} rejoins the lineup today, recovering ahead of schedule from his ${injType}. The team gets a key piece back.`,
+          ];
+          return templates[Math.floor(Math.random() * templates.length)];
+        })()
       }, false);
     }
     // Rare practice/travel illness
@@ -640,7 +648,16 @@ const App: React.FC = () => {
             })
           })
         };
-        newState = await addNewsItem(newState, 'injury', { player: unlucky, team, detail: `${unlucky.name} is dealing with an illness — day-to-day, expected back in ${days} day${days !== 1 ? 's' : ''}.` }, false);
+        const illnessDetail = (() => {
+          const d = days === 1 ? 'tomorrow' : `${days} days`;
+          const templates = [
+            `${unlucky.name} has been ruled out with an illness and is expected to return in ${d}. The team is being cautious.`,
+            `${unlucky.name} won't suit up while dealing with a virus. Team officials say he's expected back within ${d}.`,
+            `Practice bug hits ${unlucky.name}: he's listed as day-to-day with an illness, targeting a return in ${d}.`,
+          ];
+          return templates[Math.floor(Math.random() * templates.length)];
+        })();
+        newState = await addNewsItem(newState, 'injury', { player: unlucky, team, detail: illnessDetail }, false);
       }
     }
     // Facilities morale boost — elite facilities add up to +20 baseline morale per week
@@ -1043,7 +1060,16 @@ const App: React.FC = () => {
     for (const pLine of ejectedPlayers) {
       const team = newState.teams.find(t => t.id === (result.homePlayerStats.some(h => h.playerId === pLine.playerId) ? result.homeTeamId : result.awayTeamId))!;
       const player = team.roster.find(p => p.id === pLine.playerId)!;
-      newState = await addNewsItem(newState, 'injury', { player, team, detail: `${player.name} tossed — rivalry boils over!` }, true);
+      const ejDetail = (() => {
+        const templates = [
+          `${player.name} was ejected after a heated exchange escalated beyond control. He'll be subject to league review.`,
+          `Tempers flared and ${player.name} paid the price — thrown out after a second technical. His team finishes shorthanded.`,
+          `${player.name} loses his cool and gets the early exit. The crowd erupts as the benches empty briefly.`,
+          `${player.name} is gone — two technicals, no argument. The rivalry just got another chapter.`,
+        ];
+        return templates[Math.floor(Math.random() * templates.length)];
+      })();
+      newState = await addNewsItem(newState, 'injury', { player, team, detail: ejDetail }, true);
     }
 
     // Apply in-game injuries
@@ -1073,7 +1099,20 @@ const App: React.FC = () => {
         };
         newState = await addNewsItem(newState, 'injury', {
           player: injPlayer, team: injTeam,
-          detail: `${injPlayer.name} suffered a ${inj.injuryType} and is expected to miss ${inj.daysOut} day${inj.daysOut !== 1 ? 's' : ''}${wks}.`
+          detail: (() => {
+            const timeStr = wks ? wks.trim() : `${inj.daysOut} day${inj.daysOut !== 1 ? 's' : ''}`;
+            const severe = inj.daysOut >= 21;
+            const templates = severe ? [
+              `${injPlayer.name} is set for an extended absence after suffering a ${inj.injuryType}. Timeline: ${timeStr}. A significant blow to the team.`,
+              `${injPlayer.name} exits with a ${inj.injuryType} and faces a lengthy recovery — the team is scrambling to adjust their rotation. Expected out ${timeStr}.`,
+              `Devastating news: ${injPlayer.name} is down with a ${inj.injuryType}. He'll miss approximately ${timeStr}, a serious setback for his squad.`,
+            ] : [
+              `${injPlayer.name} left the floor with a ${inj.injuryType}. He's expected to miss ${timeStr} and will be re-evaluated as he progresses.`,
+              `${injPlayer.name} rolls out of tonight's game with a ${inj.injuryType}. Expected return: ${timeStr}.`,
+              `Trainers confirm ${injPlayer.name} has a ${inj.injuryType}. He'll be out approximately ${timeStr} — the team hopes the timeline is conservative.`,
+            ];
+            return templates[Math.floor(Math.random() * templates.length)];
+          })()
         }, inj.daysOut >= 14);
       }
     }
