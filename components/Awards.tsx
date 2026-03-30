@@ -356,7 +356,7 @@ const Awards: React.FC<AwardsProps> = ({ league, onScout, onScoutCoach, onManage
             <RaceTable title="MVP" candidates={awardRaces.mvp} columns={['PPG', 'TRB', 'AST', 'PER']} />
             <RaceTable title="DPOY" candidates={awardRaces.dpoy} columns={['BPG', 'SPG', 'TRB', 'DREB']} />
             <RaceTable title="ROY" candidates={awardRaces.roy} columns={['PPG', 'TRB', 'AST', 'OVR']} />
-            <RaceTable title="6th Man" candidates={awardRaces.smoy} columns={['PPG', 'TRB', 'AST', 'MIN']} />
+            <RaceTable title={league.settings.playerGenderRatio === 100 ? '6th Woman' : '6th Man'} candidates={awardRaces.smoy} columns={['PPG', 'TRB', 'AST', 'MIN']} />
             <RaceTable title="MIP" candidates={awardRaces.mip} columns={['PPG Jump', 'Curr PPG', 'Prev PPG', 'OVR']} />
             <RaceTable title="Coach" candidates={awardRaces.coy} columns={['Wins', 'Losses', 'Record', 'W vs Exp']} />
           </div>
@@ -377,7 +377,7 @@ const Awards: React.FC<AwardsProps> = ({ league, onScout, onScoutCoach, onManage
             <AwardCard title="Defensive Player" winner={viewAwards.dpoy} icon="🛡️" />
             <AwardCard title="Rookie of the Year" winner={viewAwards.roy} icon="✨" />
             <AwardCard title="Executive of the Year" winner={viewAwards.executiveOfTheYear} icon="💼" />
-            <AwardCard title="Sixth Man of Year" winner={viewAwards.sixthMan} icon="⚡" />
+            <AwardCard title={league.settings.playerGenderRatio === 100 ? 'Sixth Woman of Year' : 'Sixth Man of Year'} winner={viewAwards.sixthMan} icon="⚡" />
             <AwardCard title="Most Improved" winner={viewAwards.mip} icon="📈" />
             <AwardCard title="Coach of the Year" winner={viewAwards.coy} icon="🧠" />
           </div>

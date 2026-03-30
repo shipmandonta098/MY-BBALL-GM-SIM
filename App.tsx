@@ -1551,7 +1551,7 @@ const App: React.FC = () => {
     }
 
     if (!tempState.schedule.some(g => !g.played) && !tempState.playoffBracket) {
-      const seasonAwards = await generateAwards(tempState.teams, tempState.season);
+      const seasonAwards = await generateAwards(tempState.teams, tempState.season, tempState.settings.playerGenderRatio);
       
       if (seasonAwards.executiveOfTheYear.teamId === tempState.userTeamId) {
         const gm = tempState.gmProfile;

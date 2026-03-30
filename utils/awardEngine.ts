@@ -20,7 +20,8 @@ const getStatsLabel = (p: Player) => {
   return `${(p.stats.points / gp).toFixed(1)} PPG, ${(p.stats.rebounds / gp).toFixed(1)} RPG, ${(p.stats.assists / gp).toFixed(1)} APG`;
 };
 
-export const generateAwards = async (teams: Team[], year: number): Promise<SeasonAwards> => {
+export const generateAwards = async (teams: Team[], year: number, playerGenderRatio = 0): Promise<SeasonAwards> => {
+  const isFemaleLeague = playerGenderRatio === 100;
   const allPlayers = teams.flatMap(t => t.roster.map(p => ({ p, t })));
   
   // 1. MVP
@@ -86,7 +87,7 @@ export const generateAwards = async (teams: Team[], year: number): Promise<Seaso
     teamName: sixthManCandidate.t.name,
     statsLabel: getStatsLabel(sixthManCandidate.p)
   };
-  sixthMan.blurb = await generateAwardBlurb('Sixth Man of the Year', sixthMan);
+  sixthMan.blurb = await generateAwardBlurb(isFemaleLeague ? 'Sixth Woman of the Year' : 'Sixth Man of the Year', sixthMan);
 
   // 5. MIP
   const mipCandidate = [...allPlayers].sort((a,b) => b.p.rating - a.p.rating)[5];
