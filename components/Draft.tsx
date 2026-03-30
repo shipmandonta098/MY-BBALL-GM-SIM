@@ -135,6 +135,16 @@ const Draft: React.FC<DraftProps> = ({ league, updateLeague, onScout, scoutingRe
     return () => clearTimeout(timer);
   }, [isDrafting, currentPickIndex, isSimming]);
 
+  const availableProspects = useMemo(() => {
+    const draftedIds = new Set(league.teams.flatMap(t => t.roster.map(p => p.id)));
+    return league.prospects.filter(p => !draftedIds.has(p.id));
+  }, [league.prospects, league.teams]);
+
+  const currentPick = league.draftPicks?.[currentPickIndex];
+  const isUserTurn = isDrafting && currentPick?.currentTeamId === league.userTeamId;
+  const totalPicks = league.draftPicks?.length ?? 0;
+  const draftProgress = totalPicks > 0 ? Math.round((currentPickIndex / totalPicks) * 100) : 0;
+
   // Advance the round tab automatically when the live draft crosses into a new round
   useEffect(() => {
     if (currentPick?.round && currentPick.round !== draftOrderRound) {
@@ -151,16 +161,6 @@ const Draft: React.FC<DraftProps> = ({ league, updateLeague, onScout, scoutingRe
       container.scrollTop = row.offsetTop - container.clientHeight / 3;
     }
   }, [currentPickIndex, isDrafting]);
-
-  const availableProspects = useMemo(() => {
-    const draftedIds = new Set(league.teams.flatMap(t => t.roster.map(p => p.id)));
-    return league.prospects.filter(p => !draftedIds.has(p.id));
-  }, [league.prospects, league.teams]);
-
-  const currentPick = league.draftPicks?.[currentPickIndex];
-  const isUserTurn = isDrafting && currentPick?.currentTeamId === league.userTeamId;
-  const totalPicks = league.draftPicks?.length ?? 0;
-  const draftProgress = totalPicks > 0 ? Math.round((currentPickIndex / totalPicks) * 100) : 0;
 
   // ─── LOTTERY PHASE ────────────────────────────────────────────────────────
   if (league.draftPhase === 'lottery') {
