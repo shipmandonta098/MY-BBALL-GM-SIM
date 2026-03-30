@@ -868,41 +868,34 @@ const App: React.FC = () => {
   };
 
   const updateRivalryStats = (state: LeagueState, result: GameResult): RivalryStats[] => {
-    const history = [...(state.rivalryHistory || [])];
     const t1 = result.homeTeamId;
     const t2 = result.awayTeamId;
-    
-    let rivalry = history.find(r => (r.team1Id === t1 && r.team2Id === t2) || (r.team1Id === t2 && r.team2Id === t1));
-    
-    if (!rivalry) {
-      rivalry = {
-        team1Id: t1,
-        team2Id: t2,
-        team1Wins: 0,
-        team2Wins: 0,
-        totalGames: 0,
-        lastFiveGames: [],
-        playoffSeriesCount: 0,
-        buzzerBeaters: 0,
-        comebacks: 0,
-        otGames: 0,
-        badBloodScore: 0
-      };
-      history.push(rivalry);
-    }
+
+    // Find existing entry index so we can replace it (immutable update, no shared-ref mutation)
+    const existingIdx = (state.rivalryHistory || []).findIndex(
+      r => (r.team1Id === t1 && r.team2Id === t2) || (r.team1Id === t2 && r.team2Id === t1)
+    );
+    const history = [...(state.rivalryHistory || [])];
+
+    // Work on a copy of the found entry (or a brand-new one)
+    let rivalry: RivalryStats = existingIdx >= 0
+      ? { ...history[existingIdx] }
+      : { team1Id: t1, team2Id: t2, team1Wins: 0, team2Wins: 0, totalGames: 0, lastFiveGames: [], playoffSeriesCount: 0, buzzerBeaters: 0, comebacks: 0, otGames: 0, badBloodScore: 0 };
 
     const isT1Home = rivalry.team1Id === result.homeTeamId;
     const t1Won = (isT1Home && result.homeScore > result.awayScore) || (!isT1Home && result.awayScore > result.homeScore);
-    
+
     rivalry.totalGames += 1;
     if (t1Won) rivalry.team1Wins += 1; else rivalry.team2Wins += 1;
 
     // Season H2H — reset counters when a new season starts
     if (!rivalry.seasonH2H || rivalry.seasonH2H.season !== result.season) {
       rivalry.seasonH2H = { season: result.season, team1Wins: 0, team2Wins: 0 };
+    } else {
+      rivalry.seasonH2H = { ...rivalry.seasonH2H };
     }
     if (t1Won) rivalry.seasonH2H.team1Wins += 1; else rivalry.seasonH2H.team2Wins += 1;
-    
+
     rivalry.lastFiveGames = [t1Won ? 'team1' : 'team2', ...rivalry.lastFiveGames].slice(0, 5) as ('team1' | 'team2')[];
     rivalry.lastGameResult = {
       winnerId: t1Won ? rivalry.team1Id : rivalry.team2Id,
@@ -918,9 +911,13 @@ const App: React.FC = () => {
     // Chippy Boosts
     const allStats = [...result.homePlayerStats, ...result.awayPlayerStats];
     allStats.forEach(p => {
-      if (p.techs > 0) rivalry!.badBloodScore += p.techs;
-      if (p.flagrants > 0) rivalry!.badBloodScore += p.flagrants * 1.5; // F1=1.5, F2=3
+      if (p.techs > 0) rivalry.badBloodScore += p.techs;
+      if (p.flagrants > 0) rivalry.badBloodScore += p.flagrants * 1.5;
     });
+
+    // Place the updated copy back into the new array
+    if (existingIdx >= 0) history[existingIdx] = rivalry;
+    else history.push(rivalry);
 
     return history;
   };
