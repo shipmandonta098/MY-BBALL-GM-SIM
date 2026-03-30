@@ -1,5 +1,5 @@
 import React, { useState, useMemo } from 'react';
-import { LeagueState, Team, GameResult, ChampionshipRecord, SeasonAwards, AwardWinner } from '../types';
+import { LeagueState, Team, GameResult, ChampionshipRecord, SeasonAwards, AwardWinner, RivalryStats } from '../types';
 import TeamBadge from './TeamBadge';
 import { Trophy, Calendar, Target, TrendingUp, ChevronDown, ChevronUp, History as HistoryIcon, Star, ChevronRight } from 'lucide-react';
 
@@ -509,6 +509,9 @@ const FranchiseHistory: React.FC<FranchiseHistoryProps> = ({ league, initialTeam
               </div>
             </div>
           )}
+
+          {/* Head-to-Head Records */}
+          <FranchiseH2H league={league} selectedTeam={selectedTeam} />
         </>
       )}
 
@@ -767,7 +770,232 @@ const FranchiseHistory: React.FC<FranchiseHistoryProps> = ({ league, initialTeam
               </div>
             </div>
           )}
+
+          {/* League-wide H2H records */}
+          <LeagueH2H league={league} />
         </>
+      )}
+    </div>
+  );
+};
+
+// ─── Franchise H2H table ───────────────────────────────────────────────────────
+const FranchiseH2H: React.FC<{ league: LeagueState; selectedTeam: Team }> = ({ league, selectedTeam }) => {
+  const [collapsed, setCollapsed] = useState(false);
+
+  const rows = league.teams
+    .filter(t => t.id !== selectedTeam.id && t.status !== 'Inactive')
+    .map(t => {
+      const r = (league.rivalryHistory ?? []).find(
+        r => (r.team1Id === selectedTeam.id && r.team2Id === t.id) ||
+             (r.team1Id === t.id && r.team2Id === selectedTeam.id)
+      );
+      const isT1 = r?.team1Id === selectedTeam.id;
+      const myW   = r ? (isT1 ? r.team1Wins : r.team2Wins) : 0;
+      const oppW  = r ? (isT1 ? r.team2Wins : r.team1Wins) : 0;
+      const sMyW  = r?.seasonH2H ? (isT1 ? r.seasonH2H.team1Wins : r.seasonH2H.team2Wins) : 0;
+      const sOppW = r?.seasonH2H ? (isT1 ? r.seasonH2H.team2Wins : r.seasonH2H.team1Wins) : 0;
+      return { team: t, myW, oppW, sMyW, sOppW, total: myW + oppW };
+    })
+    .sort((a, b) => {
+      if ((a.team.conference === selectedTeam.conference) !== (b.team.conference === selectedTeam.conference))
+        return a.team.conference === selectedTeam.conference ? -1 : 1;
+      return b.total - a.total;
+    });
+
+  const hasSeason = rows.some(r => r.sMyW + r.sOppW > 0);
+
+  return (
+    <div className="bg-slate-900 border border-slate-800 rounded-[2.5rem] overflow-hidden shadow-2xl">
+      <button
+        className="w-full flex items-center justify-between p-8 border-b border-slate-800 bg-slate-900/50 hover:bg-slate-800/30 transition-colors"
+        onClick={() => setCollapsed(v => !v)}
+      >
+        <div className="flex items-center gap-3">
+          <Target className="text-blue-400" size={20} />
+          <h3 className="text-xl font-display font-bold text-white uppercase tracking-tight">Head-to-Head Records</h3>
+          <span className="px-2.5 py-0.5 bg-slate-800 border border-slate-700 rounded-full text-[10px] font-black text-slate-400 uppercase tracking-widest">
+            {selectedTeam.city} {selectedTeam.name}
+          </span>
+        </div>
+        <span className="text-slate-500 text-lg">{collapsed ? '▼' : '▲'}</span>
+      </button>
+
+      {!collapsed && (
+        <div className="overflow-x-auto">
+          <table className="w-full text-left">
+            <thead>
+              <tr className="text-[9px] text-slate-500 font-black uppercase tracking-widest border-b border-slate-800 bg-slate-950/20">
+                <th className="px-8 py-3">Opponent</th>
+                <th className="px-8 py-3 text-center">All-Time</th>
+                {hasSeason && <th className="px-8 py-3 text-center">This Season</th>}
+                <th className="px-8 py-3 text-center">Edge</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-800/40">
+              {rows.map(({ team: t, myW, oppW, sMyW, sOppW, total }) => {
+                const edge = myW - oppW;
+                const dominated    = myW >= 4 && oppW === 0 && total >= 4;
+                const dominated_by = oppW >= 4 && myW === 0 && total >= 4;
+                const sameConf = t.conference === selectedTeam.conference;
+                return (
+                  <tr key={t.id} className={`hover:bg-slate-800/20 transition-colors ${sameConf ? '' : 'opacity-60'}`}>
+                    <td className="px-8 py-4">
+                      <div className="flex items-center gap-3">
+                        <TeamBadge team={t} size="sm" />
+                        <div>
+                          <p className="text-sm font-bold text-slate-200">{t.city} {t.name}</p>
+                          <div className="flex items-center gap-1.5 mt-0.5">
+                            <span className={`text-[9px] font-black uppercase ${t.conference === 'Eastern' ? 'text-blue-500' : 'text-red-500'}`}>
+                              {t.conference.slice(0, 4)}
+                            </span>
+                            {dominated && <span className="text-[9px] font-black text-amber-400 bg-amber-500/10 px-1.5 py-0.5 rounded uppercase">Dominates</span>}
+                            {dominated_by && <span className="text-[9px] font-black text-rose-400 bg-rose-500/10 px-1.5 py-0.5 rounded uppercase">Dominated</span>}
+                          </div>
+                        </div>
+                      </div>
+                    </td>
+                    <td className="px-8 py-4 text-center">
+                      {total === 0
+                        ? <span className="text-slate-600 font-mono text-xs">—</span>
+                        : <span className={`font-mono font-bold text-sm ${edge > 0 ? 'text-emerald-400' : edge < 0 ? 'text-rose-400' : 'text-slate-300'}`}>{myW}–{oppW}</span>
+                      }
+                    </td>
+                    {hasSeason && (
+                      <td className="px-8 py-4 text-center">
+                        {sMyW + sOppW === 0
+                          ? <span className="text-slate-600 font-mono text-xs">—</span>
+                          : <span className={`font-mono font-bold text-sm ${sMyW > sOppW ? 'text-emerald-400' : sMyW < sOppW ? 'text-rose-400' : 'text-slate-300'}`}>{sMyW}–{sOppW}</span>
+                        }
+                      </td>
+                    )}
+                    <td className="px-8 py-4 text-center">
+                      {total === 0
+                        ? <span className="text-slate-700 text-xs">—</span>
+                        : edge === 0
+                        ? <span className="text-[10px] font-black text-amber-400 uppercase">Even</span>
+                        : <span className={`text-[10px] font-black uppercase ${edge > 0 ? 'text-emerald-400' : 'text-rose-400'}`}>{edge > 0 ? `+${edge}` : edge}</span>
+                      }
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+          <div className="px-8 py-3 border-t border-slate-800 text-[9px] font-black text-slate-700 uppercase tracking-widest">
+            Same-conference opponents shown at full opacity · cross-conference dimmed
+          </div>
+        </div>
+      )}
+    </div>
+  );
+};
+
+// ─── League-wide H2H table ─────────────────────────────────────────────────────
+const LeagueH2H: React.FC<{ league: LeagueState }> = ({ league }) => {
+  const [collapsed, setCollapsed] = useState(false);
+
+  const pairRows = useMemo(() => {
+    return (league.rivalryHistory ?? [])
+      .filter(r => r.totalGames > 0)
+      .map(r => {
+        const t1 = league.teams.find(t => t.id === r.team1Id);
+        const t2 = league.teams.find(t => t.id === r.team2Id);
+        if (!t1 || !t2) return null;
+        const sT1 = r.seasonH2H?.team1Wins ?? 0;
+        const sT2 = r.seasonH2H?.team2Wins ?? 0;
+        const lopsided = (r.team1Wins === 0 || r.team2Wins === 0) && r.totalGames >= 4;
+        return { r, t1, t2, sT1, sT2, lopsided };
+      })
+      .filter(Boolean)
+      .sort((a, b) => b!.r.totalGames - a!.r.totalGames) as {
+        r: RivalryStats; t1: Team; t2: Team;
+        sT1: number; sT2: number; lopsided: boolean;
+      }[];
+  }, [league.rivalryHistory, league.teams]);
+
+  const hasSeason = pairRows.some(p => p.sT1 + p.sT2 > 0);
+
+  if (pairRows.length === 0) return null;
+
+  return (
+    <div className="bg-slate-900 border border-slate-800 rounded-[2.5rem] overflow-hidden shadow-2xl">
+      <button
+        className="w-full flex items-center justify-between p-8 border-b border-slate-800 bg-slate-900/50 hover:bg-slate-800/30 transition-colors"
+        onClick={() => setCollapsed(v => !v)}
+      >
+        <div className="flex items-center gap-3">
+          <Target className="text-blue-400" size={20} />
+          <h3 className="text-xl font-display font-bold text-white uppercase tracking-tight">League Head-to-Head Records</h3>
+          <span className="px-2.5 py-0.5 bg-slate-800 border border-slate-700 rounded-full text-[10px] font-black text-slate-400 uppercase tracking-widest">
+            {pairRows.length} matchups
+          </span>
+        </div>
+        <span className="text-slate-500 text-lg">{collapsed ? '▼' : '▲'}</span>
+      </button>
+
+      {!collapsed && (
+        <div className="overflow-x-auto">
+          <table className="w-full text-left" style={{ minWidth: '600px' }}>
+            <thead>
+              <tr className="text-[9px] text-slate-500 font-black uppercase tracking-widest border-b border-slate-800 bg-slate-950/20">
+                <th className="px-8 py-3">Team A</th>
+                <th className="px-8 py-3 text-center">All-Time</th>
+                <th className="px-8 py-3">Team B</th>
+                {hasSeason && <th className="px-8 py-3 text-center">This Season</th>}
+                <th className="px-8 py-3 text-center">GP</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-800/40">
+              {pairRows.map(({ r, t1, t2, sT1, sT2, lopsided }) => {
+                const t1Leads = r.team1Wins > r.team2Wins;
+                const t2Leads = r.team2Wins > r.team1Wins;
+                return (
+                  <tr key={`${r.team1Id}-${r.team2Id}`} className={`hover:bg-slate-800/20 transition-colors ${lopsided ? 'bg-amber-500/[0.03]' : ''}`}>
+                    <td className="px-8 py-4">
+                      <div className="flex items-center gap-2">
+                        <TeamBadge team={t1} size="sm" />
+                        <span className={`text-sm font-bold ${t1Leads ? 'text-emerald-400' : t2Leads ? 'text-slate-500' : 'text-slate-300'}`}>
+                          {t1.abbreviation}
+                        </span>
+                      </div>
+                    </td>
+                    <td className="px-8 py-4 text-center">
+                      <div className="flex items-center justify-center gap-2">
+                        {lopsided && <span className="text-[9px] font-black text-amber-400 uppercase">Dominant</span>}
+                        <span className={`font-mono font-bold text-sm ${t1Leads ? 'text-emerald-400' : t2Leads ? 'text-rose-400' : 'text-slate-300'}`}>
+                          {r.team1Wins}–{r.team2Wins}
+                        </span>
+                      </div>
+                    </td>
+                    <td className="px-8 py-4">
+                      <div className="flex items-center gap-2">
+                        <TeamBadge team={t2} size="sm" />
+                        <span className={`text-sm font-bold ${t2Leads ? 'text-emerald-400' : t1Leads ? 'text-slate-500' : 'text-slate-300'}`}>
+                          {t2.abbreviation}
+                        </span>
+                      </div>
+                    </td>
+                    {hasSeason && (
+                      <td className="px-8 py-4 text-center">
+                        {sT1 + sT2 === 0
+                          ? <span className="text-slate-600 font-mono text-xs">—</span>
+                          : <span className={`font-mono text-sm font-bold ${sT1 > sT2 ? 'text-emerald-400' : sT1 < sT2 ? 'text-rose-400' : 'text-slate-300'}`}>
+                              {sT1}–{sT2}
+                            </span>
+                        }
+                      </td>
+                    )}
+                    <td className="px-8 py-4 text-center font-mono text-xs text-slate-500">{r.totalGames}</td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+          <div className="px-8 py-3 border-t border-slate-800 text-[9px] font-black text-slate-700 uppercase tracking-widest">
+            Sorted by most games played · "Dominant" = perfect record with 4+ games
+          </div>
+        </div>
       )}
     </div>
   );
