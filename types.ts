@@ -579,6 +579,7 @@ export interface LeagueSettings {
   b2bFrequency: 'None' | 'Low' | 'Realistic' | 'High' | 'Brutal';
   showAdvancedStats: boolean;
   hardCap?: number;
+  numTeams?: number;
 
   // ── League Tab additions ──────────────────────────────────────────────────
   playoffFormat?: 6 | 8 | 10 | 12 | 14 | 16;
