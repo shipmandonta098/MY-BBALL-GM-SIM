@@ -67,22 +67,22 @@ const Standings: React.FC<StandingsProps> = ({
       const confTeams = teams
         .filter(t => t.conference === conf)
         .sort((a, b) => {
+          // Primary: most wins  Secondary: fewest losses  Tertiary: win% (handles 0-0 ties)
+          if (b.wins !== a.wins) return b.wins - a.wins;
+          if (a.losses !== b.losses) return a.losses - b.losses;
           const aPct = a.wins / Math.max(1, a.wins + a.losses);
           const bPct = b.wins / Math.max(1, b.wins + b.losses);
-          if (Math.abs(bPct - aPct) > 1e-10) return bPct - aPct;
-          if (b.wins !== a.wins) return b.wins - a.wins; // more wins wins tiebreak
-          return a.losses - b.losses;                    // fewer losses breaks further ties
+          return bPct - aPct;
         });
 
+      // Leader = #1 after sort (most wins, fewest losses)
       const leader = confTeams[0];
-      // Last team that would make playoffs (0-indexed)
       const lastPlayoffTeam = confTeams[playoffSpotsPerConf - 1] ?? leader;
-      // First team outside playoffs
       const firstOut = confTeams[playoffSpotsPerConf] ?? null;
 
       const rows: TeamRow[] = confTeams.map((t, idx) => {
-        // NBA standard: GB = [(LeaderW - TeamW) + (TeamL - LeaderL)] / 2
-        // Floored at 0 to avoid negative display when win% leader has played fewer games
+        // NBA standard formula: GB = [(LW - TW) + (TL - LL)] / 2
+        // When leader has more wins, this is always >= 0 (no clamp needed, but kept as safety)
         const gb = (idx === 0 || !leader)
           ? 0
           : Math.max(0, ((leader.wins - t.wins) + (t.losses - leader.losses)) / 2);
