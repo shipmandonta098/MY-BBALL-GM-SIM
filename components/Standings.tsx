@@ -67,12 +67,12 @@ const Standings: React.FC<StandingsProps> = ({
       const confTeams = teams
         .filter(t => t.conference === conf)
         .sort((a, b) => {
-          // Primary: most wins  Secondary: fewest losses  Tertiary: win% (handles 0-0 ties)
-          if (b.wins !== a.wins) return b.wins - a.wins;
-          if (a.losses !== b.losses) return a.losses - b.losses;
+          // Primary: win% (NBA standard)  Secondary: most wins  Tertiary: fewest losses
           const aPct = a.wins / Math.max(1, a.wins + a.losses);
           const bPct = b.wins / Math.max(1, b.wins + b.losses);
-          return bPct - aPct;
+          if (bPct !== aPct) return bPct - aPct;
+          if (b.wins !== a.wins) return b.wins - a.wins;
+          return a.losses - b.losses;
         });
 
       // Leader = #1 after sort (most wins, fewest losses)
