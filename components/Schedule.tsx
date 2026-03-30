@@ -164,6 +164,9 @@ const Schedule: React.FC<ScheduleProps> = ({ league, onSimulate, onScout, onWatc
 
     const focusWins = rivalry ? (rivalry.team1Id === displayTeamId ? rivalry.team1Wins : rivalry.team2Wins) : 0;
     const oppWins = rivalry ? (rivalry.team1Id === displayTeamId ? rivalry.team2Wins : rivalry.team1Wins) : 0;
+    const seasonFocusWins = rivalry?.seasonH2H ? (rivalry.team1Id === displayTeamId ? rivalry.seasonH2H.team1Wins : rivalry.seasonH2H.team2Wins) : 0;
+    const seasonOppWins   = rivalry?.seasonH2H ? (rivalry.team1Id === displayTeamId ? rivalry.seasonH2H.team2Wins : rivalry.seasonH2H.team1Wins) : 0;
+    const seasonH2HTotal  = seasonFocusWins + seasonOppWins;
     const lastFive = rivalry?.lastFiveGames.map(g => {
       const focusWon = (rivalry.team1Id === displayTeamId && g === 'team1') || (rivalry.team1Id !== displayTeamId && g === 'team2');
       return focusWon ? 'W' : 'L';
@@ -284,11 +287,33 @@ const Schedule: React.FC<ScheduleProps> = ({ league, onSimulate, onScout, onWatc
                   </div>
                 </div>
               </div>
+
+              {/* Season H2H Pill */}
+              {seasonH2HTotal > 0 && (
+                <div className={`mt-2 px-3 py-1.5 rounded-xl border ${
+                  seasonFocusWins > seasonOppWins
+                    ? 'bg-emerald-500/10 border-emerald-500/20'
+                    : seasonFocusWins < seasonOppWins
+                    ? 'bg-rose-500/10 border-rose-500/20'
+                    : 'bg-slate-800/80 border-slate-700/50'
+                }`}>
+                  <p className="text-[8px] font-black text-slate-500 uppercase tracking-widest leading-none mb-0.5">
+                    This Season
+                  </p>
+                  <p className={`text-sm font-display font-black leading-none ${
+                    seasonFocusWins > seasonOppWins ? 'text-emerald-400'
+                    : seasonFocusWins < seasonOppWins ? 'text-rose-400'
+                    : 'text-slate-300'
+                  }`}>
+                    {seasonFocusWins}–{seasonOppWins}
+                  </p>
+                </div>
+              )}
             </div>
 
             <div className="flex-1 flex flex-col sm:flex-row items-center justify-between gap-6 w-full">
               <div className="flex items-center gap-6">
-                <div 
+                <div
                   className="w-16 h-16 bg-slate-800 rounded-2xl flex items-center justify-center border border-slate-700 relative overflow-hidden shrink-0 group-hover:scale-110 transition-transform cursor-pointer"
                   onClick={() => onManageTeam?.(opp.id)}
                 >

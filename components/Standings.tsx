@@ -1,5 +1,5 @@
 import React, { useMemo, useState } from 'react';
-import { Team, Conference } from '../types';
+import { Team, Conference, RivalryStats } from '../types';
 import TeamBadge from './TeamBadge';
 
 interface StandingsProps {
@@ -11,6 +11,7 @@ interface StandingsProps {
   isPlayoffs?: boolean;
   onViewRoster: (teamId: string) => void;
   onManageTeam: (teamId: string) => void;
+  rivalryHistory?: RivalryStats[];
 }
 
 type ClinchStatus = 'z' | 'x' | 'e' | null;
@@ -41,9 +42,21 @@ const ClinchBadge: React.FC<{ status: ClinchStatus }> = ({ status }) => {
 
 const Standings: React.FC<StandingsProps> = ({
   teams, userTeamId, seasonLength, playoffFormat, season, isPlayoffs = false,
-  onViewRoster, onManageTeam,
+  onViewRoster, onManageTeam, rivalryHistory = [],
 }) => {
   const [showTiebreakers, setShowTiebreakers] = useState(false);
+
+  /** Current-season H2H between two teams. Returns null if no games played yet. */
+  const getSeasonH2H = (a: Team, b: Team) => {
+    const r = rivalryHistory.find(
+      r => (r.team1Id === a.id && r.team2Id === b.id) || (r.team1Id === b.id && r.team2Id === a.id)
+    );
+    if (!r?.seasonH2H) return null;
+    const aWins = r.team1Id === a.id ? r.seasonH2H.team1Wins : r.seasonH2H.team2Wins;
+    const bWins = r.team1Id === a.id ? r.seasonH2H.team2Wins : r.seasonH2H.team1Wins;
+    if (aWins + bWins === 0) return null;
+    return { aWins, bWins };
+  };
 
   const playoffSpotsPerConf = Math.floor(playoffFormat / 2);
 
@@ -125,7 +138,13 @@ const Standings: React.FC<StandingsProps> = ({
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-800/40">
-            {rows.map(({ team: t, gb, gamesRemaining, clinch }, idx) => (
+            {rows.map(({ team: t, gb, gamesRemaining, clinch }, idx) => {
+              const pct = t.wins / (t.wins + t.losses || 1);
+              const nextRow = rows[idx + 1];
+              const tiedBelow = nextRow != null &&
+                (nextRow.team.wins / (nextRow.team.wins + nextRow.team.losses || 1)) === pct;
+              const h2hBelow = tiedBelow ? getSeasonH2H(t, nextRow.team) : null;
+              return (
               <tr
                 key={t.id}
                 className={`group transition-all hover:bg-slate-800/30 ${
@@ -139,7 +158,7 @@ const Standings: React.FC<StandingsProps> = ({
                   </span>
                 </td>
 
-                {/* Team name + clinch badge */}
+                {/* Team name + clinch badge + H2H tiebreaker */}
                 <td className="px-6 py-5">
                   <div className="flex items-center gap-4 cursor-pointer group/team" onClick={() => onManageTeam(t.id)}>
                     <TeamBadge team={t} size="sm" />
@@ -151,6 +170,16 @@ const Standings: React.FC<StandingsProps> = ({
                         <ClinchBadge status={clinch} />
                       </div>
                       <div className="text-[10px] text-slate-500 font-bold uppercase">{t.division}</div>
+                      {h2hBelow && (
+                        <div className={`mt-0.5 text-[9px] font-black uppercase tracking-wide ${
+                          h2hBelow.aWins > h2hBelow.bWins ? 'text-emerald-400'
+                          : h2hBelow.aWins < h2hBelow.bWins ? 'text-rose-400'
+                          : 'text-amber-400'
+                        }`}>
+                          H2H {h2hBelow.aWins}–{h2hBelow.bWins} vs {nextRow.team.abbreviation}
+                          {h2hBelow.aWins > h2hBelow.bWins ? ' ▲' : h2hBelow.aWins < h2hBelow.bWins ? ' ▼' : ' ='}
+                        </div>
+                      )}
                     </div>
                   </div>
                 </td>
@@ -181,7 +210,8 @@ const Standings: React.FC<StandingsProps> = ({
                   </span>
                 </td>
               </tr>
-            ))}
+              );
+            })}
           </tbody>
         </table>
       </div>
