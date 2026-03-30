@@ -75,7 +75,20 @@ const Awards: React.FC<AwardsProps> = ({ league, onScout, onScoutCoach, onManage
       .slice(0, 10);
 
     const smoy = allPlayers
-      .filter(p => p.stats.gamesPlayed > 5 && p.stats.gamesStarted < p.stats.gamesPlayed * 0.5)
+      .filter(p => {
+        if (p.stats.gamesPlayed <= 5) return false;
+        // Must not carry Starter status
+        if (p.status === 'Starter') return false;
+        // Must not be in the team's active starting lineup
+        const team = allTeams.find(t => t.roster.some(rp => rp.id === p.id));
+        if (!team) return false;
+        const rotationStarters = Object.values(team.rotation?.starters ?? {});
+        if (rotationStarters.includes(p.id)) return false;
+        // gamesStarted guard — excludes mid-season promotions who accumulated starter stats
+        const gp = Math.max(1, p.stats.gamesPlayed);
+        if ((p.stats.gamesStarted ?? 0) > Math.floor(gp * 0.20)) return false;
+        return true;
+      })
       .map(p => {
         const team = allTeams.find(t => t.roster.some(rp => rp.id === p.id))!;
         const ppg = getPPG(p);
