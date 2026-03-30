@@ -896,6 +896,12 @@ const App: React.FC = () => {
     
     rivalry.totalGames += 1;
     if (t1Won) rivalry.team1Wins += 1; else rivalry.team2Wins += 1;
+
+    // Season H2H — reset counters when a new season starts
+    if (!rivalry.seasonH2H || rivalry.seasonH2H.season !== result.season) {
+      rivalry.seasonH2H = { season: result.season, team1Wins: 0, team2Wins: 0 };
+    }
+    if (t1Won) rivalry.seasonH2H.team1Wins += 1; else rivalry.seasonH2H.team2Wins += 1;
     
     rivalry.lastFiveGames = [t1Won ? 'team1' : 'team2', ...rivalry.lastFiveGames].slice(0, 5) as ('team1' | 'team2')[];
     rivalry.lastGameResult = {
@@ -2216,7 +2222,7 @@ const App: React.FC = () => {
               />
             )
           )}
-          {activeTab === 'standings' && <Standings teams={league.teams} userTeamId={league.userTeamId} seasonLength={league.settings.seasonLength ?? 82} playoffFormat={league.settings.playoffFormat ?? 16} season={league.season} isPlayoffs={!!league.playoffBracket} onViewRoster={handleViewRoster} onManageTeam={handleManageTeam} />}
+          {activeTab === 'standings' && <Standings teams={league.teams} userTeamId={league.userTeamId} seasonLength={league.settings.seasonLength ?? 82} playoffFormat={league.settings.playoffFormat ?? 16} season={league.season} isPlayoffs={!!league.playoffBracket} onViewRoster={handleViewRoster} onManageTeam={handleManageTeam} rivalryHistory={league.rivalryHistory} />}
           {activeTab === 'schedule' && <Schedule league={league} onSimulate={handleSimulate} onScout={handleViewPlayer} onWatchLive={handleWatchLive} onViewBoxScore={(res, home, away) => setViewingBoxScore({ result: res, home, away })} onManageTeam={handleManageTeam} onAdvanceToRegularSeason={handleAdvanceToRegularSeason} onViewAllStar={() => setActiveTab('allstar')} />}
           {activeTab === 'draft' && <Draft league={league} updateLeague={updateLeagueState} onScout={handleScoutPlayer} scoutingReport={scoutingReport} onNavigateToFreeAgency={() => setActiveTab('free_agency')} />}
           {activeTab === 'coaching' && <Coaching league={league} updateLeague={updateLeagueState} godMode={league.settings.godMode} />}

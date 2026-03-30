@@ -1,6 +1,6 @@
 
 import React, { useState, useEffect } from 'react';
-import { Team, LeagueState, Division, Conference, MarketSize, NewsItem } from '../types';
+import { Team, LeagueState, Division, Conference, MarketSize, NewsItem, RivalryStats } from '../types';
 import TeamBadge from './TeamBadge';
 
 // ── Relocation destination data ───────────────────────────────────────────────
@@ -538,6 +538,141 @@ const TeamManagement: React.FC<TeamManagementProps> = ({ league, updateLeague, i
           </div>
         </div>
       </div>
+
+      {/* ── Head-to-Head Records ─────────────────────────────────────────── */}
+      <H2HSection league={league} selectedTeam={selectedTeam} />
+
+    </div>
+  );
+};
+
+// ── H2H helper component ──────────────────────────────────────────────────────
+const H2HSection: React.FC<{ league: LeagueState; selectedTeam: Team }> = ({ league, selectedTeam }) => {
+  const [collapsed, setCollapsed] = useState(false);
+
+  const h2hRows = league.teams
+    .filter(t => t.id !== selectedTeam.id && t.status !== 'Inactive')
+    .map(t => {
+      const r = (league.rivalryHistory ?? []).find(
+        r => (r.team1Id === selectedTeam.id && r.team2Id === t.id) ||
+             (r.team1Id === t.id && r.team2Id === selectedTeam.id)
+      );
+      const isT1 = r?.team1Id === selectedTeam.id;
+      const myWins    = r ? (isT1 ? r.team1Wins    : r.team2Wins)    : 0;
+      const theirWins = r ? (isT1 ? r.team2Wins    : r.team1Wins)    : 0;
+      const sMyW  = r?.seasonH2H ? (isT1 ? r.seasonH2H.team1Wins : r.seasonH2H.team2Wins) : 0;
+      const sOppW = r?.seasonH2H ? (isT1 ? r.seasonH2H.team2Wins : r.seasonH2H.team1Wins) : 0;
+      const total = myWins + theirWins;
+      return { team: t, myWins, theirWins, sMyW, sOppW, total };
+    })
+    .sort((a, b) => {
+      const aConf = a.team.conference === selectedTeam.conference ? 0 : 1;
+      const bConf = b.team.conference === selectedTeam.conference ? 0 : 1;
+      if (aConf !== bConf) return aConf - bConf;
+      return b.total - a.total;
+    });
+
+  const hasSeason = h2hRows.some(r => r.sMyW + r.sOppW > 0);
+
+  return (
+    <div className="bg-slate-900 border border-slate-800 rounded-[2rem] shadow-xl overflow-hidden">
+      {/* Header */}
+      <button
+        className="w-full flex items-center justify-between px-8 py-5 border-b border-slate-800 bg-slate-800/30 hover:bg-slate-800/50 transition-colors"
+        onClick={() => setCollapsed(v => !v)}
+      >
+        <div className="flex items-center gap-3">
+          <div className="w-2 h-6 bg-blue-500 rounded-full" />
+          <h3 className="text-[10px] font-black text-blue-400 uppercase tracking-[0.5em]">
+            Head-to-Head Records
+          </h3>
+          <span className="text-[9px] font-bold text-slate-600 uppercase">
+            {selectedTeam.city} {selectedTeam.name}
+          </span>
+        </div>
+        <span className="text-slate-500 text-sm">{collapsed ? '▼' : '▲'}</span>
+      </button>
+
+      {!collapsed && (
+        <div className="overflow-x-auto">
+          <table className="w-full text-left">
+            <thead>
+              <tr className="text-[10px] text-slate-500 font-black uppercase tracking-widest border-b border-slate-800 bg-slate-950/20">
+                <th className="px-6 py-3">Opponent</th>
+                <th className="px-6 py-3 text-center">All-Time</th>
+                {hasSeason && <th className="px-6 py-3 text-center">This Season</th>}
+                <th className="px-6 py-3 text-center">Edge</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-800/40">
+              {h2hRows.map(({ team: t, myWins, theirWins, sMyW, sOppW, total }) => {
+                const dominated = myWins >= 4 && theirWins === 0 && total >= 4;
+                const dominated_by = theirWins >= 4 && myWins === 0 && total >= 4;
+                const myEdge = myWins - theirWins;
+                const sameConf = t.conference === selectedTeam.conference;
+                return (
+                  <tr key={t.id} className={`hover:bg-slate-800/20 transition-colors ${sameConf ? '' : 'opacity-70'}`}>
+                    <td className="px-6 py-3">
+                      <div className="flex items-center gap-3">
+                        <TeamBadge team={t} size="sm" />
+                        <div>
+                          <span className="text-sm font-bold text-slate-200">{t.city} {t.name}</span>
+                          <div className="flex items-center gap-1.5 mt-0.5">
+                            <span className={`text-[9px] font-black uppercase ${t.conference === 'Eastern' ? 'text-blue-500' : 'text-red-500'}`}>
+                              {t.conference.slice(0, 4)}
+                            </span>
+                            {dominated && (
+                              <span className="text-[9px] font-black text-amber-400 uppercase bg-amber-500/10 px-1.5 py-0.5 rounded">
+                                Dominates
+                              </span>
+                            )}
+                            {dominated_by && (
+                              <span className="text-[9px] font-black text-rose-400 uppercase bg-rose-500/10 px-1.5 py-0.5 rounded">
+                                Dominated
+                              </span>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                    </td>
+                    <td className="px-6 py-3 text-center">
+                      {total === 0 ? (
+                        <span className="text-slate-600 font-mono text-xs">—</span>
+                      ) : (
+                        <span className={`font-mono font-bold text-sm ${myEdge > 0 ? 'text-emerald-400' : myEdge < 0 ? 'text-rose-400' : 'text-slate-300'}`}>
+                          {myWins}–{theirWins}
+                        </span>
+                      )}
+                    </td>
+                    {hasSeason && (
+                      <td className="px-6 py-3 text-center">
+                        {sMyW + sOppW === 0 ? (
+                          <span className="text-slate-600 font-mono text-xs">—</span>
+                        ) : (
+                          <span className={`font-mono font-bold text-sm ${sMyW > sOppW ? 'text-emerald-400' : sMyW < sOppW ? 'text-rose-400' : 'text-slate-300'}`}>
+                            {sMyW}–{sOppW}
+                          </span>
+                        )}
+                      </td>
+                    )}
+                    <td className="px-6 py-3 text-center">
+                      {total === 0 ? (
+                        <span className="text-slate-700 text-xs">—</span>
+                      ) : myEdge === 0 ? (
+                        <span className="text-[10px] font-black text-amber-400 uppercase">Even</span>
+                      ) : (
+                        <span className={`text-[10px] font-black uppercase ${myEdge > 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
+                          {myEdge > 0 ? `+${myEdge}` : myEdge}
+                        </span>
+                      )}
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
     </div>
   );
 };

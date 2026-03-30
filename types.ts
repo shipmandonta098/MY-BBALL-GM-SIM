@@ -733,6 +733,12 @@ export interface RivalryStats {
   comebacks: number;
   otGames: number;
   badBloodScore: number; // For trades/suspensions
+  /** Current-season head-to-head record — reset each new season */
+  seasonH2H?: {
+    season: number;
+    team1Wins: number;
+    team2Wins: number;
+  };
 }
 
 export interface LeagueState {
