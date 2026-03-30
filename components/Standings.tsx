@@ -105,7 +105,7 @@ const Standings: React.FC<StandingsProps> = ({
           if (t.wins + gamesRemaining < lastPlayoffTeam.wins) clinch = 'e';
         }
 
-        return { team: t, gb: gb === 0 ? '-' : gb.toFixed(1), gamesRemaining, clinch };
+        return { team: t, gb: idx === 0 ? '–' : gb.toFixed(1), gamesRemaining, clinch };
       });
 
       return { conference: conf, rows };
