@@ -552,7 +552,7 @@ const FranchiseHistory: React.FC<FranchiseHistoryProps> = ({ league, initialTeam
                           { key: 'finalsMvp', label: 'Finals MVP' },
                           { key: 'mvp',       label: 'MVP' },
                           { key: 'dpoy',      label: 'DPOY' },
-                          { key: 'smoy',      label: 'SMOY' },
+                          { key: 'smoy',      label: league.settings.playerGenderRatio === 100 ? 'SWOY' : 'SMOY' },
                           { key: 'mip',       label: 'MIP' },
                           { key: 'roy',       label: 'ROY' },
                         ] as { key: LeagueSortKey; label: string }[]
@@ -696,7 +696,7 @@ const FranchiseHistory: React.FC<FranchiseHistoryProps> = ({ league, initialTeam
                                       {([
                                         { key: 'mvp',      label: 'MVP',   icon: '🏆' },
                                         { key: 'dpoy',     label: 'DPOY',  icon: '🛡️' },
-                                        { key: 'sixthMan', label: 'SMOY',  icon: '⚡' },
+                                        { key: 'sixthMan', label: league.settings.playerGenderRatio === 100 ? 'SWOY' : 'SMOY',  icon: '⚡' },
                                         { key: 'mip',      label: 'MIP',   icon: '📈' },
                                         { key: 'roy',      label: 'ROY',   icon: '🌟' },
                                         { key: 'coy',      label: 'COY',   icon: '🎯' },
