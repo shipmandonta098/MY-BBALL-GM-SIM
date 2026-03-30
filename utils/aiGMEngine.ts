@@ -386,6 +386,7 @@ export function runAIGMOffseason(
     });
 
     // ── 1.5. RE-SIGN OWN EXPIRING STARS (83+ OVR) ───────────
+    let signingsLeft = 3;
     const ownExpiring = faPool
       .filter(p => p.lastTeamId === t.id && p.rating >= 83)
       .sort((a, b) => b.rating - a.rating);
@@ -443,8 +444,7 @@ export function runAIGMOffseason(
       }
     });
 
-    // Max 3 signings per team per offseason
-    let signingsLeft = 3;
+    // Max 3 signings per team per offseason (counter shared with re-sign block above)
     for (const fa of rankedFAs) {
       if (currentRoster.length >= 15) break;
       if (signingsLeft <= 0) break;
