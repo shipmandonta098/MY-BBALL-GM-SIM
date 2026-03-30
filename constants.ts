@@ -910,9 +910,9 @@ const generateDraftInfo = (
   const entryAge = 19 + Math.floor(Math.random() * 3);
   const seasonsPlayed = Math.max(0, age - entryAge);
 
-  // Draft year = season they were drafted (not current season)
-  // Rookies (0 seasons played) were drafted the season before current
-  const draftYear = seasonsPlayed === 0 ? season - 1 : season - seasonsPlayed;
+  // Draft year = season they were drafted.
+  // A player with 0 seasons played entered the league this year — drafted in the current season.
+  const draftYear = seasonsPlayed === 0 ? season : season - seasonsPlayed;
 
   // Determine draft status — higher-rated players almost always drafted
   const roll = Math.random();

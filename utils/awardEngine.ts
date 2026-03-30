@@ -49,9 +49,13 @@ export const generateAwards = async (teams: Team[], year: number): Promise<Seaso
   };
   dpoy.blurb = await generateAwardBlurb('Defensive Player of the Year', dpoy);
 
-  // 3. ROY
-  const rookies = allPlayers.filter(entry => entry.p.age <= 21);
-  const royCandidate = rookies.sort((a, b) => getPlayerStatsValue(b.p, b.t) - getPlayerStatsValue(a.p, a.t))[0];
+  // 3. ROY — use draftInfo.year to find true rookies (drafted this season)
+  const rookies = allPlayers.filter(entry => entry.p.draftInfo?.year === year);
+  const royPool = rookies.length > 0
+    ? rookies
+    : allPlayers.filter(entry => entry.p.age <= 23); // fallback for edge cases
+  const royCandidate = royPool.sort((a, b) => getPlayerStatsValue(b.p, b.t) - getPlayerStatsValue(a.p, a.t))[0]
+    ?? allPlayers[0]; // ultimate safety fallback
   const roy: AwardWinner = {
     playerId: royCandidate.p.id,
     name: royCandidate.p.name,
