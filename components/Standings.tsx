@@ -67,10 +67,11 @@ const Standings: React.FC<StandingsProps> = ({
       const confTeams = teams
         .filter(t => t.conference === conf)
         .sort((a, b) => {
-          const aPct = a.wins / (a.wins + a.losses || 1);
-          const bPct = b.wins / (b.wins + b.losses || 1);
-          if (aPct !== bPct) return bPct - aPct;
-          return b.wins - a.wins;
+          const aPct = a.wins / Math.max(1, a.wins + a.losses);
+          const bPct = b.wins / Math.max(1, b.wins + b.losses);
+          if (Math.abs(bPct - aPct) > 1e-10) return bPct - aPct;
+          if (b.wins !== a.wins) return b.wins - a.wins; // more wins wins tiebreak
+          return a.losses - b.losses;                    // fewer losses breaks further ties
         });
 
       const leader = confTeams[0];
@@ -80,9 +81,11 @@ const Standings: React.FC<StandingsProps> = ({
       const firstOut = confTeams[playoffSpotsPerConf] ?? null;
 
       const rows: TeamRow[] = confTeams.map((t, idx) => {
-        const gb = leader
-          ? ((leader.wins - t.wins) + (t.losses - leader.losses)) / 2
-          : 0;
+        // NBA standard: GB = [(LeaderW - TeamW) + (TeamL - LeaderL)] / 2
+        // Floored at 0 to avoid negative display when win% leader has played fewer games
+        const gb = (idx === 0 || !leader)
+          ? 0
+          : Math.max(0, ((leader.wins - t.wins) + (t.losses - leader.losses)) / 2);
         const gamesRemaining = Math.max(0, seasonLength - (t.wins + t.losses));
 
         let clinch: ClinchStatus = null;
