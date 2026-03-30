@@ -1,10 +1,11 @@
-import React, { useState, useMemo, useEffect } from 'react';
+import React, { useState, useMemo, useEffect, useRef } from 'react';
 import { LeagueState, Team, Prospect, DraftPick, Player } from '../types';
 import { getFlag } from '../constants';
 import { aiGMDraftPick } from '../utils/aiGMEngine';
 import DraftLottery from './DraftLottery';
 import ProspectProfile from './ProspectProfile';
 import DraftPickTrade from './DraftPickTrade';
+import TeamBadge from './TeamBadge';
 
 interface DraftProps {
   league: LeagueState;
@@ -26,6 +27,12 @@ const Draft: React.FC<DraftProps> = ({ league, updateLeague, onScout, scoutingRe
   // Pick trade modal
   const [showTradeModal, setShowTradeModal] = useState(false);
   const [pickToTrade, setPickToTrade] = useState<DraftPick | undefined>(undefined);
+
+  // Draft order panel
+  const [showDraftOrder, setShowDraftOrder] = useState(true);
+  const [draftOrderRound, setDraftOrderRound] = useState(1);
+  const draftOrderContainerRef = useRef<HTMLDivElement>(null);
+  const currentPickRowRef = useRef<HTMLDivElement>(null);
 
   const currentPickIndex = league.currentDraftPickIndex || 0;
   const userTeam = league.teams.find(t => t.id === league.userTeamId)!;
@@ -127,6 +134,23 @@ const Draft: React.FC<DraftProps> = ({ league, updateLeague, onScout, scoutingRe
     const timer = setTimeout(executeAIPick, delay);
     return () => clearTimeout(timer);
   }, [isDrafting, currentPickIndex, isSimming]);
+
+  // Advance the round tab automatically when the live draft crosses into a new round
+  useEffect(() => {
+    if (currentPick?.round && currentPick.round !== draftOrderRound) {
+      setDraftOrderRound(currentPick.round);
+    }
+  }, [currentPick?.round]);
+
+  // Scroll the current pick row into view inside the draft order panel
+  useEffect(() => {
+    if (!isDrafting) return;
+    const row = currentPickRowRef.current;
+    const container = draftOrderContainerRef.current;
+    if (row && container) {
+      container.scrollTop = row.offsetTop - container.clientHeight / 3;
+    }
+  }, [currentPickIndex, isDrafting]);
 
   const availableProspects = useMemo(() => {
     const draftedIds = new Set(league.teams.flatMap(t => t.roster.map(p => p.id)));
@@ -279,6 +303,116 @@ const Draft: React.FC<DraftProps> = ({ league, updateLeague, onScout, scoutingRe
           </div>
         )}
       </header>
+
+      {/* ── Draft Order Panel ──────────────────────────────────────────────── */}
+      {(league.draftPicks?.length ?? 0) > 0 && (() => {
+        const numRounds = league.settings.draftRounds ?? 2;
+        const allRounds = Array.from({ length: numRounds }, (_, i) => i + 1);
+        const teamsCount = league.teams.length;
+        const picksForRound = (league.draftPicks ?? []).filter(p => p.round === draftOrderRound);
+        const roundStartIdx = (league.draftPicks ?? []).findIndex(p => p.round === draftOrderRound);
+
+        return (
+          <div className="bg-slate-900 border border-slate-800 rounded-3xl overflow-hidden shadow-2xl">
+            {/* Header row */}
+            <button
+              onClick={() => setShowDraftOrder(v => !v)}
+              className="w-full flex items-center justify-between px-6 py-4 hover:bg-slate-800/20 transition-colors"
+            >
+              <div className="flex items-center gap-3 flex-wrap">
+                <span className="text-xs font-black uppercase tracking-[0.3em] text-slate-200">Draft Order</span>
+                <span className="text-[10px] font-bold text-slate-600 uppercase">{teamsCount} teams · {league.draftPicks!.length} total picks</span>
+                {isDrafting && currentPick && (
+                  <span className="px-2 py-0.5 bg-amber-500/20 border border-amber-500/40 rounded-full text-[9px] font-black text-amber-400 uppercase animate-pulse">
+                    Pick {currentPickIndex + 1} on clock
+                  </span>
+                )}
+              </div>
+              <div className="flex items-center gap-1.5 shrink-0 ml-3">
+                {allRounds.map(r => (
+                  <button
+                    key={r}
+                    onClick={e => { e.stopPropagation(); setDraftOrderRound(r); setShowDraftOrder(true); }}
+                    className={`px-2.5 py-1 text-[9px] font-black uppercase rounded-lg transition-all ${draftOrderRound === r ? 'bg-amber-500 text-slate-950' : 'bg-slate-800 text-slate-500 hover:text-slate-300'}`}
+                  >
+                    R{r}
+                  </button>
+                ))}
+                <span className="text-slate-600 ml-2 text-xs">{showDraftOrder ? '▲' : '▼'}</span>
+              </div>
+            </button>
+
+            {showDraftOrder && (
+              <div
+                ref={draftOrderContainerRef}
+                className="max-h-72 overflow-y-auto scrollbar-thin scrollbar-thumb-slate-700 border-t border-slate-800/60"
+              >
+                {picksForRound.map((pick, idx) => {
+                  const globalIdx = roundStartIdx + idx;
+                  const isCurrentPick = isDrafting && globalIdx === currentPickIndex;
+                  const isMade = globalIdx < currentPickIndex;
+                  const isUserPick = pick.currentTeamId === league.userTeamId;
+                  const wasTraded = !!(pick.originalTeamId && pick.originalTeamId !== pick.currentTeamId);
+                  const pickingTeam = league.teams.find(t => t.id === pick.currentTeamId);
+                  const originalTeam = wasTraded ? league.teams.find(t => t.id === pick.originalTeamId) : null;
+
+                  return (
+                    <div
+                      key={`${pick.round}-${pick.pick}`}
+                      ref={isCurrentPick ? currentPickRowRef : undefined}
+                      className={[
+                        'flex items-center gap-3 px-4 py-2.5 border-b border-slate-800/40 transition-colors',
+                        isCurrentPick ? 'bg-amber-500/[0.08] border-l-4 border-l-amber-500' : '',
+                        isUserPick && !isMade && !isCurrentPick ? 'bg-blue-500/[0.04] border-l-4 border-l-blue-600/60' : '',
+                        isMade ? 'opacity-30' : '',
+                      ].join(' ')}
+                    >
+                      {/* Status icon */}
+                      <div className="w-4 shrink-0 flex justify-center">
+                        {isCurrentPick
+                          ? <span className="text-amber-400 font-black text-xs">▶</span>
+                          : isMade
+                          ? <span className="text-slate-600 text-[10px]">✓</span>
+                          : <span className="text-slate-800 text-[10px]">·</span>}
+                      </div>
+
+                      {/* Pick number in round */}
+                      <div className="w-7 shrink-0 text-right">
+                        <span className={`text-xs font-black tabular-nums ${isCurrentPick ? 'text-amber-400' : isUserPick && !isMade ? 'text-blue-400' : 'text-slate-500'}`}>
+                          {idx + 1}
+                        </span>
+                      </div>
+
+                      {/* Team badge */}
+                      {pickingTeam
+                        ? <TeamBadge team={pickingTeam} size="xs" />
+                        : <div className="w-6 h-6 rounded bg-slate-800 shrink-0" />}
+
+                      {/* Team name + traded badge */}
+                      <div className="flex-1 min-w-0 flex items-center gap-2 flex-wrap">
+                        <span className={`text-xs font-bold truncate ${isCurrentPick ? 'text-white' : isUserPick && !isMade ? 'text-blue-300' : isMade ? 'text-slate-500' : 'text-slate-300'}`}>
+                          {pickingTeam ? `${pickingTeam.city} ${pickingTeam.name}` : '—'}
+                        </span>
+                        {wasTraded && (
+                          <span className="text-[9px] font-black text-amber-400/80 bg-amber-500/10 border border-amber-500/20 px-1.5 py-0.5 rounded uppercase whitespace-nowrap shrink-0">
+                            via {originalTeam?.abbreviation ?? originalTeam?.name ?? '?'}
+                          </span>
+                        )}
+                        {isUserPick && !isMade && (
+                          <span className="text-[9px] font-black text-blue-400/80 uppercase shrink-0">Your pick</span>
+                        )}
+                      </div>
+
+                      {/* Overall pick # */}
+                      <span className="text-[9px] text-slate-700 font-bold tabular-nums shrink-0">#{pick.pick}</span>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        );
+      })()}
 
       {/* "On the Clock" banner */}
       {isUserTurn && (
