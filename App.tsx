@@ -1547,7 +1547,7 @@ const App: React.FC = () => {
       }
     }
 
-    if (!tempState.schedule.some(g => !g.played) && !tempState.playoffBracket) {
+    if (!tempState.isOffseason && !tempState.schedule.some(g => !g.played) && !tempState.playoffBracket) {
       const seasonAwards = await generateAwards(tempState.teams, tempState.season, tempState.settings.playerGenderRatio);
       
       if (seasonAwards.executiveOfTheYear.teamId === tempState.userTeamId) {
@@ -1593,6 +1593,7 @@ const App: React.FC = () => {
   const handleStartOffseason = async () => {
     if (!league) return;
     setLoading(true);
+    try {
     let tempState = { ...league };
     
     // Check for championship milestone
@@ -1606,7 +1607,7 @@ const App: React.FC = () => {
       };
     }
 
-    tempState.gmProfile.totalSeasons += 1;
+    tempState.gmProfile = { ...tempState.gmProfile, totalSeasons: tempState.gmProfile.totalSeasons + 1 };
     tempState.playoffBracket = undefined;
     tempState.isOffseason = true;
     tempState.seasonPhase = 'Offseason' as SeasonPhase;
@@ -1830,7 +1831,11 @@ const App: React.FC = () => {
 
     setLeague(tempState);
     setActiveTab('draft');
-    setLoading(false);
+    } catch (err) {
+      console.error('handleStartOffseason error:', err);
+    } finally {
+      setLoading(false);
+    }
   };
 
   const handleAdvanceToRegularSeason = () => {
