@@ -383,6 +383,9 @@ const FreeAgency: React.FC<FreeAgencyProps> = ({
 
   // ── Advance Day / AI signings ──
   const advanceDay = () => {
+    // Lock all FA activity until the draft is fully complete
+    if (league.draftPhase !== 'completed') return;
+
     let updatedFAs = [...league.freeAgents];
     const newNews: typeof league.newsFeed = [];
     const newTxs: Transaction[] = [];
@@ -419,8 +422,13 @@ const FreeAgency: React.FC<FreeAgencyProps> = ({
       const desired = getDesired(player);
       const years = desired.years + (Math.random() < 0.3 ? 1 : 0);
       const salaryMult = 0.85 + Math.random() * 0.3;
-      const salary = Math.round((desired.salary * salaryMult) / 250_000) * 250_000;
+      const teamSalary = team.roster.reduce((s, p) => s + (p.salary || 0), 0);
+      const teamCapSpace = (league.settings.salaryCap || 140_000_000) - teamSalary;
+      const rawSalary = Math.round((desired.salary * salaryMult) / 250_000) * 250_000;
+      const salary = Math.max(600_000, Math.min(rawSalary, teamCapSpace));
+      if (teamCapSpace < 600_000) continue;
 
+      const totalValue = salary * years;
       const tx: Transaction = {
         id: `tx-ai-${Date.now()}-${i}`,
         type: 'signing',
@@ -428,16 +436,16 @@ const FreeAgency: React.FC<FreeAgencyProps> = ({
         realTimestamp: Date.now() + i,
         teamIds: [team.id],
         playerIds: [player.id],
-        description: `${team.name} signed ${player.name} to a ${years}y/${fmt(salary)} contract.`,
-        value: salary * years,
+        description: `${team.name} agree to terms with ${player.name} on a ${years}-year, $${(totalValue / 1_000_000).toFixed(1)}M deal.`,
+        value: totalValue,
       };
       newTxs.push(tx);
 
       newNews.push({
         id: `fa-ai-${Date.now()}-${i}`,
         category: 'transaction',
-        headline: `${player.name} signs with ${team.name}`,
-        content: `${player.name} (${player.position}, ${player.rating} OVR) agreed to a ${years}-year deal with the ${team.name} worth ${fmt(salary)}/yr.`,
+        headline: `${player.name} agrees to terms with ${team.name}`,
+        content: `The ${team.name} agree to terms with ${player.name} (${player.position}, ${player.rating} OVR) on a ${years}-year, $${(totalValue / 1_000_000).toFixed(1)}M deal (${fmt(salary)}/yr).`,
         timestamp: league.currentDay,
         realTimestamp: Date.now() + i,
         teamId: team.id,
@@ -509,6 +517,28 @@ const FreeAgency: React.FC<FreeAgencyProps> = ({
               In-season waivers &amp; buyouts become available once the regular season begins.
               Advance your first game to unlock.
             </p>
+          </div>
+        </div>
+      )}
+
+      {/* ── Draft Lock Banner ── */}
+      {league.isOffseason && league.draftPhase !== 'completed' && (
+        <div className="bg-violet-500/10 border border-violet-500/30 rounded-[2rem] p-6 flex flex-col sm:flex-row items-center justify-between gap-4">
+          <div>
+            <p className="text-[10px] font-black uppercase tracking-[0.4em] text-violet-400 mb-1">
+              🚫 Draft In Progress
+            </p>
+            <h3 className="text-xl font-display font-bold text-white uppercase">
+              Free Agency Locked Until Draft Completes
+            </h3>
+            <p className="text-slate-500 text-xs mt-1">
+              No signings or roster moves are allowed until all draft rounds are finished. Head to Draft HQ to complete the draft.
+            </p>
+          </div>
+          <div className="shrink-0">
+            <span className="px-5 py-3 bg-violet-500/20 border border-violet-500/40 rounded-xl text-violet-300 font-bold text-sm uppercase tracking-wider">
+              {league.draftPhase === 'lottery' ? 'Lottery Phase' : league.draftPhase === 'draft' ? 'Live Draft' : 'Scouting Phase'}
+            </span>
           </div>
         </div>
       )}
@@ -599,7 +629,8 @@ const FreeAgency: React.FC<FreeAgencyProps> = ({
             {league.isOffseason && (
               <button
                 onClick={advanceDay}
-                className="px-7 py-4 bg-amber-500 hover:bg-amber-400 text-slate-950 font-display font-bold uppercase rounded-xl transition-all shadow-xl shadow-amber-500/20 active:scale-95"
+                disabled={league.draftPhase !== 'completed'}
+                className="px-7 py-4 bg-amber-500 hover:bg-amber-400 text-slate-950 font-display font-bold uppercase rounded-xl transition-all shadow-xl shadow-amber-500/20 active:scale-95 disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-amber-500"
               >
                 Advance Day →
               </button>
