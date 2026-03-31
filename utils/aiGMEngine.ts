@@ -183,7 +183,7 @@ function faOfferAmount(
   difficulty: string,
   isTopFA: boolean
 ): number {
-  const capSpace = salaryCap - rosterSalary(teamContext);
+  const capSpace = Math.max(0, salaryCap - rosterSalary(teamContext));
   const maxBid = Math.min(capSpace, salaryCap * 0.35);
   const baseBid = Math.max(500_000, p.salary * 1.05);
 
@@ -230,7 +230,7 @@ function faOfferAmount(
   if (negotiationRating < 60) multiplier *= 1.0 + (0.2 * (1 - negotiationRating / 100));
 
   const bid = Math.round(baseBid * multiplier);
-  return Math.min(maxBid, bid);
+  return Math.max(600_000, Math.min(maxBid, bid));
 }
 
 // ─── Helper: sum salary for a team ──────────────────────────
@@ -414,11 +414,12 @@ export function runAIGMOffseason(
         `${t.abbreviation} RE-SIGNS`,
         (() => {
           const yrs = signedPlayer.contractYears;
-          const sal = (offerAmt / 1_000_000).toFixed(1);
+          const totalM = ((offerAmt * yrs) / 1_000_000).toFixed(1);
+          const perYrM = (offerAmt / 1_000_000).toFixed(1);
           const templates = [
-            `${fa.name} stays in ${t.name} on a ${yrs}-year, $${sal}M deal. The front office locks up a key piece of the core.`,
-            `${t.name} keep ${fa.name} off the market — ${yrs} years, $${sal}M. He was a priority re-sign and the team got it done.`,
-            `${fa.name} is staying put. He and ${t.name} agreed to a ${yrs}-year extension worth $${sal}M per front-office sources.`,
+            `${fa.name} stays with ${t.name} on a ${yrs}-year, $${totalM}M deal ($${perYrM}M/yr). The front office locks up a key piece of the core.`,
+            `${t.name} agree to terms with ${fa.name} — ${yrs} years, $${totalM}M. He was a priority re-sign and the team got it done.`,
+            `${fa.name} is staying put. He and the ${t.name} agreed to a ${yrs}-year extension worth $${totalM}M.`,
           ];
           return templates[Math.floor(Math.random() * templates.length)];
         })(),
@@ -428,6 +429,9 @@ export function runAIGMOffseason(
     }
 
     // ── 2. FREE AGENT SIGNING ────────────────────────────────
+    // Only sign free agents after the draft is complete
+    if (s.draftPhase !== 'completed') continue;
+
     // Sort FA pool by personality priorities
     const rankedFAs = [...faPool].sort((a, b) => {
       switch (personality) {
@@ -498,11 +502,12 @@ export function runAIGMOffseason(
         `${t.abbreviation} SIGNING`,
         (() => {
           const yrs = signedPlayer.contractYears;
-          const sal = (offerAmt / 1_000_000).toFixed(1);
+          const totalM = ((offerAmt * yrs) / 1_000_000).toFixed(1);
+          const perYrM = (offerAmt / 1_000_000).toFixed(1);
           const templates = [
-            `${t.name} land ${fa.name} in free agency — ${yrs} years, $${sal}M. He fills a clear need and upgrades the rotation.`,
-            `${fa.name} picks ${t.name}, agreeing to a ${yrs}-year deal worth $${sal}M. A statement signing for the front office.`,
-            `The deal is done: ${fa.name} joins ${t.name} on a ${yrs}-year, $${sal}M contract. Expect him in the lineup immediately.`,
+            `${t.name} agree to terms with ${fa.name} — ${yrs} years, $${totalM}M ($${perYrM}M/yr). He fills a clear need and upgrades the rotation.`,
+            `${fa.name} picks ${t.name}, agreeing to a ${yrs}-year, $${totalM}M deal. A statement signing for the front office.`,
+            `The ${t.name} land ${fa.name} on a ${yrs}-year, $${totalM}M contract. Expect him in the lineup immediately.`,
           ];
           return templates[Math.floor(Math.random() * templates.length)];
         })(),
