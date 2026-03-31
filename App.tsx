@@ -1318,13 +1318,11 @@ const App: React.FC = () => {
         const teamCapSpace = cap - teamSalary;
         const minSalary = 600_000;
         if (teamCapSpace >= minSalary) {
-          const eligible = newState.freeAgents.filter(fa => (fa.desiredContract?.salary ?? 600_000) <= teamCapSpace * 1.2);
+          const eligible = newState.freeAgents.filter(fa => (fa.desiredContract?.salary || 600_000) <= teamCapSpace * 1.2);
           if (eligible.length > 0) {
             const fa = eligible[Math.floor(Math.random() * Math.min(5, eligible.length))];
-            const salary = Math.min(
-              Math.round((fa.desiredContract?.salary ?? 1_500_000) * (0.8 + Math.random() * 0.3) / 250_000) * 250_000,
-              teamCapSpace
-            );
+            const rawSalary = Math.round((fa.desiredContract?.salary || 1_500_000) * (0.8 + Math.random() * 0.3) / 250_000) * 250_000;
+            const salary = Math.max(600_000, Math.min(rawSalary, teamCapSpace));
             const signingType = salary <= 700_000 ? '10-day' : 'rest-of-season minimum';
             const signedPlayer = { ...fa, isFreeAgent: false, inSeasonFA: false, salary, contractYears: 1, morale: Math.min(100, (fa.morale || 70) + 5) };
             newState = {
@@ -1334,8 +1332,8 @@ const App: React.FC = () => {
               newsFeed: [{
                 id: `in-season-sign-${Date.now()}-${fa.id}`,
                 category: 'transaction' as const,
-                headline: `${fa.name} signs with ${team.name}`,
-                content: `${team.name} signed ${fa.name} (${fa.position}, ${fa.rating} OVR) to a ${signingType} deal${salary > 0 ? ` worth ${(salary / 1_000_000).toFixed(1)}M` : ''}.`,
+                headline: `${fa.name} agrees to terms with ${team.name}`,
+                content: `The ${team.name} agree to terms with ${fa.name} (${fa.position}, ${fa.rating} OVR) on a ${signingType} deal worth $${(salary / 1_000_000).toFixed(1)}M.`,
                 timestamp: newState.currentDay,
                 realTimestamp: Date.now(),
                 isBreaking: false,
