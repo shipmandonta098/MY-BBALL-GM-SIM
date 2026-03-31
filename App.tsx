@@ -151,12 +151,18 @@ const App: React.FC = () => {
     setLeague(prev => {
       if (!prev || prev.draftPhase !== 'completed' || !prev.isOffseason) return prev;
       if (prev.newsFeed.some(n => n.id === `ai-fa-run-${prev.season}`)) return prev;
-      const aiResult = runAIGMOffseason(prev, prev.settings.difficulty ?? 'Medium');
+      // Run pre-offseason agreements (verbals/informal) then full AI offseason
+      const preResult = aiGMPreOffseasonAgreements(prev, prev.settings.difficulty ?? 'Medium');
+      const afterPre = {
+        ...preResult.updatedState,
+        transactions: [...preResult.transactions, ...(prev.transactions || [])].slice(0, 1000),
+      };
+      const aiResult = runAIGMOffseason(afterPre, afterPre.settings.difficulty ?? 'Medium');
       const sentinel: typeof prev.newsFeed[0] = {
         id: `ai-fa-run-${prev.season}`,
         category: 'transaction' as const,
-        headline: '🟢 Free Agency is Now Open',
-        content: 'The draft is complete. AI teams are now signing free agents.',
+        headline: '🟢 Free Agency Opens',
+        content: 'The draft is complete. Teams are now active in free agency.',
         timestamp: prev.currentDay,
         realTimestamp: Date.now(),
         isBreaking: true,
@@ -164,7 +170,7 @@ const App: React.FC = () => {
       return {
         ...aiResult.updatedState,
         newsFeed: [sentinel, ...aiResult.updatedState.newsFeed].slice(0, 200),
-        transactions: [...aiResult.transactions, ...(prev.transactions || [])].slice(0, 1000),
+        transactions: [...aiResult.transactions, ...(afterPre.transactions || [])].slice(0, 1000),
       };
     });
   }, [league?.draftPhase, league?.isOffseason, status]);
