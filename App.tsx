@@ -142,6 +142,33 @@ const App: React.FC = () => {
     }
   }, [league, status]);
 
+  // ── Trigger AI FA signings after draft completes ──────────────────────────
+  useEffect(() => {
+    if (status !== 'game' || !league || league.draftPhase !== 'completed' || !league.isOffseason) return;
+    // Only run once per offseason — guard with a flag in newsFeed
+    const alreadyRan = league.newsFeed.some(n => n.id === `ai-fa-run-${league.season}`);
+    if (alreadyRan) return;
+    setLeague(prev => {
+      if (!prev || prev.draftPhase !== 'completed' || !prev.isOffseason) return prev;
+      if (prev.newsFeed.some(n => n.id === `ai-fa-run-${prev.season}`)) return prev;
+      const aiResult = runAIGMOffseason(prev, prev.settings.difficulty ?? 'Medium');
+      const sentinel: typeof prev.newsFeed[0] = {
+        id: `ai-fa-run-${prev.season}`,
+        category: 'transaction' as const,
+        headline: '🟢 Free Agency is Now Open',
+        content: 'The draft is complete. AI teams are now signing free agents.',
+        timestamp: prev.currentDay,
+        realTimestamp: Date.now(),
+        isBreaking: true,
+      };
+      return {
+        ...aiResult.updatedState,
+        newsFeed: [sentinel, ...aiResult.updatedState.newsFeed].slice(0, 200),
+        transactions: [...aiResult.transactions, ...(prev.transactions || [])].slice(0, 1000),
+      };
+    });
+  }, [league?.draftPhase, league?.isOffseason, status]);
+
   const recordTransaction = (state: LeagueState, type: TransactionType, teamIds: string[], description: string, playerIds?: string[], value?: number): Transaction[] => {
     const newTransaction: Transaction = {
       id: `tx-${Date.now()}-${Math.random()}`,
