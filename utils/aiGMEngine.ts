@@ -385,138 +385,125 @@ export function runAIGMOffseason(
       txs.push(makeTransaction(s, 'release', [t.id], `${t.name} released ${p.name}.`, [p.id]));
     });
 
-    // ── 1.5. RE-SIGN OWN EXPIRING STARS (83+ OVR) ───────────
-    let signingsLeft = 3;
-    const ownExpiring = faPool
-      .filter(p => p.lastTeamId === t.id && p.rating >= 83)
-      .sort((a, b) => b.rating - a.rating);
-    for (const fa of ownExpiring) {
-      if (currentRoster.length >= (s.settings.maxRosterSize ?? 15)) break;
-      const currentSalary = rosterSalary({ ...t, roster: currentRoster });
-      const offerAmt = faOfferAmount(fa, { ...t, roster: currentRoster }, salaryCap, personality, ratings.negotiation, difficulty, topFAIds.has(fa.id));
-      const isHardCap = s.settings.salaryCapType === 'Hard Cap';
-      if (isHardCap && currentSalary + offerAmt > salaryCap) continue;
-      if (!isHardCap && currentSalary + offerAmt > salaryCap * 1.15 && personality !== 'Win Now') continue;
-      const maxYears = s.settings.maxContractYears ?? 5;
-      const rawYears = 2 + Math.floor(Math.random() * 3);
-      const signedPlayer: Player = {
-        ...fa,
-        isFreeAgent: false,
-        salary: offerAmt,
-        contractYears: Math.min(rawYears, maxYears),
-        status: 'Rotation' as PlayerStatus,
-        morale: Math.min(95, (fa.morale ?? 70) + 10),
-      };
-      currentRoster.push(signedPlayer);
-      faPool = faPool.filter(p => p.id !== fa.id);
-      signingsLeft--;
-      newsItems.push(makeNewsItem(
-        'signing',
-        `${t.abbreviation} RE-SIGNS`,
-        (() => {
-          const yrs = signedPlayer.contractYears;
-          const totalM = ((offerAmt * yrs) / 1_000_000).toFixed(1);
-          const perYrM = (offerAmt / 1_000_000).toFixed(1);
-          const templates = [
-            `${fa.name} stays with ${t.name} on a ${yrs}-year, $${totalM}M deal ($${perYrM}M/yr). The front office locks up a key piece of the core.`,
-            `${t.name} agree to terms with ${fa.name} — ${yrs} years, $${totalM}M. He was a priority re-sign and the team got it done.`,
-            `${fa.name} is staying put. He and the ${t.name} agreed to a ${yrs}-year extension worth $${totalM}M.`,
-          ];
-          return templates[Math.floor(Math.random() * templates.length)];
-        })(),
-        s.currentDay, t.id, fa.id, fa.rating >= 88
-      ));
-      txs.push(makeTransaction(s, 'signing', [t.id], `${t.name} re-signed ${fa.name}.`, [fa.id]));
-    }
+    // ── 1.5 + 2. RE-SIGNINGS & FA SIGNINGS ────────────────────
+    // STRICTLY LOCKED until the draft is 100% complete.
+    if (s.draftPhase === 'completed') {
+      // ── 1.5. RE-SIGN OWN EXPIRING STARS (83+ OVR) ──────────
+      const ownExpiring = faPool
+        .filter(p => p.lastTeamId === t.id && p.rating >= 83)
+        .sort((a, b) => b.rating - a.rating);
+      for (const fa of ownExpiring) {
+        if (currentRoster.length >= (s.settings.maxRosterSize ?? 15)) break;
+        const currentSalary = rosterSalary({ ...t, roster: currentRoster });
+        const offerAmt = faOfferAmount(fa, { ...t, roster: currentRoster }, salaryCap, personality, ratings.negotiation, difficulty, topFAIds.has(fa.id));
+        const isHardCap = s.settings.salaryCapType === 'Hard Cap';
+        if (isHardCap && currentSalary + offerAmt > salaryCap) continue;
+        if (!isHardCap && currentSalary + offerAmt > salaryCap * 1.15 && personality !== 'Win Now') continue;
+        const maxYears = s.settings.maxContractYears ?? 5;
+        const rawYears = 2 + Math.floor(Math.random() * 3);
+        const signedPlayer: Player = {
+          ...fa,
+          isFreeAgent: false,
+          salary: offerAmt,
+          contractYears: Math.min(rawYears, maxYears),
+          status: 'Rotation' as PlayerStatus,
+          morale: Math.min(95, (fa.morale ?? 70) + 10),
+        };
+        currentRoster.push(signedPlayer);
+        faPool = faPool.filter(p => p.id !== fa.id);
+        newsItems.push(makeNewsItem(
+          'signing',
+          `${t.abbreviation} RE-SIGNS`,
+          (() => {
+            const yrs = signedPlayer.contractYears;
+            const totalM = ((offerAmt * yrs) / 1_000_000).toFixed(1);
+            const perYrM = (offerAmt / 1_000_000).toFixed(1);
+            const templates = [
+              `${fa.name} stays with ${t.name} on a ${yrs}-year, $${totalM}M deal ($${perYrM}M/yr). The front office locks up a key piece of the core.`,
+              `${t.name} agree to terms with ${fa.name} — ${yrs} years, $${totalM}M. He was a priority re-sign and the team got it done.`,
+              `${fa.name} is staying put. He and the ${t.name} agreed to a ${yrs}-year extension worth $${totalM}M.`,
+            ];
+            return templates[Math.floor(Math.random() * templates.length)];
+          })(),
+          s.currentDay, t.id, fa.id, fa.rating >= 88
+        ));
+        txs.push(makeTransaction(s, 'signing', [t.id], `${t.name} re-signed ${fa.name}.`, [fa.id]));
+      }
 
-    // ── 2. FREE AGENT SIGNING ────────────────────────────────
-    // Only sign free agents after the draft is complete
-    if (s.draftPhase !== 'completed') continue;
-
-    // Sort FA pool by personality priorities
-    const rankedFAs = [...faPool].sort((a, b) => {
-      switch (personality) {
-        case 'Rebuilder':     return a.age - b.age; // youngest first
-        case 'Win Now':       return b.rating - a.rating;
-        case 'Analytics': {
-          const tsA = (a.stats.fga + 0.44 * a.stats.fta) > 0 ? a.stats.points / (2 * (a.stats.fga + 0.44 * a.stats.fta)) : 0.5;
-          const tsB = (b.stats.fga + 0.44 * b.stats.fta) > 0 ? b.stats.points / (2 * (b.stats.fga + 0.44 * b.stats.fta)) : 0.5;
-          return tsB - tsA;
+      // ── 2. FREE AGENT SIGNING ──────────────────────────────
+      const rankedFAs = [...faPool].sort((a, b) => {
+        switch (personality) {
+          case 'Rebuilder':     return a.age - b.age;
+          case 'Win Now':       return b.rating - a.rating;
+          case 'Analytics': {
+            const tsA = (a.stats.fga + 0.44 * a.stats.fta) > 0 ? a.stats.points / (2 * (a.stats.fga + 0.44 * a.stats.fta)) : 0.5;
+            const tsB = (b.stats.fga + 0.44 * b.stats.fta) > 0 ? b.stats.points / (2 * (b.stats.fga + 0.44 * b.stats.fta)) : 0.5;
+            return tsB - tsA;
+          }
+          case 'Superstar Chaser': return b.rating - a.rating;
+          default:              return b.rating - a.rating;
         }
-        case 'Superstar Chaser': return b.rating - a.rating;
-        default:              return b.rating - a.rating;
+      });
+
+      let signingsLeft = 3;
+      for (const fa of rankedFAs) {
+        if (currentRoster.length >= 15) break;
+        if (signingsLeft <= 0) break;
+        if (personality === 'Rebuilder' && fa.age > 24 && fa.rating < 83) continue;
+        if (personality === 'Analytics') {
+          const fga = fa.stats.fga || 0;
+          const fta = fa.stats.fta || 0;
+          const ts = (fga + 0.44 * fta) > 0 ? fa.stats.points / (2 * (fga + 0.44 * fta)) : 0.5;
+          if (fa.stats.gamesPlayed > 5 && ts < 0.45 && fa.rating < 82) continue;
+        }
+        if (personality === 'Win Now' && fa.rating < 75) continue;
+
+        const currentSalary = rosterSalary({ ...t, roster: currentRoster });
+        const offerAmt = faOfferAmount(
+          fa, { ...t, roster: currentRoster }, salaryCap,
+          personality, ratings.negotiation, difficulty,
+          topFAIds.has(fa.id)
+        );
+        const isHardCap = s.settings.salaryCapType === 'Hard Cap';
+        if (isHardCap && currentSalary + offerAmt > salaryCap) continue;
+        if (!isHardCap && currentSalary + offerAmt > salaryCap * 1.1 && personality !== 'Win Now') continue;
+        if (currentRoster.length >= (s.settings.maxRosterSize ?? 15)) continue;
+
+        const maxYears = s.settings.maxContractYears ?? 5;
+        const rawYears = personality === 'Win Now' ? 3 + Math.floor(Math.random() * 2) : 1 + Math.floor(Math.random() * 3);
+        const signedPlayer: Player = {
+          ...fa,
+          isFreeAgent: false,
+          salary: offerAmt,
+          contractYears: Math.min(rawYears, maxYears),
+          status: 'Rotation' as PlayerStatus,
+          morale: 70 + Math.floor(Math.random() * 20),
+        };
+        currentRoster.push(signedPlayer);
+        faPool = faPool.filter(p => p.id !== fa.id);
+        signingsLeft--;
+
+        newsItems.push(makeNewsItem(
+          'signing',
+          `${t.abbreviation} SIGNING`,
+          (() => {
+            const yrs = signedPlayer.contractYears;
+            const totalM = ((offerAmt * yrs) / 1_000_000).toFixed(1);
+            const perYrM = (offerAmt / 1_000_000).toFixed(1);
+            const templates = [
+              `${t.name} agree to terms with ${fa.name} — ${yrs} years, $${totalM}M ($${perYrM}M/yr). He fills a clear need and upgrades the rotation.`,
+              `${fa.name} picks ${t.name}, agreeing to a ${yrs}-year, $${totalM}M deal. A statement signing for the front office.`,
+              `The ${t.name} land ${fa.name} on a ${yrs}-year, $${totalM}M contract. Expect him in the lineup immediately.`,
+            ];
+            return templates[Math.floor(Math.random() * templates.length)];
+          })(),
+          s.currentDay, t.id, fa.id, fa.rating >= 85
+        ));
+        txs.push(makeTransaction(
+          s, 'signing', [t.id], `${t.name} signed ${fa.name} to $${(offerAmt / 1_000_000).toFixed(1)}M / ${signedPlayer.contractYears}yr.`, [fa.id]
+        ));
       }
-    });
-
-    // Max 3 signings per team per offseason (counter shared with re-sign block above)
-    for (const fa of rankedFAs) {
-      if (currentRoster.length >= 15) break;
-      if (signingsLeft <= 0) break;
-
-      // Rebuilder: skip players over 24
-      if (personality === 'Rebuilder' && fa.age > 24 && fa.rating < 83) continue;
-      // Analytics: skip low TS% high USG% (check if enough data)
-      if (personality === 'Analytics') {
-        const fga = fa.stats.fga || 0;
-        const fta = fa.stats.fta || 0;
-        const ts = (fga + 0.44 * fta) > 0 ? fa.stats.points / (2 * (fga + 0.44 * fta)) : 0.5;
-        if (fa.stats.gamesPlayed > 5 && ts < 0.45 && fa.rating < 82) continue;
-      }
-      // Win Now: only OVR 75+
-      if (personality === 'Win Now' && fa.rating < 75) continue;
-
-      // Check salary cap
-      const currentSalary = rosterSalary({ ...t, roster: currentRoster });
-      const offerAmt = faOfferAmount(
-        fa, { ...t, roster: currentRoster }, salaryCap,
-        personality, ratings.negotiation, difficulty,
-        topFAIds.has(fa.id)
-      );
-
-      // Hard cap: never exceed cap; soft cap: allow slight overage for Win Now
-      const isHardCap = s.settings.salaryCapType === 'Hard Cap';
-      if (isHardCap && currentSalary + offerAmt > salaryCap) continue;
-      if (!isHardCap && currentSalary + offerAmt > salaryCap * 1.1 && personality !== 'Win Now') continue;
-
-      // Enforce max roster size
-      if (currentRoster.length >= (s.settings.maxRosterSize ?? 15)) continue;
-
-      // Sign the player
-      const maxYears = s.settings.maxContractYears ?? 5;
-      const rawYears = personality === 'Win Now' ? 3 + Math.floor(Math.random() * 2) : 1 + Math.floor(Math.random() * 3);
-      const signedPlayer: Player = {
-        ...fa,
-        isFreeAgent: false,
-        salary: offerAmt,
-        contractYears: Math.min(rawYears, maxYears),
-        status: 'Rotation' as PlayerStatus,
-        morale: 70 + Math.floor(Math.random() * 20),
-      };
-
-      currentRoster.push(signedPlayer);
-      faPool = faPool.filter(p => p.id !== fa.id);
-      signingsLeft--;
-
-      newsItems.push(makeNewsItem(
-        'signing',
-        `${t.abbreviation} SIGNING`,
-        (() => {
-          const yrs = signedPlayer.contractYears;
-          const totalM = ((offerAmt * yrs) / 1_000_000).toFixed(1);
-          const perYrM = (offerAmt / 1_000_000).toFixed(1);
-          const templates = [
-            `${t.name} agree to terms with ${fa.name} — ${yrs} years, $${totalM}M ($${perYrM}M/yr). He fills a clear need and upgrades the rotation.`,
-            `${fa.name} picks ${t.name}, agreeing to a ${yrs}-year, $${totalM}M deal. A statement signing for the front office.`,
-            `The ${t.name} land ${fa.name} on a ${yrs}-year, $${totalM}M contract. Expect him in the lineup immediately.`,
-          ];
-          return templates[Math.floor(Math.random() * templates.length)];
-        })(),
-        s.currentDay, t.id, fa.id, fa.rating >= 85
-      ));
-      txs.push(makeTransaction(
-        s, 'signing', [t.id], `${t.name} signed ${fa.name} to $${(offerAmt / 1_000_000).toFixed(1)}M / ${signedPlayer.contractYears}yr.`, [fa.id]
-      ));
-    }
+    } // end draftPhase === 'completed' guard
 
     // ── 3. COACH MANAGEMENT ──────────────────────────────────
     const wins = t.prevSeasonWins ?? t.wins;
@@ -619,25 +606,25 @@ export function runAIGMOffseason(
     }),
   };
 
-  // ── MINIMUM PAYROLL FLOOR ──────────────────────────────────────────────────
-  // If minPayroll is set, teams spending less must sign cheap FAs to reach the floor.
-  const payrollFloor = s.settings.minPayroll;
-  if (payrollFloor && payrollFloor > 0) {
-    for (let teamIdx = 0; teamIdx < s.teams.length; teamIdx++) {
-      const t = s.teams[teamIdx];
-      if (t.id === s.userTeamId) continue;
-      let teamSalary = rosterSalary(t);
-      let currentRoster = [...t.roster];
-      while (teamSalary < payrollFloor && faPool.length > 0 && currentRoster.length < (s.settings.maxRosterSize ?? 15)) {
-        // Sign cheapest available FA to fill up to floor
-        faPool.sort((a, b) => (a.desiredContract?.salary ?? 500_000) - (b.desiredContract?.salary ?? 500_000));
-        const fa = faPool.shift()!;
-        const minSalary = fa.desiredContract?.salary ?? 750_000;
-        const sp: Player = { ...fa, isFreeAgent: false, salary: minSalary, contractYears: 1, status: 'Bench' as PlayerStatus };
-        currentRoster.push(sp);
-        teamSalary += minSalary;
+  // ── MINIMUM PAYROLL FLOOR (post-draft only) ───────────────────────────────
+  if (s.draftPhase === 'completed') {
+    const payrollFloor = s.settings.minPayroll;
+    if (payrollFloor && payrollFloor > 0) {
+      for (let teamIdx = 0; teamIdx < s.teams.length; teamIdx++) {
+        const t = s.teams[teamIdx];
+        if (t.id === s.userTeamId) continue;
+        let teamSalary = rosterSalary(t);
+        let currentRoster = [...t.roster];
+        while (teamSalary < payrollFloor && faPool.length > 0 && currentRoster.length < (s.settings.maxRosterSize ?? 15)) {
+          faPool.sort((a, b) => (a.desiredContract?.salary ?? 500_000) - (b.desiredContract?.salary ?? 500_000));
+          const fa = faPool.shift()!;
+          const minSalary = Math.max(600_000, fa.desiredContract?.salary ?? 750_000);
+          const sp: Player = { ...fa, isFreeAgent: false, salary: minSalary, contractYears: 1, status: 'Bench' as PlayerStatus };
+          currentRoster.push(sp);
+          teamSalary += minSalary;
+        }
+        s = { ...s, teams: s.teams.map(tm => tm.id === t.id ? { ...tm, roster: currentRoster } : tm) };
       }
-      s = { ...s, teams: s.teams.map(tm => tm.id === t.id ? { ...tm, roster: currentRoster } : tm) };
     }
   }
 
@@ -1249,6 +1236,8 @@ export function aiGMPreOffseasonAgreements(
   const transactions: Transaction[] = [];
   let s = { ...state };
 
+  // Pre-offseason agreements only happen after the draft is complete
+  if (s.draftPhase !== 'completed') return { updatedState: s, newsItems, transactions };
   if (!s.freeAgents || s.freeAgents.length === 0) return { updatedState: s, newsItems, transactions };
 
   const cap = s.settings.salaryCap || 140_000_000;
