@@ -1,5 +1,5 @@
 
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useRef, useEffect } from 'react';
 import { LeagueState, SeasonAwards, AwardWinner, Player, Coach, Team } from '../types';
 import TeamBadge from './TeamBadge';
 import { PlayerLink } from '../context/NavigationContext';
@@ -17,6 +17,10 @@ const Awards: React.FC<AwardsProps> = ({ league, onScout, onScoutCoach, onManage
   const [activeTab, setActiveTab] = useState<AwardsTab>('races');
   const [historyYear, setHistoryYear] = useState<number | null>(null);
   const [sortConfig, setSortConfig] = useState<{ key: string, direction: 'asc' | 'desc' }>({ key: 'score', direction: 'desc' });
+
+  // Track previous score-based rankings to compute movement arrows
+  const prevRanksRef = useRef<Record<string, Record<string, number>>>({});
+  const [rankDeltas, setRankDeltas] = useState<Record<string, Record<string, number>>>({});
 
   const allPlayers = useMemo(() => league.teams.flatMap(t => t.roster), [league.teams]);
   const allTeams = league.teams;
@@ -146,6 +150,31 @@ const Awards: React.FC<AwardsProps> = ({ league, onScout, onScoutCoach, onManage
     return { mvp, dpoy, roy, smoy, mip, coy, maxGamesPlayed, seasonActive };
   }, [allPlayers, allTeams, league.season, league.isOffseason, league.teams]);
 
+  // Recompute rank-movement deltas whenever awardRaces changes
+  useEffect(() => {
+    const raceKeys = ['mvp', 'dpoy', 'roy', 'smoy', 'mip', 'coy'] as const;
+    const newDeltas: Record<string, Record<string, number>> = {};
+
+    for (const key of raceKeys) {
+      const candidates = awardRaces[key] as any[];
+      const prev = prevRanksRef.current[key] ?? {};
+      const current: Record<string, number> = {};
+      newDeltas[key] = {};
+
+      candidates.forEach((c, idx) => {
+        const id: string = c.player?.id ?? c.coach?.id ?? '';
+        current[id] = idx + 1;
+        if (id in prev) {
+          newDeltas[key][id] = prev[id] - (idx + 1); // positive = moved up, negative = fell
+        }
+      });
+
+      prevRanksRef.current[key] = current;
+    }
+
+    setRankDeltas(newDeltas);
+  }, [awardRaces]);
+
   const currentAwards = league.currentSeasonAwards || (league.awardHistory && league.awardHistory[0]);
   const allCoaches = useMemo(() => league.teams.flatMap(t => [t.staff.headCoach]), [league.teams]);
 
@@ -222,12 +251,19 @@ const Awards: React.FC<AwardsProps> = ({ league, onScout, onScoutCoach, onManage
     </div>
   );
 
-  const RaceTable = ({ title, candidates, columns, gamesPlayed, seasonActive }: {
+  const RankArrow = ({ delta }: { delta?: number }) => {
+    if (delta === undefined || delta === 0) return <span className="text-slate-700 text-[9px] font-black">—</span>;
+    if (delta > 0) return <span className="text-emerald-400 text-[9px] font-black leading-none">↑{delta}</span>;
+    return <span className="text-rose-400 text-[9px] font-black leading-none">↓{Math.abs(delta)}</span>;
+  };
+
+  const RaceTable = ({ title, candidates, columns, gamesPlayed, seasonActive, deltas }: {
     title: string;
     candidates: any[];
     columns: string[];
     gamesPlayed: number;
     seasonActive: boolean;
+    deltas?: Record<string, number>;
   }) => {
     const allCols = [...columns, 'GP'];
     const [localSort, setLocalSort] = useState<{ key: string, direction: 'asc' | 'desc' }>({ key: columns[0], direction: 'desc' });
@@ -313,9 +349,12 @@ const Awards: React.FC<AwardsProps> = ({ league, onScout, onScoutCoach, onManage
                     }`}
                   >
                     <td className="p-3">
-                      <span className={`text-xs font-mono font-black ${
-                        idx === 0 ? 'text-amber-500' : idx === 1 ? 'text-slate-400' : idx === 2 ? 'text-amber-900' : 'text-slate-700'
-                      }`}>{idx + 1}</span>
+                      <div className="flex items-center gap-1.5">
+                        <span className={`text-xs font-mono font-black ${
+                          idx === 0 ? 'text-amber-500' : idx === 1 ? 'text-slate-400' : idx === 2 ? 'text-amber-900' : 'text-slate-700'
+                        }`}>{idx + 1}</span>
+                        <RankArrow delta={deltas?.[c.player?.id ?? c.coach?.id ?? '']} />
+                      </div>
                     </td>
                     <td className="p-3 min-w-[130px]">
                       <div className="flex flex-col">
@@ -410,12 +449,12 @@ const Awards: React.FC<AwardsProps> = ({ league, onScout, onScoutCoach, onManage
             </div>
           )}
           <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
-            <RaceTable title="MVP"   candidates={awardRaces.mvp}  columns={['PPG', 'TRB', 'AST', 'FG', 'PER']}         gamesPlayed={awardRaces.maxGamesPlayed} seasonActive={awardRaces.seasonActive} />
-            <RaceTable title="DPOY"  candidates={awardRaces.dpoy} columns={['BPG', 'SPG', 'TRB', 'DREB']}              gamesPlayed={awardRaces.maxGamesPlayed} seasonActive={awardRaces.seasonActive} />
-            <RaceTable title="ROY"   candidates={awardRaces.roy}  columns={['PPG', 'TRB', 'AST', 'OVR']}              gamesPlayed={awardRaces.maxGamesPlayed} seasonActive={awardRaces.seasonActive} />
-            <RaceTable title={league.settings.playerGenderRatio === 100 ? '6th Woman' : '6th Man'} candidates={awardRaces.smoy} columns={['PPG', 'TRB', 'AST', 'MIN']} gamesPlayed={awardRaces.maxGamesPlayed} seasonActive={awardRaces.seasonActive} />
-            <RaceTable title="MIP"   candidates={awardRaces.mip}  columns={['PPG Jump', 'Curr PPG', 'Prev PPG', 'OVR']} gamesPlayed={awardRaces.maxGamesPlayed} seasonActive={awardRaces.seasonActive} />
-            <RaceTable title="Coach" candidates={awardRaces.coy}  columns={['Wins', 'Losses', 'Record', 'W vs Exp']}    gamesPlayed={awardRaces.maxGamesPlayed} seasonActive={awardRaces.seasonActive} />
+            <RaceTable title="MVP"   candidates={awardRaces.mvp}  columns={['PPG', 'TRB', 'AST', 'FG', 'PER']}          gamesPlayed={awardRaces.maxGamesPlayed} seasonActive={awardRaces.seasonActive} deltas={rankDeltas.mvp} />
+            <RaceTable title="DPOY"  candidates={awardRaces.dpoy} columns={['BPG', 'SPG', 'TRB', 'DREB']}               gamesPlayed={awardRaces.maxGamesPlayed} seasonActive={awardRaces.seasonActive} deltas={rankDeltas.dpoy} />
+            <RaceTable title="ROY"   candidates={awardRaces.roy}  columns={['PPG', 'TRB', 'AST', 'OVR']}               gamesPlayed={awardRaces.maxGamesPlayed} seasonActive={awardRaces.seasonActive} deltas={rankDeltas.roy} />
+            <RaceTable title={league.settings.playerGenderRatio === 100 ? '6th Woman' : '6th Man'} candidates={awardRaces.smoy} columns={['PPG', 'TRB', 'AST', 'MIN']} gamesPlayed={awardRaces.maxGamesPlayed} seasonActive={awardRaces.seasonActive} deltas={rankDeltas.smoy} />
+            <RaceTable title="MIP"   candidates={awardRaces.mip}  columns={['PPG Jump', 'Curr PPG', 'Prev PPG', 'OVR']}  gamesPlayed={awardRaces.maxGamesPlayed} seasonActive={awardRaces.seasonActive} deltas={rankDeltas.mip} />
+            <RaceTable title="Coach" candidates={awardRaces.coy}  columns={['Wins', 'Losses', 'Record', 'W vs Exp']}     gamesPlayed={awardRaces.maxGamesPlayed} seasonActive={awardRaces.seasonActive} deltas={rankDeltas.coy} />
           </div>
         </div>
       )}
