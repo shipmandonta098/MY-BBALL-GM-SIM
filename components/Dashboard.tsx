@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { LeagueState, Team, Player, GameResult } from '../types';
 import TeamBadge from './TeamBadge';
+import { teamSeasonAttendance } from '../utils/attendanceEngine';
 
 interface DashboardProps {
   league: LeagueState;
@@ -402,6 +403,58 @@ const Dashboard: React.FC<DashboardProps> = ({ league, news, onSimulate, onScout
           </div>
         </div>
       </div>
+
+      {/* Attendance Summary Card */}
+      {(() => {
+        const { homeGames, avgAttendance, capacityPct } = teamSeasonAttendance(userTeam, league.schedule);
+        const allRanked = [...league.teams]
+          .map(t => ({ id: t.id, avg: teamSeasonAttendance(t, league.schedule).avgAttendance }))
+          .sort((a, b) => b.avg - a.avg);
+        const rank = allRanked.findIndex(r => r.id === userTeam.id) + 1;
+        const fmt = (n: number) => n.toLocaleString('en-US');
+        if (homeGames === 0) return null;
+        return (
+          <div className="bg-slate-900 border border-slate-800 rounded-3xl p-6 shadow-2xl">
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-[10px] font-black uppercase tracking-[0.4em] text-slate-500">Home Attendance</h3>
+              <button
+                onClick={() => setActiveTab('stats')}
+                className="text-[10px] font-black uppercase tracking-widest text-amber-500 hover:text-amber-400 transition-colors"
+              >
+                Rankings →
+              </button>
+            </div>
+            <div className="grid grid-cols-3 gap-4">
+              <div className="text-center">
+                <p className="text-[10px] text-slate-500 font-black uppercase mb-1">Avg / Game</p>
+                <p className="text-2xl font-display font-black text-white">{fmt(avgAttendance)}</p>
+              </div>
+              <div className="text-center">
+                <p className="text-[10px] text-slate-500 font-black uppercase mb-1">% Capacity</p>
+                <p className={`text-2xl font-display font-black ${
+                  capacityPct >= 95 ? 'text-emerald-400' :
+                  capacityPct >= 80 ? 'text-amber-400' :
+                  capacityPct >= 60 ? 'text-slate-300' : 'text-rose-400'
+                }`}>{capacityPct.toFixed(1)}%</p>
+              </div>
+              <div className="text-center">
+                <p className="text-[10px] text-slate-500 font-black uppercase mb-1">League Rank</p>
+                <p className="text-2xl font-display font-black" style={{ color: userTeam.primaryColor }}>#{rank}</p>
+              </div>
+            </div>
+            <div className="mt-4 h-1.5 bg-slate-800 rounded-full overflow-hidden">
+              <div
+                className="h-full rounded-full transition-all duration-500"
+                style={{
+                  width: `${Math.min(100, capacityPct)}%`,
+                  backgroundColor: capacityPct >= 95 ? '#34d399' : capacityPct >= 80 ? '#f59e0b' : capacityPct >= 60 ? '#94a3b8' : '#f43f5e',
+                }}
+              />
+            </div>
+            <p className="text-[10px] text-slate-600 font-bold mt-1.5">{homeGames} home games played · Arena cap: {fmt(userTeam.stadiumCapacity || 19_000)}</p>
+          </div>
+        );
+      })()}
 
       {/* Main Grid: Depth Chart & Quick Actions */}
       <div className="grid grid-cols-1 lg:grid-cols-4 gap-8">

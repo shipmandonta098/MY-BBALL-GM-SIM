@@ -493,6 +493,7 @@ export interface ScheduleGame {
   homeB2BCount: number;
   awayB2BCount: number;
   gameNumber?: number;
+  attendance?: number;
 }
 
 export interface PlayByPlayEvent {
