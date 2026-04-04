@@ -3,6 +3,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { LeagueState, Player, Team, GameResult, PlayerStatus, ScheduleGame, BulkSimSummary, Prospect, Coach, TradeProposal, Position, NewsItem, NewsCategory, LeagueSettings, SeasonAwards, PlayoffBracket, PlayoffSeries, Transaction, TransactionType, PowerRankingSnapshot, PowerRankingEntry, GMProfile, GMMilestone, RivalryStats, InjuryType, SeasonPhase, AllStarWeekendData, AllStarVoteEntry } from './types';
 import { generateLeagueTeams, generateSeasonSchedule, generateProspects, generateFreeAgentPool, generateCoachPool, EXPANSION_TEAM_POOL, generateCoach, generatePlayer, generateDefaultRotation, enforcePositionalBounds, ageFromBirthdate, getCoachPreferredScheme } from './constants';
 import { simulateGame, normalizeLeagueOVRs } from './utils/simEngine';
+import { computeGameAttendance } from './utils/attendanceEngine';
 import { autoSimAllStarWeekend } from './utils/allStarSim';
 import { snapshotPlayerStats } from './utils/playerUtils';
 import { generateGameRecap, generateScoutingReport, generateSeasonNarrative, generateCoachScoutingReport, generateNewsHeadline } from './services/geminiService';
@@ -1144,7 +1145,8 @@ const App: React.FC = () => {
     }));
 
     const rivalryHistory = updateRivalryStats(state, result);
-    newState = { ...state, teams: updatedTeams, history: [result, ...state.history], schedule: state.schedule.map(sg => sg.id === gameId ? { ...sg, played: true, resultId: result.id } : sg), rivalryHistory };
+    const gameAttendance = computeGameAttendance(homeTeam, awayTeam);
+    newState = { ...state, teams: updatedTeams, history: [result, ...state.history], schedule: state.schedule.map(sg => sg.id === gameId ? { ...sg, played: true, resultId: result.id, attendance: gameAttendance } : sg), rivalryHistory };
 
     // Generate morale-based news (only for user team, deduplicated per player per cooldown window)
     const userTeamUpdated = newState.teams.find(t => t.id === newState.userTeamId);
