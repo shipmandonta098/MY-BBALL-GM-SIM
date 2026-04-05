@@ -460,6 +460,10 @@ export interface Team {
   borderStyle: 'None' | 'Solid' | 'Gradient';
   status: 'Active' | 'Inactive' | 'Relocating' | 'Expansion';
   aiGM?: AIGMData;
+  /** Name of the team's current General Manager (AI or human-named). */
+  gmName?: string;
+  /** Age of the team's GM (35–65). */
+  gmAge?: number;
   /** Team pace rating 60-100. Controls possessions per game via tier table.
    *  Defaults to scheme-based value if not set. */
   paceRating?: number;

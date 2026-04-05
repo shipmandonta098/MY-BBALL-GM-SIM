@@ -1567,6 +1567,36 @@ const TIER_SLOT_FLOORS: Record<string, number[]> = {
   rebuilding: [84, 81, 79, 77, 77, 76, 75, 74, 74, 73, 73, 72, 71, 71],
 };
 
+// ── Executive (GM) name generation ───────────────────────────────────────────
+const GM_FIRST_NAMES_MALE = [
+  'Marcus','Darnell','Terrence','Calvin','Jerome','Reginald','Alvin','Devin','Maurice','Kendall',
+  'Bradley','Curtis','Elijah','Gordon','Harris','Ivan','Jordan','Kevin','Lance','Miles',
+  'Nathan','Owen','Preston','Quinton','Russell','Spencer','Travis','Victor','Walter','Xavier',
+];
+const GM_FIRST_NAMES_FEMALE = [
+  'Alicia','Brenda','Carmen','Denise','Evelyn','Felicia','Gloria','Helen','Irene','Jasmine',
+  'Karen','Latasha','Monica','Natasha','Olivia','Patricia','Renee','Sandra','Tamika','Ursula',
+  'Vanessa','Whitney','Alexis','Brianna','Cassandra','Dominique','Elaine','Francine','Gwendolyn','Harriet',
+];
+const GM_LAST_NAMES = [
+  'Whitaker','Chambers','Holloway','Mercer','Stanton','Dupree','Fletcher','Gaines','Harmon','Ingram',
+  'Jefferson','Kingston','Lawson','Monroe','Nash','Okafor','Parrish','Quinn','Rhodes','Sutton',
+  'Tillman','Underwood','Vance','Washington','Yates','Zimmerman','Blackwell','Caldwell','Dixon','Ellison',
+];
+const GM_MIDDLE_INITIALS = 'ABCDEFGHJKLMNPRSTW';
+
+export const generateGMName = (genderRatio: number = 0): { name: string; age: number } => {
+  const isFemale = Math.random() * 100 < genderRatio;
+  const firstNames = isFemale ? GM_FIRST_NAMES_FEMALE : GM_FIRST_NAMES_MALE;
+  const first = firstNames[Math.floor(Math.random() * firstNames.length)];
+  const last  = GM_LAST_NAMES[Math.floor(Math.random() * GM_LAST_NAMES.length)];
+  const mid   = GM_MIDDLE_INITIALS[Math.floor(Math.random() * GM_MIDDLE_INITIALS.length)];
+  // ~50% chance of middle initial for variety
+  const name  = Math.random() < 0.5 ? `${first} ${mid}. ${last}` : `${first} ${last}`;
+  const age   = 35 + Math.floor(Math.random() * 31); // 35–65
+  return { name, age };
+};
+
 export const generateLeagueTeams = (genderRatio: number = 0, season: number = 2026, futureSeasonsToSeed: number = 4): Team[] => {
   const teamNames = TEAM_DATA.map(t => t.name);
   const usedPicks = new Map<number, Set<string>>();
@@ -1653,6 +1683,7 @@ export const generateLeagueTeams = (genderRatio: number = 0, season: number = 20
       stadiumCapacity: data.market === 'Large' ? 20000 : data.market === 'Medium' ? 18500 : 17000,
       borderStyle: 'Solid',
       status: 'Active',
+      ...(() => { const gm = generateGMName(genderRatio); return { gmName: gm.name, gmAge: gm.age }; })(),
     };
   });
 };
