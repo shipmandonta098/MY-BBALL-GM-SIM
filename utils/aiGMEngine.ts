@@ -334,6 +334,13 @@ export function runAIGMOffseason(
   state: LeagueState,
   difficulty: string
 ): AIGMOffseasonResult {
+  // ── HARD LOCK: no AI roster moves (cuts, signings, trades) until the draft
+  // is 100% complete. This prevents waivers/releases from appearing in the
+  // news feed or transaction log during the lottery or draft phase.
+  if (state.draftPhase !== 'completed') {
+    return { updatedState: state, newsItems: [], transactions: [] };
+  }
+
   let s = { ...state, teams: state.teams.map(t => ({ ...t, roster: [...t.roster] })) };
   let faPool = [...s.freeAgents];
   const newsItems: NewsItem[] = [];
@@ -386,8 +393,7 @@ export function runAIGMOffseason(
     });
 
     // ── 1.5 + 2. RE-SIGNINGS & FA SIGNINGS ────────────────────
-    // STRICTLY LOCKED until the draft is 100% complete.
-    if (s.draftPhase === 'completed') {
+    {
       // ── 1.5. RE-SIGN OWN EXPIRING STARS (83+ OVR) ──────────
       const ownExpiring = faPool
         .filter(p => p.lastTeamId === t.id && p.rating >= 83)
@@ -503,7 +509,7 @@ export function runAIGMOffseason(
           s, 'signing', [t.id], `${t.name} signed ${fa.name} to $${(offerAmt / 1_000_000).toFixed(1)}M / ${signedPlayer.contractYears}yr.`, [fa.id]
         ));
       }
-    } // end draftPhase === 'completed' guard
+    } // end re-signings & FA signings block
 
     // ── 3. COACH MANAGEMENT ──────────────────────────────────
     const wins = t.prevSeasonWins ?? t.wins;

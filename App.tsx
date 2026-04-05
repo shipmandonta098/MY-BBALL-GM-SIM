@@ -2142,6 +2142,9 @@ const App: React.FC = () => {
   
   const handleReleasePlayer = (playerId: string) => {
     if (!league || !league.userTeamId) return;
+    // Hard lock: no waivers/releases during draft lottery, live draft, or any
+    // pre-completed draft phase. Only allow once free agency officially opens.
+    if (league.isOffseason && league.draftPhase !== 'completed') return;
     const userTeam = league.teams.find(t => t.id === league.userTeamId)!;
     const p = userTeam.roster.find(pl => pl.id === playerId);
     const updatedRoster = userTeam.roster.filter(pl => pl.id !== playerId);
@@ -2504,6 +2507,7 @@ const App: React.FC = () => {
             isUserTeam={league.teams.find(t => t.id === league.userTeamId)?.roster.some(p => p.id === selectedPlayer.id) ?? false}
             onUpdateStatus={handleUpdatePlayerStatus}
             onRelease={handleReleasePlayer}
+            draftLocked={!!(league.isOffseason && league.draftPhase !== 'completed')}
             godMode={league.settings.godMode}
             onUpdatePlayer={handleUpdatePlayer}
             isCurrentAllStar={isCurrentAllStar}
