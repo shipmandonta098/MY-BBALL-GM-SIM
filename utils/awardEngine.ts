@@ -130,12 +130,13 @@ export const generateAwards = async (teams: Team[], year: number, playerGenderRa
     return bScore - aScore;
   })[0];
 
+  const eoyGMName = eoyCandidate.gmName ?? `GM of the ${eoyCandidate.name}`;
   const executiveOfTheYear: AwardWinner = {
     gmId: 'gm-' + eoyCandidate.id,
-    name: `General Manager of the ${eoyCandidate.name}`,
+    name: eoyGMName,
     teamId: eoyCandidate.id,
     teamName: eoyCandidate.name,
-    statsLabel: `Lead improvement to ${eoyCandidate.wins} wins`
+    statsLabel: `${eoyCandidate.wins}-${eoyCandidate.losses} — General Manager, ${eoyCandidate.city} ${eoyCandidate.name}`
   };
   executiveOfTheYear.blurb = await generateAwardBlurb('Executive of the Year', executiveOfTheYear);
 

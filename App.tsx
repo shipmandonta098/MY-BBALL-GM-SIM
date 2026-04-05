@@ -1,7 +1,7 @@
 
 import React, { useState, useEffect, useCallback } from 'react';
 import { LeagueState, Player, Team, GameResult, PlayerStatus, ScheduleGame, BulkSimSummary, Prospect, Coach, TradeProposal, Position, NewsItem, NewsCategory, LeagueSettings, SeasonAwards, PlayoffBracket, PlayoffSeries, Transaction, TransactionType, PowerRankingSnapshot, PowerRankingEntry, GMProfile, GMMilestone, RivalryStats, InjuryType, SeasonPhase, AllStarWeekendData, AllStarVoteEntry } from './types';
-import { generateLeagueTeams, generateSeasonSchedule, generateProspects, generateFreeAgentPool, generateCoachPool, EXPANSION_TEAM_POOL, generateCoach, generatePlayer, generateDefaultRotation, enforcePositionalBounds, ageFromBirthdate, getCoachPreferredScheme } from './constants';
+import { generateLeagueTeams, generateSeasonSchedule, generateProspects, generateFreeAgentPool, generateCoachPool, EXPANSION_TEAM_POOL, generateCoach, generatePlayer, generateDefaultRotation, enforcePositionalBounds, ageFromBirthdate, getCoachPreferredScheme, generateGMName } from './constants';
 import { simulateGame, normalizeLeagueOVRs } from './utils/simEngine';
 import { computeGameAttendance } from './utils/attendanceEngine';
 import { autoSimAllStarWeekend } from './utils/allStarSim';
@@ -1590,7 +1590,7 @@ const App: React.FC = () => {
           eoyWins: [...gm.eoyWins, tempState.season],
           reputation: Math.min(100, gm.reputation + 15),
           milestones: [...gm.milestones, {
-            id: `eoy-${Date.now()}`, year: tempState.season, day: tempState.currentDay, text: `Awarded Executive of the Year after leading team to ${tempState.teams.find(t=>t.id===tempState.userTeamId)!.wins} wins.`, type: 'award'
+            id: `eoy-${Date.now()}`, year: tempState.season, day: tempState.currentDay, text: `Awarded Executive of the Year after leading the ${tempState.teams.find(t=>t.id===tempState.userTeamId)!.name} to ${tempState.teams.find(t=>t.id===tempState.userTeamId)!.wins} wins.`, type: 'award'
           }]
         };
       }
@@ -2114,6 +2114,7 @@ const App: React.FC = () => {
             stadiumCapacity: data.market === 'Large' ? 20000 : data.market === 'Medium' ? 18500 : 17000,
             borderStyle: 'Solid',
             status: 'Active',
+            ...(() => { const gm = generateGMName(prev.settings?.playerGenderRatio ?? 0); return { gmName: gm.name, gmAge: gm.age }; })(),
           };
           return { ...prev, teams: [...prev.teams, newTeam] };
         });
