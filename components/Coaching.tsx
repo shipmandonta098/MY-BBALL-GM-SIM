@@ -328,6 +328,21 @@ const Coaching: React.FC<CoachingProps> = ({ league, updateLeague, godMode = fal
 
         {/* Center/Right: Staff Carousel */}
         <div className="lg:col-span-2 space-y-6">
+           {/* Front Office — GM nameplate */}
+           {userTeam.gmName && (
+             <div className="flex items-center gap-4 bg-slate-900 border border-slate-800 rounded-2xl px-5 py-4">
+               <div className="w-10 h-10 rounded-xl bg-slate-800 flex items-center justify-center shrink-0">
+                 <span className="text-lg">💼</span>
+               </div>
+               <div className="min-w-0">
+                 <p className="text-[9px] font-black uppercase tracking-[0.3em] text-slate-500">General Manager</p>
+                 <p className="text-sm font-bold text-white truncate">{userTeam.gmName}</p>
+                 {userTeam.gmAge && (
+                   <p className="text-[9px] text-slate-600 font-bold uppercase tracking-widest">Age {userTeam.gmAge}</p>
+                 )}
+               </div>
+             </div>
+           )}
            {/* Interim / search banner */}
            {userTeam.staff.headCoach?.isInterim && (
              <div className="flex items-start gap-4 bg-amber-500/10 border border-amber-500/30 rounded-2xl px-5 py-4 animate-in fade-in duration-500">

@@ -18,6 +18,10 @@ const Awards: React.FC<AwardsProps> = ({ league, onScout, onScoutCoach, onManage
   const [historyYear, setHistoryYear] = useState<number | null>(null);
   const [sortConfig, setSortConfig] = useState<{ key: string, direction: 'asc' | 'desc' }>({ key: 'score', direction: 'desc' });
 
+  // Track previous score-based rankings to compute movement arrows
+  const prevRanksRef = useRef<Record<string, Record<string, number>>>({});
+  const [rankDeltas, setRankDeltas] = useState<Record<string, Record<string, number>>>({});
+
   const allPlayers = useMemo(() => league.teams.flatMap(t => t.roster), [league.teams]);
   const allTeams = league.teams;
 
@@ -146,24 +150,30 @@ const Awards: React.FC<AwardsProps> = ({ league, onScout, onScoutCoach, onManage
     return { mvp, dpoy, roy, smoy, mip, coy, maxGamesPlayed, seasonActive };
   }, [allPlayers, allTeams, league.season, league.isOffseason, league.teams]);
 
-  // ── Ranking movement tracking ─────────────────────────────────────────────
-  // Snapshot of score-sorted IDs from the *previous* render (before latest games)
-  const prevScoreRanksRef = useRef<Record<string, Record<string, number>> | null>(null);
-
-  // Build current score-rank maps: raceKey → { playerId/coachId → 1-indexed rank }
-  const scoreRankMaps = useMemo(() => ({
-    mvp:  Object.fromEntries(awardRaces.mvp.map((c, i)  => [c.player.id,  i + 1])),
-    dpoy: Object.fromEntries(awardRaces.dpoy.map((c, i) => [c.player.id,  i + 1])),
-    roy:  Object.fromEntries(awardRaces.roy.map((c, i)  => [c.player.id,  i + 1])),
-    smoy: Object.fromEntries(awardRaces.smoy.map((c, i) => [c.player.id,  i + 1])),
-    mip:  Object.fromEntries(awardRaces.mip.map((c, i)  => [c.player.id,  i + 1])),
-    coy:  Object.fromEntries(awardRaces.coy.map((c, i)  => [c!.coach.id,  i + 1])),
-  }), [awardRaces]);
-
-  // After render: advance snapshot so next render can diff against it
+  // Recompute rank-movement deltas whenever awardRaces changes
   useEffect(() => {
-    prevScoreRanksRef.current = scoreRankMaps;
-  }, [scoreRankMaps]);
+    const raceKeys = ['mvp', 'dpoy', 'roy', 'smoy', 'mip', 'coy'] as const;
+    const newDeltas: Record<string, Record<string, number>> = {};
+
+    for (const key of raceKeys) {
+      const candidates = awardRaces[key] as any[];
+      const prev = prevRanksRef.current[key] ?? {};
+      const current: Record<string, number> = {};
+      newDeltas[key] = {};
+
+      candidates.forEach((c, idx) => {
+        const id: string = c.player?.id ?? c.coach?.id ?? '';
+        current[id] = idx + 1;
+        if (id in prev) {
+          newDeltas[key][id] = prev[id] - (idx + 1); // positive = moved up, negative = fell
+        }
+      });
+
+      prevRanksRef.current[key] = current;
+    }
+
+    setRankDeltas(newDeltas);
+  }, [awardRaces]);
 
   const currentAwards = league.currentSeasonAwards || (league.awardHistory && league.awardHistory[0]);
   const allCoaches = useMemo(() => league.teams.flatMap(t => [t.staff.headCoach]), [league.teams]);
@@ -241,58 +251,22 @@ const Awards: React.FC<AwardsProps> = ({ league, onScout, onScoutCoach, onManage
     </div>
   );
 
-  // ── Movement arrow badge ──────────────────────────────────────────────────
-  const MovementArrow = ({ type, delta }: { type: 'up' | 'down' | 'same' | 'new'; delta: number }) => {
-    if (type === 'up') return (
-      <span className="inline-flex items-center text-[9px] font-black text-emerald-500 leading-none whitespace-nowrap" title={`Rose ${delta} spot${delta !== 1 ? 's' : ''}`}>
-        ↑{delta}
-      </span>
-    );
-    if (type === 'down') return (
-      <span className="inline-flex items-center text-[9px] font-black text-red-500 leading-none whitespace-nowrap" title={`Fell ${delta} spot${delta !== 1 ? 's' : ''}`}>
-        ↓{delta}
-      </span>
-    );
-    if (type === 'new') return (
-      <span className="inline-flex items-center text-[8px] font-black text-sky-500 leading-none tracking-wide" title="New entrant">
-        NEW
-      </span>
-    );
-    return <span className="inline-flex items-center text-[9px] text-slate-700 leading-none" title="No change">→</span>;
+  const RankArrow = ({ delta }: { delta?: number }) => {
+    if (delta === undefined || delta === 0) return <span className="text-slate-700 text-[9px] font-black">—</span>;
+    if (delta > 0) return <span className="text-emerald-400 text-[9px] font-black leading-none">↑{delta}</span>;
+    return <span className="text-rose-400 text-[9px] font-black leading-none">↓{Math.abs(delta)}</span>;
   };
 
-  const RaceTable = ({ title, candidates, columns, gamesPlayed, seasonActive, prevScoreRankMap }: {
+  const RaceTable = ({ title, candidates, columns, gamesPlayed, seasonActive, deltas }: {
     title: string;
     candidates: any[];
     columns: string[];
     gamesPlayed: number;
     seasonActive: boolean;
-    prevScoreRankMap: Record<string, number> | null;
+    deltas?: Record<string, number>;
   }) => {
     const allCols = [...columns, 'GP'];
     const [localSort, setLocalSort] = useState<{ key: string, direction: 'asc' | 'desc' }>({ key: columns[0], direction: 'desc' });
-
-    // Build score-rank map for this render: id → 1-indexed score rank
-    const currentScoreRankMap = useMemo(() => {
-      const map: Record<string, number> = {};
-      candidates.forEach((c, i) => {
-        const id = c.player?.id || c.coach?.id;
-        if (id) map[id] = i + 1;
-      });
-      return map;
-    }, [candidates]);
-
-    const getMovement = (id: string): { type: 'up' | 'down' | 'same' | 'new'; delta: number } => {
-      const curr = currentScoreRankMap[id];
-      if (curr === undefined) return { type: 'same', delta: 0 };
-      if (!prevScoreRankMap) return { type: 'same', delta: 0 };
-      const prev = prevScoreRankMap[id];
-      if (prev === undefined) return { type: 'new', delta: 0 };
-      const delta = prev - curr; // positive = moved up (was ranked lower/higher number before)
-      if (delta > 0) return { type: 'up', delta };
-      if (delta < 0) return { type: 'down', delta: Math.abs(delta) };
-      return { type: 'same', delta: 0 };
-    };
 
     const sortedCandidates = useMemo(() => {
       return [...candidates].sort((a, b) => {
@@ -366,60 +340,55 @@ const Awards: React.FC<AwardsProps> = ({ league, onScout, onScoutCoach, onManage
                 </tr>
               </thead>
               <tbody>
-                {sortedCandidates.map((c, idx) => {
-                  const id = c.player?.id || c.coach?.id;
-                  const scoreRank = currentScoreRankMap[id] ?? idx + 1;
-                  const movement = getMovement(id);
-                  return (
-                    <tr
-                      key={id}
-                      onClick={() => c.player ? onScout(c.player) : onScoutCoach(c.coach)}
-                      className={`group cursor-pointer border-b border-slate-800/40 hover:bg-slate-800/30 transition-colors ${
-                        scoreRank === 1 ? 'bg-amber-500/5' : scoreRank <= 3 ? 'bg-emerald-500/3' : ''
-                      }`}
-                    >
-                      <td className="p-3">
-                        <div className="flex items-center gap-1">
-                          <span className={`text-xs font-mono font-black ${
-                            scoreRank === 1 ? 'text-amber-500' : scoreRank === 2 ? 'text-slate-400' : scoreRank === 3 ? 'text-amber-900' : 'text-slate-700'
-                          }`}>{scoreRank}</span>
-                          <MovementArrow type={movement.type} delta={movement.delta} />
-                        </div>
-                      </td>
-                      <td className="p-3 min-w-[130px]">
-                        <div className="flex flex-col">
-                          <span className="text-sm font-bold text-white group-hover:text-amber-500 transition-colors leading-tight">
-                            {c.player?.name || c.coach?.name}
-                          </span>
-                          <span className="text-[9px] font-black text-slate-500 uppercase tracking-widest">
-                            {c.player ? `${c.player.position} · ${c.player.age}y` : 'Head Coach'}
-                          </span>
-                        </div>
-                      </td>
-                      <td className="p-3 min-w-[110px]">
-                        <div
-                          className="flex items-center gap-1.5 cursor-pointer hover:opacity-75 transition-opacity"
-                          onClick={e => { e.stopPropagation(); onManageTeam(c.team.id); }}
-                        >
-                          <TeamBadge team={c.team} size="xs" />
-                          <span className="text-[9px] font-bold text-slate-400 uppercase group-hover/team:text-amber-500 whitespace-nowrap">
-                            {c.team.abbreviation} {c.team.wins}-{c.team.losses}
-                          </span>
-                        </div>
-                      </td>
-                      {allCols.map(col => {
-                        const val = col === 'GP' ? c.stats.GP : c.stats[col];
-                        return (
-                          <td key={col} className="p-3 text-right whitespace-nowrap">
-                            <span className={`text-xs font-mono font-bold ${
-                              scoreRank === 1 ? 'text-amber-400' : scoreRank <= 3 ? 'text-emerald-400' : 'text-slate-300'
-                            }`}>{val}</span>
-                          </td>
-                        );
-                      })}
-                    </tr>
-                  );
-                })}
+                {sortedCandidates.map((c, idx) => (
+                  <tr
+                    key={c.player?.id || c.coach?.id}
+                    onClick={() => c.player ? onScout(c.player) : onScoutCoach(c.coach)}
+                    className={`group cursor-pointer border-b border-slate-800/40 hover:bg-slate-800/30 transition-colors ${
+                      idx === 0 ? 'bg-amber-500/5' : idx < 3 ? 'bg-emerald-500/3' : ''
+                    }`}
+                  >
+                    <td className="p-3">
+                      <div className="flex items-center gap-1.5">
+                        <span className={`text-xs font-mono font-black ${
+                          idx === 0 ? 'text-amber-500' : idx === 1 ? 'text-slate-400' : idx === 2 ? 'text-amber-900' : 'text-slate-700'
+                        }`}>{idx + 1}</span>
+                        <RankArrow delta={deltas?.[c.player?.id ?? c.coach?.id ?? '']} />
+                      </div>
+                    </td>
+                    <td className="p-3 min-w-[130px]">
+                      <div className="flex flex-col">
+                        <span className="text-sm font-bold text-white group-hover:text-amber-500 transition-colors leading-tight">
+                          {c.player?.name || c.coach?.name}
+                        </span>
+                        <span className="text-[9px] font-black text-slate-500 uppercase tracking-widest">
+                          {c.player ? `${c.player.position} · ${c.player.age}y` : 'Head Coach'}
+                        </span>
+                      </div>
+                    </td>
+                    <td className="p-3 min-w-[110px]">
+                      <div
+                        className="flex items-center gap-1.5 cursor-pointer hover:opacity-75 transition-opacity"
+                        onClick={e => { e.stopPropagation(); onManageTeam(c.team.id); }}
+                      >
+                        <TeamBadge team={c.team} size="xs" />
+                        <span className="text-[9px] font-bold text-slate-400 uppercase group-hover/team:text-amber-500 whitespace-nowrap">
+                          {c.team.abbreviation} {c.team.wins}-{c.team.losses}
+                        </span>
+                      </div>
+                    </td>
+                    {allCols.map(col => {
+                      const val = col === 'GP' ? c.stats.GP : c.stats[col];
+                      return (
+                        <td key={col} className="p-3 text-right whitespace-nowrap">
+                          <span className={`text-xs font-mono font-bold ${
+                            idx === 0 ? 'text-amber-400' : idx < 3 ? 'text-emerald-400' : 'text-slate-300'
+                          }`}>{val}</span>
+                        </td>
+                      );
+                    })}
+                  </tr>
+                ))}
               </tbody>
             </table>
           </div>
@@ -480,12 +449,12 @@ const Awards: React.FC<AwardsProps> = ({ league, onScout, onScoutCoach, onManage
             </div>
           )}
           <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
-            <RaceTable title="MVP"   candidates={awardRaces.mvp}  columns={['PPG', 'TRB', 'AST', 'FG', 'PER']}         gamesPlayed={awardRaces.maxGamesPlayed} seasonActive={awardRaces.seasonActive} />
-            <RaceTable title="DPOY"  candidates={awardRaces.dpoy} columns={['BPG', 'SPG', 'TRB', 'DREB']}              gamesPlayed={awardRaces.maxGamesPlayed} seasonActive={awardRaces.seasonActive} />
-            <RaceTable title="ROY"   candidates={awardRaces.roy}  columns={['PPG', 'TRB', 'AST', 'OVR']}              gamesPlayed={awardRaces.maxGamesPlayed} seasonActive={awardRaces.seasonActive} />
-            <RaceTable title={league.settings.playerGenderRatio === 100 ? '6th Woman' : '6th Man'} candidates={awardRaces.smoy} columns={['PPG', 'TRB', 'AST', 'MIN']} gamesPlayed={awardRaces.maxGamesPlayed} seasonActive={awardRaces.seasonActive} />
-            <RaceTable title="MIP"   candidates={awardRaces.mip}  columns={['PPG Jump', 'Curr PPG', 'Prev PPG', 'OVR']} gamesPlayed={awardRaces.maxGamesPlayed} seasonActive={awardRaces.seasonActive} />
-            <RaceTable title="Coach" candidates={awardRaces.coy}  columns={['Wins', 'Losses', 'Record', 'W vs Exp']}    gamesPlayed={awardRaces.maxGamesPlayed} seasonActive={awardRaces.seasonActive} />
+            <RaceTable title="MVP"   candidates={awardRaces.mvp}  columns={['PPG', 'TRB', 'AST', 'FG', 'PER']}          gamesPlayed={awardRaces.maxGamesPlayed} seasonActive={awardRaces.seasonActive} deltas={rankDeltas.mvp} />
+            <RaceTable title="DPOY"  candidates={awardRaces.dpoy} columns={['BPG', 'SPG', 'TRB', 'DREB']}               gamesPlayed={awardRaces.maxGamesPlayed} seasonActive={awardRaces.seasonActive} deltas={rankDeltas.dpoy} />
+            <RaceTable title="ROY"   candidates={awardRaces.roy}  columns={['PPG', 'TRB', 'AST', 'OVR']}               gamesPlayed={awardRaces.maxGamesPlayed} seasonActive={awardRaces.seasonActive} deltas={rankDeltas.roy} />
+            <RaceTable title={league.settings.playerGenderRatio === 100 ? '6th Woman' : '6th Man'} candidates={awardRaces.smoy} columns={['PPG', 'TRB', 'AST', 'MIN']} gamesPlayed={awardRaces.maxGamesPlayed} seasonActive={awardRaces.seasonActive} deltas={rankDeltas.smoy} />
+            <RaceTable title="MIP"   candidates={awardRaces.mip}  columns={['PPG Jump', 'Curr PPG', 'Prev PPG', 'OVR']}  gamesPlayed={awardRaces.maxGamesPlayed} seasonActive={awardRaces.seasonActive} deltas={rankDeltas.mip} />
+            <RaceTable title="Coach" candidates={awardRaces.coy}  columns={['Wins', 'Losses', 'Record', 'W vs Exp']}     gamesPlayed={awardRaces.maxGamesPlayed} seasonActive={awardRaces.seasonActive} deltas={rankDeltas.coy} />
           </div>
         </div>
       )}

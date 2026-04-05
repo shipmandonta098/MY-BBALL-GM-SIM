@@ -446,6 +446,58 @@ const Rotations: React.FC<RotationsProps> = ({ league, updateLeague }) => {
     setHasChanges(false);
   };
 
+  // Position compatibility: exact → swing → group
+  const POS_COMPAT_ROT: Record<string, string[]> = {
+    PG: ['PG', 'SG', 'SF'], SG: ['SG', 'PG', 'SF'],
+    SF: ['SF', 'SG', 'PF'], PF: ['PF', 'SF', 'C'], C: ['C', 'PF', 'SF'],
+  };
+  const starterPositions5 = ['PG', 'SG', 'SF', 'PF', 'C'];
+
+  // Auto-fill: replace any injured starter/bench slot with the best positional backup
+  const autoFillInjuries = () => {
+    const injuredIds = new Set(
+      team.roster
+        .filter(p => p.status === 'Injured' || (p.injuryDaysLeft != null && p.injuryDaysLeft > 0))
+        .map(p => p.id)
+    );
+    if (injuredIds.size === 0) return;
+
+    let newOrder = [...playerOrder];
+    const newMins = { ...minutes };
+
+    newOrder = newOrder.map((id, slotIdx) => {
+      if (!injuredIds.has(id)) return id;
+      // This slot has an injured player — find best backup
+      const slotPos = slotIdx < 5 ? starterPositions5[slotIdx] : null;
+      const compat = slotPos ? (POS_COMPAT_ROT[slotPos] ?? [slotPos]) : null;
+      const alreadyInOrder = new Set(newOrder);
+
+      // Pool: healthy, not already placed, not injured
+      const pool = team.roster.filter(
+        p => !injuredIds.has(p.id) && !alreadyInOrder.has(p.id)
+      );
+
+      let replacement: Player | undefined;
+      if (compat) {
+        for (const pos of compat) {
+          const tier = pool.filter(p => p.position === pos);
+          if (tier.length) { replacement = tier.sort((a, b) => b.rating - a.rating)[0]; break; }
+        }
+      }
+      if (!replacement) replacement = pool.sort((a, b) => b.rating - a.rating)[0];
+      if (!replacement) return id; // no one left
+
+      // Give the replacement at least as many minutes as the injured player had
+      newMins[replacement.id] = Math.max(newMins[replacement.id] ?? 0, newMins[id] ?? (slotIdx < 5 ? 32 : 14));
+      newMins[id] = 0;
+      return replacement.id;
+    });
+
+    setPlayerOrder(newOrder);
+    setMinutes(newMins);
+    setHasChanges(true);
+  };
+
   const autoDistribute = () => {
     const newMinutes: Record<string, number> = {};
     playerOrder.forEach((id, i) => {
@@ -506,8 +558,17 @@ const Rotations: React.FC<RotationsProps> = ({ league, updateLeague }) => {
           <h1 className="text-4xl font-display font-bold uppercase tracking-tight text-white">Rotation <span className="text-amber-500">Lab</span></h1>
           <p className="text-slate-500 text-sm mt-1 uppercase font-bold tracking-[0.2em]">Optimize depth chart & minutes</p>
         </div>
-        <div className="flex gap-3">
-          <button 
+        <div className="flex gap-3 flex-wrap">
+          {team.roster.some(p => p.status === 'Injured' || (p.injuryDaysLeft != null && p.injuryDaysLeft > 0)) && (
+            <button
+              onClick={autoFillInjuries}
+              className="flex items-center gap-2 px-4 py-2 bg-rose-500/10 border border-rose-500/30 rounded-xl text-xs font-black uppercase text-rose-400 hover:text-white hover:bg-rose-500/20 transition-all"
+              title="Replace injured players with best positional backups"
+            >
+              🤕 Fill Injuries
+            </button>
+          )}
+          <button
             onClick={autoDistribute}
             className="flex items-center gap-2 px-4 py-2 bg-slate-800 border border-slate-700 rounded-xl text-xs font-black uppercase text-slate-400 hover:text-white transition-all"
           >
