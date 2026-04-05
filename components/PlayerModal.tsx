@@ -12,6 +12,8 @@ interface PlayerModalProps {
   isUserTeam: boolean;
   onUpdateStatus: (playerId: string, status: PlayerStatus) => void;
   onRelease: (playerId: string) => void;
+  /** True when the draft lottery/live draft is in progress — disables all waiver actions */
+  draftLocked?: boolean;
   godMode?: boolean;
   onUpdatePlayer?: (player: Player) => void;
   /** Whether this player is in the current season's All-Star game */
@@ -63,6 +65,7 @@ const PlayerModal: React.FC<PlayerModalProps> = ({
   isUserTeam,
   onUpdateStatus,
   onRelease,
+  draftLocked = false,
   godMode = false,
   onUpdatePlayer,
   isCurrentAllStar = false,
@@ -2145,12 +2148,27 @@ const PlayerModal: React.FC<PlayerModalProps> = ({
                     )}
                  </div>
               </div>
-              <button
-                 onClick={() => onRelease(player.id)}
-                 className="px-10 py-5 bg-rose-500/10 hover:bg-rose-500 text-rose-500 hover:text-white border border-rose-500/20 font-display font-bold uppercase rounded-2xl transition-all"
-              >
-                 Waive Player
-              </button>
+              {draftLocked ? (
+                <div className="flex flex-col items-end gap-1">
+                  <button
+                    disabled
+                    className="px-10 py-5 bg-slate-800/50 text-slate-600 border border-slate-700/50 font-display font-bold uppercase rounded-2xl cursor-not-allowed opacity-60"
+                    title="Roster moves are locked during the draft"
+                  >
+                    Waive Player
+                  </button>
+                  <span className="text-[10px] text-amber-500/70 font-bold uppercase tracking-widest">
+                    🔒 Locked · Draft in Progress
+                  </span>
+                </div>
+              ) : (
+                <button
+                   onClick={() => onRelease(player.id)}
+                   className="px-10 py-5 bg-rose-500/10 hover:bg-rose-500 text-rose-500 hover:text-white border border-rose-500/20 font-display font-bold uppercase rounded-2xl transition-all"
+                >
+                   Waive Player
+                </button>
+              )}
            </div>
         )}
       </div>
