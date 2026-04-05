@@ -1122,8 +1122,9 @@ const assignArchetype = (pos: Position, attrs: Record<string, number>, rating: n
   return clamped[clamped.length - 1][0];
 };
 
-/** Deterministic archetype derivation — picks highest-weight archetype for the given position + attributes. */
-export const deriveArchetype = (pos: Position, attrs: Record<string, number>, rating: number): string => {
+/** Deterministic archetype derivation — picks highest-weight archetype for the given position + attributes.
+ *  Pass `isStarterRole = true` when the player is in the starting 5 so "Bench Spark" is never assigned. */
+export const deriveArchetype = (pos: Position, attrs: Record<string, number>, rating: number, isStarterRole = false): string => {
   const sht  = attrs.shooting3pt ?? 50;
   const def  = attrs.defense ?? 50;
   const blk  = attrs.blocks ?? 50;
@@ -1183,7 +1184,9 @@ export const deriveArchetype = (pos: Position, attrs: Record<string, number>, ra
     w.push(['Hybrid Star',        rating >= 82 ? 8 : 2]);
   }
 
-  return w.reduce((best, cur) => (cur[1] > best[1] ? cur : best), w[0])[0];
+  // Starters should never receive "Bench Spark" — zero its weight out
+  const eligible = isStarterRole ? w.filter(([name]) => name !== 'Bench Spark') : w;
+  return eligible.reduce((best, cur) => (cur[1] > best[1] ? cur : best), eligible[0])[0];
 };
 
 type AttrMap = Record<string, number>;
