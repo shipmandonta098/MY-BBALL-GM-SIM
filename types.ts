@@ -503,7 +503,7 @@ export interface ScheduleGame {
 export interface PlayByPlayEvent {
   time: string;
   text: string;
-  type: 'score' | 'miss' | 'turnover' | 'foul' | 'info';
+  type: 'score' | 'miss' | 'turnover' | 'foul' | 'info' | 'sub';
   quarter: number;
 }
 
