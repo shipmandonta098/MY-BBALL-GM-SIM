@@ -299,6 +299,99 @@ const parseHeightStr = (h: string): number => {
   return m ? parseInt(m[1]) * 12 + parseInt(m[2]) : 0;
 };
 
+// ── Secondary Position Assignment ────────────────────────────────────────────
+/**
+ * Derives realistic secondary positions based on height, attributes, and primary position.
+ * Returns 0–2 secondary positions the player can play without a full performance penalty.
+ */
+export const assignSecondaryPositions = (
+  primaryPos: Position,
+  attrs: Record<string, number>,
+  heightInches: number,
+): Position[] => {
+  const secondaries: Position[] = [];
+  const ballHandling = attrs.ballHandling ?? 50;
+  const passing      = attrs.passing      ?? 50;
+  const shooting3pt  = attrs.shooting3pt  ?? 50;
+  const speed        = attrs.speed        ?? 50;
+  const strength     = attrs.strength     ?? 50;
+  const shooting     = attrs.shooting     ?? 50;
+  const athleticism  = attrs.athleticism  ?? 50;
+  const interiorDef  = attrs.interiorDef  ?? 50;
+
+  switch (primaryPos) {
+    case 'PG':
+      // Combo guard / shoot-first PG → SG
+      if (shooting3pt >= 75 && speed >= 76) secondaries.push('SG');
+      // Tall PG (6-6+) with athleticism → can also play SF
+      if (heightInches >= 78 && athleticism >= 80 && shooting >= 74) secondaries.push('SF');
+      break;
+
+    case 'SG':
+      // Ball-handler combo → PG
+      if (ballHandling >= 74 && passing >= 68) secondaries.push('PG');
+      // Long athletic SG (6-5+) → SF
+      if (heightInches >= 77 && athleticism >= 80) secondaries.push('SF');
+      break;
+
+    case 'SF':
+      // Quick, shooting-capable wing → SG
+      if (speed >= 74 && shooting >= 76) secondaries.push('SG');
+      // Strong, tall SF (6-7+) → PF
+      if (strength >= 76 && heightInches >= 79) secondaries.push('PF');
+      break;
+
+    case 'PF':
+      // Mobile stretch four → SF
+      if (speed >= 70 && shooting >= 70) secondaries.push('SF');
+      // Interior-anchored PF with size → C
+      if (strength >= 80 && interiorDef >= 76) secondaries.push('C');
+      break;
+
+    case 'C':
+      // Mobile or stretch big → PF
+      if (speed >= 65 && shooting >= 60) secondaries.push('PF');
+      // Athletic, undersized C (under 7-0) with speed → SF small-ball
+      if (speed >= 72 && athleticism >= 80 && shooting >= 65 && heightInches <= 84) secondaries.push('SF');
+      break;
+  }
+
+  return secondaries;
+};
+
+/**
+ * Returns all positions a player is eligible to play (primary + secondary).
+ * Used by rotation assignment and substitution logic.
+ */
+export const getEligiblePositions = (player: { position: Position; secondaryPositions?: Position[] }): Position[] =>
+  [player.position, ...(player.secondaryPositions ?? [])];
+
+/**
+ * Positional distance penalty multiplier (0.88–1.0).
+ * A player at a position not in their eligible set takes a ~8% effective-rating hit.
+ * A player one tier away from their nearest eligible position takes ~4%.
+ */
+const POS_DISTANCE: Record<Position, Record<Position, number>> = {
+  PG: { PG: 0, SG: 1, SF: 2, PF: 3, C: 4 },
+  SG: { SG: 0, PG: 1, SF: 1, PF: 2, C: 3 },
+  SF: { SF: 0, SG: 1, PF: 1, PG: 2, C: 2 },
+  PF: { PF: 0, SF: 1, C:  1, SG: 2, PG: 3 },
+  C:  { C:  0, PF: 1, SF: 2, SG: 3, PG: 4 },
+};
+
+export const positionalPenaltyFactor = (
+  player: { position: Position; secondaryPositions?: Position[] },
+  slotPosition: Position,
+): number => {
+  const eligible = getEligiblePositions(player);
+  if (eligible.includes(slotPosition)) return 1.0;
+  // Find smallest distance from any eligible position to the slot
+  const minDist = Math.min(...eligible.map(ep => POS_DISTANCE[ep][slotPosition]));
+  if (minDist <= 1) return 0.96; // slight stretch, e.g. SG playing PF
+  if (minDist <= 2) return 0.92;
+  return 0.88;                   // far out of position, e.g. PG at C
+};
+
 /**
  * Hard caps applied to female players for physical attributes that are
  * physiologically distinct from the male game.
@@ -1342,7 +1435,10 @@ export const generatePlayer = (id: string, ageRange: [number, number] = [19, 38]
     },
     morale: 75 + Math.floor(Math.random() * 20),
     jerseyNumber: Math.floor(Math.random() * 99),
-    height: phys.heightStr, weight: phys.weight, archetype: assignArchetype(pos, pAttrs as Record<string, number>, rating), status: 'Bench',
+    height: phys.heightStr, weight: phys.weight,
+    archetype: assignArchetype(pos, pAttrs as Record<string, number>, rating),
+    secondaryPositions: assignSecondaryPositions(pos, pAttrs as Record<string, number>, phys.heightIn),
+    status: 'Bench',
     personalityTraits: playerTraits,
     tendencies: generateTendencies(pos, playerTraits),
     hometown: playerHometown,
@@ -1474,7 +1570,9 @@ export const generateProspects = (year: number, count: number = 100, genderRatio
       mockRank: i + 1,
       attributes: bAttrs,
       jerseyNumber: Math.floor(Math.random() * 99),
-      height: phys.heightStr, weight: phys.weight, archetype: assignArchetype(pos, bAttrs as Record<string, number>, rating),
+      height: phys.heightStr, weight: phys.weight,
+      archetype: assignArchetype(pos, bAttrs as Record<string, number>, rating),
+      secondaryPositions: assignSecondaryPositions(pos, bAttrs as Record<string, number>, phys.heightIn),
       personalityTraits: prospectTraits,
       tendencies: generateTendencies(pos, prospectTraits),
       hometown: prospectHometown,
@@ -1505,7 +1603,7 @@ export const generateDefaultRotation = (roster: Player[]): TeamRotation => {
   
   const assignedIds = new Set<string>();
   
-  // Try to fill positions naturally
+  // Try to fill positions naturally — first exact primary match, then secondary match
   const positions: Position[] = ['PG', 'SG', 'SF', 'PF', 'C'];
   positions.forEach(pos => {
     const bestAtPos = sorted.find(p => p.position === pos && !assignedIds.has(p.id));
@@ -1514,7 +1612,20 @@ export const generateDefaultRotation = (roster: Player[]): TeamRotation => {
       assignedIds.add(bestAtPos.id);
     }
   });
-  
+
+  // Second pass: fill gaps with secondary-position eligible players
+  positions.forEach(pos => {
+    if (!starters[pos]) {
+      const eligible = sorted.find(
+        p => !assignedIds.has(p.id) && (p.secondaryPositions ?? []).includes(pos)
+      );
+      if (eligible) {
+        starters[pos] = eligible.id;
+        assignedIds.add(eligible.id);
+      }
+    }
+  });
+
   // Fill remaining starter spots with best available
   positions.forEach(pos => {
     if (!starters[pos]) {

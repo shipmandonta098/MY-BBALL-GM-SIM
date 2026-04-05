@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Player, PlayerStatus, PersonalityTrait, Position, PlayerTendencies, TeamRotation } from '../types';
-import { getFlag, countryFromHometown, POS_ATTR_RANGES, PosAttrRangeKey, enforcePositionalBounds, FEMALE_ATTR_CAPS, NAMES_MALE, NAMES_FEMALE, COLLEGES_HIGH_MAJOR, COLLEGES_MID_MAJOR, ALL_HOMETOWNS, deriveComposites, deriveArchetype } from '../constants';
+import { getFlag, countryFromHometown, POS_ATTR_RANGES, PosAttrRangeKey, enforcePositionalBounds, FEMALE_ATTR_CAPS, NAMES_MALE, NAMES_FEMALE, COLLEGES_HIGH_MAJOR, COLLEGES_MID_MAJOR, ALL_HOMETOWNS, deriveComposites, deriveArchetype, assignSecondaryPositions, getEligiblePositions } from '../constants';
 
 const POS_RANGE_KEYS: PosAttrRangeKey[] = ['shooting', 'playmaking', 'defense', 'rebounding', 'athleticism'];
 
@@ -234,7 +234,20 @@ const PlayerModal: React.FC<PlayerModalProps> = ({
       const fullName = [editFirstName.trim(), editLastName.trim()].filter(Boolean).join(' ');
       const withName = { ...editedPlayer, name: fullName || editedPlayer.name };
       const bounded = enforcePositionalBounds(withName);
-      onUpdatePlayer({ ...bounded, potential: derivePotential(bounded.rating, bounded.age) });
+      // Re-derive secondary positions when position changed (unless user manually set them)
+      const heightInches = (() => {
+        // Height may be "6'2"" or "6-2" depending on source
+        const m = bounded.height?.match(/^(\d+)['\-](\d+)/);
+        return m ? parseInt(m[1]) * 12 + parseInt(m[2]) : 0;
+      })();
+      const autoSecondary = assignSecondaryPositions(
+        bounded.position,
+        bounded.attributes as Record<string, number>,
+        heightInches,
+      );
+      // Keep user-set secondaries if they differ from what auto-assign would give, otherwise refresh
+      const finalSecondary = bounded.secondaryPositions ?? autoSecondary;
+      onUpdatePlayer({ ...bounded, secondaryPositions: finalSecondary, potential: derivePotential(bounded.rating, bounded.age) });
     }
     setIsEditing(false);
   };
@@ -450,6 +463,33 @@ const PlayerModal: React.FC<PlayerModalProps> = ({
                     >
                       {positions.map(pos => <option key={pos} value={pos}>{pos}</option>)}
                     </select>
+                  </div>
+                  <div className="space-y-2">
+                    <label className="text-[10px] font-black uppercase text-slate-500 tracking-widest">Secondary Positions</label>
+                    <div className="flex flex-wrap gap-2">
+                      {positions.filter(p => p !== editedPlayer.position).map(pos => {
+                        const hasSec = (editedPlayer.secondaryPositions ?? []).includes(pos);
+                        return (
+                          <button
+                            key={pos}
+                            type="button"
+                            onClick={() => {
+                              const cur = editedPlayer.secondaryPositions ?? [];
+                              const updated = hasSec ? cur.filter(p => p !== pos) : [...cur, pos];
+                              setEditedPlayer(prev => ({ ...prev, secondaryPositions: updated }));
+                            }}
+                            className={`px-3 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all border ${
+                              hasSec
+                                ? 'bg-amber-500/20 text-amber-400 border-amber-500/40'
+                                : 'bg-slate-950 text-slate-500 border-slate-800 hover:border-slate-600'
+                            }`}
+                          >
+                            {pos}
+                          </button>
+                        );
+                      })}
+                    </div>
+                    <p className="text-[9px] text-slate-600">Auto-assigned on save if left at defaults</p>
                   </div>
                   <div className="space-y-2">
                     <label className="text-[10px] font-black uppercase text-slate-500 tracking-widest">Archetype <span className="text-slate-600 normal-case font-normal">(auto)</span></label>
@@ -857,7 +897,9 @@ const PlayerModal: React.FC<PlayerModalProps> = ({
             <div className="relative z-10 flex flex-col">
               <h2 className="text-5xl md:text-8xl font-display font-bold uppercase tracking-tighter text-white drop-shadow-lg leading-tight">{player.name}</h2>
               <div className="flex flex-wrap items-center gap-4 mt-2">
-                <span className="px-4 py-1.5 bg-amber-500 text-slate-950 text-xs font-black uppercase rounded-lg shadow-lg shadow-amber-500/20">{player.position}</span>
+                <span className="px-4 py-1.5 bg-amber-500 text-slate-950 text-xs font-black uppercase rounded-lg shadow-lg shadow-amber-500/20">
+                  {getEligiblePositions(player).join(' / ')}
+                </span>
                 <span className="text-slate-100 font-display font-bold text-xl uppercase tracking-wider">
                    {formatPhysicals(player.height, player.weight)}
                 </span>
@@ -908,6 +950,20 @@ const PlayerModal: React.FC<PlayerModalProps> = ({
         <div id="modal-scroll-container" className="flex-1 overflow-y-auto p-8 md:p-12 space-y-12 scrollbar-thin scrollbar-thumb-slate-800">
           <section className="bg-slate-950/40 border border-slate-800/60 rounded-[2.5rem] p-8 shadow-inner grid grid-cols-1 md:grid-cols-2 gap-8">
              <div className="space-y-4">
+                <div className="flex items-center gap-4">
+                   <span className="text-[10px] text-slate-500 font-black uppercase tracking-[0.2em] w-24">Positions</span>
+                   <div className="flex items-center gap-2 flex-wrap">
+                     <span className="px-2.5 py-1 bg-amber-500 text-slate-950 text-[10px] font-black uppercase rounded-md">{player.position}</span>
+                     {(player.secondaryPositions ?? []).map(sp => (
+                       <span key={sp} className="px-2.5 py-1 bg-slate-800 text-slate-300 text-[10px] font-black uppercase rounded-md border border-slate-700">
+                         {sp}
+                       </span>
+                     ))}
+                     {(player.secondaryPositions ?? []).length === 0 && (
+                       <span className="text-[10px] text-slate-600 font-bold">Primary only</span>
+                     )}
+                   </div>
+                </div>
                 <div className="flex items-center gap-4">
                    <span className="text-[10px] text-slate-500 font-black uppercase tracking-[0.2em] w-24">Archetype</span>
                    <span className="text-amber-500 text-base font-bold uppercase tracking-widest">{liveArchetype}</span>

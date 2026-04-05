@@ -1,6 +1,7 @@
 
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { ScheduleGame, Team, GameResult, GamePlayerLine, Player, LeagueState, PlayByPlayEvent, InjuryType } from '../types';
+import { getEligiblePositions } from '../constants';
 import { PlayerLink } from '../context/NavigationContext';
 import TeamBadge from './TeamBadge';
 import { Play, Pause, FastForward, X, Trophy, TrendingUp, Clock } from 'lucide-react';
@@ -224,7 +225,12 @@ const LiveGameModal: React.FC<LiveGameModalProps> = ({
     PF: 'power forward', C: 'center',
   };
 
-  // Find the best available backup in priority order: exact pos → swing → group → any
+  // Find the best available backup in priority order:
+  // 1. Exact primary-position match
+  // 2. Secondary-position eligible (no penalty)
+  // 3. Swing position (positional compat list)
+  // 4. Same group (Guard/Wing/Big)
+  // 5. Any available
   const findPositionalBackup = (
     outPos: string,
     currentLineup: string[],
@@ -237,12 +243,18 @@ const LiveGameModal: React.FC<LiveGameModalProps> = ({
            !injuredInGameRef.current.has(p.id) &&
            ((pf[p.id]?.pf ?? 0) as number) < 5
     );
-    // Walk priority tiers
-    for (const pos of compat) {
-      const tier = pool.filter(p => p.position === pos);
+    // Tier 1: exact primary position match
+    const exactTier = pool.filter(p => p.position === outPos);
+    if (exactTier.length) return exactTier.sort((a, b) => b.rating - a.rating)[0];
+    // Tier 2: secondary-position eligible (player lists outPos as a secondary)
+    const secTier = pool.filter(p => getEligiblePositions(p).includes(outPos as any));
+    if (secTier.length) return secTier.sort((a, b) => b.rating - a.rating)[0];
+    // Tier 3: swing positions from compat list
+    for (const pos of compat.slice(1)) {
+      const tier = pool.filter(p => p.position === pos || getEligiblePositions(p).includes(pos as any));
       if (tier.length) return tier.sort((a, b) => b.rating - a.rating)[0];
     }
-    // Fallback: same position group (Guard/Wing/Big)
+    // Tier 4: same position group (Guard/Wing/Big)
     const grp = posGroup(outPos);
     const groupTier = pool.filter(p => posGroup(p.position) === grp);
     if (groupTier.length) return groupTier.sort((a, b) => b.rating - a.rating)[0];
@@ -290,7 +302,14 @@ const LiveGameModal: React.FC<LiveGameModalProps> = ({
       if (!fatigueRef.current[backup.id]) fatigueRef.current[backup.id] = { minutesPlayed: 0, fatigueLevel: 0, isOnFloor: false, consecutiveMinutes: 0 };
       fatigueRef.current[backup.id].isOnFloor = true;
       const posLabel = POS_DISPLAY[player.position] ?? player.position;
-      const posNote  = backup.position !== player.position ? ` (${backup.position} sliding to ${posLabel})` : ` at ${posLabel}`;
+      const backupEligible = getEligiblePositions(backup);
+      const isSecFit = backupEligible.includes(player.position as any) && backup.position !== player.position;
+      const isOop    = !backupEligible.includes(player.position as any) && backup.position !== player.position;
+      const posNote  = isSecFit
+        ? ` — slides over to ${posLabel} (secondary position)`
+        : isOop
+        ? ` — steps up to ${posLabel} out of position`
+        : ` at ${posLabel}`;
       batchEvts.push({ time: formatTime(currentTime), quarter, text: `🔄 ${abbrev(backup.name)} checks in${posNote} for ${abbrev(player.name)} — Injury`, type: 'sub', teamId: team.id, possessionBefore: possessionRef.current, possessionAfter: possessionRef.current });
     }
 
@@ -1070,8 +1089,13 @@ const LiveGameModal: React.FC<LiveGameModalProps> = ({
       else if (op.reason === 'TACTICAL')       reasonTag = `Tactical`;
       else if (op.reason === 'QUARTER_BREAK')  reasonTag = `Rotation`;
       const posLabel  = POS_DISPLAY[op.out.position] ?? op.out.position;
-      const posNote   = op.in.position !== op.out.position
-        ? ` (${op.in.position}→${op.out.position})`
+      const inEligible = getEligiblePositions(op.in);
+      const isFlexSub  = inEligible.includes(op.out.position as any) && op.in.position !== op.out.position;
+      const isOopSub   = !inEligible.includes(op.out.position as any) && op.in.position !== op.out.position;
+      const posNote    = isFlexSub
+        ? ` — slides over to ${posLabel}`
+        : isOopSub
+        ? ` (${op.in.position}→${op.out.position}, out of position)`
         : ` at ${posLabel}`;
       batchEvts.push({
         time: formatTime(currentTime),

@@ -1,4 +1,5 @@
-import { Team, GameResult, Player, GamePlayerLine, ClutchGameLine, CoachScheme, PlayByPlayEvent, InjuryType, LeagueState, QuarterDetail, LeagueSettings } from '../types';
+import { Team, GameResult, Player, GamePlayerLine, ClutchGameLine, CoachScheme, PlayByPlayEvent, InjuryType, LeagueState, QuarterDetail, LeagueSettings, Position } from '../types';
+import { positionalPenaltyFactor, getEligiblePositions } from '../constants';
 
 // ─── Constants ───────────────────────────────────────────────────────────────
 const BASE_PPP       = 1.06;
@@ -2921,6 +2922,21 @@ const generateQuarterPBP = (
     : offTeam.roster.slice(0, isGarbageTime ? 12 : 8);
   if (rotation.length === 0) return { events, teamStreak };
 
+  // Build a per-player positional penalty map for this quarter.
+  // Starters may be assigned to a slot different from their primary position.
+  const posPenaltyMap = new Map<string, number>();
+  if (offTeam.rotation) {
+    const SLOT_ORDER: Position[] = ['PG', 'SG', 'SF', 'PF', 'C'];
+    Object.entries(offTeam.rotation.starters).forEach(([slotPos, pid]) => {
+      const player = offTeam.roster.find(p => p.id === pid);
+      if (player) {
+        posPenaltyMap.set(pid, positionalPenaltyFactor(player, slotPos as Position));
+      }
+    });
+  }
+  // Bench/reserve players always play near their natural position — no penalty
+  rotation.forEach(p => { if (!posPenaltyMap.has(p.id)) posPenaltyMap.set(p.id, 1.0); });
+
   const sample = Math.round(possessions / 3);
   for (let i = 0; i < sample; i++) {
     // ── Clock window for this possession ─────────────────────────────────────
@@ -2946,8 +2962,11 @@ const generateQuarterPBP = (
     if (!handler) continue;
 
     const streak  = streakMap.get(handler.id) ?? 0;
+    // Position penalty: out-of-position players get a subtle negative boost
+    const penaltyFactor = posPenaltyMap.get(handler.id) ?? 1.0;
+    const penaltyBoost  = penaltyFactor < 1.0 ? (penaltyFactor - 1.0) * 0.5 : 0; // max ~-6% at factor 0.88
     // Emergency boost after a 12-0 run: next 3 possessions get +10%
-    const posBoost = situationalBoost + (emergencyBoostPoss > 0 ? 0.10 : 0);
+    const posBoost = situationalBoost + (emergencyBoostPoss > 0 ? 0.10 : 0) + penaltyBoost;
     const poss    = simulatePossession(handler, defTeam, scheme, streak, posBoost);
     if (emergencyBoostPoss > 0) emergencyBoostPoss--;
 
