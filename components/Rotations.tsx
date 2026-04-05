@@ -1,7 +1,7 @@
 
 import React, { useState, useMemo } from 'react';
 import { Team, Player, Position, TeamRotation, CoachScheme, CoachBadge } from '../types';
-import { getEligiblePositions } from '../constants';
+import { getEligiblePositions, deriveArchetype } from '../constants';
 import { PlayerLink } from '../context/NavigationContext';
 import {
   DndContext,
@@ -460,10 +460,25 @@ const Rotations: React.FC<RotationsProps> = ({ league, updateLeague }) => {
       minutes: effectiveMinutes
     };
 
+    const starterIdSet = new Set(Object.values(newRotation.starters));
+
     updateLeague((prev: any) => {
-      const newTeams = prev.teams.map((t: Team) => 
-        t.id === team.id ? { ...t, rotation: newRotation } : t
-      );
+      const newTeams = prev.teams.map((t: Team) => {
+        if (t.id !== team.id) return t;
+        // Re-derive each player's archetype now that starter slots are known,
+        // so all views read a consistent, up-to-date value from player.archetype.
+        const updatedRoster = t.roster.map((p: Player) => {
+          const isStarter = starterIdSet.has(p.id);
+          const freshArchetype = deriveArchetype(
+            p.position,
+            p.attributes as Record<string, number>,
+            p.rating,
+            isStarter,
+          );
+          return freshArchetype !== p.archetype ? { ...p, archetype: freshArchetype } : p;
+        });
+        return { ...t, rotation: newRotation, roster: updatedRoster };
+      });
       return { ...prev, teams: newTeams };
     });
     setHasChanges(false);

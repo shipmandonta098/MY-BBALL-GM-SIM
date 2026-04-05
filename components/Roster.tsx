@@ -1,7 +1,7 @@
 import React, { useState, useMemo, useEffect, useRef } from 'react';
 import { Team, Player, Position, PlayerStatus, PersonalityTrait, Coach, TeamRotation } from '../types';
 import TeamBadge from './TeamBadge';
-import { getFlag } from '../constants';
+import { getFlag, deriveArchetype } from '../constants';
 
 export interface RosterProps {
   leagueTeams: Team[];
@@ -524,11 +524,20 @@ const Roster: React.FC<RosterProps> = ({ leagueTeams, userTeamId, initialTeamId,
                               </span>
                             );
                           })()}
-                          {player.archetype && (
-                            <span className={`text-[10px] font-black uppercase tracking-widest px-1.5 py-0.5 rounded border ${ARCHETYPE_COLORS[player.archetype] ?? 'bg-slate-800/50 text-slate-400 border-slate-700'}`}>
-                              {player.archetype}
-                            </span>
-                          )}
+                          {(() => {
+                            const isStarter = getEffectiveStatus(player, activeTeam.rotation) === 'Starter';
+                            const arch = deriveArchetype(
+                              player.position,
+                              player.attributes as Record<string, number>,
+                              player.rating,
+                              isStarter,
+                            );
+                            return (
+                              <span className={`text-[10px] font-black uppercase tracking-widest px-1.5 py-0.5 rounded border ${ARCHETYPE_COLORS[arch] ?? 'bg-slate-800/50 text-slate-400 border-slate-700'}`}>
+                                {arch}
+                              </span>
+                            );
+                          })()}
                           <div className="flex gap-1">
                             {player.personalityTraits.map(trait => (
                               <span key={trait} title={trait} className="text-xs">{traitIcons[trait]}</span>
