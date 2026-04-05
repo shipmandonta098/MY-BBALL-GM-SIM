@@ -147,17 +147,17 @@ const Draft: React.FC<DraftProps> = ({ league, updateLeague, onScout, scoutingRe
     [userTeam.roster, userTeam.activeScheme, userTeam.wins, userTeam.losses]
   );
 
+  const currentPick = league.draftPicks?.[currentPickIndex];
+  const isUserTurn = isDrafting && currentPick?.currentTeamId === league.userTeamId;
+  const totalPicks = league.draftPicks?.length ?? 0;
+  const draftProgress = totalPicks > 0 ? Math.round((currentPickIndex / totalPicks) * 100) : 0;
+
   // Needs for whichever team is currently on the clock
   const draftingTeamNeeds = useMemo(() => {
     if (!isDrafting || !currentPick) return userTeamNeeds;
     const clockTeam = league.teams.find(t => t.id === currentPick.currentTeamId);
     return clockTeam ? computeTeamNeeds(clockTeam) : userTeamNeeds;
   }, [isDrafting, currentPick, league.teams, userTeamNeeds]);
-
-  const currentPick = league.draftPicks?.[currentPickIndex];
-  const isUserTurn = isDrafting && currentPick?.currentTeamId === league.userTeamId;
-  const totalPicks = league.draftPicks?.length ?? 0;
-  const draftProgress = totalPicks > 0 ? Math.round((currentPickIndex / totalPicks) * 100) : 0;
 
   // Advance the round tab automatically when the live draft crosses into a new round
   useEffect(() => {
