@@ -379,6 +379,8 @@ export interface Player {
   allStarSelections?: number[];
   /** Years in which this player won the All-Star Game MVP award */
   allStarMvpYears?: number[];
+  /** 0–2 secondary positions this player can play without a full penalty (e.g. SG for a PG/SG combo guard) */
+  secondaryPositions?: Position[];
 }
 
 export interface Prospect extends Omit<Player, 'stats' | 'status' | 'morale' | 'salary' | 'contractYears'> {

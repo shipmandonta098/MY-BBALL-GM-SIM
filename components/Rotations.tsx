@@ -1,6 +1,7 @@
 
 import React, { useState, useMemo } from 'react';
 import { Team, Player, Position, TeamRotation, CoachScheme, CoachBadge } from '../types';
+import { getEligiblePositions } from '../constants';
 import { PlayerLink } from '../context/NavigationContext';
 import {
   DndContext,
@@ -169,7 +170,8 @@ const SortablePlayerCard = ({
   onMinutesChange,
   isStarter,
   positionLabel,
-  fatigueWarning
+  fatigueWarning,
+  slotPosition,
 }: {
   player: Player;
   minutes: number;
@@ -177,7 +179,12 @@ const SortablePlayerCard = ({
   isStarter?: boolean;
   positionLabel?: string;
   fatigueWarning?: boolean;
+  /** The roster slot position this card occupies (PG/SG/SF/PF/C for starters) */
+  slotPosition?: Position;
 }) => {
+  const eligible = getEligiblePositions(player);
+  const isOutOfPosition = slotPosition != null && !eligible.includes(slotPosition);
+  const isSecondaryFit  = slotPosition != null && !isOutOfPosition && player.position !== slotPosition;
   const injured = player.status === 'Injured' || (player.injuryDaysLeft != null && player.injuryDaysLeft > 0);
   const suspended = !!(player.isSuspended && (player.suspensionGamesLeft ?? 0) > 0);
   const unavailable = injured || suspended;
@@ -244,7 +251,23 @@ const SortablePlayerCard = ({
             <PlayerLink player={player} name={player.name} className={`font-bold uppercase tracking-tight text-sm ${
               suspended ? 'text-amber-400' : injured ? 'text-rose-400' : 'text-slate-200'
             }`} />
+            {/* Primary position */}
             <span className="text-[10px] font-black text-slate-500 uppercase px-1.5 py-0.5 bg-slate-900 rounded">{player.position}</span>
+            {/* Secondary positions */}
+            {(player.secondaryPositions ?? []).map(sp => (
+              <span key={sp} className="text-[10px] font-black text-sky-500/70 uppercase px-1.5 py-0.5 bg-sky-950/30 rounded border border-sky-500/20">{sp}</span>
+            ))}
+            {/* Out-of-position / secondary-fit badge */}
+            {isOutOfPosition && (
+              <span className="text-[10px] font-black uppercase px-1.5 py-0.5 rounded bg-rose-500/10 text-rose-400 border border-rose-500/20 whitespace-nowrap" title="Playing outside eligible positions — performance penalty applies">
+                ⚠ Out of Pos
+              </span>
+            )}
+            {isSecondaryFit && !isOutOfPosition && (
+              <span className="text-[10px] font-black uppercase px-1.5 py-0.5 rounded bg-sky-500/10 text-sky-400 border border-sky-500/20 whitespace-nowrap" title="Playing secondary position — no penalty">
+                ↔ Flex
+              </span>
+            )}
             {suspended && (
               <span className="text-[10px] font-black uppercase px-1.5 py-0.5 rounded bg-amber-500/10 text-amber-400 border border-amber-500/20 whitespace-nowrap">
                 🚫 DNP–Suspended · {player.suspensionGamesLeft}g{player.suspensionReason ? ` · ${player.suspensionReason}` : ''}
@@ -446,7 +469,7 @@ const Rotations: React.FC<RotationsProps> = ({ league, updateLeague }) => {
     setHasChanges(false);
   };
 
-  // Position compatibility: exact → swing → group
+  // Position compatibility: eligible (primary+secondary) → swing → group
   const POS_COMPAT_ROT: Record<string, string[]> = {
     PG: ['PG', 'SG', 'SF'], SG: ['SG', 'PG', 'SF'],
     SF: ['SF', 'SG', 'PF'], PF: ['PF', 'SF', 'C'], C: ['C', 'PF', 'SF'],
@@ -479,9 +502,15 @@ const Rotations: React.FC<RotationsProps> = ({ league, updateLeague }) => {
 
       let replacement: Player | undefined;
       if (compat) {
+        // Priority 1: exact primary match
         for (const pos of compat) {
           const tier = pool.filter(p => p.position === pos);
           if (tier.length) { replacement = tier.sort((a, b) => b.rating - a.rating)[0]; break; }
+        }
+        // Priority 2: secondary-position eligible for the slot
+        if (!replacement && slotPos) {
+          const secEligible = pool.filter(p => (p.secondaryPositions ?? []).includes(slotPos as Position));
+          if (secEligible.length) replacement = secEligible.sort((a, b) => b.rating - a.rating)[0];
         }
       }
       if (!replacement) replacement = pool.sort((a, b) => b.rating - a.rating)[0];
@@ -610,18 +639,21 @@ const Rotations: React.FC<RotationsProps> = ({ league, updateLeague }) => {
                       else if (index < 10) label = `B${index - 4}`;
                       else label = 'RES';
 
+                      const slotPos = index < 5 ? (starterPositions[index] as Position) : undefined;
+
                       return (
                         <div key={id}>
                           {index === 0 && <div className="text-[10px] font-black text-slate-700 uppercase mb-2 ml-4">Starters</div>}
                           {index === 5 && <div className="text-[10px] font-black text-slate-700 uppercase mt-6 mb-2 ml-4">Bench</div>}
                           {index === 10 && <div className="text-[10px] font-black text-slate-700 uppercase mt-6 mb-2 ml-4">Reserves</div>}
-                          <SortablePlayerCard 
-                            player={player} 
+                          <SortablePlayerCard
+                            player={player}
                             minutes={minutes[player.id] || 0}
                             onMinutesChange={(v) => handleMinutesChange(player.id, v)}
                             isStarter={index < 5}
                             positionLabel={label}
                             fatigueWarning={getFatigueWarning(player.id)}
+                            slotPosition={slotPos}
                           />
                         </div>
                       );
@@ -772,11 +804,16 @@ const Rotations: React.FC<RotationsProps> = ({ league, updateLeague }) => {
                           {/* Starters */}
                           <div className="space-y-1">
                             {rec.starters.map((p, si) => {
-                              const posLabel = ['PG','SG','SF','PF','C'][si];
+                              const posLabel = ['PG','SG','SF','PF','C'][si] as Position;
+                              const eligible = getEligiblePositions(p);
+                              const isSecFit = !eligible.includes(posLabel) === false && p.position !== posLabel;
+                              const isOop = !eligible.includes(posLabel);
                               return (
                                 <div key={p.id} className="flex items-center gap-2 text-[10px]">
-                                  <span className="w-6 text-slate-600 font-black uppercase shrink-0">{posLabel}</span>
+                                  <span className={`w-6 font-black uppercase shrink-0 ${isOop ? 'text-rose-500' : isSecFit ? 'text-sky-400' : 'text-slate-600'}`}>{posLabel}</span>
                                   <span className="text-slate-300 font-bold truncate flex-1">{p.name}</span>
+                                  {isOop && <span className="text-rose-500/70 text-[8px] font-black shrink-0">OOP</span>}
+                                  {isSecFit && !isOop && <span className="text-sky-400/70 text-[8px] font-black shrink-0">FLEX</span>}
                                   <span className="text-slate-600 font-mono shrink-0">{p.rating}</span>
                                 </div>
                               );
