@@ -286,7 +286,7 @@ const Awards: React.FC<AwardsProps> = ({ league, onScout, onScoutCoach, onManage
       }));
     };
 
-    const leader = sortedCandidates[0];
+    const leader = candidates[0]; // score-rank #1 is always index 0 in candidates
 
     return (
       <div className="bg-slate-900 border border-slate-800 rounded-[2rem] overflow-hidden shadow-2xl">
@@ -323,7 +323,7 @@ const Awards: React.FC<AwardsProps> = ({ league, onScout, onScoutCoach, onManage
             <table className="w-full text-left border-collapse">
               <thead>
                 <tr className="bg-slate-950/50">
-                  <th className="p-3 text-[9px] font-black uppercase text-slate-500 tracking-widest border-b border-slate-800">#</th>
+                  <th className="p-3 text-[9px] font-black uppercase text-slate-500 tracking-widest border-b border-slate-800 whitespace-nowrap"># ±</th>
                   <th className="p-3 text-[9px] font-black uppercase text-slate-500 tracking-widest border-b border-slate-800">Name</th>
                   <th className="p-3 text-[9px] font-black uppercase text-slate-500 tracking-widest border-b border-slate-800">Team</th>
                   {allCols.map(col => (
