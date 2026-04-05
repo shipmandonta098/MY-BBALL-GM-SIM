@@ -314,6 +314,34 @@ function makeTransaction(
   };
 }
 
+const DRAFT_TRANSACTION_LOCKED_PHASES: LeagueState['draftPhase'][] = ['scouting', 'lottery', 'draft'];
+const BLOCKED_AI_ROSTER_TRANSACTION_TYPES = new Set<TransactionType>(['release', 'waiver', 'signing']);
+const BLOCKED_DRAFT_WINDOW_NEWS_PATTERN = /\b(waiv(?:e|ed|er|ers)|releas(?:e|ed|es|ing)|sign(?:ed|ing|s)|agree(?:d|s)? to terms)\b/i;
+
+function isAIDraftTransactionWindowLocked(state: Pick<LeagueState, 'isOffseason' | 'draftPhase'>): boolean {
+  return Boolean(state.isOffseason && DRAFT_TRANSACTION_LOCKED_PHASES.includes(state.draftPhase));
+}
+
+function isAIFreeAgencyRosterWindow(state: Pick<LeagueState, 'isOffseason' | 'draftPhase'>): boolean {
+  return Boolean(state.isOffseason && state.draftPhase === 'completed');
+}
+
+function filterBlockedDraftWindowTransactions(
+  state: Pick<LeagueState, 'isOffseason' | 'draftPhase'>,
+  transactions: Transaction[]
+): Transaction[] {
+  if (!isAIDraftTransactionWindowLocked(state)) return transactions;
+  return transactions.filter(tx => !BLOCKED_AI_ROSTER_TRANSACTION_TYPES.has(tx.type));
+}
+
+function filterBlockedDraftWindowNews(
+  state: Pick<LeagueState, 'isOffseason' | 'draftPhase'>,
+  newsItems: NewsItem[]
+): NewsItem[] {
+  if (!isAIDraftTransactionWindowLocked(state)) return newsItems;
+  return newsItems.filter(item => !BLOCKED_DRAFT_WINDOW_NEWS_PATTERN.test(`${item.headline} ${item.content}`));
+}
+
 // ─── Roster evaluation: who gets cut ────────────────────────
 function shouldRelease(p: Player, salary: number, personality: AIGMPersonality): boolean {
   if (salary > 200_000 && p.rating < 75) return true;
@@ -339,6 +367,7 @@ export function runAIGMOffseason(
   const newsItems: NewsItem[] = [];
   const txs: Transaction[] = [];
   const salaryCap = s.settings.salaryCap;
+  const canRunRosterTransactions = isAIFreeAgencyRosterWindow(s);
 
   // Build a sorted list of top FAs for "superstar chaser" detection
   const topFAIds = new Set(
@@ -352,42 +381,46 @@ export function runAIGMOffseason(
     const personality = t.aiGM?.personality ?? 'Balanced';
     const ratings = t.aiGM?.ratings ?? generateAIGMRatings('Balanced');
 
-    // ── 1. ROSTER CUTS ──────────────────────────────────────
+    // ── 1. ROSTER CUTS (only once free agency officially opens) ───────────
     let currentRoster = [...t.roster];
     const released: Player[] = [];
 
-    const minRoster = s.settings.minRosterSize ?? 10;
-    currentRoster = currentRoster.filter(p => {
-      if (currentRoster.length <= minRoster) return true; // never below minimum
-      if (personality === 'Loyalist' && p.morale >= 60) return true; // loyalist keeps happy players
-      if (shouldRelease(p, p.salary, personality)) {
-        released.push(p);
-        return false;
-      }
-      return true;
-    });
+    if (canRunRosterTransactions) {
+      const minRoster = s.settings.minRosterSize ?? 10;
+      const maxReleasesPerTeam = 1; // prevents spammy same-day transaction bursts
+      currentRoster = currentRoster.filter(p => {
+        if (currentRoster.length <= minRoster) return true; // never below minimum
+        if (released.length >= maxReleasesPerTeam) return true;
+        if (personality === 'Loyalist' && p.morale >= 60) return true; // loyalist keeps happy players
+        if (shouldRelease(p, p.salary, personality)) {
+          released.push(p);
+          return false;
+        }
+        return true;
+      });
 
-    released.forEach(p => {
-      faPool.push({ ...p, isFreeAgent: true, contractYears: 0 });
-      newsItems.push(makeNewsItem(
-        'signing',
-        `${t.abbreviation} ROSTER MOVE`,
-        (() => {
-          const templates = [
-            `${t.name} have released ${p.name}, clearing roster space as the front office reshapes the squad.`,
-            `${p.name} has been waived by ${t.name}. He'll clear waivers and become available to other teams.`,
-            `${t.name} part ways with ${p.name} in a roster move. He becomes an unrestricted free agent immediately.`,
-          ];
-          return templates[Math.floor(Math.random() * templates.length)];
-        })(),
-        s.currentDay, t.id, p.id
-      ));
-      txs.push(makeTransaction(s, 'release', [t.id], `${t.name} released ${p.name}.`, [p.id]));
-    });
+      released.forEach(p => {
+        faPool.push({ ...p, isFreeAgent: true, contractYears: 0 });
+        newsItems.push(makeNewsItem(
+          'transaction',
+          `${t.abbreviation} ROSTER UPDATE`,
+          (() => {
+            const templates = [
+              `${t.name} waived ${p.name} to open a roster slot ahead of free agency moves.`,
+              `${t.name} released ${p.name} after a front-office roster review. He now enters the open market.`,
+              `${p.name} was waived by ${t.name} as part of a measured post-draft roster trim.`,
+            ];
+            return templates[Math.floor(Math.random() * templates.length)];
+          })(),
+          s.currentDay, t.id, p.id
+        ));
+        txs.push(makeTransaction(s, 'release', [t.id], `${t.name} waived ${p.name} to clear a roster spot.`, [p.id]));
+      });
+    }
 
     // ── 1.5 + 2. RE-SIGNINGS & FA SIGNINGS ────────────────────
     // STRICTLY LOCKED until the draft is 100% complete.
-    if (s.draftPhase === 'completed') {
+    if (canRunRosterTransactions) {
       // ── 1.5. RE-SIGN OWN EXPIRING STARS (83+ OVR) ──────────
       const ownExpiring = faPool
         .filter(p => p.lastTeamId === t.id && p.rating >= 83)
@@ -503,7 +536,7 @@ export function runAIGMOffseason(
           s, 'signing', [t.id], `${t.name} signed ${fa.name} to $${(offerAmt / 1_000_000).toFixed(1)}M / ${signedPlayer.contractYears}yr.`, [fa.id]
         ));
       }
-    } // end draftPhase === 'completed' guard
+    } // end free agency guard
 
     // ── 3. COACH MANAGEMENT ──────────────────────────────────
     const wins = t.prevSeasonWins ?? t.wins;
@@ -607,7 +640,7 @@ export function runAIGMOffseason(
   };
 
   // ── MINIMUM PAYROLL FLOOR (post-draft only) ───────────────────────────────
-  if (s.draftPhase === 'completed') {
+  if (canRunRosterTransactions) {
     const payrollFloor = s.settings.minPayroll;
     if (payrollFloor && payrollFloor > 0) {
       for (let teamIdx = 0; teamIdx < s.teams.length; teamIdx++) {
@@ -632,12 +665,14 @@ export function runAIGMOffseason(
   s = { ...s, freeAgents: faPool };
 
   // Prepend news items
-  const allNews = [...newsItems.slice(0, 40), ...s.newsFeed].slice(0, 100);
+  const filteredNewsItems = filterBlockedDraftWindowNews(s, newsItems);
+  const filteredTransactions = filterBlockedDraftWindowTransactions(s, txs);
+  const allNews = [...filteredNewsItems.slice(0, 40), ...s.newsFeed].slice(0, 100);
 
   return {
     updatedState: { ...s, newsFeed: allNews },
-    newsItems,
-    transactions: txs,
+    newsItems: filteredNewsItems,
+    transactions: filteredTransactions,
   };
 }
 
@@ -1236,8 +1271,8 @@ export function aiGMPreOffseasonAgreements(
   const transactions: Transaction[] = [];
   let s = { ...state };
 
-  // Pre-offseason agreements only happen after the draft is complete
-  if (s.draftPhase !== 'completed') return { updatedState: s, newsItems, transactions };
+  // Pre-offseason agreements only happen once free agency officially opens.
+  if (!isAIFreeAgencyRosterWindow(s)) return { updatedState: s, newsItems, transactions };
   if (!s.freeAgents || s.freeAgents.length === 0) return { updatedState: s, newsItems, transactions };
 
   const cap = s.settings.salaryCap || 140_000_000;
@@ -1307,7 +1342,11 @@ export function aiGMPreOffseasonAgreements(
   }
 
   s = { ...s, freeAgents: updatedFAs };
-  return { updatedState: s, newsItems, transactions };
+  return {
+    updatedState: s,
+    newsItems: filterBlockedDraftWindowNews(s, newsItems),
+    transactions: filterBlockedDraftWindowTransactions(s, transactions),
+  };
 }
 
 // ─── Summary of AI personalities for display ────────────────
