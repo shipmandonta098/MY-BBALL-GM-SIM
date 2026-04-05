@@ -754,6 +754,61 @@ const App: React.FC = () => {
         newState = await addNewsItem(newState, 'injury', { player: unlucky, team, detail: illnessDetail }, false);
       }
     }
+    // ── Off-court incident (rare, ~0.1% per team per day) ───────────────────
+    if (!newState.isOffseason) {
+      for (const team of newState.teams) {
+        if (Math.random() >= 0.001) continue;
+        const eligible = team.roster.filter(p =>
+          !p.isSuspended &&
+          p.status !== 'Injured' &&
+          !p.personalityTraits?.includes('Professional'),
+        );
+        if (eligible.length === 0) continue;
+        // Weight toward Hot Head and Diva/Star traits
+        const weights = eligible.map(p =>
+          (p.personalityTraits?.includes('Hot Head') ? 3 : 1) +
+          (p.personalityTraits?.includes('Diva/Star') ? 1 : 0),
+        );
+        const totalW = weights.reduce((a, b) => a + b, 0);
+        let rand = Math.random() * totalW;
+        let chosen: Player | null = null;
+        for (let i = 0; i < eligible.length; i++) {
+          rand -= weights[i];
+          if (rand <= 0) { chosen = eligible[i]; break; }
+        }
+        if (!chosen) chosen = eligible[Math.floor(Math.random() * eligible.length)];
+        const games = 2 + Math.floor(Math.random() * 4); // 2-5 games
+        const reasons = ['Conduct Detrimental to the Team', 'Off-Court Altercation', 'League Policy Violation', 'Off-Court Incident'];
+        const reason = reasons[Math.floor(Math.random() * reasons.length)];
+        const gStr = `${games} game${games !== 1 ? 's' : ''}`;
+        newState = {
+          ...newState,
+          teams: newState.teams.map(t => t.id !== team.id ? t : {
+            ...t,
+            roster: t.roster.map(p => p.id !== chosen!.id ? p : {
+              ...p,
+              isSuspended: true,
+              suspensionGamesLeft: games,
+              suspensionReason: reason,
+              morale: Math.max(0, (p.morale ?? 75) - 12),
+            }),
+          }),
+        };
+        const updatedTeam = newState.teams.find(t => t.id === team.id)!;
+        const updatedPlayer = updatedTeam.roster.find(p => p.id === chosen!.id)!;
+        const offCourtTemplates = [
+          `${updatedPlayer.name} has been suspended ${gStr} by the ${updatedTeam.name} following an off-court incident. The team issued a brief statement citing conduct detrimental to the organization.`,
+          `Breaking: ${updatedPlayer.name} of the ${updatedTeam.name} is suspended ${gStr} after an off-court altercation. The league is monitoring the situation.`,
+          `The ${updatedTeam.name} announce a ${gStr} suspension for ${updatedPlayer.name} due to a league policy violation. He is expected to return after serving the ban.`,
+          `${updatedPlayer.name} won't be available for ${gStr} after the league stepped in following a reported off-court incident. A distraction the ${updatedTeam.name} didn't need.`,
+        ];
+        newState = await addNewsItem(newState, 'injury', {
+          player: updatedPlayer, team: updatedTeam,
+          detail: offCourtTemplates[Math.floor(Math.random() * offCourtTemplates.length)],
+        }, true);
+      }
+    }
+
     // Facilities morale boost — elite facilities add up to +20 baseline morale per week
     if (newState.currentDay % 7 === 0) {
       newState = {
@@ -1005,14 +1060,11 @@ const App: React.FC = () => {
           const newFlagrants = (p.stats.flagrants || 0) + (line.flagrants || 0);
           const newEjections = (p.stats.ejections || 0) + (line.ejected ? 1 : 0);
           
-          let isSuspended = p.isSuspended;
-          let suspensionGames = p.suspensionGames || 0;
-          
-          // Suspension Logic (16 techs)
-          if (newTechs >= 16 && (p.stats.techs || 0) < 16) {
-            isSuspended = true;
-            suspensionGames = 1;
-          }
+          // Preserve suspension state; countdown + new triggers handled below
+          const isSuspended = p.isSuspended ?? false;
+          const suspensionGames = p.suspensionGames ?? 0; // legacy compat
+          const suspensionGamesLeft = p.suspensionGamesLeft ?? 0;
+          const suspensionReason = p.suspensionReason;
 
           let morale = p.morale ?? 75;
           const traits = p.personalityTraits ?? [];
@@ -1090,9 +1142,11 @@ const App: React.FC = () => {
           morale = Math.min(100, Math.max(0, morale));
 
           return {
-            ...p, 
+            ...p,
             isSuspended,
-            suspensionGames,
+            suspensionGames,      // legacy
+            suspensionGamesLeft,
+            suspensionReason,
             morale,
             stats: { 
               ...p.stats, 
@@ -1213,6 +1267,101 @@ const App: React.FC = () => {
         return templates[Math.floor(Math.random() * templates.length)];
       })();
       newState = await addNewsItem(newState, 'injury', { player, team, detail: ejDetail }, true);
+    }
+
+    // ── Suspension countdown: decrement for both teams that just played ────
+    const suspensionCleared: Array<{ player: Player; team: Team }> = [];
+    newState = {
+      ...newState,
+      teams: newState.teams.map(t => {
+        if (t.id !== result.homeTeamId && t.id !== result.awayTeamId) return t;
+        return {
+          ...t,
+          roster: t.roster.map(p => {
+            if (!p.isSuspended || (p.suspensionGamesLeft ?? 0) <= 0) return p;
+            const gamesLeft = (p.suspensionGamesLeft ?? 1) - 1;
+            if (gamesLeft <= 0) {
+              suspensionCleared.push({ player: p, team: t });
+              return { ...p, isSuspended: false, suspensionGamesLeft: 0, suspensionReason: undefined };
+            }
+            return { ...p, suspensionGamesLeft: gamesLeft };
+          }),
+        };
+      }),
+    };
+    for (const { player, team } of suspensionCleared) {
+      const returnTemplates = [
+        `${player.name} has served his suspension and is cleared to return to the ${team.name} lineup.`,
+        `${player.name}'s suspension is over. He's eligible to play in the ${team.name}'s next game.`,
+        `The league has reinstated ${player.name}. He rejoins the ${team.name} rotation immediately.`,
+      ];
+      newState = await addNewsItem(newState, 'injury', {
+        player, team, detail: returnTemplates[Math.floor(Math.random() * returnTemplates.length)],
+      }, false);
+    }
+
+    // ── Process new suspension triggers from this game ───────────────────
+    if (result.gameSuspensions && result.gameSuspensions.length > 0) {
+      for (const trigger of result.gameSuspensions) {
+        // Determine games suspended
+        let games: number;
+        let reason: string;
+        if (trigger.reason === 'flagrant2') {
+          // 1 game (50%), 2 games (35%), 3 games (15%)
+          const r = Math.random();
+          games = r < 0.50 ? 1 : r < 0.85 ? 2 : 3;
+          reason = 'Flagrant 2 Foul';
+        } else {
+          // double-tech: 80% no suspension, 20% 1 game
+          games = Math.random() < 0.20 ? 1 : 0;
+          reason = 'Unsportsmanlike Conduct';
+        }
+        if (games === 0) continue;
+
+        // Apply suspension
+        newState = {
+          ...newState,
+          teams: newState.teams.map(t => t.id !== trigger.teamId ? t : {
+            ...t,
+            roster: t.roster.map(p => p.id !== trigger.playerId ? p : {
+              ...p,
+              isSuspended: true,
+              suspensionGamesLeft: games,
+              suspensionReason: reason,
+              morale: Math.max(0, (p.morale ?? 75) - 8),
+            }),
+          }),
+        };
+
+        // Morale dip for teammates
+        newState = {
+          ...newState,
+          teams: newState.teams.map(t => t.id !== trigger.teamId ? t : {
+            ...t,
+            roster: t.roster.map(p => p.id === trigger.playerId ? p : {
+              ...p, morale: Math.max(0, (p.morale ?? 75) - 2),
+            }),
+          }),
+        };
+
+        const susTeam = newState.teams.find(t => t.id === trigger.teamId)!;
+        const susPlayer = susTeam?.roster.find(p => p.id === trigger.playerId);
+        if (susPlayer && susTeam) {
+          const gStr = games === 1 ? '1 game' : `${games} games`;
+          const susTemplates = trigger.reason === 'flagrant2' ? [
+            `${susPlayer.name} has been suspended ${gStr} by the league following a Flagrant 2 foul. The ${susTeam.name} will be shorthanded.`,
+            `The league office has handed ${susPlayer.name} a ${gStr} suspension after his ejection for a Flagrant 2. ${susTeam.name} must adjust their rotation.`,
+            `${susPlayer.name} suspended ${gStr} — Flagrant 2 foul reviewed and penalized. A costly absence for the ${susTeam.name}.`,
+          ] : [
+            `${susPlayer.name} is suspended ${gStr} after his double-technical ejection. The league cited unsportsmanlike conduct.`,
+            `The ${susTeam.name} will be without ${susPlayer.name} for ${gStr} following his two-technical ejection and league review.`,
+          ];
+          newState = await addNewsItem(newState, 'injury', {
+            player: susPlayer, team: susTeam,
+            detail: susTemplates[Math.floor(Math.random() * susTemplates.length)],
+          }, true);
+        }
+      }
     }
 
     // Apply in-game injuries

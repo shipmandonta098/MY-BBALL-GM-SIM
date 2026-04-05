@@ -1,5 +1,5 @@
 
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useRef, useEffect } from 'react';
 import { LeagueState, SeasonAwards, AwardWinner, Player, Coach, Team } from '../types';
 import TeamBadge from './TeamBadge';
 import { PlayerLink } from '../context/NavigationContext';
@@ -146,6 +146,25 @@ const Awards: React.FC<AwardsProps> = ({ league, onScout, onScoutCoach, onManage
     return { mvp, dpoy, roy, smoy, mip, coy, maxGamesPlayed, seasonActive };
   }, [allPlayers, allTeams, league.season, league.isOffseason, league.teams]);
 
+  // ── Ranking movement tracking ─────────────────────────────────────────────
+  // Snapshot of score-sorted IDs from the *previous* render (before latest games)
+  const prevScoreRanksRef = useRef<Record<string, Record<string, number>> | null>(null);
+
+  // Build current score-rank maps: raceKey → { playerId/coachId → 1-indexed rank }
+  const scoreRankMaps = useMemo(() => ({
+    mvp:  Object.fromEntries(awardRaces.mvp.map((c, i)  => [c.player.id,  i + 1])),
+    dpoy: Object.fromEntries(awardRaces.dpoy.map((c, i) => [c.player.id,  i + 1])),
+    roy:  Object.fromEntries(awardRaces.roy.map((c, i)  => [c.player.id,  i + 1])),
+    smoy: Object.fromEntries(awardRaces.smoy.map((c, i) => [c.player.id,  i + 1])),
+    mip:  Object.fromEntries(awardRaces.mip.map((c, i)  => [c.player.id,  i + 1])),
+    coy:  Object.fromEntries(awardRaces.coy.map((c, i)  => [c!.coach.id,  i + 1])),
+  }), [awardRaces]);
+
+  // After render: advance snapshot so next render can diff against it
+  useEffect(() => {
+    prevScoreRanksRef.current = scoreRankMaps;
+  }, [scoreRankMaps]);
+
   const currentAwards = league.currentSeasonAwards || (league.awardHistory && league.awardHistory[0]);
   const allCoaches = useMemo(() => league.teams.flatMap(t => [t.staff.headCoach]), [league.teams]);
 
@@ -222,15 +241,58 @@ const Awards: React.FC<AwardsProps> = ({ league, onScout, onScoutCoach, onManage
     </div>
   );
 
-  const RaceTable = ({ title, candidates, columns, gamesPlayed, seasonActive }: {
+  // ── Movement arrow badge ──────────────────────────────────────────────────
+  const MovementArrow = ({ type, delta }: { type: 'up' | 'down' | 'same' | 'new'; delta: number }) => {
+    if (type === 'up') return (
+      <span className="inline-flex items-center text-[9px] font-black text-emerald-500 leading-none whitespace-nowrap" title={`Rose ${delta} spot${delta !== 1 ? 's' : ''}`}>
+        ↑{delta}
+      </span>
+    );
+    if (type === 'down') return (
+      <span className="inline-flex items-center text-[9px] font-black text-red-500 leading-none whitespace-nowrap" title={`Fell ${delta} spot${delta !== 1 ? 's' : ''}`}>
+        ↓{delta}
+      </span>
+    );
+    if (type === 'new') return (
+      <span className="inline-flex items-center text-[8px] font-black text-sky-500 leading-none tracking-wide" title="New entrant">
+        NEW
+      </span>
+    );
+    return <span className="inline-flex items-center text-[9px] text-slate-700 leading-none" title="No change">→</span>;
+  };
+
+  const RaceTable = ({ title, candidates, columns, gamesPlayed, seasonActive, prevScoreRankMap }: {
     title: string;
     candidates: any[];
     columns: string[];
     gamesPlayed: number;
     seasonActive: boolean;
+    prevScoreRankMap: Record<string, number> | null;
   }) => {
     const allCols = [...columns, 'GP'];
     const [localSort, setLocalSort] = useState<{ key: string, direction: 'asc' | 'desc' }>({ key: columns[0], direction: 'desc' });
+
+    // Build score-rank map for this render: id → 1-indexed score rank
+    const currentScoreRankMap = useMemo(() => {
+      const map: Record<string, number> = {};
+      candidates.forEach((c, i) => {
+        const id = c.player?.id || c.coach?.id;
+        if (id) map[id] = i + 1;
+      });
+      return map;
+    }, [candidates]);
+
+    const getMovement = (id: string): { type: 'up' | 'down' | 'same' | 'new'; delta: number } => {
+      const curr = currentScoreRankMap[id];
+      if (curr === undefined) return { type: 'same', delta: 0 };
+      if (!prevScoreRankMap) return { type: 'same', delta: 0 };
+      const prev = prevScoreRankMap[id];
+      if (prev === undefined) return { type: 'new', delta: 0 };
+      const delta = prev - curr; // positive = moved up (was ranked lower/higher number before)
+      if (delta > 0) return { type: 'up', delta };
+      if (delta < 0) return { type: 'down', delta: Math.abs(delta) };
+      return { type: 'same', delta: 0 };
+    };
 
     const sortedCandidates = useMemo(() => {
       return [...candidates].sort((a, b) => {
@@ -250,7 +312,7 @@ const Awards: React.FC<AwardsProps> = ({ league, onScout, onScoutCoach, onManage
       }));
     };
 
-    const leader = sortedCandidates[0];
+    const leader = candidates[0]; // score-rank #1 is always index 0 in candidates
 
     return (
       <div className="bg-slate-900 border border-slate-800 rounded-[2rem] overflow-hidden shadow-2xl">
@@ -287,7 +349,7 @@ const Awards: React.FC<AwardsProps> = ({ league, onScout, onScoutCoach, onManage
             <table className="w-full text-left border-collapse">
               <thead>
                 <tr className="bg-slate-950/50">
-                  <th className="p-3 text-[9px] font-black uppercase text-slate-500 tracking-widest border-b border-slate-800">#</th>
+                  <th className="p-3 text-[9px] font-black uppercase text-slate-500 tracking-widest border-b border-slate-800 whitespace-nowrap"># ±</th>
                   <th className="p-3 text-[9px] font-black uppercase text-slate-500 tracking-widest border-b border-slate-800">Name</th>
                   <th className="p-3 text-[9px] font-black uppercase text-slate-500 tracking-widest border-b border-slate-800">Team</th>
                   {allCols.map(col => (
@@ -304,52 +366,60 @@ const Awards: React.FC<AwardsProps> = ({ league, onScout, onScoutCoach, onManage
                 </tr>
               </thead>
               <tbody>
-                {sortedCandidates.map((c, idx) => (
-                  <tr
-                    key={c.player?.id || c.coach?.id}
-                    onClick={() => c.player ? onScout(c.player) : onScoutCoach(c.coach)}
-                    className={`group cursor-pointer border-b border-slate-800/40 hover:bg-slate-800/30 transition-colors ${
-                      idx === 0 ? 'bg-amber-500/5' : idx < 3 ? 'bg-emerald-500/3' : ''
-                    }`}
-                  >
-                    <td className="p-3">
-                      <span className={`text-xs font-mono font-black ${
-                        idx === 0 ? 'text-amber-500' : idx === 1 ? 'text-slate-400' : idx === 2 ? 'text-amber-900' : 'text-slate-700'
-                      }`}>{idx + 1}</span>
-                    </td>
-                    <td className="p-3 min-w-[130px]">
-                      <div className="flex flex-col">
-                        <span className="text-sm font-bold text-white group-hover:text-amber-500 transition-colors leading-tight">
-                          {c.player?.name || c.coach?.name}
-                        </span>
-                        <span className="text-[9px] font-black text-slate-500 uppercase tracking-widest">
-                          {c.player ? `${c.player.position} · ${c.player.age}y` : 'Head Coach'}
-                        </span>
-                      </div>
-                    </td>
-                    <td className="p-3 min-w-[110px]">
-                      <div
-                        className="flex items-center gap-1.5 cursor-pointer hover:opacity-75 transition-opacity"
-                        onClick={e => { e.stopPropagation(); onManageTeam(c.team.id); }}
-                      >
-                        <TeamBadge team={c.team} size="xs" />
-                        <span className="text-[9px] font-bold text-slate-400 uppercase group-hover/team:text-amber-500 whitespace-nowrap">
-                          {c.team.abbreviation} {c.team.wins}-{c.team.losses}
-                        </span>
-                      </div>
-                    </td>
-                    {allCols.map(col => {
-                      const val = col === 'GP' ? c.stats.GP : c.stats[col];
-                      return (
-                        <td key={col} className="p-3 text-right whitespace-nowrap">
-                          <span className={`text-xs font-mono font-bold ${
-                            idx === 0 ? 'text-amber-400' : idx < 3 ? 'text-emerald-400' : 'text-slate-300'
-                          }`}>{val}</span>
-                        </td>
-                      );
-                    })}
-                  </tr>
-                ))}
+                {sortedCandidates.map((c, idx) => {
+                  const id = c.player?.id || c.coach?.id;
+                  const scoreRank = currentScoreRankMap[id] ?? idx + 1;
+                  const movement = getMovement(id);
+                  return (
+                    <tr
+                      key={id}
+                      onClick={() => c.player ? onScout(c.player) : onScoutCoach(c.coach)}
+                      className={`group cursor-pointer border-b border-slate-800/40 hover:bg-slate-800/30 transition-colors ${
+                        scoreRank === 1 ? 'bg-amber-500/5' : scoreRank <= 3 ? 'bg-emerald-500/3' : ''
+                      }`}
+                    >
+                      <td className="p-3">
+                        <div className="flex items-center gap-1">
+                          <span className={`text-xs font-mono font-black ${
+                            scoreRank === 1 ? 'text-amber-500' : scoreRank === 2 ? 'text-slate-400' : scoreRank === 3 ? 'text-amber-900' : 'text-slate-700'
+                          }`}>{scoreRank}</span>
+                          <MovementArrow type={movement.type} delta={movement.delta} />
+                        </div>
+                      </td>
+                      <td className="p-3 min-w-[130px]">
+                        <div className="flex flex-col">
+                          <span className="text-sm font-bold text-white group-hover:text-amber-500 transition-colors leading-tight">
+                            {c.player?.name || c.coach?.name}
+                          </span>
+                          <span className="text-[9px] font-black text-slate-500 uppercase tracking-widest">
+                            {c.player ? `${c.player.position} · ${c.player.age}y` : 'Head Coach'}
+                          </span>
+                        </div>
+                      </td>
+                      <td className="p-3 min-w-[110px]">
+                        <div
+                          className="flex items-center gap-1.5 cursor-pointer hover:opacity-75 transition-opacity"
+                          onClick={e => { e.stopPropagation(); onManageTeam(c.team.id); }}
+                        >
+                          <TeamBadge team={c.team} size="xs" />
+                          <span className="text-[9px] font-bold text-slate-400 uppercase group-hover/team:text-amber-500 whitespace-nowrap">
+                            {c.team.abbreviation} {c.team.wins}-{c.team.losses}
+                          </span>
+                        </div>
+                      </td>
+                      {allCols.map(col => {
+                        const val = col === 'GP' ? c.stats.GP : c.stats[col];
+                        return (
+                          <td key={col} className="p-3 text-right whitespace-nowrap">
+                            <span className={`text-xs font-mono font-bold ${
+                              scoreRank === 1 ? 'text-amber-400' : scoreRank <= 3 ? 'text-emerald-400' : 'text-slate-300'
+                            }`}>{val}</span>
+                          </td>
+                        );
+                      })}
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           </div>

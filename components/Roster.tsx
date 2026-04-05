@@ -35,6 +35,10 @@ const traitIcons: Record<PersonalityTrait, string> = {
 const isPlayerInjured = (p: Player) =>
   p.status === 'Injured' || (p.injuryDaysLeft != null && p.injuryDaysLeft > 0);
 
+/** True if a player is currently serving a suspension. */
+const isPlayerSuspended = (p: Player) =>
+  !!(p.isSuspended && (p.suspensionGamesLeft ?? 0) > 0);
+
 /** Derive display status from rotation slot, overriding with injury when applicable. */
 const getEffectiveStatus = (p: Player, rotation?: TeamRotation): PlayerStatus => {
   if (isPlayerInjured(p)) return 'Injured';
@@ -64,6 +68,8 @@ const Roster: React.FC<RosterProps> = ({ leagueTeams, userTeamId, initialTeamId,
   const [minOvr, setMinOvr] = useState(60);
   const [sortConfig, setSortConfig] = useState<{ key: string, direction: 'asc' | 'desc' }>({ key: 'rating', direction: 'desc' });
   const [injuredOnly, setInjuredOnly] = useState(false);
+  const [suspendedOnly, setSuspendedOnly] = useState(false);
+  const [appealMsg, setAppealMsg] = useState<{ text: string; type: 'ok' | 'err' } | null>(null);
   const [godModeMsg, setGodModeMsg] = useState<{ text: string; type: 'ok' | 'err' } | null>(null);
   const importRosterRef = useRef<HTMLInputElement>(null);
   const importPlayerRef = useRef<HTMLInputElement>(null);
@@ -112,7 +118,8 @@ const Roster: React.FC<RosterProps> = ({ leagueTeams, userTeamId, initialTeamId,
         const matchesPos = posFilter === 'ALL' || p.position === posFilter;
         const matchesOvr = p.rating >= minOvr;
         const matchesInjured = !injuredOnly || isPlayerInjured(p);
-        return matchesSearch && matchesPos && matchesOvr && matchesInjured;
+        const matchesSuspended = !suspendedOnly || isPlayerSuspended(p);
+        return matchesSearch && matchesPos && matchesOvr && matchesInjured && matchesSuspended;
       })
       .sort((a, b) => {
         let aVal: any = (a as any)[sortConfig.key];
@@ -127,7 +134,7 @@ const Roster: React.FC<RosterProps> = ({ leagueTeams, userTeamId, initialTeamId,
         if (aVal > bVal) return sortConfig.direction === 'asc' ? 1 : -1;
         return 0;
       });
-  }, [activeTeam.roster, searchTerm, posFilter, minOvr, injuredOnly, sortConfig]);
+  }, [activeTeam.roster, searchTerm, posFilter, minOvr, injuredOnly, suspendedOnly, sortConfig]);
 
   const toggleSort = (key: string) => {
     setSortConfig(prev => ({
@@ -156,6 +163,27 @@ const Roster: React.FC<RosterProps> = ({ leagueTeams, userTeamId, initialTeamId,
     a.click();
     document.body.removeChild(a);
     URL.revokeObjectURL(url);
+  };
+
+  const handleAppeal = (player: Player) => {
+    if (!onUpdateTeamRoster) return;
+    const success = Math.random() < 0.25;
+    if (success && (player.suspensionGamesLeft ?? 0) > 1) {
+      const updatedRoster = activeTeam.roster.map(p =>
+        p.id !== player.id ? p : { ...p, suspensionGamesLeft: (p.suspensionGamesLeft ?? 1) - 1 },
+      );
+      onUpdateTeamRoster(activeTeam.id, updatedRoster);
+      setAppealMsg({ text: `Appeal granted — ${player.name}'s suspension reduced by 1 game.`, type: 'ok' });
+    } else if (success && (player.suspensionGamesLeft ?? 0) === 1) {
+      const updatedRoster = activeTeam.roster.map(p =>
+        p.id !== player.id ? p : { ...p, isSuspended: false, suspensionGamesLeft: 0, suspensionReason: undefined },
+      );
+      onUpdateTeamRoster(activeTeam.id, updatedRoster);
+      setAppealMsg({ text: `Appeal granted — ${player.name}'s suspension overturned!`, type: 'ok' });
+    } else {
+      setAppealMsg({ text: `Appeal denied. ${player.name} must serve the full suspension.`, type: 'err' });
+    }
+    setTimeout(() => setAppealMsg(null), 3500);
   };
 
   const handleExportRoster = () => {
@@ -317,21 +345,43 @@ const Roster: React.FC<RosterProps> = ({ leagueTeams, userTeamId, initialTeamId,
         </div>
       </div>
 
-      {/* Injury Filter */}
-      <div className="flex items-center gap-3">
+      {/* Appeal result banner */}
+      {appealMsg && (
+        <div className={`text-[11px] font-bold px-4 py-2 rounded-xl border ${
+          appealMsg.type === 'ok'
+            ? 'bg-emerald-900/40 border-emerald-500/40 text-emerald-300'
+            : 'bg-rose-900/40 border-rose-500/40 text-rose-300'
+        }`}>
+          {appealMsg.text}
+        </div>
+      )}
+
+      {/* Injury / Suspension Filters */}
+      <div className="flex items-center gap-3 flex-wrap">
         <button
-          onClick={() => setInjuredOnly(!injuredOnly)}
+          onClick={() => { setInjuredOnly(!injuredOnly); setSuspendedOnly(false); }}
           className={`flex items-center gap-2 px-4 py-2.5 rounded-xl border text-[10px] font-black uppercase tracking-widest transition-all ${
             injuredOnly ? 'bg-rose-500/20 border-rose-500 text-rose-400 shadow-lg shadow-rose-900/20' : 'bg-slate-900 border-slate-800 text-slate-500 hover:border-slate-600'
           }`}
         >
           <span>🤕</span> {injuredOnly ? 'Showing Injured Only' : 'Show Injured Only'}
         </button>
+        <button
+          onClick={() => { setSuspendedOnly(!suspendedOnly); setInjuredOnly(false); }}
+          className={`flex items-center gap-2 px-4 py-2.5 rounded-xl border text-[10px] font-black uppercase tracking-widest transition-all ${
+            suspendedOnly ? 'bg-amber-500/20 border-amber-500 text-amber-400 shadow-lg shadow-amber-900/20' : 'bg-slate-900 border-slate-800 text-slate-500 hover:border-slate-600'
+          }`}
+        >
+          <span>🚫</span> {suspendedOnly ? 'Showing Suspended Only' : 'Suspensions'}
+        </button>
         {injuredOnly && filteredRoster.length > 0 && (
           <span className="text-[10px] text-rose-400 font-bold uppercase tracking-widest">{filteredRoster.length} on injured list</span>
         )}
         {injuredOnly && filteredRoster.length === 0 && (
           <span className="text-[10px] text-slate-500 font-bold uppercase tracking-widest">No current injuries on this roster</span>
+        )}
+        {suspendedOnly && filteredRoster.length === 0 && (
+          <span className="text-[10px] text-slate-500 font-bold uppercase tracking-widest">No active suspensions</span>
         )}
       </div>
 
@@ -409,14 +459,21 @@ const Roster: React.FC<RosterProps> = ({ leagueTeams, userTeamId, initialTeamId,
             </thead>
             <tbody className="divide-y divide-slate-800/40">
               {filteredRoster.map((player) => (
-                <tr 
-                  key={player.id} 
-                  className={`group hover:bg-slate-800/40 transition-all cursor-pointer ${isPlayerInjured(player) ? 'bg-rose-950/20 border-l-2 border-rose-500/30' : ''}`}
+                <tr
+                  key={player.id}
+                  className={`group hover:bg-slate-800/40 transition-all cursor-pointer ${
+                    isPlayerSuspended(player) ? 'bg-amber-950/20 border-l-2 border-amber-500/30' :
+                    isPlayerInjured(player)   ? 'bg-rose-950/20 border-l-2 border-rose-500/30' : ''
+                  }`}
                   onClick={() => onScout(player)}
                 >
                   <td className="px-8 py-6">
                     <div className="flex items-center gap-4">
-                      <div className={`w-12 h-12 rounded-xl flex items-center justify-center font-display text-xl border ${isPlayerInjured(player) ? 'bg-rose-950/40 border-rose-500/40 text-rose-400' : 'bg-slate-800 border-slate-700 text-slate-600'}`}>
+                      <div className={`w-12 h-12 rounded-xl flex items-center justify-center font-display text-xl border ${
+                        isPlayerSuspended(player) ? 'bg-amber-950/40 border-amber-500/40 text-amber-400' :
+                        isPlayerInjured(player)   ? 'bg-rose-950/40 border-rose-500/40 text-rose-400' :
+                        'bg-slate-800 border-slate-700 text-slate-600'
+                      }`}>
                         {player.name.charAt(0)}
                       </div>
                       <div className="min-w-0">
@@ -424,12 +481,32 @@ const Roster: React.FC<RosterProps> = ({ leagueTeams, userTeamId, initialTeamId,
                           {player.country && (
                             <span className="text-base leading-none" title={player.country}>{getFlag(player.country)}</span>
                           )}
-                          <span className={`font-display font-bold text-lg uppercase tracking-tight transition-colors group-hover:text-amber-500 ${isPlayerInjured(player) ? 'text-rose-400' : 'text-slate-100'}`}>
+                          <span className={`font-display font-bold text-lg uppercase tracking-tight transition-colors group-hover:text-amber-500 ${
+                            isPlayerSuspended(player) ? 'text-amber-400' :
+                            isPlayerInjured(player)   ? 'text-rose-400' : 'text-slate-100'
+                          }`}>
                             {player.name}
                           </span>
                         </div>
                         <div className="flex items-center gap-2 mt-1 flex-wrap">
                           {(() => {
+                            // Suspension badge (checked first — takes priority)
+                            if (isPlayerSuspended(player)) return (
+                              <div className="flex items-center gap-2 flex-wrap">
+                                <span className="text-[10px] font-black uppercase tracking-widest px-1.5 py-0.5 rounded bg-amber-500/10 text-amber-400 border border-amber-500/20 whitespace-nowrap">
+                                  🚫 Suspended · {player.suspensionGamesLeft}g left{player.suspensionReason ? ` · ${player.suspensionReason}` : ''}
+                                </span>
+                                {activeTeam.id === userTeamId && onUpdateTeamRoster && (player.suspensionGamesLeft ?? 0) >= 1 && (
+                                  <button
+                                    onClick={e => { e.stopPropagation(); handleAppeal(player); }}
+                                    className="text-[9px] font-black uppercase tracking-widest px-2 py-0.5 rounded border border-slate-600 bg-slate-800 text-slate-400 hover:border-amber-500 hover:text-amber-400 transition-all"
+                                    title="Appeal the suspension (25% chance of 1-game reduction)"
+                                  >
+                                    Appeal
+                                  </button>
+                                )}
+                              </div>
+                            );
                             const eff = getEffectiveStatus(player, activeTeam.rotation);
                             if (eff === 'Injured') return (
                               <span className="text-[10px] font-black uppercase tracking-widest px-1.5 py-0.5 rounded bg-rose-500/10 text-rose-400 border border-rose-500/20 whitespace-nowrap">

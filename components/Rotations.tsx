@@ -179,6 +179,8 @@ const SortablePlayerCard = ({
   fatigueWarning?: boolean;
 }) => {
   const injured = player.status === 'Injured' || (player.injuryDaysLeft != null && player.injuryDaysLeft > 0);
+  const suspended = !!(player.isSuspended && (player.suspensionGamesLeft ?? 0) > 0);
+  const unavailable = injured || suspended;
 
   const {
     attributes,
@@ -187,7 +189,7 @@ const SortablePlayerCard = ({
     transform,
     transition,
     isDragging,
-  } = useSortable({ id: player.id, disabled: injured });
+  } = useSortable({ id: player.id, disabled: unavailable });
 
   const style = {
     transform: CSS.Transform.toString(transform),
@@ -201,26 +203,37 @@ const SortablePlayerCard = ({
       ref={setNodeRef}
       style={style}
       className={`border rounded-2xl p-4 flex items-center gap-4 group transition-all ${
-        injured
+        suspended
+          ? 'bg-amber-950/20 border-amber-500/30 opacity-70'
+          : injured
           ? 'bg-rose-950/20 border-rose-500/30 opacity-70'
           : `bg-slate-800/50 ${isStarter ? 'border-amber-500/30' : 'border-slate-700/50'} hover:bg-slate-800`
       }`}
     >
-      <div {...(injured ? {} : { ...attributes, ...listeners })} className={`p-2 ${injured ? 'text-rose-800 cursor-not-allowed' : 'cursor-grab active:cursor-grabbing text-slate-600 hover:text-slate-400'}`}>
+      <div {...(unavailable ? {} : { ...attributes, ...listeners })} className={`p-2 ${unavailable ? 'text-slate-700 cursor-not-allowed' : 'cursor-grab active:cursor-grabbing text-slate-600 hover:text-slate-400'}`}>
         <GripVertical size={20} />
       </div>
 
       <div className="flex-1 flex items-center gap-4">
         <div className="relative">
-          <div className={`w-12 h-12 rounded-xl flex items-center justify-center font-display font-bold border ${injured ? 'bg-rose-950/40 border-rose-500/30 text-rose-500' : 'bg-slate-900 border-slate-800 text-slate-500'}`}>
+          <div className={`w-12 h-12 rounded-xl flex items-center justify-center font-display font-bold border ${
+            suspended ? 'bg-amber-950/40 border-amber-500/30 text-amber-500' :
+            injured   ? 'bg-rose-950/40 border-rose-500/30 text-rose-500'   :
+            'bg-slate-900 border-slate-800 text-slate-500'
+          }`}>
             {player.name.charAt(0)}
           </div>
-          {positionLabel && !injured && (
+          {positionLabel && !unavailable && (
             <div className="absolute -top-2 -left-2 bg-amber-500 text-slate-950 text-[10px] font-black px-1.5 py-0.5 rounded border border-slate-950">
               {positionLabel}
             </div>
           )}
-          {injured && (
+          {suspended && (
+            <div className="absolute -top-2 -left-2 bg-amber-500 text-slate-950 text-[10px] font-black px-1.5 py-0.5 rounded border border-amber-900">
+              SUS
+            </div>
+          )}
+          {injured && !suspended && (
             <div className="absolute -top-2 -left-2 bg-rose-500 text-white text-[10px] font-black px-1.5 py-0.5 rounded border border-rose-900">
               INJ
             </div>
@@ -228,14 +241,21 @@ const SortablePlayerCard = ({
         </div>
         <div className="flex-1">
           <div className="flex items-center gap-2 flex-wrap">
-            <PlayerLink player={player} name={player.name} className={`font-bold uppercase tracking-tight text-sm ${injured ? 'text-rose-400' : 'text-slate-200'}`} />
+            <PlayerLink player={player} name={player.name} className={`font-bold uppercase tracking-tight text-sm ${
+              suspended ? 'text-amber-400' : injured ? 'text-rose-400' : 'text-slate-200'
+            }`} />
             <span className="text-[10px] font-black text-slate-500 uppercase px-1.5 py-0.5 bg-slate-900 rounded">{player.position}</span>
-            {injured && (
+            {suspended && (
+              <span className="text-[10px] font-black uppercase px-1.5 py-0.5 rounded bg-amber-500/10 text-amber-400 border border-amber-500/20 whitespace-nowrap">
+                🚫 DNP–Suspended · {player.suspensionGamesLeft}g{player.suspensionReason ? ` · ${player.suspensionReason}` : ''}
+              </span>
+            )}
+            {injured && !suspended && (
               <span className="text-[10px] font-black uppercase px-1.5 py-0.5 rounded bg-rose-500/10 text-rose-400 border border-rose-500/20 whitespace-nowrap">
                 🤕 DNP–Injured{player.injuryDaysLeft ? ` · ${player.injuryDaysLeft}d` : ''}
               </span>
             )}
-            {!injured && fatigueWarning && (
+            {!unavailable && fatigueWarning && (
               <AlertTriangle size={14} className="text-rose-500 animate-pulse" />
             )}
           </div>
@@ -248,9 +268,9 @@ const SortablePlayerCard = ({
         </div>
       </div>
 
-      {injured ? (
+      {unavailable ? (
         <div className="w-48 flex items-center justify-center">
-          <span className="text-[10px] font-black uppercase tracking-widest text-rose-500/60">Unavailable</span>
+          <span className={`text-[10px] font-black uppercase tracking-widest ${suspended ? 'text-amber-500/60' : 'text-rose-500/60'}`}>Unavailable</span>
         </div>
       ) : (
         <div className="w-48 flex flex-col gap-1">

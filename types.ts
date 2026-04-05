@@ -370,7 +370,9 @@ export interface Player {
   interestScore?: number;
   onTradeBlock?: boolean;
   isSuspended?: boolean;
-  suspensionGames?: number;
+  suspensionGames?: number;      // legacy – kept for save compatibility
+  suspensionGamesLeft?: number;  // games remaining to serve
+  suspensionReason?: string;     // display label (e.g. 'Flagrant 2 Foul')
   injuryType?: InjuryType;
   injuryDaysLeft?: number;
   /** Years (season numbers) in which this player was selected as an All-Star */
@@ -545,6 +547,7 @@ export interface GameResult {
   isChippy?: boolean;
   season: number;
   gameInjuries?: Array<{playerId: string; playerName: string; injuryType: InjuryType; daysOut: number; teamId: string}>;
+  gameSuspensions?: Array<{playerId: string; playerName: string; teamId: string; reason: 'double-tech' | 'flagrant2'}>;
   /** Detailed per-quarter pace/possession stats */
   quarterDetails?: QuarterDetail[];
   /** True when the game had a clutch situation (last 5 min of 4Q/OT, score diff ≤5) */

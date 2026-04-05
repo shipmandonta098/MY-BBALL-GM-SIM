@@ -3808,6 +3808,17 @@ export const simulateGame = (
           ejected: false, dnp: 'Injured',
         };
       }
+      const isSuspended = p.isSuspended && (p.suspensionGamesLeft ?? 0) > 0;
+      if (isSuspended) {
+        return {
+          playerId: p.id, name: p.name,
+          min: 0, pts: 0, reb: 0, offReb: 0, defReb: 0,
+          ast: 0, stl: 0, blk: 0,
+          fgm: 0, fga: 0, threepm: 0, threepa: 0, ftm: 0, fta: 0,
+          tov: 0, pf: 0, techs: 0, flagrants: 0, plusMinus: 0,
+          ejected: false, dnp: 'Suspended',
+        };
+      }
 
       let mins = 0;
       if (team.rotation && team.rotation.minutes[p.id] !== undefined) {
@@ -3845,26 +3856,81 @@ export const simulateGame = (
   totalHome = homePlayerStats.reduce((s, p) => s + p.pts, 0);
   totalAway = awayPlayerStats.reduce((s, p) => s + p.pts, 0);
 
-  // ── 8. Chippy / tech rolls ────────────────────────────────────────────────
+  // ── 8. Chippy / tech rolls + flagrant fouls ──────────────────────────────
   let isChippy = false;
   const rivalryMod = ['Hot', 'Red Hot'].includes(rivalryLevel) ? 1.5 : 1.0;
+
+  // Suspension triggers collected during this game, returned with the result
+  const gameSuspensionTriggers: Array<{
+    playerId: string; playerName: string; teamId: string; reason: 'double-tech' | 'flagrant2';
+  }> = [];
+
   const rollForChippy = (stats: GamePlayerLine[], isHome: boolean) => {
+    const tm = isHome ? home : away;
     stats.forEach(p => {
-      const player = (isHome ? home : away).roster.find(pl => pl.id === p.playerId)!;
+      if (p.dnp) return; // already out (injured / suspended)
+      const player = tm.roster.find(pl => pl.id === p.playerId)!;
       let techChance = 0.02 * rivalryMod;
       if (player?.personalityTraits.includes('Diva/Star'))    techChance *= 1.8;
       if (player?.personalityTraits.includes('Tough/Alpha'))  techChance *= 1.4;
+      if (player?.personalityTraits.includes('Hot Head'))     techChance *= 2.0;
       if (player?.personalityTraits.includes('Professional')) techChance *= 0.5;
       if (player?.personalityTraits.includes('Leader'))       techChance *= 0.7;
       if (Math.random() < techChance) {
         p.techs += 1; isChippy = true;
         pbp.push({ time: `${Math.floor(Math.random() * 12)}:00`, quarter: Math.floor(Math.random() * 4) + 1, text: `${p.name} picks up a technical — bench reacts!`, type: 'foul' });
         if (isHome) totalAway += 1; else totalHome += 1;
+
+        // ── Second technical → ejection (rare but possible) ──────────────
+        let secondTechChance = 0.05 * rivalryMod;
+        if (player?.personalityTraits.includes('Hot Head'))    secondTechChance *= 2.5;
+        if (player?.personalityTraits.includes('Tough/Alpha')) secondTechChance *= 1.4;
+        if (Math.random() < secondTechChance) {
+          p.techs += 1;
+          p.ejected = true;
+          isChippy = true;
+          pbp.push({ time: `${Math.floor(Math.random() * 12)}:00`, quarter: Math.floor(Math.random() * 4) + 1, text: `${p.name} gets a SECOND TECHNICAL — EJECTED!`, type: 'foul' });
+          if (isHome) totalAway += 1; else totalHome += 1;
+          gameSuspensionTriggers.push({ playerId: player.id, playerName: player.name, teamId: tm.id, reason: 'double-tech' });
+        }
       }
     });
   };
   rollForChippy(homePlayerStats, true);
   rollForChippy(awayPlayerStats, false);
+
+  // ── Flagrant foul rolls (~0.04% base/player; F2 = ejection + suspension) ─
+  const rollForFlagrants = (stats: GamePlayerLine[], isHome: boolean) => {
+    const tm = isHome ? home : away;
+    stats.forEach(p => {
+      if (p.dnp || p.ejected) return;
+      const player = tm.roster.find(pl => pl.id === p.playerId)!;
+      if (!player) return;
+      let flagrantChance = 0.0004 * rivalryMod;
+      if (player.personalityTraits.includes('Hot Head'))     flagrantChance *= 3.0;
+      if (player.personalityTraits.includes('Tough/Alpha'))  flagrantChance *= 1.6;
+      if (player.personalityTraits.includes('Professional')) flagrantChance *= 0.2;
+      if (Math.random() < flagrantChance) {
+        const isF2 = Math.random() < 0.20 || (rivalryLevel === 'Red Hot' && Math.random() < 0.40);
+        const q = Math.floor(Math.random() * 4) + 1;
+        const t = `${Math.floor(Math.random() * 12)}:${String(Math.floor(Math.random() * 60)).padStart(2, '0')}`;
+        isChippy = true;
+        if (isF2) {
+          p.flagrants = (p.flagrants ?? 0) + 2;
+          p.ejected = true;
+          pbp.push({ time: t, quarter: q, text: `🚨 ${p.name} — FLAGRANT 2 FOUL! EJECTED! Opponent awarded 2 FTs + possession.`, type: 'foul' });
+          if (isHome) totalAway += 2; else totalHome += 2;
+          gameSuspensionTriggers.push({ playerId: player.id, playerName: player.name, teamId: tm.id, reason: 'flagrant2' });
+        } else {
+          p.flagrants = (p.flagrants ?? 0) + 1;
+          pbp.push({ time: t, quarter: q, text: `⚠️ ${p.name} — Flagrant 1 Foul. 2 FTs awarded, possession retained.`, type: 'foul' });
+          if (isHome) totalAway += 2; else totalHome += 2;
+        }
+      }
+    });
+  };
+  rollForFlagrants(homePlayerStats, true);
+  rollForFlagrants(awayPlayerStats, false);
 
   // ── 9. Injury rolls ──────────────────────────────────────────────────────
   const gameInjuries: Array<{ playerId: string; playerName: string; injuryType: InjuryType; daysOut: number; teamId: string }> = [];
@@ -4130,6 +4196,7 @@ export const simulateGame = (
     topPerformers: allLines.slice(0, 3).map(l => ({ playerId: l.playerId, points: l.pts, rebounds: l.reb, assists: l.ast })),
     playByPlay: pbp,
     date, season, isOvertime, isBuzzerBeater, isComeback, isChippy, gameInjuries,
+    gameSuspensions: gameSuspensionTriggers.length > 0 ? gameSuspensionTriggers : undefined,
   };
 };
 
