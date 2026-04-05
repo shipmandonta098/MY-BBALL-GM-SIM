@@ -1,7 +1,7 @@
 import React, { useState, useMemo, useEffect, useRef } from 'react';
 import { LeagueState, Team, Prospect, DraftPick, Player } from '../types';
 import { getFlag } from '../constants';
-import { aiGMDraftPick } from '../utils/aiGMEngine';
+import { aiGMDraftPick, computeTeamNeeds, prospectNeedFit, TeamNeedItem } from '../utils/aiGMEngine';
 import DraftLottery from './DraftLottery';
 import ProspectProfile from './ProspectProfile';
 import DraftPickTrade from './DraftPickTrade';
@@ -139,6 +139,20 @@ const Draft: React.FC<DraftProps> = ({ league, updateLeague, onScout, scoutingRe
     const draftedIds = new Set(league.teams.flatMap(t => t.roster.map(p => p.id)));
     return league.prospects.filter(p => !draftedIds.has(p.id));
   }, [league.prospects, league.teams]);
+
+  // Needs for the user's team (recalculated when roster/scheme/record changes)
+  const userTeamNeeds = useMemo(
+    () => computeTeamNeeds(userTeam),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [userTeam.roster, userTeam.activeScheme, userTeam.wins, userTeam.losses]
+  );
+
+  // Needs for whichever team is currently on the clock
+  const draftingTeamNeeds = useMemo(() => {
+    if (!isDrafting || !currentPick) return userTeamNeeds;
+    const clockTeam = league.teams.find(t => t.id === currentPick.currentTeamId);
+    return clockTeam ? computeTeamNeeds(clockTeam) : userTeamNeeds;
+  }, [isDrafting, currentPick, league.teams, userTeamNeeds]);
 
   const currentPick = league.draftPicks?.[currentPickIndex];
   const isUserTurn = isDrafting && currentPick?.currentTeamId === league.userTeamId;
@@ -432,6 +446,75 @@ const Draft: React.FC<DraftProps> = ({ league, updateLeague, onScout, scoutingRe
         </div>
       )}
 
+      {/* ── Team Needs Panel ──────────────────────────────────────── */}
+      {(() => {
+        const showingUser = !isDrafting || isUserTurn || !currentPick;
+        const displayNeeds = showingUser ? userTeamNeeds : draftingTeamNeeds;
+        const displayTeamName = showingUser
+          ? userTeam.name
+          : (league.teams.find(t => t.id === currentPick?.currentTeamId)?.name ?? userTeam.name);
+        const displayScheme = showingUser
+          ? userTeam.activeScheme
+          : (league.teams.find(t => t.id === currentPick?.currentTeamId)?.activeScheme ?? userTeam.activeScheme);
+        const bestFit = showingUser
+          ? availableProspects.find(p => prospectNeedFit(p, userTeamNeeds) === 'Strong Fit') ?? null
+          : null;
+        const bpa = availableProspects[0] ?? null;
+        return (
+          <div className="bg-slate-900 border border-slate-800 rounded-3xl p-6 shadow-xl">
+            <div className="flex flex-wrap items-start justify-between gap-4 mb-4">
+              <div>
+                <h3 className="text-xs font-black uppercase tracking-[0.3em] text-slate-200">
+                  {showingUser ? 'Your Team Needs' : `${displayTeamName} — Team Needs`}
+                </h3>
+                <p className="text-[10px] text-slate-600 font-bold uppercase mt-0.5">
+                  {displayTeamName} · {displayScheme} Scheme
+                </p>
+              </div>
+              {isUserTurn && (
+                <div className="flex flex-wrap items-center gap-2 text-[10px] font-black uppercase">
+                  {bpa && (
+                    <span className="flex items-center gap-1.5 px-3 py-1.5 bg-slate-800 border border-slate-700 rounded-xl text-slate-400">
+                      <span className="text-slate-600">BPA</span>
+                      {bpa.name}
+                      <span className="text-amber-500">{bpa.position}</span>
+                    </span>
+                  )}
+                  {bestFit && bestFit.id !== bpa?.id && (
+                    <span className="flex items-center gap-1.5 px-3 py-1.5 bg-emerald-500/15 border border-emerald-500/30 rounded-xl text-emerald-400">
+                      <span className="text-emerald-600">Best Fit</span>
+                      {bestFit.name}
+                      <span className="text-emerald-600">{bestFit.position}</span>
+                    </span>
+                  )}
+                </div>
+              )}
+            </div>
+            {displayNeeds.length === 0 ? (
+              <p className="text-xs text-slate-500 italic">Roster is well-balanced — draft best available player</p>
+            ) : (
+              <div className="flex flex-wrap gap-2">
+                {displayNeeds.map((need: TeamNeedItem, i: number) => (
+                  <span key={need.label} className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl border text-[10px] font-black uppercase ${
+                    need.urgency === 'Critical'
+                      ? 'bg-red-500/15 border-red-500/30 text-red-400'
+                      : need.urgency === 'High'
+                      ? 'bg-amber-500/15 border-amber-500/30 text-amber-400'
+                      : 'bg-slate-800 border-slate-700 text-slate-400'
+                  }`}>
+                    <span className="opacity-50 text-[9px]">#{i + 1}</span>
+                    {need.label}
+                    <span className={`ml-0.5 text-[8px] opacity-60 ${
+                      need.urgency === 'Critical' ? 'text-red-300' : need.urgency === 'High' ? 'text-amber-300' : 'text-slate-500'
+                    }`}>· {need.urgency}</span>
+                  </span>
+                ))}
+              </div>
+            )}
+          </div>
+        );
+      })()}
+
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
         {/* Left: Prospect Board */}
         <div className="lg:col-span-2 space-y-6">
@@ -449,6 +532,7 @@ const Draft: React.FC<DraftProps> = ({ league, updateLeague, onScout, scoutingRe
                     <th className="px-6 py-4">Pos</th>
                     <th className="px-6 py-4">School</th>
                     <th className="px-6 py-4 text-center">Grade</th>
+                    <th className="px-6 py-4 text-center hidden sm:table-cell">Fit</th>
                     <th className="px-6 py-4 text-right">Action</th>
                   </tr>
                 </thead>
@@ -475,6 +559,26 @@ const Draft: React.FC<DraftProps> = ({ league, updateLeague, onScout, scoutingRe
                             <span key={i} className={`text-xs ${i < p.scoutGrade ? 'text-amber-500' : 'text-slate-800'}`}>★</span>
                           ))}
                         </div>
+                      </td>
+                      <td className="px-6 py-5 text-center hidden sm:table-cell">
+                        {(() => {
+                          const fit = prospectNeedFit(p, userTeamNeeds);
+                          if (fit === 'Strong Fit') return (
+                            <span className="inline-flex items-center gap-1 px-2 py-0.5 bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 rounded text-[9px] font-black uppercase whitespace-nowrap">
+                              ✓ Strong Fit
+                            </span>
+                          );
+                          if (fit === 'Good Fit') return (
+                            <span className="inline-flex items-center gap-1 px-2 py-0.5 bg-blue-500/15 text-blue-400 border border-blue-500/25 rounded text-[9px] font-black uppercase whitespace-nowrap">
+                              Good Fit
+                            </span>
+                          );
+                          return (
+                            <span className="px-2 py-0.5 bg-slate-800/50 text-slate-600 border border-slate-700/50 rounded text-[9px] font-bold uppercase">
+                              Reach
+                            </span>
+                          );
+                        })()}
                       </td>
                       <td className="px-6 py-5 text-right" onClick={e => e.stopPropagation()}>
                         {isUserTurn ? (

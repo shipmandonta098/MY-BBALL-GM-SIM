@@ -33,6 +33,13 @@ export interface AIGMData {
   ratings: AIGMRatings;
 }
 
+/** A single prioritized roster need for a team, used in draft and FA logic. */
+export interface TeamNeedItem {
+  label: string;
+  urgency: 'Critical' | 'High' | 'Medium';
+  positions: Position[];
+}
+
 // ─── Personality defaults (ratings seeded around these) ─────
 const PERSONALITY_RATING_BASE: Record<AIGMPersonality, AIGMRatings> = {
   'Rebuilder':         { scouting: 80, negotiation: 55, development: 85, adaptability: 60, riskTolerance: 45 },
@@ -360,37 +367,51 @@ export function runAIGMOffseason(
     const ratings = t.aiGM?.ratings ?? generateAIGMRatings('Balanced');
 
     // ── 1. ROSTER CUTS ──────────────────────────────────────
+    // STRICTLY LOCKED during Draft Lottery, Live Draft, or any draft sub-phase.
+    // Waivers and releases are only processed after the draft is 100% complete.
     let currentRoster = [...t.roster];
-    const released: Player[] = [];
 
-    const minRoster = s.settings.minRosterSize ?? 10;
-    currentRoster = currentRoster.filter(p => {
-      if (currentRoster.length <= minRoster) return true; // never below minimum
-      if (personality === 'Loyalist' && p.morale >= 60) return true; // loyalist keeps happy players
-      if (shouldRelease(p, p.salary, personality)) {
-        released.push(p);
-        return false;
-      }
-      return true;
-    });
+    if (s.draftPhase === 'completed') {
+      const released: Player[] = [];
+      const minRoster = s.settings.minRosterSize ?? 10;
+      // Cap releases per team per offseason run to prevent mass-waiving
+      let releasesThisTeam = 0;
+      const MAX_RELEASES_PER_TEAM = 3;
 
-    released.forEach(p => {
-      faPool.push({ ...p, isFreeAgent: true, contractYears: 0 });
-      newsItems.push(makeNewsItem(
-        'signing',
-        `${t.abbreviation} ROSTER MOVE`,
-        (() => {
-          const templates = [
-            `${t.name} have released ${p.name}, clearing roster space as the front office reshapes the squad.`,
-            `${p.name} has been waived by ${t.name}. He'll clear waivers and become available to other teams.`,
-            `${t.name} part ways with ${p.name} in a roster move. He becomes an unrestricted free agent immediately.`,
-          ];
-          return templates[Math.floor(Math.random() * templates.length)];
-        })(),
-        s.currentDay, t.id, p.id
-      ));
-      txs.push(makeTransaction(s, 'release', [t.id], `${t.name} released ${p.name}.`, [p.id]));
-    });
+      currentRoster = currentRoster.filter(p => {
+        if (releasesThisTeam >= MAX_RELEASES_PER_TEAM) return true;
+        if (currentRoster.length <= minRoster) return true; // never below minimum
+        if (personality === 'Loyalist' && p.morale >= 60) return true; // loyalist keeps happy players
+        if (shouldRelease(p, p.salary, personality)) {
+          released.push(p);
+          releasesThisTeam++;
+          return false;
+        }
+        return true;
+      });
+
+      released.forEach(p => {
+        faPool.push({ ...p, isFreeAgent: true, contractYears: 0 });
+        const ageSuffix = p.age >= 32 ? `, age ${p.age},` : '';
+        const salaryM = (p.salary / 1_000_000).toFixed(1);
+        const lastName = p.name.split(' ').slice(-1)[0];
+        newsItems.push(makeNewsItem(
+          'transaction',
+          `${t.abbreviation} ROSTER MOVE`,
+          (() => {
+            const templates = [
+              `${t.name} have released ${p.name}${ageSuffix} as they reshape the roster heading into the offseason. He clears waivers immediately.`,
+              `${p.name} has been waived by ${t.name}. The move frees up $${salaryM}M and creates flexibility for the front office.`,
+              `${t.name} part ways with ${lastName} in a roster move. The ${p.position} becomes an unrestricted free agent.`,
+              `${t.name} announce the release of ${p.name}. The organization thanked him for his contributions and wishes him well.`,
+            ];
+            return templates[Math.floor(Math.random() * templates.length)];
+          })(),
+          s.currentDay, t.id, p.id
+        ));
+        txs.push(makeTransaction(s, 'release', [t.id], `${t.name} released ${p.name}.`, [p.id]));
+      });
+    }
 
     // ── 1.5 + 2. RE-SIGNINGS & FA SIGNINGS ────────────────────
     {
@@ -647,6 +668,123 @@ export function runAIGMOffseason(
   };
 }
 
+// ─── Team Needs Analysis ────────────────────────────────────
+
+function isGoodFitForNeed(prospect: Prospect, need: TeamNeedItem): boolean {
+  const a = prospect.attributes as Record<string, number>;
+  switch (need.label) {
+    case 'Rim Protection':    return (a.blocks ?? 0) >= 65 || (a.interiorDef ?? 0) >= 65;
+    case '3-Point Shooting':  return (a.shooting3pt ?? 0) >= 65;
+    case '3-and-D Wing':      return (a.perimeterDef ?? 0) >= 60 && (a.shooting3pt ?? 0) >= 58;
+    case 'Playmaking Guard':  return (a.playmaking ?? 0) >= 65 || (a.ballHandling ?? 0) >= 65;
+    case 'Rebounding':        return (a.rebounding ?? 0) >= 65 || (a.defReb ?? 0) >= 65;
+    case 'Stretch 4':         return (a.shooting3pt ?? 0) >= 60;
+    case 'Defensive Big':     return (a.blocks ?? 0) >= 62 || (a.interiorDef ?? 0) >= 68;
+    case 'Scoring Bench':     return prospect.rating >= 70;
+    default:                  return true;
+  }
+}
+
+/**
+ * Compute up to 5 prioritised roster needs for a team, ranked by urgency.
+ * Factors in position depth, attribute averages, bench quality, and coach scheme.
+ */
+export function computeTeamNeeds(team: Team): TeamNeedItem[] {
+  const allRoster = team.roster;
+  const healthyRoster = allRoster.filter(p => !p.isSuspended && p.status !== 'Injured');
+  const scheme = team.activeScheme;
+  const needs: TeamNeedItem[] = [];
+
+  const posCounts: Record<Position, number> = { PG: 0, SG: 0, SF: 0, PF: 0, C: 0 };
+  for (const p of allRoster) posCounts[p.position as Position] = (posCounts[p.position as Position] || 0) + 1;
+
+  const starterIds = team.rotation ? Object.values(team.rotation.starters) : [];
+  const benchPlayers = allRoster.filter(p => !starterIds.includes(p.id));
+
+  const avgAttr = (attr: string): number => {
+    if (healthyRoster.length === 0) return 50;
+    return healthyRoster.reduce((s, p) => s + ((p.attributes as Record<string, number>)[attr] ?? 50), 0) / healthyRoster.length;
+  };
+
+  // Rim protection
+  if (avgAttr('blocks') < 55 || avgAttr('interiorDef') < 58) {
+    const urgency: TeamNeedItem['urgency'] = (avgAttr('blocks') < 45 || avgAttr('interiorDef') < 48) ? 'Critical' : 'High';
+    needs.push({ label: 'Rim Protection', urgency, positions: ['C', 'PF'] });
+  }
+
+  // 3-point shooting
+  if (avgAttr('shooting3pt') < 60) {
+    const urgency: TeamNeedItem['urgency'] = avgAttr('shooting3pt') < 50 ? 'Critical' : 'High';
+    needs.push({ label: '3-Point Shooting', urgency, positions: ['SG', 'SF', 'PF'] });
+  }
+
+  // Playmaking
+  if (avgAttr('playmaking') < 57 || avgAttr('ballHandling') < 55) {
+    needs.push({ label: 'Playmaking Guard', urgency: 'High', positions: ['PG', 'SG'] });
+  }
+
+  // Rebounding
+  if (avgAttr('rebounding') < 55 && avgAttr('defReb') < 55) {
+    needs.push({ label: 'Rebounding', urgency: 'High', positions: ['C', 'PF', 'SF'] });
+  }
+
+  // Perimeter defense / 3-and-D
+  if (avgAttr('perimeterDef') < 55) {
+    needs.push({ label: '3-and-D Wing', urgency: 'Medium', positions: ['SF', 'SG'] });
+  }
+
+  // Thin position spots
+  const posLabels: Record<Position, string> = {
+    PG: 'Backup Point Guard', SG: 'Shooting Guard Depth',
+    SF: 'Wing Depth', PF: 'Power Forward Depth', C: 'Center Depth',
+  };
+  for (const pos of (['PG', 'SG', 'SF', 'PF', 'C'] as Position[])) {
+    if (posCounts[pos] < 2 && !needs.some(n => n.positions.includes(pos))) {
+      const urgency: TeamNeedItem['urgency'] = posCounts[pos] === 0 ? 'Critical' : 'High';
+      needs.push({ label: posLabels[pos], urgency, positions: [pos] });
+    }
+  }
+
+  // Bench scoring
+  const avgBenchRating = benchPlayers.length > 0
+    ? benchPlayers.reduce((s, p) => s + p.rating, 0) / benchPlayers.length : 0;
+  if (benchPlayers.length < 4 || avgBenchRating < 68) {
+    needs.push({ label: 'Scoring Bench', urgency: 'Medium', positions: ['SG', 'SF', 'PG'] });
+  }
+
+  // Scheme-specific overrides
+  if (scheme === 'Pace and Space' && avgAttr('shooting3pt') < 66 && !needs.some(n => n.label === '3-Point Shooting')) {
+    needs.push({ label: 'Stretch 4', urgency: 'High', positions: ['PF', 'SF'] });
+  }
+  if ((scheme === 'Grit and Grind' || scheme === 'Triangle') &&
+      avgAttr('blocks') < 62 && !needs.some(n => n.label === 'Rim Protection')) {
+    needs.push({ label: 'Defensive Big', urgency: 'High', positions: ['C', 'PF'] });
+  }
+
+  const urgencyOrder = { Critical: 0, High: 1, Medium: 2 };
+  needs.sort((a, b) => urgencyOrder[a.urgency] - urgencyOrder[b.urgency]);
+  return needs.slice(0, 5);
+}
+
+/**
+ * Score a prospect against a team's prioritised needs.
+ * Returns 'Strong Fit' if prospect fills a top-2 need with matching attributes,
+ * 'Good Fit' if position overlaps a top-3 need, otherwise 'Reach'.
+ */
+export function prospectNeedFit(prospect: Prospect, needs: TeamNeedItem[]): 'Strong Fit' | 'Good Fit' | 'Reach' {
+  if (needs.length === 0) return 'Reach';
+  const topNeeds = needs.slice(0, 3);
+  for (const need of topNeeds.slice(0, 2)) {
+    if (need.positions.includes(prospect.position as Position) && isGoodFitForNeed(prospect, need)) {
+      return 'Strong Fit';
+    }
+  }
+  for (const need of topNeeds) {
+    if (need.positions.includes(prospect.position as Position)) return 'Good Fit';
+  }
+  return 'Reach';
+}
+
 // ─── AI Draft Pick selector ──────────────────────────────────
 export function aiGMDraftPick(
   team: Team,
@@ -658,43 +796,55 @@ export function aiGMDraftPick(
   const personality = team.aiGM?.personality ?? 'Balanced';
   const ratings = team.aiGM?.ratings ?? generateAIGMRatings('Balanced');
 
+  // Compute roster needs and desperation level
+  const needs = computeTeamNeeds(team);
+  const totalGames = team.wins + team.losses;
+  const winPct = totalGames > 0 ? team.wins / totalGames : 0.5;
+  const isDesperate =
+    winPct < 0.30 ||
+    personality === 'Rebuilder' ||
+    needs.filter(n => n.urgency === 'Critical').length >= 2;
+
   // Scouting noise on potential
   const scoredProspects = availableProspects.map(p => {
     const noisePot = scoutingAdjustedRating(p as unknown as Player, ratings.scouting, difficulty);
     const noiseOvr = scoutingAdjustedRating(p as unknown as Player, ratings.scouting, difficulty);
-    return { p, adjustedPot: noisePot, adjustedOvr: noiseOvr };
+    const fit = prospectNeedFit(p, needs);
+    const fitBonus = fit === 'Strong Fit' ? 8 : fit === 'Good Fit' ? 4 : 0;
+    return { p, adjustedPot: noisePot, adjustedOvr: noiseOvr, fit, fitBonus };
   });
 
   let sorted: typeof scoredProspects;
 
   switch (personality) {
     case 'Rebuilder':
-      // Always take highest potential
+      // Pure potential — ignores needs entirely (full rebuild mode)
       sorted = [...scoredProspects].sort((a, b) => b.adjustedPot - a.adjustedPot);
       break;
     case 'Win Now':
-      // Take highest OVR, ignores potential
-      sorted = [...scoredProspects].sort((a, b) => b.adjustedOvr - a.adjustedOvr);
+      // OVR + need fit (want contributors right away)
+      sorted = [...scoredProspects].sort((a, b) =>
+        (b.adjustedOvr + b.fitBonus) - (a.adjustedOvr + a.fitBonus)
+      );
       break;
     case 'Analytics': {
-      // Prioritize scoutGrade (proxy for advanced metrics)
+      // Scout grade + potential + modest need bonus
       sorted = [...scoredProspects].sort((a, b) => {
-        const scoreA = a.p.scoutGrade * 0.6 + a.adjustedPot * 0.4;
-        const scoreB = b.p.scoutGrade * 0.6 + b.adjustedPot * 0.4;
+        const scoreA = a.p.scoutGrade * 0.5 + a.adjustedPot * 0.35 + a.fitBonus;
+        const scoreB = b.p.scoutGrade * 0.5 + b.adjustedPot * 0.35 + b.fitBonus;
         return scoreB - scoreA;
       });
       break;
     }
     case 'Superstar Chaser':
-      // Reach for high-upside players; bias toward OVR with upside
+      // Reach for stars regardless of need
       sorted = [...scoredProspects].sort((a, b) => {
         const potBonus = a.adjustedPot >= 85 ? 15 : 0;
         const potBonusB = b.adjustedPot >= 85 ? 15 : 0;
         return (b.adjustedOvr + potBonusB) - (a.adjustedOvr + potBonus);
       });
       break;
-    case 'Loyalist':
-      // Favor players from team's position of need
+    case 'Loyalist': {
       const needed = mostNeededPosition(team);
       sorted = [...scoredProspects].sort((a, b) => {
         const aNeed = a.p.position === needed ? 10 : 0;
@@ -702,11 +852,38 @@ export function aiGMDraftPick(
         return (b.adjustedPot + bNeed) - (a.adjustedPot + aNeed);
       });
       break;
+    }
     default:
-      // BPA — best player available (combined score)
-      sorted = [...scoredProspects].sort((a, b) =>
-        (b.adjustedOvr * 0.5 + b.adjustedPot * 0.5) - (a.adjustedOvr * 0.5 + a.adjustedPot * 0.5)
-      );
+      if (isDesperate) {
+        // Desperate teams go pure BPA — too many holes to be selective
+        sorted = [...scoredProspects].sort((a, b) =>
+          (b.adjustedOvr * 0.5 + b.adjustedPot * 0.5) - (a.adjustedOvr * 0.5 + a.adjustedPot * 0.5)
+        );
+      } else {
+        // Balanced: BPA weighted with a need-fit bonus
+        sorted = [...scoredProspects].sort((a, b) =>
+          (b.adjustedOvr * 0.4 + b.adjustedPot * 0.4 + b.fitBonus * 1.5) -
+          (a.adjustedOvr * 0.4 + a.adjustedPot * 0.4 + a.fitBonus * 1.5)
+        );
+      }
+  }
+
+  // Need-first pass: if a top-tier prospect fills a priority need, prefer them
+  // over the raw BPA (unless team is rebuilding / desperate).
+  if (!isDesperate && personality !== 'Rebuilder' && needs.length > 0) {
+    const bestBpaScore = (sorted[0]?.adjustedOvr ?? 0) * 0.5 + (sorted[0]?.adjustedPot ?? 0) * 0.5;
+    const reachAllowance = 0.90; // can reach within 10% of top BPA
+    const topTier = scoredProspects.filter(sp => {
+      const score = sp.adjustedOvr * 0.5 + sp.adjustedPot * 0.5;
+      return score >= bestBpaScore * reachAllowance;
+    });
+    const needMatch = topTier.find(sp => sp.fit === 'Strong Fit' || sp.fit === 'Good Fit');
+    if (needMatch) {
+      // Easy/Rookie difficulty: sometimes miss the value anyway
+      if (!((difficulty === 'Easy' || difficulty === 'Rookie') && Math.random() < 0.30)) {
+        return needMatch.p;
+      }
+    }
   }
 
   // Difficulty: Rookie/Easy → 30% chance AI misses value

@@ -28,6 +28,7 @@ const NewsFeed: React.FC<NewsFeedProps> = ({ league, onViewPlayer, onViewRoster,
       case 'firing': return 'text-purple-500';
       case 'trade_request': return 'text-orange-500';
       case 'award': return 'text-yellow-500';
+      case 'suspension': return 'text-red-400';
       default: return 'text-slate-500';
     }
   };
@@ -40,6 +41,7 @@ const NewsFeed: React.FC<NewsFeedProps> = ({ league, onViewPlayer, onViewRoster,
       case 'firing': return '🚫';
       case 'trade_request': return '🔥';
       case 'award': return '🏆';
+      case 'suspension': return '⛔';
       default: return '🏀';
     }
   };
@@ -74,7 +76,7 @@ const NewsFeed: React.FC<NewsFeedProps> = ({ league, onViewPlayer, onViewRoster,
         </div>
 
         <div className="flex gap-2 overflow-x-auto pb-2 px-4 scrollbar-none">
-          {['all', 'user', 'rumor', 'transaction', 'injury', 'firing', 'trade_request'].map(cat => (
+          {['all', 'user', 'rumor', 'transaction', 'injury', 'suspension', 'firing', 'trade_request'].map(cat => (
             <button
               key={cat}
               onClick={() => setFilter(cat as any)}

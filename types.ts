@@ -164,7 +164,7 @@ export interface BulkSimSummary {
   news: string[];
 }
 
-export type NewsCategory = 'rumor' | 'transaction' | 'injury' | 'firing' | 'trade_request' | 'award' | 'milestone' | 'expansion' | 'playoffs';
+export type NewsCategory = 'rumor' | 'transaction' | 'injury' | 'firing' | 'trade_request' | 'award' | 'milestone' | 'expansion' | 'playoffs' | 'suspension';
 
 export interface NewsItem {
   id: string;
@@ -370,17 +370,16 @@ export interface Player {
   interestScore?: number;
   onTradeBlock?: boolean;
   isSuspended?: boolean;
-  suspensionGames?: number;      // legacy – kept for save compatibility
-  suspensionGamesLeft?: number;  // games remaining to serve
-  suspensionReason?: string;     // display label (e.g. 'Flagrant 2 Foul')
+  suspensionGames?: number;
+  suspensionReason?: string;
+  /** True once GM has filed one appeal for the current suspension — blocks further appeals */
+  suspensionAppealed?: boolean;
   injuryType?: InjuryType;
   injuryDaysLeft?: number;
   /** Years (season numbers) in which this player was selected as an All-Star */
   allStarSelections?: number[];
   /** Years in which this player won the All-Star Game MVP award */
   allStarMvpYears?: number[];
-  /** 0–2 secondary positions this player can play without a full penalty (e.g. SG for a PG/SG combo guard) */
-  secondaryPositions?: Position[];
 }
 
 export interface Prospect extends Omit<Player, 'stats' | 'status' | 'morale' | 'salary' | 'contractYears'> {
@@ -553,7 +552,7 @@ export interface GameResult {
   isChippy?: boolean;
   season: number;
   gameInjuries?: Array<{playerId: string; playerName: string; injuryType: InjuryType; daysOut: number; teamId: string}>;
-  gameSuspensions?: Array<{playerId: string; playerName: string; teamId: string; reason: 'double-tech' | 'flagrant2'}>;
+  gameSuspensions?: Array<{playerId: string; playerName: string; teamId: string; games: number; reason: string}>;
   /** Detailed per-quarter pace/possession stats */
   quarterDetails?: QuarterDetail[];
   /** True when the game had a clutch situation (last 5 min of 4Q/OT, score diff ≤5) */

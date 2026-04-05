@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Player, PlayerStatus, PersonalityTrait, Position, PlayerTendencies, TeamRotation } from '../types';
-import { getFlag, countryFromHometown, POS_ATTR_RANGES, PosAttrRangeKey, enforcePositionalBounds, FEMALE_ATTR_CAPS, NAMES_MALE, NAMES_FEMALE, COLLEGES_HIGH_MAJOR, COLLEGES_MID_MAJOR, ALL_HOMETOWNS, deriveComposites, deriveArchetype, assignSecondaryPositions, getEligiblePositions } from '../constants';
+import { getFlag, countryFromHometown, POS_ATTR_RANGES, PosAttrRangeKey, enforcePositionalBounds, FEMALE_ATTR_CAPS, NAMES_MALE, NAMES_FEMALE, COLLEGES_HIGH_MAJOR, COLLEGES_MID_MAJOR, ALL_HOMETOWNS, deriveComposites, deriveArchetype } from '../constants';
 
 const POS_RANGE_KEYS: PosAttrRangeKey[] = ['shooting', 'playmaking', 'defense', 'rebounding', 'athleticism'];
 
@@ -12,6 +12,7 @@ interface PlayerModalProps {
   isUserTeam: boolean;
   onUpdateStatus: (playerId: string, status: PlayerStatus) => void;
   onRelease: (playerId: string) => void;
+  onAppealSuspension?: (playerId: string) => void;
   /** True when the draft lottery/live draft is in progress — disables all waiver actions */
   draftLocked?: boolean;
   godMode?: boolean;
@@ -65,6 +66,7 @@ const PlayerModal: React.FC<PlayerModalProps> = ({
   isUserTeam,
   onUpdateStatus,
   onRelease,
+  onAppealSuspension,
   draftLocked = false,
   godMode = false,
   onUpdatePlayer,
@@ -77,31 +79,6 @@ const PlayerModal: React.FC<PlayerModalProps> = ({
 }) => {
   const [isEditing, setIsEditing] = React.useState(false);
   const [statsTab, setStatsTab] = useState<'season' | 'career' | 'advanced' | 'playoffs'>('season');
-
-  // ── Rotation-aware effective role ─────────────────────────────────────────
-  // Always derived from the actual team rotation so it stays in sync.
-  // Priority: Suspended > Injured > rotation slot > player.status fallback.
-  const isSuspendedPlayer = !!(player.isSuspended && (player.suspensionGamesLeft ?? 0) > 0);
-  const isInjuredPlayer   = player.status === 'Injured' || (player.injuryDaysLeft ?? 0) > 0;
-  const effectiveRole: PlayerStatus | 'Suspended' = (() => {
-    if (isSuspendedPlayer) return 'Suspended';
-    if (isInjuredPlayer)   return 'Injured';
-    const rot = leagueContext?.teamRotation;
-    if (!rot) return player.status;
-    if (Object.values(rot.starters).includes(player.id)) return 'Starter';
-    if (rot.bench.includes(player.id))                   return 'Rotation';
-    if (rot.reserves.includes(player.id))                return 'Bench';
-    return player.status;
-  })();
-  const isStarterRole = effectiveRole === 'Starter';
-
-  // Live rotation-aware archetype (overrides stored player.archetype which may be stale)
-  const liveArchetype = deriveArchetype(
-    player.position,
-    player.attributes as Record<string, number>,
-    player.rating,
-    isStarterRole,
-  );
 
   const defaultAttributes = {
     shooting: 50, defense: 50, rebounding: 50, playmaking: 50, athleticism: 50,
@@ -237,20 +214,7 @@ const PlayerModal: React.FC<PlayerModalProps> = ({
       const fullName = [editFirstName.trim(), editLastName.trim()].filter(Boolean).join(' ');
       const withName = { ...editedPlayer, name: fullName || editedPlayer.name };
       const bounded = enforcePositionalBounds(withName);
-      // Re-derive secondary positions when position changed (unless user manually set them)
-      const heightInches = (() => {
-        // Height may be "6'2"" or "6-2" depending on source
-        const m = bounded.height?.match(/^(\d+)['\-](\d+)/);
-        return m ? parseInt(m[1]) * 12 + parseInt(m[2]) : 0;
-      })();
-      const autoSecondary = assignSecondaryPositions(
-        bounded.position,
-        bounded.attributes as Record<string, number>,
-        heightInches,
-      );
-      // Keep user-set secondaries if they differ from what auto-assign would give, otherwise refresh
-      const finalSecondary = bounded.secondaryPositions ?? autoSecondary;
-      onUpdatePlayer({ ...bounded, secondaryPositions: finalSecondary, potential: derivePotential(bounded.rating, bounded.age) });
+      onUpdatePlayer({ ...bounded, potential: derivePotential(bounded.rating, bounded.age) });
     }
     setIsEditing(false);
   };
@@ -268,9 +232,7 @@ const PlayerModal: React.FC<PlayerModalProps> = ({
       const withSub = { ...prev.attributes, [key]: clamped };
       const withComposites = deriveComposites(withSub);
       const bounded = enforcePositionalBounds({ ...prev, attributes: withComposites });
-      // Pass isStarterRole so starters never receive "Bench Spark"
-      const starterIds = Object.values(leagueContext?.teamRotation?.starters ?? {});
-      const archetype = deriveArchetype(bounded.position, bounded.attributes as Record<string, number>, bounded.rating, starterIds.includes(bounded.id));
+      const archetype = deriveArchetype(bounded.position, bounded.attributes as Record<string, number>, bounded.rating);
       return { ...bounded, archetype };
     });
   };
@@ -466,33 +428,6 @@ const PlayerModal: React.FC<PlayerModalProps> = ({
                     >
                       {positions.map(pos => <option key={pos} value={pos}>{pos}</option>)}
                     </select>
-                  </div>
-                  <div className="space-y-2">
-                    <label className="text-[10px] font-black uppercase text-slate-500 tracking-widest">Secondary Positions</label>
-                    <div className="flex flex-wrap gap-2">
-                      {positions.filter(p => p !== editedPlayer.position).map(pos => {
-                        const hasSec = (editedPlayer.secondaryPositions ?? []).includes(pos);
-                        return (
-                          <button
-                            key={pos}
-                            type="button"
-                            onClick={() => {
-                              const cur = editedPlayer.secondaryPositions ?? [];
-                              const updated = hasSec ? cur.filter(p => p !== pos) : [...cur, pos];
-                              setEditedPlayer(prev => ({ ...prev, secondaryPositions: updated }));
-                            }}
-                            className={`px-3 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all border ${
-                              hasSec
-                                ? 'bg-amber-500/20 text-amber-400 border-amber-500/40'
-                                : 'bg-slate-950 text-slate-500 border-slate-800 hover:border-slate-600'
-                            }`}
-                          >
-                            {pos}
-                          </button>
-                        );
-                      })}
-                    </div>
-                    <p className="text-[9px] text-slate-600">Auto-assigned on save if left at defaults</p>
                   </div>
                   <div className="space-y-2">
                     <label className="text-[10px] font-black uppercase text-slate-500 tracking-widest">Archetype <span className="text-slate-600 normal-case font-normal">(auto)</span></label>
@@ -900,26 +835,28 @@ const PlayerModal: React.FC<PlayerModalProps> = ({
             <div className="relative z-10 flex flex-col">
               <h2 className="text-5xl md:text-8xl font-display font-bold uppercase tracking-tighter text-white drop-shadow-lg leading-tight">{player.name}</h2>
               <div className="flex flex-wrap items-center gap-4 mt-2">
-                <span className="px-4 py-1.5 bg-amber-500 text-slate-950 text-xs font-black uppercase rounded-lg shadow-lg shadow-amber-500/20">
-                  {getEligiblePositions(player).join(' / ')}
-                </span>
+                <span className="px-4 py-1.5 bg-amber-500 text-slate-950 text-xs font-black uppercase rounded-lg shadow-lg shadow-amber-500/20">{player.position}</span>
                 <span className="text-slate-100 font-display font-bold text-xl uppercase tracking-wider">
                    {formatPhysicals(player.height, player.weight)}
                 </span>
                 {(() => {
-                  const roleStyle =
-                    effectiveRole === 'Starter'    ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30' :
-                    effectiveRole === 'Rotation'   ? 'bg-blue-500/10 text-blue-400 border-blue-500/30' :
-                    effectiveRole === 'Injured'    ? 'bg-red-500/10 text-red-400 border-red-500/30' :
-                    effectiveRole === 'Suspended'  ? 'bg-amber-500/10 text-amber-400 border-amber-500/30' :
-                    /* Bench */                      'bg-slate-800/50 text-slate-400 border-slate-700/50';
-                  const roleLabel =
-                    effectiveRole === 'Suspended' ? `🚫 Suspended · ${player.suspensionGamesLeft}g` :
-                    effectiveRole === 'Injured'   ? `🤕 ${player.injuryType ?? 'Injured'}${player.injuryDaysLeft ? ` · ${player.injuryDaysLeft}d` : ''}` :
-                    effectiveRole;
+                  // Derive true role from team rotation; fall back to player.status
+                  const rot = leagueContext?.teamRotation;
+                  const effectiveRole: PlayerStatus = (() => {
+                    if (!rot) return player.status;
+                    if (Object.values(rot.starters).includes(player.id)) return 'Starter';
+                    if (rot.bench.includes(player.id)) return 'Rotation';
+                    if (rot.reserves.includes(player.id)) return 'Bench';
+                    return player.status;
+                  })();
+                  const roleStyle = effectiveRole === 'Starter'
+                    ? 'bg-emerald-500/10 text-emerald-500 border-emerald-500/30'
+                    : effectiveRole === 'Injured'
+                    ? 'bg-red-500/10 text-red-400 border-red-500/30'
+                    : 'bg-slate-800/50 text-slate-400 border-slate-700/50';
                   return (
                     <span className={`px-3 py-1 text-[10px] font-black uppercase tracking-widest rounded border ${roleStyle}`}>
-                      {roleLabel}
+                      {effectiveRole}
                     </span>
                   );
                 })()}
@@ -930,6 +867,12 @@ const PlayerModal: React.FC<PlayerModalProps> = ({
                       : 'bg-sky-500/15 text-sky-400 border-sky-500/30 shadow-sky-900/20'
                   }`}>
                     ⭐ All-Star {currentAllStarRole}
+                  </span>
+                )}
+                {player.isSuspended && (player.suspensionGames ?? 0) > 0 && (
+                  <span className="px-3 py-1 text-[10px] font-black uppercase tracking-widest rounded border flex items-center gap-1.5 bg-red-500/15 text-red-400 border-red-500/40 shadow-lg shadow-red-900/20">
+                    ⛔ Suspended · {player.suspensionGames}G remaining
+                    {player.suspensionReason ? ` · ${player.suspensionReason}` : ''}
                   </span>
                 )}
               </div>
@@ -954,22 +897,8 @@ const PlayerModal: React.FC<PlayerModalProps> = ({
           <section className="bg-slate-950/40 border border-slate-800/60 rounded-[2.5rem] p-8 shadow-inner grid grid-cols-1 md:grid-cols-2 gap-8">
              <div className="space-y-4">
                 <div className="flex items-center gap-4">
-                   <span className="text-[10px] text-slate-500 font-black uppercase tracking-[0.2em] w-24">Positions</span>
-                   <div className="flex items-center gap-2 flex-wrap">
-                     <span className="px-2.5 py-1 bg-amber-500 text-slate-950 text-[10px] font-black uppercase rounded-md">{player.position}</span>
-                     {(player.secondaryPositions ?? []).map(sp => (
-                       <span key={sp} className="px-2.5 py-1 bg-slate-800 text-slate-300 text-[10px] font-black uppercase rounded-md border border-slate-700">
-                         {sp}
-                       </span>
-                     ))}
-                     {(player.secondaryPositions ?? []).length === 0 && (
-                       <span className="text-[10px] text-slate-600 font-bold">Primary only</span>
-                     )}
-                   </div>
-                </div>
-                <div className="flex items-center gap-4">
                    <span className="text-[10px] text-slate-500 font-black uppercase tracking-[0.2em] w-24">Archetype</span>
-                   <span className="text-amber-500 text-base font-bold uppercase tracking-widest">{liveArchetype}</span>
+                   <span className="text-amber-500 text-base font-bold uppercase tracking-widest">{player.archetype || 'Role Player'}</span>
                 </div>
                 <div className="flex items-center gap-4">
                    <span className="text-[10px] text-slate-500 font-black uppercase tracking-[0.2em] w-24">
@@ -1985,14 +1914,14 @@ const PlayerModal: React.FC<PlayerModalProps> = ({
                 else if (winPct < 0.35) factors.push({ label: 'Team struggling this season', impact: 'negative' });
               }
 
-              // Playing time (use rotation-derived role so starters get correct thresholds)
-              const prefMin = effectiveRole === 'Starter' ? 28 : effectiveRole === 'Rotation' ? 18 : 10;
+              // Playing time
+              const prefMin = player.status === 'Starter' ? 28 : player.status === 'Rotation' ? 18 : 10;
               if (mpg > 0) {
                 if (mpg < prefMin - 10) factors.push({ label: 'Far below preferred minutes', impact: 'negative' });
                 else if (mpg < prefMin - 5) factors.push({ label: 'Below preferred minutes', impact: 'negative' });
                 else if (mpg >= prefMin) factors.push({ label: 'Playing expected minutes', impact: 'positive' });
               }
-              if (effectiveRole === 'Bench' && traits.includes('Diva/Star')) {
+              if (player.status === 'Bench' && traits.includes('Diva/Star')) {
                 factors.push({ label: 'Bench role (Diva/Star)', impact: 'negative' });
               }
 
@@ -2007,11 +1936,8 @@ const PlayerModal: React.FC<PlayerModalProps> = ({
               if (traits.includes('Friendly/Team First')) factors.push({ label: 'Team First — positive chemistry', impact: 'positive' });
               if (traits.includes('Lazy'))                factors.push({ label: 'Lazy — effort drops in losses', impact: 'negative' });
 
-              // Injury / suspension
-              if (isSuspendedPlayer) {
-                factors.push({ label: `Suspended (${player.suspensionGamesLeft}g remaining)`, impact: 'negative' });
-              }
-              if (isInjuredPlayer && (player.injuryDaysLeft ?? 0) >= 14) {
+              // Injury
+              if (player.status === 'Injured' && (player.injuryDaysLeft ?? 0) >= 14) {
                 factors.push({ label: `Long-term injury (${player.injuryDaysLeft}d out)`, impact: 'negative' });
               }
 
@@ -2116,36 +2042,17 @@ const PlayerModal: React.FC<PlayerModalProps> = ({
            <div className="p-10 bg-slate-950/80 border-t border-slate-800 flex flex-wrap justify-between items-center gap-6">
               <div className="flex items-center gap-6">
                  <div className="space-y-2">
-                    <label className="text-[10px] font-black uppercase text-slate-500 tracking-widest">
-                      Roster Status{!godMode && <span className="ml-2 text-slate-700 normal-case font-bold tracking-normal">· set via Rotations</span>}
-                    </label>
-                    {godMode ? (
-                      /* God Mode: fully editable */
-                      <select
-                        value={effectiveRole === 'Suspended' ? 'Bench' : (effectiveRole as string)}
-                        onChange={(e) => onUpdateStatus(player.id, e.target.value as PlayerStatus)}
-                        className="bg-slate-900 border border-slate-800 rounded-xl px-4 py-2 text-sm font-bold text-white focus:outline-none"
-                      >
-                        <option value="Starter">Starter</option>
-                        <option value="Rotation">Rotation</option>
-                        <option value="Bench">Bench</option>
-                        <option value="Injured">Injured</option>
-                      </select>
-                    ) : (
-                      /* Normal mode: read-only badge reflecting actual rotation */
-                      <div className={`inline-flex items-center gap-2 px-4 py-2 rounded-xl border text-sm font-bold ${
-                        effectiveRole === 'Starter'   ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30' :
-                        effectiveRole === 'Rotation'  ? 'bg-blue-500/10 text-blue-400 border-blue-500/30' :
-                        effectiveRole === 'Injured'   ? 'bg-red-500/10 text-red-400 border-red-500/30' :
-                        effectiveRole === 'Suspended' ? 'bg-amber-500/10 text-amber-400 border-amber-500/30' :
-                        'bg-slate-800 text-slate-400 border-slate-700'
-                      }`}>
-                        {effectiveRole === 'Suspended' ? '🚫' : effectiveRole === 'Injured' ? '🤕' : effectiveRole === 'Starter' ? '🟢' : ''}
-                        {' '}{effectiveRole}
-                        {effectiveRole === 'Suspended' && ` · ${player.suspensionGamesLeft}g left`}
-                        {effectiveRole === 'Injured' && player.injuryDaysLeft ? ` · ${player.injuryDaysLeft}d` : ''}
-                      </div>
-                    )}
+                    <label className="text-[10px] font-black uppercase text-slate-500 tracking-widest">Roster Status</label>
+                    <select 
+                       value={player.status}
+                       onChange={(e) => onUpdateStatus(player.id, e.target.value as PlayerStatus)}
+                       className="bg-slate-900 border border-slate-800 rounded-xl px-4 py-2 text-sm font-bold text-white focus:outline-none"
+                    >
+                       <option value="Starter">Starter</option>
+                       <option value="Rotation">Rotation</option>
+                       <option value="Bench">Bench</option>
+                       <option value="Injured">Injured</option>
+                    </select>
                  </div>
               </div>
               {draftLocked ? (
@@ -2168,6 +2075,20 @@ const PlayerModal: React.FC<PlayerModalProps> = ({
                 >
                    Waive Player
                 </button>
+              )}
+              {player.isSuspended && (player.suspensionGames ?? 0) > 0 && !player.suspensionAppealed && onAppealSuspension && (
+                <button
+                  onClick={() => onAppealSuspension(player.id)}
+                  className="px-10 py-5 bg-amber-500/10 hover:bg-amber-500/20 text-amber-400 hover:text-amber-300 border border-amber-500/30 font-display font-bold uppercase rounded-2xl transition-all flex items-center gap-2"
+                  title="25% chance to reduce suspension by 1 game. Costs 3 Owner Patience. One appeal per suspension."
+                >
+                  ⚖️ Appeal Suspension
+                </button>
+              )}
+              {player.isSuspended && player.suspensionAppealed && (
+                <span className="px-6 py-3 text-xs font-bold uppercase text-slate-500 border border-slate-700/50 rounded-2xl tracking-widest">
+                  Appeal Filed
+                </span>
               )}
            </div>
         )}
