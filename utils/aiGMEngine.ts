@@ -1524,20 +1524,32 @@ export function generateAITradeProposalsForUser(
   if (state.isOffseason) return [];
   if (state.tradeDeadlinePassed) return [];
   if (state.playoffBracket) return [];
-  const totalPlayed = userTeam.wins + userTeam.losses;
-  if (totalPlayed < 5) return [];
+  const userGamesPlayed = userTeam.wins + userTeam.losses;
+  if (userGamesPlayed < 5) return [];
 
-  // Don't flood — stop generating if 3+ pending proposals already exist
+  // Don't flood — stop generating if 4+ pending proposals already exist
   const pending = (state.incomingTradeProposals ?? []).filter(p => p.status === 'incoming');
-  if (pending.length >= 3) return [];
+  if (pending.length >= 4) return [];
+
+  // ── Situational multipliers ────────────────────────────────────────────────
+  const seasonLength = state.settings.seasonLength ?? 82;
+  // Mid-season: games 20–60 are the hot trade window
+  const isMidSeason = userGamesPlayed >= 20 && userGamesPlayed <= 60;
+  // Near deadline: last ~15% of games before cutoff — build tension, fewer proposals
+  const nearDeadline = userGamesPlayed >= seasonLength * 0.60;
+  // User is a clear buyer (hot streak) or seller (cold streak)
+  const userGab = userTeam.wins - userTeam.losses;
+  const userIsBuyer  = userGab >= 6;
+  const userIsSeller = userGab <= -6;
 
   const alreadyPendingTeamIds = new Set(pending.map(p => p.partnerTeamId));
   const aiTeams = state.teams.filter(t => t.id !== state.userTeamId && !!t.aiGM);
-  const shuffled = [...aiTeams].sort(() => Math.random() - 0.5).slice(0, 5);
+  // Sample up to 8 teams per call (was 5) for more chances
+  const shuffled = [...aiTeams].sort(() => Math.random() - 0.5).slice(0, 8);
   const proposals: TradeProposal[] = [];
 
   for (const aiTeam of shuffled) {
-    if (proposals.length >= 2) break;
+    if (proposals.length >= 3) break;  // up to 3 per call (was 2)
     if (alreadyPendingTeamIds.has(aiTeam.id)) continue;
 
     const { personality } = aiTeam.aiGM!;
@@ -1545,29 +1557,44 @@ export function generateAITradeProposalsForUser(
     const isContending = gab >= 3 || personality === 'Win Now' || personality === 'Superstar Chaser';
     const isRebuilding = gab <= -3 || personality === 'Rebuilder';
 
-    // Activity chance — personality-gated
-    const propChance =
-      personality === 'Win Now'          ? 0.50 :
-      personality === 'Superstar Chaser' ? 0.45 :
-      personality === 'Rebuilder'        ? 0.38 :
-      personality === 'Analytics'        ? 0.28 :
-      personality === 'Balanced'         ? 0.20 :
-      0.12; // Loyalist
+    // ── Base activity chance — higher than before ─────────────────────────
+    let propChance =
+      personality === 'Win Now'          ? 0.68 :
+      personality === 'Superstar Chaser' ? 0.62 :
+      personality === 'Rebuilder'        ? 0.55 :
+      personality === 'Analytics'        ? 0.45 :
+      personality === 'Balanced'         ? 0.38 :
+      0.25; // Loyalist
+
+    // ── Situational multipliers ───────────────────────────────────────────
+    if (isMidSeason)  propChance *= 1.40; // peak trade window
+    if (nearDeadline) propChance *= 0.45; // tension before deadline, fewer but more meaningful
+    if (Math.abs(gab) >= 5) propChance *= 1.25; // AI team is a clear buyer/seller
+    if (userIsBuyer  && isRebuilding)  propChance *= 1.30; // seller targets hot-streak buyer
+    if (userIsSeller && isContending)  propChance *= 1.30; // buyer targets struggling team's assets
+
+    // Needs-matching bonus: AI wants what user has
+    const neededPos = mostNeededPosition(aiTeam);
+    const userHasFit = userTeam.roster.some(p => p.position === neededPos && p.rating >= 72);
+    if (userHasFit) propChance *= 1.25;
+
+    propChance = Math.min(propChance, 0.90); // hard ceiling
     if (Math.random() > propChance) continue;
 
     let userPieces: TradePiece[] = [];   // what user must give
     let partnerPieces: TradePiece[] = []; // what AI offers
 
     if (isContending) {
-      // ── Contender wants a user veteran, offers picks ± young player ──────
-      const vetTargets = userTeam.roster
-        .filter(p => p.age >= 27 && p.rating >= 76 && p.contractYears <= 3 && !p.onTradeBlock === false || p.onTradeBlock)
+      // ── Contender wants a user veteran or trade-block player ──────────────
+      // Primary pool: players explicitly on the trade block
+      const tradeBlockPool = userTeam.roster
+        .filter(p => p.onTradeBlock && p.rating >= 68)
         .sort((a, b) => b.rating - a.rating);
-      // Also consider non-block veterans, just weighted lower
+      // Fallback pool: veterans with expiring/short deals
       const allVetTargets = userTeam.roster
-        .filter(p => p.age >= 27 && p.rating >= 76 && p.contractYears <= 3)
+        .filter(p => p.age >= 26 && p.rating >= 73 && p.contractYears <= 3)
         .sort((a, b) => b.rating - a.rating);
-      const pool = vetTargets.length > 0 ? vetTargets : allVetTargets;
+      const pool = tradeBlockPool.length > 0 ? tradeBlockPool : allVetTargets;
       if (pool.length === 0) continue;
       const target = pool[Math.floor(Math.random() * Math.min(3, pool.length))];
 
@@ -1602,7 +1629,7 @@ export function generateAITradeProposalsForUser(
     } else if (isRebuilding) {
       // ── Rebuilder wants user's picks or young talent, offers a veteran ──
       const aiVets = aiTeam.roster
-        .filter(p => p.age >= 28 && p.rating >= 74 && p.contractYears <= 3)
+        .filter(p => p.age >= 27 && p.rating >= 71 && p.contractYears <= 3)
         .sort((a, b) => b.rating - a.rating);
       if (aiVets.length === 0) continue;
       const vet = aiVets[0];
@@ -1611,7 +1638,7 @@ export function generateAITradeProposalsForUser(
 
       const userFirst = userTeam.picks.filter(p => p.round === 1);
       const userYoung = userTeam.roster
-        .filter(p => p.age <= 24 && p.rating >= 65)
+        .filter(p => p.age <= 25 && p.rating >= 63)
         .sort((a, b) => b.rating - a.rating);
 
       if (userFirst.length > 0 && (Math.random() > 0.45 || userYoung.length === 0)) {
@@ -1632,9 +1659,8 @@ export function generateAITradeProposalsForUser(
 
     } else {
       // ── Balanced / Analytics: need-based player swap ─────────────────────
-      const neededPos = mostNeededPosition(aiTeam);
       const posTargets = userTeam.roster
-        .filter(p => p.position === neededPos && p.rating >= 74)
+        .filter(p => p.position === neededPos && p.rating >= 70)
         .sort((a, b) => b.rating - a.rating);
       if (posTargets.length === 0) continue;
       const target = posTargets[0];
