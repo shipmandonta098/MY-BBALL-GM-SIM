@@ -1058,7 +1058,7 @@ const App: React.FC = () => {
       return t;
     });
 
-    const updateStats = (team: Team, lines: any[], isWinner: boolean) => {
+    const updateStats = (team: Team, lines: any[], isWinner: boolean, opponentTeamId: string, opponentTeamName: string) => {
       return {
         ...team,
         roster: team.roster.map(p => {
@@ -1163,28 +1163,38 @@ const App: React.FC = () => {
 
           morale = Math.min(100, Math.max(0, morale));
 
+          const logEntry = {
+            ...line,
+            date: state.currentDay,
+            opponentTeamId,
+            opponentTeamName,
+          };
+          // Keep last 30 games only to avoid unbounded save-game growth
+          const updatedGameLog = [...(p.gameLog ?? []), logEntry].slice(-30);
+
           return {
-            ...p, 
+            ...p,
             isSuspended,
             suspensionGames,
             suspensionReason,
             morale,
-            stats: { 
-              ...p.stats, 
-              gamesPlayed: p.stats.gamesPlayed + 1, 
-              points: p.stats.points + line.pts, 
-              rebounds: p.stats.rebounds + line.reb, 
-              assists: p.stats.assists + line.ast, 
-              steals: p.stats.steals + line.stl, 
-              blocks: p.stats.blocks + line.blk, 
-              minutes: p.stats.minutes + line.min, 
-              fgm: p.stats.fgm + line.fgm, 
-              fga: p.stats.fga + line.fga, 
-              threepm: p.stats.threepm + line.threepm, 
-              threepa: p.stats.threepa + line.threepa, 
-              ftm: p.stats.ftm + line.ftm, 
-              fta: p.stats.fta + line.fta, 
-              tov: p.stats.tov + line.tov, 
+            gameLog: updatedGameLog,
+            stats: {
+              ...p.stats,
+              gamesPlayed: p.stats.gamesPlayed + 1,
+              points: p.stats.points + line.pts,
+              rebounds: p.stats.rebounds + line.reb,
+              assists: p.stats.assists + line.ast,
+              steals: p.stats.steals + line.stl,
+              blocks: p.stats.blocks + line.blk,
+              minutes: p.stats.minutes + line.min,
+              fgm: p.stats.fgm + line.fgm,
+              fga: p.stats.fga + line.fga,
+              threepm: p.stats.threepm + line.threepm,
+              threepa: p.stats.threepa + line.threepa,
+              ftm: p.stats.ftm + line.ftm,
+              fta: p.stats.fta + line.fta,
+              tov: p.stats.tov + line.tov,
               pf: p.stats.pf + line.pf,
               techs: newTechs,
               flagrants: newFlagrants,
@@ -1203,8 +1213,8 @@ const App: React.FC = () => {
 
     updatedTeams = updatedTeams.map(t => {
       const isWinner = (t.id === homeTeam.id && homeWon) || (t.id === awayTeam.id && !homeWon);
-      if (t.id === homeTeam.id) return updateStats(t, result.homePlayerStats, isWinner);
-      if (t.id === awayTeam.id) return updateStats(t, result.awayPlayerStats, isWinner);
+      if (t.id === homeTeam.id) return updateStats(t, result.homePlayerStats, isWinner, awayTeam.id, awayTeam.name);
+      if (t.id === awayTeam.id) return updateStats(t, result.awayPlayerStats, isWinner, homeTeam.id, homeTeam.name);
       return t;
     });
 
