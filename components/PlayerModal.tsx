@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { Player, PlayerStatus, PersonalityTrait, Position, PlayerTendencies, TeamRotation } from '../types';
 import { getFlag, countryFromHometown, POS_ATTR_RANGES, PosAttrRangeKey, enforcePositionalBounds, FEMALE_ATTR_CAPS, NAMES_MALE, NAMES_FEMALE, COLLEGES_HIGH_MAJOR, COLLEGES_MID_MAJOR, ALL_HOMETOWNS, deriveComposites, deriveArchetype } from '../constants';
 
@@ -79,6 +79,53 @@ const PlayerModal: React.FC<PlayerModalProps> = ({
 }) => {
   const [isEditing, setIsEditing] = React.useState(false);
   const [statsTab, setStatsTab] = useState<'season' | 'career' | 'advanced' | 'playoffs'>('season');
+  const [vsTeamId, setVsTeamId] = useState<string>('all');
+
+  // ── Last 5 non-DNP games (most recent first) ──────────────────────────────
+  const last5Games = useMemo(() =>
+    [...(player.gameLog ?? [])]
+      .filter(g => !g.dnp)
+      .sort((a, b) => (b.date ?? 0) - (a.date ?? 0))
+      .slice(0, 5),
+    [player.gameLog],
+  );
+
+  // ── Unique opponents seen in game log ─────────────────────────────────────
+  const uniqueOpponents = useMemo(() => {
+    const seen = new Map<string, string>();
+    (player.gameLog ?? []).forEach(g => {
+      if (g.opponentTeamId && g.opponentTeamName && !seen.has(g.opponentTeamId))
+        seen.set(g.opponentTeamId, g.opponentTeamName);
+    });
+    return [...seen.entries()]
+      .map(([id, name]) => ({ id, name }))
+      .sort((a, b) => a.name.localeCompare(b.name));
+  }, [player.gameLog]);
+
+  // ── Aggregated stats for selected opponent (or all opponents) ─────────────
+  const vsTeamStats = useMemo(() => {
+    const games = (player.gameLog ?? []).filter(
+      g => !g.dnp && (vsTeamId === 'all' || g.opponentTeamId === vsTeamId),
+    );
+    if (!games.length) return null;
+    const n = games.length;
+    const sum = (fn: (g: typeof games[0]) => number) => games.reduce((acc, g) => acc + fn(g), 0);
+    const totalFga = sum(g => g.fga), totalFgm = sum(g => g.fgm);
+    const total3pa = sum(g => g.threepa), total3pm = sum(g => g.threepm);
+    const totalFta = sum(g => g.fta), totalFtm = sum(g => g.ftm);
+    return {
+      gp: n,
+      ppg:  sum(g => g.pts)  / n,
+      rpg:  sum(g => g.reb)  / n,
+      apg:  sum(g => g.ast)  / n,
+      spg:  sum(g => g.stl)  / n,
+      bpg:  sum(g => g.blk)  / n,
+      fgPct:    totalFga > 0 ? totalFgm / totalFga : null,
+      threePct: total3pa > 0 ? total3pm / total3pa : null,
+      ftPct:    totalFta > 0 ? totalFtm / totalFta : null,
+      pm:   sum(g => g.plusMinus) / n,
+    };
+  }, [player.gameLog, vsTeamId]);
 
   const defaultAttributes = {
     shooting: 50, defense: 50, rebounding: 50, playmaking: 50, athleticism: 50,
@@ -1879,6 +1926,153 @@ const PlayerModal: React.FC<PlayerModalProps> = ({
                         </div>
                       ))}
                     </div>
+                  </div>
+                )}
+              </section>
+            );
+          })()}
+
+          {/* ── Last 5 Games ────────────────────────────────────────────────── */}
+          {last5Games.length > 0 && (() => {
+            const f1  = (v: number) => v.toFixed(1);
+            const fPct = (v: number | null) => v == null ? '—' : `${(v * 100).toFixed(0)}%`;
+            const ptColor = (pts: number) =>
+              pts >= 30 ? 'text-amber-300 font-black' :
+              pts >= 20 ? 'text-amber-400 font-bold' :
+              pts <= 4  ? 'text-rose-500' :
+              pts <= 9  ? 'text-rose-400' : 'text-slate-200';
+            const pmColor = (pm: number) =>
+              pm > 10 ? 'text-emerald-400' : pm < -10 ? 'text-rose-400' : 'text-slate-400';
+            return (
+              <section className="space-y-3">
+                <h3 className="text-[10px] font-black text-amber-500 uppercase tracking-[0.5em]">Last 5 Games</h3>
+                <div className="bg-slate-950/50 border border-slate-800 rounded-3xl overflow-hidden">
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-center text-xs">
+                      <thead>
+                        <tr className="border-b border-slate-800">
+                          {['OPP','PTS','REB','AST','STL','BLK','FG%','3P%','MIN','+/−'].map(h => (
+                            <th key={h} className="px-3 py-3 text-[10px] font-black uppercase tracking-widest text-slate-500 whitespace-nowrap">{h}</th>
+                          ))}
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-800/40">
+                        {last5Games.map((g, i) => {
+                          const fgPct = g.fga > 0 ? g.fgm / g.fga : null;
+                          const tpPct = g.threepa > 0 ? g.threepm / g.threepa : null;
+                          const isHot  = g.pts >= 25 || (g.pts >= 20 && g.ast >= 5);
+                          const isCold = g.pts <= 5 && g.reb <= 3 && g.ast <= 1;
+                          return (
+                            <tr
+                              key={i}
+                              className={`transition-colors ${
+                                isHot  ? 'bg-amber-500/5 hover:bg-amber-500/10' :
+                                isCold ? 'bg-rose-500/5 hover:bg-rose-500/10' :
+                                'hover:bg-slate-800/20'
+                              }`}
+                            >
+                              <td className="px-3 py-3 whitespace-nowrap">
+                                <div className="flex flex-col items-center gap-0.5">
+                                  <span className="text-[10px] font-black uppercase text-slate-400">
+                                    {g.opponentTeamName ?? '—'}
+                                  </span>
+                                  {g.date != null && (
+                                    <span className="text-[9px] text-slate-600">Day {g.date}</span>
+                                  )}
+                                </div>
+                              </td>
+                              <td className={`px-3 py-3 font-display font-bold tabular-nums text-sm ${ptColor(g.pts)}`}>{g.pts}</td>
+                              <td className="px-3 py-3 font-display font-bold text-slate-200 tabular-nums text-sm">{g.reb}</td>
+                              <td className="px-3 py-3 font-display font-bold text-slate-300 tabular-nums text-sm">{g.ast}</td>
+                              <td className="px-3 py-3 font-display font-bold text-slate-400 tabular-nums text-sm">{g.stl}</td>
+                              <td className="px-3 py-3 font-display font-bold text-slate-400 tabular-nums text-sm">{g.blk}</td>
+                              <td className="px-3 py-3 font-display font-bold text-slate-400 tabular-nums text-sm">{fPct(fgPct)}</td>
+                              <td className="px-3 py-3 font-display font-bold text-slate-400 tabular-nums text-sm">{fPct(tpPct)}</td>
+                              <td className="px-3 py-3 font-display font-bold text-slate-500 tabular-nums text-sm">{f1(g.min)}</td>
+                              <td className={`px-3 py-3 font-display font-bold tabular-nums text-sm ${pmColor(g.plusMinus)}`}>
+                                {g.plusMinus > 0 ? `+${g.plusMinus}` : g.plusMinus}
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                  <div className="px-4 py-2 border-t border-slate-800/60 flex gap-3 flex-wrap">
+                    <span className="flex items-center gap-1.5 text-[9px] text-amber-500/70 font-bold uppercase">
+                      <span className="inline-block w-2 h-2 rounded-full bg-amber-500/40" /> Hot game
+                    </span>
+                    <span className="flex items-center gap-1.5 text-[9px] text-rose-500/70 font-bold uppercase">
+                      <span className="inline-block w-2 h-2 rounded-full bg-rose-500/40" /> Cold game
+                    </span>
+                  </div>
+                </div>
+              </section>
+            );
+          })()}
+
+          {/* ── Stats vs Teams ───────────────────────────────────────────────── */}
+          {uniqueOpponents.length > 0 && (() => {
+            const f1  = (v: number) => v.toFixed(1);
+            const fPct = (v: number | null) => v == null ? '—' : `${(v * 100).toFixed(0)}%`;
+            const pmColor = (pm: number) =>
+              pm > 5 ? 'text-emerald-400' : pm < -5 ? 'text-rose-400' : 'text-slate-300';
+            const stats = vsTeamStats;
+            return (
+              <section className="space-y-3">
+                <div className="flex items-center justify-between flex-wrap gap-2">
+                  <h3 className="text-[10px] font-black text-amber-500 uppercase tracking-[0.5em]">Matchup Stats</h3>
+                  <select
+                    value={vsTeamId}
+                    onChange={e => setVsTeamId(e.target.value)}
+                    className="bg-slate-900 border border-slate-700 rounded-xl px-3 py-1.5 text-xs font-bold text-white focus:outline-none focus:border-amber-500/60 min-w-[140px]"
+                  >
+                    <option value="all">All Opponents</option>
+                    {uniqueOpponents.map(t => (
+                      <option key={t.id} value={t.id}>{t.name}</option>
+                    ))}
+                  </select>
+                </div>
+                {stats ? (
+                  <div className="bg-slate-950/50 border border-slate-800 rounded-3xl overflow-hidden">
+                    {/* GP badge */}
+                    <div className="px-5 py-3 border-b border-slate-800/60 flex items-center justify-between">
+                      <span className="text-[10px] font-black uppercase tracking-widest text-slate-500">
+                        {vsTeamId === 'all'
+                          ? `All opponents · ${stats.gp} game${stats.gp !== 1 ? 's' : ''}`
+                          : `vs ${uniqueOpponents.find(t => t.id === vsTeamId)?.name} · ${stats.gp} game${stats.gp !== 1 ? 's' : ''}`}
+                      </span>
+                      <span className={`text-sm font-display font-black ${pmColor(stats.pm)}`}>
+                        {stats.pm > 0 ? `+${f1(stats.pm)}` : f1(stats.pm)} avg +/−
+                      </span>
+                    </div>
+                    <div className="overflow-x-auto">
+                      <table className="w-full text-center text-xs">
+                        <thead>
+                          <tr className="border-b border-slate-800">
+                            {['PPG','RPG','APG','SPG','BPG','FG%','3P%','FT%'].map(h => (
+                              <th key={h} className="px-4 py-3 text-[10px] font-black uppercase tracking-widest text-slate-500">{h}</th>
+                            ))}
+                          </tr>
+                        </thead>
+                        <tbody>
+                          <tr>
+                            <td className={`px-4 py-4 font-display font-black tabular-nums text-lg ${stats.ppg >= 20 ? 'text-amber-400' : 'text-slate-200'}`}>{f1(stats.ppg)}</td>
+                            <td className="px-4 py-4 font-display font-bold tabular-nums text-sm text-slate-200">{f1(stats.rpg)}</td>
+                            <td className="px-4 py-4 font-display font-bold tabular-nums text-sm text-slate-200">{f1(stats.apg)}</td>
+                            <td className="px-4 py-4 font-display font-bold tabular-nums text-sm text-slate-300">{f1(stats.spg)}</td>
+                            <td className="px-4 py-4 font-display font-bold tabular-nums text-sm text-slate-300">{f1(stats.bpg)}</td>
+                            <td className={`px-4 py-4 font-display font-bold tabular-nums text-sm ${stats.fgPct != null && stats.fgPct >= 0.5 ? 'text-emerald-400' : stats.fgPct != null && stats.fgPct < 0.4 ? 'text-rose-400' : 'text-slate-300'}`}>{fPct(stats.fgPct)}</td>
+                            <td className={`px-4 py-4 font-display font-bold tabular-nums text-sm ${stats.threePct != null && stats.threePct >= 0.38 ? 'text-emerald-400' : 'text-slate-300'}`}>{fPct(stats.threePct)}</td>
+                            <td className="px-4 py-4 font-display font-bold tabular-nums text-sm text-slate-300">{fPct(stats.ftPct)}</td>
+                          </tr>
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="bg-slate-950/50 border border-slate-800 rounded-3xl p-8 text-center">
+                    <p className="text-[10px] text-slate-600 uppercase tracking-widest font-bold">No games logged vs this team</p>
                   </div>
                 )}
               </section>
