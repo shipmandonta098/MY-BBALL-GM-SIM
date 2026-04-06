@@ -19,6 +19,8 @@ const Draft: React.FC<DraftProps> = ({ league, updateLeague, onScout, scoutingRe
   const [scoutPoints, setScoutPoints] = useState(100);
   const [isDrafting, setIsDrafting] = useState(false);
   const [isSimming, setIsSimming] = useState(false);
+  const [isSimToEnd, setIsSimToEnd] = useState(false);
+  const [showSimToEndConfirm, setShowSimToEndConfirm] = useState(false);
   const [draftLog, setDraftLog] = useState<string[]>([]);
 
   // Prospect profile modal
@@ -90,6 +92,7 @@ const Draft: React.FC<DraftProps> = ({ league, updateLeague, onScout, scoutingRe
       if (isDrafting) {
         setIsDrafting(false);
         setIsSimming(false);
+        setIsSimToEnd(false);
         const newsItem = {
           id: `draft-complete-${Date.now()}`,
           category: 'playoffs' as const,
@@ -105,7 +108,7 @@ const Draft: React.FC<DraftProps> = ({ league, updateLeague, onScout, scoutingRe
     }
 
     const currentPick = picks[currentPickIndex];
-    if (currentPick.currentTeamId === league.userTeamId) return; // Pause for user
+    if (currentPick.currentTeamId === league.userTeamId && !isSimToEnd) return; // Pause for user
 
     const available = league.prospects.filter(
       p => !league.teams.some(t => t.roster.some(r => r.id === p.id))
@@ -124,16 +127,16 @@ const Draft: React.FC<DraftProps> = ({ league, updateLeague, onScout, scoutingRe
     const picks = league.draftPicks || [];
     const cp = picks[currentPickIndex];
 
-    // Stop simming when it's the user's turn
-    if (cp?.currentTeamId === league.userTeamId) {
+    // Stop simming when it's the user's turn (unless simming to end)
+    if (cp?.currentTeamId === league.userTeamId && !isSimToEnd) {
       if (isSimming) setIsSimming(false);
       return;
     }
 
-    const delay = isSimming ? 80 : 900;
+    const delay = isSimToEnd ? 60 : isSimming ? 80 : 900;
     const timer = setTimeout(executeAIPick, delay);
     return () => clearTimeout(timer);
-  }, [isDrafting, currentPickIndex, isSimming]);
+  }, [isDrafting, currentPickIndex, isSimming, isSimToEnd]);
 
   const availableProspects = useMemo(() => {
     const draftedIds = new Set(league.teams.flatMap(t => t.roster.map(p => p.id)));
@@ -243,6 +246,43 @@ const Draft: React.FC<DraftProps> = ({ league, updateLeague, onScout, scoutingRe
         />
       )}
 
+      {/* Sim to End confirmation modal */}
+      {showSimToEndConfirm && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm">
+          <div className="bg-slate-900 border border-slate-700 rounded-3xl p-8 max-w-sm w-full mx-4 shadow-2xl">
+            <div className="text-4xl mb-4 text-center">⚡</div>
+            <h3 className="text-xl font-display font-bold text-white uppercase tracking-tight text-center mb-2">
+              Sim Entire Draft?
+            </h3>
+            <p className="text-sm text-slate-400 text-center mb-6 leading-relaxed">
+              AI will make <span className="text-white font-bold">all remaining picks</span> — including yours. This cannot be undone.
+            </p>
+            <div className="flex gap-3">
+              <button
+                onClick={() => setShowSimToEndConfirm(false)}
+                className="flex-1 px-4 py-3 bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold uppercase text-sm rounded-xl transition-all active:scale-95"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={() => {
+                  setShowSimToEndConfirm(false);
+                  if (!isDrafting) {
+                    setIsDrafting(true);
+                    setDraftLog(['🏀 The NBA Draft is now underway!']);
+                  }
+                  setIsSimming(false);
+                  setIsSimToEnd(true);
+                }}
+                className="flex-1 px-4 py-3 bg-rose-600 hover:bg-rose-500 text-white font-display font-bold uppercase text-sm rounded-xl transition-all active:scale-95 shadow-lg shadow-rose-500/20"
+              >
+                Sim to End
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Header */}
       <header className="bg-slate-900 border border-slate-800 rounded-[2.5rem] p-8 shadow-2xl relative overflow-hidden">
         <div className="absolute top-0 right-0 w-80 h-80 bg-amber-500/5 blur-[100px] rounded-full -mr-40 -mt-40" />
@@ -284,23 +324,50 @@ const Draft: React.FC<DraftProps> = ({ league, updateLeague, onScout, scoutingRe
                 >
                   ⚡ Sim to My Pick
                 </button>
+                <button
+                  onClick={() => setShowSimToEndConfirm(true)}
+                  className="px-6 py-4 bg-rose-700 hover:bg-rose-600 text-white font-display font-bold uppercase rounded-xl transition-all shadow-xl shadow-rose-500/20 active:scale-95 text-sm"
+                >
+                  ⚡⚡ Sim to End
+                </button>
               </>
             )}
-            {isDrafting && !isSimming && !isUserTurn && (
+            {isDrafting && !isSimming && !isSimToEnd && !isUserTurn && (
+              <>
+                <button
+                  onClick={() => setIsSimming(true)}
+                  className="px-6 py-3 bg-blue-600 hover:bg-blue-500 text-white font-display font-bold uppercase rounded-xl transition-all text-sm active:scale-95"
+                >
+                  ⚡ Sim to My Pick
+                </button>
+                <button
+                  onClick={() => setShowSimToEndConfirm(true)}
+                  className="px-5 py-3 bg-rose-700 hover:bg-rose-600 text-white font-display font-bold uppercase rounded-xl transition-all text-sm active:scale-95"
+                >
+                  ⚡⚡ Sim to End
+                </button>
+              </>
+            )}
+            {isDrafting && isUserTurn && !isSimToEnd && (
               <button
-                onClick={() => setIsSimming(true)}
-                className="px-6 py-3 bg-blue-600 hover:bg-blue-500 text-white font-display font-bold uppercase rounded-xl transition-all text-sm active:scale-95"
+                onClick={() => setShowSimToEndConfirm(true)}
+                className="px-5 py-3 bg-rose-700/80 hover:bg-rose-600 text-white font-display font-bold uppercase rounded-xl transition-all text-sm active:scale-95"
               >
-                ⚡ Sim to My Pick
+                ⚡⚡ Sim to End
               </button>
             )}
-            {isSimming && (
+            {isSimming && !isSimToEnd && (
               <button
                 onClick={() => setIsSimming(false)}
                 className="px-6 py-3 bg-slate-700 hover:bg-slate-600 text-white font-bold uppercase rounded-xl transition-all text-sm active:scale-95"
               >
                 ⏸ Pause
               </button>
+            )}
+            {isSimToEnd && (
+              <div className="flex items-center gap-2 px-4 py-2 bg-rose-900/40 border border-rose-700/40 rounded-xl">
+                <span className="text-rose-400 animate-pulse text-sm font-black uppercase">⚡⚡ Simming to End…</span>
+              </div>
             )}
           </div>
         </div>
@@ -581,29 +648,26 @@ const Draft: React.FC<DraftProps> = ({ league, updateLeague, onScout, scoutingRe
                         })()}
                       </td>
                       <td className="px-6 py-5 text-right" onClick={e => e.stopPropagation()}>
-                        {isUserTurn ? (
-                          <div className="flex items-center justify-end gap-2">
-                            <button
-                              onClick={() => setSelectedProspect(p)}
-                              className="px-3 py-2 bg-slate-800 text-slate-400 text-[10px] font-black uppercase rounded-lg hover:bg-slate-700 transition-all"
-                            >
-                              Info
-                            </button>
-                            <button
-                              onClick={() => makePick(league.userTeamId, p)}
-                              className="px-4 py-2 bg-emerald-500 text-slate-950 text-[10px] font-black uppercase rounded-lg hover:scale-105 active:scale-95 transition-all shadow-lg shadow-emerald-500/20"
-                            >
-                              Draft
-                            </button>
-                          </div>
-                        ) : (
+                        <div className="flex items-center justify-end gap-2">
                           <button
                             onClick={() => { onScout(p); setSelectedProspect(p); }}
-                            className="px-4 py-2 bg-slate-800 text-slate-400 text-[10px] font-black uppercase rounded-lg hover:bg-amber-500 hover:text-slate-950 transition-all"
+                            className="px-3 py-2 bg-slate-800 text-slate-400 text-[10px] font-black uppercase rounded-lg hover:bg-amber-500 hover:text-slate-950 transition-all"
                           >
                             Profile
                           </button>
-                        )}
+                          <button
+                            onClick={() => isUserTurn && makePick(league.userTeamId, p)}
+                            disabled={!isUserTurn}
+                            title={isUserTurn ? 'Draft this player' : 'Not your pick'}
+                            className={`px-4 py-2 text-[10px] font-black uppercase rounded-lg transition-all ${
+                              isUserTurn
+                                ? 'bg-emerald-500 text-slate-950 hover:scale-105 active:scale-95 shadow-lg shadow-emerald-500/20 cursor-pointer'
+                                : 'bg-slate-800/50 text-slate-600 border border-slate-700/50 cursor-not-allowed'
+                            }`}
+                          >
+                            Draft
+                          </button>
+                        </div>
                       </td>
                     </tr>
                   ))}
