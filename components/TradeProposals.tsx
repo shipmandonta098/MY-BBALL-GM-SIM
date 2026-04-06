@@ -224,7 +224,7 @@ const TradeProposals: React.FC<TradeProposalsProps> = ({
           </p>
           <p className="text-slate-600 text-sm mt-1">
             {windowOpen
-              ? 'AI GMs will reach out as the season progresses. Check back after simulating a few days.'
+              ? 'AI GMs reach out roughly every 5–10 games. More activity during mid-season and when teams have clear needs.'
               : 'Proposals will resume at the start of next season.'}
           </p>
         </div>

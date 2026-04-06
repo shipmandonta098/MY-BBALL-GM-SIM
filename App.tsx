@@ -1454,8 +1454,11 @@ const App: React.FC = () => {
           newState = tradeResult.updatedState;
         }
       } catch (_e) { /* non-fatal */ }
+    }
 
-      // ── Generate incoming AI-to-user trade proposals ──
+    // ── Generate incoming AI-to-user trade proposals (every 3 sim-days) ──
+    // Decoupled from the weekly AI-to-AI block so it fires more frequently.
+    if (!newState.isOffseason && newState.currentDay % 3 === 0 && !newState.tradeDeadlinePassed && !newState.playoffBracket) {
       try {
         const newProposals = generateAITradeProposalsForUser(newState, newState.settings.difficulty ?? 'Medium');
         if (newProposals.length > 0) {
