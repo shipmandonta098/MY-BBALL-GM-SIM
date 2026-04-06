@@ -1904,6 +1904,26 @@ export const generateSeasonSchedule = (
     }
   });
 
+  // ── Build per-pair max games map (used in pool and greedy fill) ───────────
+  const maxPairGames: Record<string, number> = {};
+  for (let i = 0; i < teams.length; i++) {
+    for (let j = i + 1; j < teams.length; j++) {
+      const t1 = teams[i], t2 = teams[j];
+      const key = `${t1.id}|${t2.id}`;
+      if (numGames >= 80) {
+        if (t1.division === t2.division) {
+          maxPairGames[key] = divPP;
+        } else if (t1.conference === t2.conference) {
+          maxPairGames[key] = confPP + (confExtraPairs.has(key) ? 1 : 0);
+        } else {
+          maxPairGames[key] = oocPP + (oocExtraPairs.has(key) ? 1 : 0);
+        }
+      } else {
+        maxPairGames[key] = 1;
+      }
+    }
+  }
+
   // ── Build the matchup pool ─────────────────────────────────────────────────
   for (let i = 0; i < teams.length; i++) {
     for (let j = i + 1; j < teams.length; j++) {
@@ -1932,14 +1952,38 @@ export const generateSeasonSchedule = (
   }
 
   // Fill any remaining gaps (rounding edge cases) greedily
+  // Respects per-pair maxima so conference opponents never exceed the planned cap.
+  // Priority: prefer OOC opponents → conf non-div → div → any (emergency only).
   const allTeamIds = teams.map(t => t.id);
+  const teamById: Record<string, Team> = {};
+  teams.forEach(t => { teamById[t.id] = t; });
+  const pairKey = (a: string, b: string) => a < b ? `${a}|${b}` : `${b}|${a}`;
+
   allTeamIds.forEach(id => {
     while (teamGamesCountTotal[id] < numGames) {
-      const bestOpponent = allTeamIds
-        .filter(oid => oid !== id && teamGamesCountTotal[oid] < numGames)
-        .sort((a, b) => (pairings[id][a] || 0) - (pairings[id][b] || 0))[0];
-      if (bestOpponent) addGameToPool(id, bestOpponent);
-      else break;
+      // Only consider opponents that still have capacity AND haven't hit their per-pair cap
+      const eligible = allTeamIds.filter(oid => {
+        if (oid === id || teamGamesCountTotal[oid] >= numGames) return false;
+        const max = maxPairGames[pairKey(id, oid)];
+        // If no max entry (shouldn't happen with standard setup), allow up to oocPP+1 as fallback
+        return max === undefined || (pairings[id][oid] || 0) < max;
+      });
+      if (eligible.length === 0) break;
+
+      // Sort: prefer OOC first, then conf-ND, then div; within each tier fewest pairings first
+      const myConf = teamById[id]?.conference;
+      const myDiv  = teamById[id]?.division;
+      eligible.sort((a, b) => {
+        const aConf = teamById[a]?.conference;
+        const bConf = teamById[b]?.conference;
+        const aDiv  = teamById[a]?.division;
+        const bDiv  = teamById[b]?.division;
+        const tierA = aConf !== myConf ? 0 : aDiv !== myDiv ? 1 : 2;
+        const tierB = bConf !== myConf ? 0 : bDiv !== myDiv ? 1 : 2;
+        if (tierA !== tierB) return tierA - tierB;
+        return (pairings[id][a] || 0) - (pairings[id][b] || 0);
+      });
+      addGameToPool(id, eligible[0]);
     }
   });
 
