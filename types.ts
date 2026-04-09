@@ -369,6 +369,7 @@ export interface Player {
   };
   interestScore?: number;
   onTradeBlock?: boolean;
+  requestedTrade?: boolean;
   isSuspended?: boolean;
   suspensionGames?: number;
   suspensionReason?: string;

@@ -248,6 +248,37 @@ const App: React.FC = () => {
     });
   };
 
+  /** Accept a player's trade request: keeps them on trade block, boosts AI interest. */
+  const handleAcceptTradeRequest = (playerId: string) => {
+    if (!league) return;
+    updateLeagueState({
+      teams: league.teams.map(t =>
+        t.id === league.userTeamId
+          ? { ...t, roster: t.roster.map(p => p.id === playerId ? { ...p, requestedTrade: true, onTradeBlock: true } : p) }
+          : t
+      ),
+    });
+  };
+
+  /** Decline a player's trade request: clears the flag but drops morale. */
+  const handleDeclineTradeRequest = (playerId: string) => {
+    if (!league) return;
+    updateLeagueState({
+      teams: league.teams.map(t =>
+        t.id === league.userTeamId
+          ? {
+              ...t,
+              roster: t.roster.map(p =>
+                p.id === playerId
+                  ? { ...p, requestedTrade: false, morale: Math.max(0, (p.morale ?? 75) - 10) }
+                  : p
+              ),
+            }
+          : t
+      ),
+    });
+  };
+
   /** Compute the current season phase from state */
   const computeSeasonPhase = (state: LeagueState): SeasonPhase => {
     if (state.isOffseason) return 'Offseason';
@@ -659,7 +690,14 @@ const App: React.FC = () => {
       if (fireChance === 0 || Math.random() >= fireChance) continue;
 
       // ── FIRE ──
-      newState = await addNewsItem(newState, 'firing', { team, coach: hc, detail: `Fired following ${fireReason}.` }, true);
+      const pick = <T,>(arr: T[]): T => arr[Math.floor(Math.random() * arr.length)];
+      const firingDetail = pick([
+        `The ${team.name} have fired head coach ${hc.name} following ${fireReason}. The front office thanked him for his service but said a change was necessary.`,
+        `${team.name} part ways with ${hc.name} after ${fireReason}. The search for a permanent replacement begins immediately.`,
+        `Sources confirm: ${hc.name} is out in ${team.city ?? team.name}. The ${team.name} cited ${fireReason} as the deciding factor. An interim coach will be named shortly.`,
+        `${team.name} make a move — head coach ${hc.name} has been relieved of his duties following ${fireReason}.`,
+      ]);
+      newState = await addNewsItem(newState, 'firing', { team, coach: hc, detail: firingDetail }, true);
       newState.transactions = recordTransaction(newState, 'firing', [team.id], `${team.name} fired Head Coach ${hc.name} following ${fireReason}.`);
 
       // Released coach returns to market
@@ -852,11 +890,24 @@ const App: React.FC = () => {
             const lastName = unhappyDiva.name.split(' ').slice(-1)[0];
             const pick = <T,>(arr: T[]): T => arr[Math.floor(Math.random() * arr.length)];
             const detail = pick([
-              `${unhappyDiva.name} is reportedly frustrated with his role and has requested a trade.`,
-              `${lastName}'s camp has informed the front office: he wants out. A formal trade request is expected.`,
-              `${unhappyDiva.name} is seeking a change of scenery — sources say trade talks have quietly begun.`,
-              `Frustration has boiled over: ${unhappyDiva.name} wants a trade and his morale is at an all-time low.`,
+              `${unhappyDiva.name} has formally requested a trade from the ${team?.name}. Sources say he wants a fresh start in a winning environment.`,
+              `BREAKING: ${lastName}'s camp has delivered a trade request to ${team?.name} management. The star is seeking a change of scenery immediately.`,
+              `${unhappyDiva.name} is done in ${team?.city ?? team?.name}. Multiple sources confirm a formal trade request has been submitted to the front office.`,
+              `Sources close to ${unhappyDiva.name} say frustration has reached a breaking point. He's formally asked the ${team?.name} to trade him.`,
+              `${unhappyDiva.name} wants out. His agent has notified the ${team?.name} front office of a formal trade request, citing a desire to compete for a championship.`,
             ]);
+            // If this is the user's team, mark the player as having requested a trade
+            const isUserTeam = team?.id === newState.userTeamId;
+            if (isUserTeam) {
+              newState = {
+                ...newState,
+                teams: newState.teams.map(t =>
+                  t.id === team.id
+                    ? { ...t, roster: t.roster.map(p => p.id === unhappyDiva.id ? { ...p, requestedTrade: true, onTradeBlock: true } : p) }
+                    : t
+                ),
+              };
+            }
             newState = {
               ...newState,
               newsFeed: [{ id: cooldownId, category: 'trade_request' as const, headline: 'TRADE_REQUEST', content: detail, timestamp: newState.currentDay, realTimestamp: Date.now(), teamId: team?.id, playerId: unhappyDiva.id, isBreaking: true }, ...(newState.newsFeed ?? [])].slice(0, 100),
@@ -2462,6 +2513,8 @@ const App: React.FC = () => {
                 setCounterProposal(proposal);
                 setActiveTab('trade');
               }}
+              onAcceptRequest={handleAcceptTradeRequest}
+              onDeclineRequest={handleDeclineTradeRequest}
             />
           )}
           {activeTab === 'settings' && <Settings league={league} updateLeague={updateLeagueState} onRegenerateSchedule={async () => {
