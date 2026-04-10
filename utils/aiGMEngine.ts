@@ -994,10 +994,10 @@ export function aiGMTradeDeadlineAction(
       if (dealMade || tradedTeams.has(contender.id)) continue;
       const contenderData = s.teams.find(t => t.id === contender.id)!;
 
-      // Contender offers: a future first pick + possibly a young player
+      // Contender offers a first-round pick (current-year OR future) + possibly a young player
       const futurePick = contenderData.picks.find(p =>
         p.round === 1 && p.currentTeamId === contenderData.id &&
-        p.year !== undefined && p.year > s.season
+        (p.year === undefined || p.year >= s.season)
       );
 
       // Try pick + young player deal first
@@ -1038,7 +1038,7 @@ export function aiGMTradeDeadlineAction(
           tradedTeams.add(contender.id);
           tradesExecuted++;
           dealMade = true;
-          const yearStr = futurePick.year ? `${futurePick.year}` : 'future';
+          const yearStr = futurePick.year ? (futurePick.year === s.season ? `${futurePick.year} (this year's pick)` : `${futurePick.year}`) : 'current-year';
           newsItems.push(makeNewsItem(
             'trade',
             `DEADLINE TRADE: ${vet.name} → ${contenderData.abbreviation}`,
@@ -1093,7 +1093,7 @@ export function aiGMTradeDeadlineAction(
           tradedTeams.add(contender.id);
           tradesExecuted++;
           dealMade = true;
-          const yearStr = futurePick.year ? `${futurePick.year}` : 'future';
+          const yearStr = futurePick.year ? (futurePick.year === s.season ? `${futurePick.year} (this year's pick)` : `${futurePick.year}`) : 'current-year';
           newsItems.push(makeNewsItem(
             'trade',
             `DEADLINE TRADE: ${vet.name} → ${contenderData.abbreviation}`,
@@ -1349,9 +1349,10 @@ export function aiGMInSeasonTrades(
     for (const contender of contenders) {
       if (dealMade) break;
       const contenderData = s.teams.find(t => t.id === contender.id)!;
+      // Include current-year picks (year === s.season) — contenders often trade them for vets
       const futurePick = contenderData.picks.find(p =>
         p.round === 1 && p.currentTeamId === contenderData.id &&
-        p.year !== undefined && p.year > s.season
+        (p.year === undefined || p.year >= s.season)
       );
       if (!futurePick) continue;
 

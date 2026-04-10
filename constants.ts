@@ -1739,8 +1739,8 @@ export const generateLeagueTeams = (genderRatio: number = 0, season: number = 20
       );
     }
     const picks: DraftPick[] = [
-      { round: 1, pick: 0, originalTeamId: teamId, currentTeamId: teamId },
-      { round: 2, pick: 0, originalTeamId: teamId, currentTeamId: teamId },
+      { round: 1, pick: 0, originalTeamId: teamId, currentTeamId: teamId, year: season },
+      { round: 2, pick: 0, originalTeamId: teamId, currentTeamId: teamId, year: season },
       ...futurePicks,
     ];
 
