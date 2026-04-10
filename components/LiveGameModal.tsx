@@ -1,6 +1,7 @@
 
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { ScheduleGame, Team, GameResult, GamePlayerLine, Player, LeagueState, PlayByPlayEvent, InjuryType } from '../types';
+import { getEligiblePositions } from '../constants';
 import { PlayerLink } from '../context/NavigationContext';
 import TeamBadge from './TeamBadge';
 import { Play, Pause, FastForward, X, Trophy, TrendingUp, Clock } from 'lucide-react';
@@ -21,7 +22,7 @@ interface GameEvent {
   time: string;
   quarter: number;
   text: string;
-  type: 'score' | 'miss' | 'turnover' | 'foul' | 'highlight' | 'info';
+  type: 'score' | 'miss' | 'turnover' | 'foul' | 'highlight' | 'info' | 'sub';
   teamId?: string;           // which team performed the action
   possessionBefore?: string; // teamId that had possession entering the play
   possessionAfter?: string;  // teamId that has possession leaving the play
@@ -91,7 +92,7 @@ const LiveGameModal: React.FC<LiveGameModalProps> = ({
         events: events.map(e => ({
           time: e.time,
           text: e.text,
-          type: e.type === 'highlight' ? 'info' : e.type,
+          type: (e.type === 'highlight' ? 'info' : e.type === 'sub' ? 'info' : e.type) as any,
           quarter: e.quarter
         })),
         homeStats,
@@ -211,6 +212,56 @@ const LiveGameModal: React.FC<LiveGameModalProps> = ({
   const posGroup = (pos: string): 'Guard' | 'Wing' | 'Big' =>
     (pos === 'PG' || pos === 'SG') ? 'Guard' : pos === 'C' ? 'Big' : 'Wing';
 
+  // Priority order for positional substitutions: exact match → swing → stretch → group
+  const POS_COMPAT: Record<string, string[]> = {
+    PG: ['PG', 'SG', 'SF'],
+    SG: ['SG', 'PG', 'SF'],
+    SF: ['SF', 'SG', 'PF'],
+    PF: ['PF', 'SF', 'C'],
+    C:  ['C',  'PF', 'SF'],
+  };
+  const POS_DISPLAY: Record<string, string> = {
+    PG: 'point guard', SG: 'shooting guard', SF: 'small forward',
+    PF: 'power forward', C: 'center',
+  };
+
+  // Find the best available backup in priority order:
+  // 1. Exact primary-position match
+  // 2. Secondary-position eligible (no penalty)
+  // 3. Swing position (positional compat list)
+  // 4. Same group (Guard/Wing/Big)
+  // 5. Any available
+  const findPositionalBackup = (
+    outPos: string,
+    currentLineup: string[],
+    teamRoster: Player[],
+    pf: Record<string, GamePlayerLine>,
+  ): Player | undefined => {
+    const compat = POS_COMPAT[outPos] ?? [outPos];
+    const pool = teamRoster.filter(
+      p => !currentLineup.includes(p.id) &&
+           !injuredInGameRef.current.has(p.id) &&
+           ((pf[p.id]?.pf ?? 0) as number) < 5
+    );
+    // Tier 1: exact primary position match
+    const exactTier = pool.filter(p => p.position === outPos);
+    if (exactTier.length) return exactTier.sort((a, b) => b.rating - a.rating)[0];
+    // Tier 2: secondary-position eligible (player lists outPos as a secondary)
+    const secTier = pool.filter(p => getEligiblePositions(p).includes(outPos as any));
+    if (secTier.length) return secTier.sort((a, b) => b.rating - a.rating)[0];
+    // Tier 3: swing positions from compat list
+    for (const pos of compat.slice(1)) {
+      const tier = pool.filter(p => p.position === pos || getEligiblePositions(p).includes(pos as any));
+      if (tier.length) return tier.sort((a, b) => b.rating - a.rating)[0];
+    }
+    // Tier 4: same position group (Guard/Wing/Big)
+    const grp = posGroup(outPos);
+    const groupTier = pool.filter(p => posGroup(p.position) === grp);
+    if (groupTier.length) return groupTier.sort((a, b) => b.rating - a.rating)[0];
+    // Last resort: anyone available
+    return pool.sort((a, b) => b.rating - a.rating)[0];
+  };
+
   // ── In-game injury system ────────────────────────────────────────────────
   type LiveInjuryEntry = { type: InjuryType; minDays: number; maxDays: number; weight: number; msgs: string[] };
   const LIVE_INJURY_TABLE: LiveInjuryEntry[] = [
@@ -238,11 +289,10 @@ const LiveGameModal: React.FC<LiveGameModalProps> = ({
     // Injury PBP event (red = foul type so it renders in the injury color)
     batchEvts.push({ time: formatTime(currentTime), quarter, text: `🚨 ${rawMsg}`, type: 'foul', teamId: team.id, possessionBefore: possessionRef.current, possessionAfter: possessionRef.current });
 
-    // Find a backup to sub in
+    // Find positional backup: exact position → swing → group → any available
     const lineup = isHome ? lineupRef.current.home : lineupRef.current.away;
-    const group = posGroup(player.position);
-    const backup = team.roster.find(p => !lineup.includes(p.id) && !injuredInGameRef.current.has(p.id) && posGroup(p.position) === group)
-      ?? team.roster.find(p => !lineup.includes(p.id) && !injuredInGameRef.current.has(p.id));
+    const pf = isHome ? homeStats : awayStats;
+    const backup = findPositionalBackup(player.position, lineup, team.roster, pf);
 
     if (backup) {
       const newLineup = lineup.map(id => id === player.id ? backup.id : id);
@@ -251,7 +301,16 @@ const LiveGameModal: React.FC<LiveGameModalProps> = ({
       if (fatigueRef.current[player.id])  fatigueRef.current[player.id].isOnFloor  = false;
       if (!fatigueRef.current[backup.id]) fatigueRef.current[backup.id] = { minutesPlayed: 0, fatigueLevel: 0, isOnFloor: false, consecutiveMinutes: 0 };
       fatigueRef.current[backup.id].isOnFloor = true;
-      batchEvts.push({ time: formatTime(currentTime), quarter, text: `${abbrev(backup.name)} checks in for ${abbrev(player.name)} (Injury)`, type: 'info', teamId: team.id, possessionBefore: possessionRef.current, possessionAfter: possessionRef.current });
+      const posLabel = POS_DISPLAY[player.position] ?? player.position;
+      const backupEligible = getEligiblePositions(backup);
+      const isSecFit = backupEligible.includes(player.position as any) && backup.position !== player.position;
+      const isOop    = !backupEligible.includes(player.position as any) && backup.position !== player.position;
+      const posNote  = isSecFit
+        ? ` — slides over to ${posLabel} (secondary position)`
+        : isOop
+        ? ` — steps up to ${posLabel} out of position`
+        : ` at ${posLabel}`;
+      batchEvts.push({ time: formatTime(currentTime), quarter, text: `🔄 ${abbrev(backup.name)} checks in${posNote} for ${abbrev(player.name)} — Injury`, type: 'sub', teamId: team.id, possessionBefore: possessionRef.current, possessionAfter: possessionRef.current });
     }
 
     // Mark as injured — excluded from all future lineups this game
@@ -976,26 +1035,26 @@ const LiveGameModal: React.FC<LiveGameModalProps> = ({
 
       if (!shouldSub) continue;
 
-      // Find eligible bench player — same position group, not fouled out
-      const group = posGroup(player.position);
-      const candidates = offBench.filter(b =>
-        !usedFromBench.has(b.id) &&
-        posGroup(b.position) === group &&
-        ((stats[b.id]?.pf ?? 0) as number) < 5
-      );
-
+      // Find backup: exact position → swing → group → any (position-smart)
+      const compat = POS_COMPAT[player.position] ?? [player.position];
       let incoming: Player | undefined;
-      if (isDevGenius) {
-        // Prefer youngest available
-        incoming = [...candidates].sort((a, b) => a.age - b.age)[0];
+      for (const pos of [...compat, '__group__', '__any__']) {
+        const tier = offBench.filter(b => {
+          if (usedFromBench.has(b.id)) return false;
+          if (((stats[b.id]?.pf ?? 0) as number) >= 5) return false;
+          if (pos === '__group__') return posGroup(b.position) === posGroup(player.position);
+          if (pos === '__any__') return true;
+          return b.position === pos;
+        });
+        if (!tier.length) continue;
+        // Dev Genius: prefer youngest in tier; otherwise least fatigued
+        const sorted = isDevGenius
+          ? [...tier].sort((a, b) => a.age - b.age)
+          : [...tier].sort((a, b) => (ft[a.id]?.fatigueLevel ?? 0) - (ft[b.id]?.fatigueLevel ?? 0));
+        incoming = sorted[0];
+        break;
       }
-      if (!incoming) {
-        // Default: prefer least fatigued bench player
-        incoming = [...candidates].sort(
-          (a, b) => (ft[a.id]?.fatigueLevel ?? 0) - (ft[b.id]?.fatigueLevel ?? 0)
-        )[0];
-      }
-      if (!incoming) continue; // no valid sub for this position group
+      if (!incoming) continue;
 
       ops.push({ out: player, in: incoming, reason });
       usedFromBench.add(incoming.id);
@@ -1023,17 +1082,26 @@ const LiveGameModal: React.FC<LiveGameModalProps> = ({
     for (const op of ops) {
       const fatLabel = Math.round(ft[op.out.id]?.fatigueLevel ?? 0);
       const pfLabel  = (stats[op.out.id]?.pf ?? 0) as number;
-      let detail = '';
-      if      (op.reason === 'FOUL_TROUBLE')  detail = `${pfLabel} PF`;
-      else if (op.reason === 'FATIGUE')        detail = `fatigue ${fatLabel}%`;
-      else if (op.reason === 'COLD_STREAK')    detail = `${(stats[op.out.id]?.fgm ?? 0)}-${(stats[op.out.id]?.fga ?? 0)} FG`;
-      else if (op.reason === 'TACTICAL')       detail = `tactical`;
-      else if (op.reason === 'QUARTER_BREAK')  detail = `rotation`;
+      let reasonTag = '';
+      if      (op.reason === 'FOUL_TROUBLE')  reasonTag = `Foul trouble (${pfLabel} PF)`;
+      else if (op.reason === 'FATIGUE')        reasonTag = `Rest — ${fatLabel}% fatigue`;
+      else if (op.reason === 'COLD_STREAK')    reasonTag = `Cold (${(stats[op.out.id]?.fgm ?? 0)}-${(stats[op.out.id]?.fga ?? 0)} FG)`;
+      else if (op.reason === 'TACTICAL')       reasonTag = `Tactical`;
+      else if (op.reason === 'QUARTER_BREAK')  reasonTag = `Rotation`;
+      const posLabel  = POS_DISPLAY[op.out.position] ?? op.out.position;
+      const inEligible = getEligiblePositions(op.in);
+      const isFlexSub  = inEligible.includes(op.out.position as any) && op.in.position !== op.out.position;
+      const isOopSub   = !inEligible.includes(op.out.position as any) && op.in.position !== op.out.position;
+      const posNote    = isFlexSub
+        ? ` — slides over to ${posLabel}`
+        : isOopSub
+        ? ` (${op.in.position}→${op.out.position}, out of position)`
+        : ` at ${posLabel}`;
       batchEvts.push({
         time: formatTime(currentTime),
         quarter,
-        text: `${abbrev(op.in.name)} checks in for ${abbrev(op.out.name)} (${detail})`,
-        type: 'info',
+        text: `🔄 ${abbrev(op.in.name)} checks in${posNote} for ${abbrev(op.out.name)} — ${reasonTag}`,
+        type: 'sub',
         teamId: team.id,
         possessionBefore: possessionRef.current,
         possessionAfter:  possessionRef.current,
@@ -1108,7 +1176,7 @@ const LiveGameModal: React.FC<LiveGameModalProps> = ({
       homePlayerStats,
       awayPlayerStats,
       topPerformers: allLines.slice(0, 3).map(l => ({ playerId: l.playerId, points: l.pts, rebounds: l.reb, assists: l.ast })),
-      playByPlay: currentEvents.map(e => ({ time: e.time, text: e.text, type: e.type === 'highlight' ? 'info' : e.type, quarter: e.quarter })),
+      playByPlay: currentEvents.map(e => ({ time: e.time, text: e.text, type: (e.type === 'highlight' ? 'info' : e.type === 'sub' ? 'info' : e.type) as any, quarter: e.quarter })),
       date: game.day,
       season: season,
       isOvertime: currentQuarter > 4,
@@ -1200,7 +1268,7 @@ const LiveGameModal: React.FC<LiveGameModalProps> = ({
       playByPlay: events.map(e => ({
         time: e.time,
         text: e.text,
-        type: e.type === 'highlight' ? 'info' : e.type,
+        type: (e.type === 'highlight' ? 'info' : e.type === 'sub' ? 'info' : e.type) as any,
         quarter: e.quarter
       })),
       date: game.day,
@@ -1472,6 +1540,7 @@ const LiveGameModal: React.FC<LiveGameModalProps> = ({
               const isScore = e.type === 'score';
               const isTurnover = e.type === 'turnover';
               const isInfo = e.type === 'info';
+              const isSub  = e.type === 'sub';
               const actingTeam = e.teamId ? (e.teamId === homeTeam.id ? homeTeam : awayTeam) : null;
 
               if (isInfo && !e.teamId) {
@@ -1491,6 +1560,8 @@ const LiveGameModal: React.FC<LiveGameModalProps> = ({
                   className={`flex items-start gap-3 group animate-in slide-in-from-bottom-2 duration-300 rounded-2xl px-3 py-2 transition-all ${
                     isScore
                       ? 'bg-amber-500/5 border border-amber-500/10 shadow-sm'
+                      : isSub
+                      ? 'bg-sky-500/5 border border-sky-500/10'
                       : isLatest
                       ? 'bg-slate-900/50'
                       : 'hover:bg-slate-900/30'
@@ -1532,6 +1603,8 @@ const LiveGameModal: React.FC<LiveGameModalProps> = ({
                         ? 'text-orange-400'
                         : e.type === 'foul'
                         ? 'text-rose-400'
+                        : isSub
+                        ? 'text-sky-400'
                         : isInfo
                         ? 'text-amber-400'
                         : 'text-slate-400'

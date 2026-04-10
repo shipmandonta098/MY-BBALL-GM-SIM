@@ -164,7 +164,7 @@ export interface BulkSimSummary {
   news: string[];
 }
 
-export type NewsCategory = 'rumor' | 'transaction' | 'injury' | 'firing' | 'trade_request' | 'award' | 'milestone' | 'expansion' | 'playoffs';
+export type NewsCategory = 'rumor' | 'transaction' | 'injury' | 'firing' | 'trade_request' | 'award' | 'milestone' | 'expansion' | 'playoffs' | 'suspension';
 
 export interface NewsItem {
   id: string;
@@ -369,8 +369,12 @@ export interface Player {
   };
   interestScore?: number;
   onTradeBlock?: boolean;
+  requestedTrade?: boolean;
   isSuspended?: boolean;
   suspensionGames?: number;
+  suspensionReason?: string;
+  /** True once GM has filed one appeal for the current suspension — blocks further appeals */
+  suspensionAppealed?: boolean;
   injuryType?: InjuryType;
   injuryDaysLeft?: number;
   /** Years (season numbers) in which this player was selected as an All-Star */
@@ -436,7 +440,8 @@ export interface Team {
   activeScheme: CoachScheme;
   wins: number;
   losses: number;
-  prevSeasonWins?: number; // Added for EOY logic
+  prevSeasonWins?: number;  // Added for EOY logic
+  prevSeasonLosses?: number; // Added for EOY logic (used by draft lottery sorting)
   homeWins: number;
   homeLosses: number;
   roadWins: number; roadLosses: number;
@@ -460,6 +465,10 @@ export interface Team {
   borderStyle: 'None' | 'Solid' | 'Gradient';
   status: 'Active' | 'Inactive' | 'Relocating' | 'Expansion';
   aiGM?: AIGMData;
+  /** Name of the team's current General Manager (AI or human-named). */
+  gmName?: string;
+  /** Age of the team's GM (35–65). */
+  gmAge?: number;
   /** Team pace rating 60-100. Controls possessions per game via tier table.
    *  Defaults to scheme-based value if not set. */
   paceRating?: number;
@@ -493,12 +502,13 @@ export interface ScheduleGame {
   homeB2BCount: number;
   awayB2BCount: number;
   gameNumber?: number;
+  attendance?: number;
 }
 
 export interface PlayByPlayEvent {
   time: string;
   text: string;
-  type: 'score' | 'miss' | 'turnover' | 'foul' | 'info';
+  type: 'score' | 'miss' | 'turnover' | 'foul' | 'info' | 'sub';
   quarter: number;
 }
 
@@ -544,6 +554,7 @@ export interface GameResult {
   isChippy?: boolean;
   season: number;
   gameInjuries?: Array<{playerId: string; playerName: string; injuryType: InjuryType; daysOut: number; teamId: string}>;
+  gameSuspensions?: Array<{playerId: string; playerName: string; teamId: string; games: number; reason: string}>;
   /** Detailed per-quarter pace/possession stats */
   quarterDetails?: QuarterDetail[];
   /** True when the game had a clutch situation (last 5 min of 4Q/OT, score diff ≤5) */
@@ -579,6 +590,7 @@ export interface LeagueSettings {
   b2bFrequency: 'None' | 'Low' | 'Realistic' | 'High' | 'Brutal';
   showAdvancedStats: boolean;
   hardCap?: number;
+  numTeams?: number;
 
   // ── League Tab additions ──────────────────────────────────────────────────
   playoffFormat?: 6 | 8 | 10 | 12 | 14 | 16;
@@ -741,6 +753,18 @@ export interface RivalryStats {
   };
 }
 
+export interface PreviousSeasonStanding {
+  teamId: string;
+  teamName: string;
+  teamCity: string;
+  teamAbbr: string;
+  conference: Conference;
+  wins: number;
+  losses: number;
+  confRank: number;
+  madePlayoffs: boolean;
+}
+
 export interface LeagueState {
   id: string;
   lastUpdated: number;
@@ -771,6 +795,10 @@ export interface LeagueState {
   currentDraftPickIndex?: number;
   championshipHistory?: ChampionshipRecord[];
   rivalryHistory?: RivalryStats[];
+  /** Final standings snapshot from the most recently completed season, saved at season end. */
+  previousSeasonStandings?: PreviousSeasonStanding[];
+  /** Season number that previousSeasonStandings was captured from. */
+  previousSeasonYear?: number;
   expansionDraft?: {
     active: boolean;
     phase: 'setup' | 'protection' | 'draft' | 'completed';

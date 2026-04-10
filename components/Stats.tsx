@@ -2,6 +2,7 @@ import React, { useState, useMemo } from 'react';
 import { LeagueState, Player, Team, Position } from '../types';
 import TeamBadge from './TeamBadge';
 import { PlayerLink } from '../context/NavigationContext';
+import Attendance from './Attendance';
 
 interface StatsProps {
   league: LeagueState;
@@ -10,7 +11,7 @@ interface StatsProps {
   onViewPlayer?: (player: Player) => void;
 }
 
-type StatTab = 'leaderboards' | 'advanced' | 'compare' | 'teams' | 'players';
+type StatTab = 'leaderboards' | 'advanced' | 'compare' | 'teams' | 'players' | 'attendance';
 type PlayerSubTab = 'traditional' | 'advanced' | 'per36' | 'shooting' | 'totals' | 'clutch';
 type PlayerStatsView = 'season' | 'career';
 type StatsSource = 'regular' | 'playoffs';
@@ -1528,13 +1529,13 @@ const Stats: React.FC<StatsProps> = ({ league, onViewRoster, onManageTeam, onVie
           <div>
             <h2 className="text-4xl font-display font-bold uppercase tracking-tight text-white mb-2">League Intelligence</h2>
             <div className="flex gap-2 flex-wrap">
-              {(['leaderboards', 'advanced', 'compare', 'teams', 'players'] as StatTab[]).map(t => (
-                <button 
+              {(['leaderboards', 'advanced', 'compare', 'teams', 'players', 'attendance'] as StatTab[]).map(t => (
+                <button
                   key={t}
                   onClick={() => { setActiveTab(t); setPage(0); }}
                   className={`text-[10px] font-black uppercase tracking-widest px-4 py-2 rounded-full transition-all ${activeTab === t ? 'bg-amber-500 text-slate-950' : 'bg-slate-800 text-slate-500 hover:text-white'}`}
                 >
-                  {t === 'teams' ? 'Team Stats' : t === 'players' ? 'Player Stats' : t}
+                  {t === 'teams' ? 'Team Stats' : t === 'players' ? 'Player Stats' : t === 'attendance' ? '🏟 Attendance' : t}
                 </button>
               ))}
             </div>
@@ -1636,6 +1637,10 @@ const Stats: React.FC<StatsProps> = ({ league, onViewRoster, onManageTeam, onVie
       {activeTab === 'teams' && <TeamStatsTable />}
 
       {activeTab === 'players' && <PlayerStatsTable />}
+
+      {activeTab === 'attendance' && (
+        <Attendance league={league} onManageTeam={onManageTeam} />
+      )}
     </div>
   );
 };

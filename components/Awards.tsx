@@ -1,5 +1,5 @@
 
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useRef, useEffect } from 'react';
 import { LeagueState, SeasonAwards, AwardWinner, Player, Coach, Team } from '../types';
 import TeamBadge from './TeamBadge';
 import { PlayerLink } from '../context/NavigationContext';
@@ -18,118 +18,162 @@ const Awards: React.FC<AwardsProps> = ({ league, onScout, onScoutCoach, onManage
   const [historyYear, setHistoryYear] = useState<number | null>(null);
   const [sortConfig, setSortConfig] = useState<{ key: string, direction: 'asc' | 'desc' }>({ key: 'score', direction: 'desc' });
 
+  // Track previous score-based rankings to compute movement arrows
+  const prevRanksRef = useRef<Record<string, Record<string, number>>>({});
+  const [rankDeltas, setRankDeltas] = useState<Record<string, Record<string, number>>>({});
+
   const allPlayers = useMemo(() => league.teams.flatMap(t => t.roster), [league.teams]);
   const allTeams = league.teams;
 
   const awardRaces = useMemo(() => {
-    const getPPG = (p: Player) => p.stats.gamesPlayed > 0 ? p.stats.points / p.stats.gamesPlayed : 0;
-    const getRPG = (p: Player) => p.stats.gamesPlayed > 0 ? p.stats.rebounds / p.stats.gamesPlayed : 0;
-    const getAPG = (p: Player) => p.stats.gamesPlayed > 0 ? p.stats.assists / p.stats.gamesPlayed : 0;
-    const getBPG = (p: Player) => p.stats.gamesPlayed > 0 ? p.stats.blocks / p.stats.gamesPlayed : 0;
-    const getSPG = (p: Player) => p.stats.gamesPlayed > 0 ? p.stats.steals / p.stats.gamesPlayed : 0;
-    const getPER = (p: Player) => {
+    // ── Season context ───────────────────────────────────────────────────────
+    // Use the maximum team record (wins+losses) so the threshold scales with
+    // actual games played rather than a fixed cutoff.
+    const maxGamesPlayed = Math.max(...league.teams.map(t => t.wins + t.losses), 0);
+    // Minimum GP to appear in a race: 1 game during first week, scales to 5+ by mid-season
+    const minGP = maxGamesPlayed < 5 ? 1 : maxGamesPlayed < 15 ? 3 : 5;
+    const seasonActive = !league.isOffseason && maxGamesPlayed > 0;
+
+    const getPPG  = (p: Player) => p.stats.gamesPlayed > 0 ? p.stats.points  / p.stats.gamesPlayed : 0;
+    const getRPG  = (p: Player) => p.stats.gamesPlayed > 0 ? p.stats.rebounds / p.stats.gamesPlayed : 0;
+    const getAPG  = (p: Player) => p.stats.gamesPlayed > 0 ? p.stats.assists  / p.stats.gamesPlayed : 0;
+    const getBPG  = (p: Player) => p.stats.gamesPlayed > 0 ? p.stats.blocks   / p.stats.gamesPlayed : 0;
+    const getSPG  = (p: Player) => p.stats.gamesPlayed > 0 ? p.stats.steals   / p.stats.gamesPlayed : 0;
+    const getMPG  = (p: Player) => p.stats.gamesPlayed > 0 ? p.stats.minutes  / p.stats.gamesPlayed : 0;
+    const getFGPct = (p: Player) => p.stats.fga > 0 ? p.stats.fgm / p.stats.fga : 0;
+    const getPER  = (p: Player) => {
       if (p.stats.gamesPlayed === 0) return 0;
-      const val = (p.stats.points + p.stats.rebounds + p.stats.assists + p.stats.steals + p.stats.blocks) 
+      const val = (p.stats.points + p.stats.rebounds + p.stats.assists + p.stats.steals + p.stats.blocks)
                 - (p.stats.fga - p.stats.fgm) - (p.stats.fta - p.stats.ftm) - p.stats.tov;
       return val / p.stats.gamesPlayed;
     };
 
+    // ── Eligibility helpers ──────────────────────────────────────────────────
+    // Rookie: drafted this season OR no prior career stats (undrafted first-year player)
+    const isRookie = (p: Player) =>
+      p.draftInfo?.year === league.season ||
+      (p.careerStats?.length === 0 && p.stats.gamesPlayed >= 1);
+
+    // True bench player: not in starting rotation and started < 35% of games
+    const isBenchPlayer = (p: Player) => {
+      if (p.status === 'Starter') return false;
+      const team = allTeams.find(t => t.roster.some(rp => rp.id === p.id));
+      if (!team) return false;
+      if (Object.values(team.rotation?.starters ?? {}).includes(p.id)) return false;
+      const gp = Math.max(1, p.stats.gamesPlayed);
+      return (p.stats.gamesStarted ?? 0) <= Math.floor(gp * 0.35);
+    };
+
+    // ── MVP ──────────────────────────────────────────────────────────────────
     const mvp = allPlayers
-      .filter(p => p.stats.gamesPlayed > 5)
+      .filter(p => p.stats.gamesPlayed >= minGP)
       .map(p => {
         const team = allTeams.find(t => t.roster.some(rp => rp.id === p.id))!;
-        const ppg = getPPG(p);
-        const rpg = getRPG(p);
-        const apg = getAPG(p);
-        const per = getPER(p);
+        const ppg = getPPG(p), rpg = getRPG(p), apg = getAPG(p), per = getPER(p);
+        const fgPct = getFGPct(p);
         const score = (ppg * 1.2) + (rpg * 0.8) + (apg * 1.0) + (per * 1.5) + (team.wins * 0.5);
-        return { player: p, team, score, stats: { PPG: ppg.toFixed(1), TRB: rpg.toFixed(1), AST: apg.toFixed(1), PER: per.toFixed(1) } };
+        return { player: p, team, score, stats: { PPG: ppg.toFixed(1), TRB: rpg.toFixed(1), AST: apg.toFixed(1), FG: `${(fgPct * 100).toFixed(1)}%`, PER: per.toFixed(1), GP: p.stats.gamesPlayed } };
       })
       .sort((a, b) => b.score - a.score)
-      .slice(0, 10);
+      .slice(0, 15);
 
+    // ── DPOY ─────────────────────────────────────────────────────────────────
     const dpoy = allPlayers
-      .filter(p => p.stats.gamesPlayed > 5)
+      .filter(p => p.stats.gamesPlayed >= minGP)
       .map(p => {
         const team = allTeams.find(t => t.roster.some(rp => rp.id === p.id))!;
-        const bpg = getBPG(p);
-        const spg = getSPG(p);
-        const rpg = getRPG(p);
-        const score = (bpg * 4) + (spg * 3) + (rpg * 0.5) + (p.attributes.defense * 0.1) + (team.wins * 0.2);
-        return { player: p, team, score, stats: { BPG: bpg.toFixed(1), SPG: spg.toFixed(1), TRB: rpg.toFixed(1), DREB: (p.stats.defReb / p.stats.gamesPlayed).toFixed(1) } };
+        const bpg = getBPG(p), spg = getSPG(p), rpg = getRPG(p);
+        const dreb = p.stats.gamesPlayed > 0 ? p.stats.defReb / p.stats.gamesPlayed : 0;
+        const score = (bpg * 4) + (spg * 3) + (rpg * 0.5) + (p.attributes?.defense ?? 0) * 0.1 + (team.wins * 0.2);
+        return { player: p, team, score, stats: { BPG: bpg.toFixed(1), SPG: spg.toFixed(1), TRB: rpg.toFixed(1), DREB: dreb.toFixed(1), GP: p.stats.gamesPlayed } };
       })
       .sort((a, b) => b.score - a.score)
-      .slice(0, 10);
+      .slice(0, 15);
 
+    // ── ROY ──────────────────────────────────────────────────────────────────
     const roy = allPlayers
-      .filter(p => p.stats.gamesPlayed > 5 && p.draftInfo.year === league.season)
+      .filter(p => p.stats.gamesPlayed >= minGP && isRookie(p))
       .map(p => {
         const team = allTeams.find(t => t.roster.some(rp => rp.id === p.id))!;
-        const ppg = getPPG(p);
-        const rpg = getRPG(p);
-        const apg = getAPG(p);
-        const score = (ppg * 1.5) + (rpg * 1.0) + (apg * 1.2);
-        return { player: p, team, score, stats: { PPG: ppg.toFixed(1), TRB: rpg.toFixed(1), AST: apg.toFixed(1), OVR: p.rating } };
+        const ppg = getPPG(p), rpg = getRPG(p), apg = getAPG(p);
+        const score = (ppg * 1.5) + (rpg * 1.0) + (apg * 1.2) + (p.rating * 0.1);
+        return { player: p, team, score, stats: { PPG: ppg.toFixed(1), TRB: rpg.toFixed(1), AST: apg.toFixed(1), OVR: p.rating, GP: p.stats.gamesPlayed } };
       })
       .sort((a, b) => b.score - a.score)
-      .slice(0, 10);
+      .slice(0, 15);
 
+    // ── 6th Man / Woman ───────────────────────────────────────────────────────
     const smoy = allPlayers
-      .filter(p => {
-        if (p.stats.gamesPlayed <= 5) return false;
-        // Must not carry Starter status
-        if (p.status === 'Starter') return false;
-        // Must not be in the team's active starting lineup
-        const team = allTeams.find(t => t.roster.some(rp => rp.id === p.id));
-        if (!team) return false;
-        const rotationStarters = Object.values(team.rotation?.starters ?? {});
-        if (rotationStarters.includes(p.id)) return false;
-        // gamesStarted guard — excludes mid-season promotions who accumulated starter stats
-        const gp = Math.max(1, p.stats.gamesPlayed);
-        if ((p.stats.gamesStarted ?? 0) > Math.floor(gp * 0.20)) return false;
-        return true;
-      })
+      .filter(p => p.stats.gamesPlayed >= minGP && isBenchPlayer(p))
       .map(p => {
         const team = allTeams.find(t => t.roster.some(rp => rp.id === p.id))!;
-        const ppg = getPPG(p);
-        const rpg = getRPG(p);
-        const apg = getAPG(p);
+        const ppg = getPPG(p), rpg = getRPG(p), apg = getAPG(p), mpg = getMPG(p);
         const score = (ppg * 1.5) + (rpg * 0.8) + (apg * 1.0) + (team.wins * 0.2);
-        return { player: p, team, score, stats: { PPG: ppg.toFixed(1), TRB: rpg.toFixed(1), AST: apg.toFixed(1), MIN: (p.stats.minutes / p.stats.gamesPlayed).toFixed(1) } };
+        return { player: p, team, score, stats: { PPG: ppg.toFixed(1), TRB: rpg.toFixed(1), AST: apg.toFixed(1), MIN: mpg.toFixed(1), GP: p.stats.gamesPlayed } };
       })
       .sort((a, b) => b.score - a.score)
-      .slice(0, 10);
+      .slice(0, 15);
 
+    // ── MIP ──────────────────────────────────────────────────────────────────
     const mip = allPlayers
-      .filter(p => p.stats.gamesPlayed > 10 && p.careerStats.length > 0)
+      .filter(p => p.stats.gamesPlayed >= minGP && p.careerStats.length > 0)
       .map(p => {
         const team = allTeams.find(t => t.roster.some(rp => rp.id === p.id))!;
         const lastSeason = p.careerStats[p.careerStats.length - 1];
         const lastPPG = lastSeason.gamesPlayed > 0 ? lastSeason.points / lastSeason.gamesPlayed : 0;
         const currentPPG = getPPG(p);
         const ppgJump = currentPPG - lastPPG;
-        const score = (ppgJump * 10) + (p.rating - (p.rating - 5)) * 2; // Simple growth score
-        return { player: p, team, score, stats: { "PPG Jump": ppgJump.toFixed(1), "Curr PPG": currentPPG.toFixed(1), "Prev PPG": lastPPG.toFixed(1), OVR: p.rating } };
+        const score = (ppgJump * 10) + (p.rating - (p.rating - 5)) * 2;
+        return { player: p, team, score, stats: { 'PPG Jump': ppgJump.toFixed(1), 'Curr PPG': currentPPG.toFixed(1), 'Prev PPG': lastPPG.toFixed(1), OVR: p.rating, GP: p.stats.gamesPlayed } };
       })
       .filter(c => c.score > 0)
       .sort((a, b) => b.score - a.score)
-      .slice(0, 10);
+      .slice(0, 15);
 
+    // ── COY ──────────────────────────────────────────────────────────────────
     const coy = allTeams
       .map(t => {
         const coach = t.staff.headCoach;
         if (!coach) return null;
-        const expectedWins = (t.roster.reduce((acc, p) => acc + p.rating, 0) / t.roster.length - 70) * 0.8 + 30;
+        const avgOVR = t.roster.length > 0
+          ? t.roster.reduce((acc, p) => acc + p.rating, 0) / t.roster.length
+          : 70;
+        const expectedWins = (avgOVR - 70) * 0.8 + 30;
         const winsOverExpected = t.wins - expectedWins;
         const score = (t.wins * 1.0) + (winsOverExpected * 2.0);
-        return { coach, team: t, score, stats: { Wins: t.wins, Losses: t.losses, Record: `${t.wins}-${t.losses}`, "W vs Exp": winsOverExpected.toFixed(1) } };
+        return { coach, team: t, score, stats: { Wins: t.wins, Losses: t.losses, Record: `${t.wins}-${t.losses}`, 'W vs Exp': winsOverExpected.toFixed(1) } };
       })
       .filter(c => c !== null)
       .sort((a, b) => b!.score - a!.score)
-      .slice(0, 10);
+      .slice(0, 15);
 
-    return { mvp, dpoy, roy, smoy, mip, coy };
-  }, [allPlayers, allTeams, league.season]);
+    return { mvp, dpoy, roy, smoy, mip, coy, maxGamesPlayed, seasonActive };
+  }, [allPlayers, allTeams, league.season, league.isOffseason, league.teams]);
+
+  // Recompute rank-movement deltas whenever awardRaces changes
+  useEffect(() => {
+    const raceKeys = ['mvp', 'dpoy', 'roy', 'smoy', 'mip', 'coy'] as const;
+    const newDeltas: Record<string, Record<string, number>> = {};
+
+    for (const key of raceKeys) {
+      const candidates = awardRaces[key] as any[];
+      const prev = prevRanksRef.current[key] ?? {};
+      const current: Record<string, number> = {};
+      newDeltas[key] = {};
+
+      candidates.forEach((c, idx) => {
+        const id: string = c.player?.id ?? c.coach?.id ?? '';
+        current[id] = idx + 1;
+        if (id in prev) {
+          newDeltas[key][id] = prev[id] - (idx + 1); // positive = moved up, negative = fell
+        }
+      });
+
+      prevRanksRef.current[key] = current;
+    }
+
+    setRankDeltas(newDeltas);
+  }, [awardRaces]);
 
   const currentAwards = league.currentSeasonAwards || (league.awardHistory && league.awardHistory[0]);
   const allCoaches = useMemo(() => league.teams.flatMap(t => [t.staff.headCoach]), [league.teams]);
@@ -207,104 +251,148 @@ const Awards: React.FC<AwardsProps> = ({ league, onScout, onScoutCoach, onManage
     </div>
   );
 
-  const RaceTable = ({ title, candidates, columns }: { title: string, candidates: any[], columns: string[] }) => {
-    const [localSort, setLocalSort] = useState<{ key: string, direction: 'asc' | 'desc' }>({ key: 'score', direction: 'desc' });
+  const RankArrow = ({ delta }: { delta?: number }) => {
+    if (delta === undefined || delta === 0) return <span className="text-slate-700 text-[9px] font-black">—</span>;
+    if (delta > 0) return <span className="text-emerald-400 text-[9px] font-black leading-none">↑{delta}</span>;
+    return <span className="text-rose-400 text-[9px] font-black leading-none">↓{Math.abs(delta)}</span>;
+  };
+
+  const RaceTable = ({ title, candidates, columns, gamesPlayed, seasonActive, deltas }: {
+    title: string;
+    candidates: any[];
+    columns: string[];
+    gamesPlayed: number;
+    seasonActive: boolean;
+    deltas?: Record<string, number>;
+  }) => {
+    const allCols = [...columns, 'GP'];
+    const [localSort, setLocalSort] = useState<{ key: string, direction: 'asc' | 'desc' }>({ key: columns[0], direction: 'desc' });
 
     const sortedCandidates = useMemo(() => {
       return [...candidates].sort((a, b) => {
-        let valA = localSort.key === 'score' ? a.score : parseFloat(a.stats[localSort.key]);
-        let valB = localSort.key === 'score' ? b.score : parseFloat(b.stats[localSort.key]);
-        
-        if (isNaN(valA)) valA = a.stats[localSort.key];
-        if (isNaN(valB)) valB = b.stats[localSort.key];
-
-        if (valA < valB) return localSort.direction === 'asc' ? -1 : 1;
-        if (valA > valB) return localSort.direction === 'asc' ? 1 : -1;
-        return 0;
+        const rawA = localSort.key === 'GP' ? a.stats.GP : a.stats[localSort.key];
+        const rawB = localSort.key === 'GP' ? b.stats.GP : b.stats[localSort.key];
+        const valA = typeof rawA === 'string' ? parseFloat(rawA) : rawA;
+        const valB = typeof rawB === 'string' ? parseFloat(rawB) : rawB;
+        if (isNaN(valA) || isNaN(valB)) return String(rawA ?? '').localeCompare(String(rawB ?? ''));
+        return localSort.direction === 'asc' ? valA - valB : valB - valA;
       });
     }, [candidates, localSort]);
 
     const toggleSort = (key: string) => {
       setLocalSort(prev => ({
         key,
-        direction: prev.key === key && prev.direction === 'desc' ? 'asc' : 'desc'
+        direction: prev.key === key && prev.direction === 'desc' ? 'asc' : 'desc',
       }));
     };
 
+    const leader = candidates[0]; // score-rank #1 is always index 0 in candidates
+
     return (
       <div className="bg-slate-900 border border-slate-800 rounded-[2rem] overflow-hidden shadow-2xl">
-        <div className="p-6 border-b border-slate-800 flex justify-between items-center bg-slate-900/50">
-          <h3 className="text-sm font-black uppercase tracking-[0.3em] text-amber-500">{title} Race</h3>
-          <button className="text-[9px] font-black uppercase text-slate-500 hover:text-white transition-colors">More: Edit Awards</button>
+        <div className="p-5 border-b border-slate-800 flex justify-between items-center bg-slate-900/50 gap-4">
+          <div className="flex items-center gap-3 min-w-0">
+            <h3 className="text-sm font-black uppercase tracking-[0.3em] text-amber-500 shrink-0">{title} Race</h3>
+            {leader && (
+              <span className="text-[10px] font-bold text-slate-500 truncate">
+                Leader: <span className="text-white">{leader.player?.name || leader.coach?.name}</span>
+              </span>
+            )}
+          </div>
+          <span className="text-[9px] font-black uppercase text-slate-600 shrink-0">
+            {candidates.length} candidate{candidates.length !== 1 ? 's' : ''}
+          </span>
         </div>
-        <div className="overflow-x-auto">
-          <table className="w-full text-left border-collapse">
-            <thead>
-              <tr className="bg-slate-950/50">
-                <th className="p-4 text-[9px] font-black uppercase text-slate-500 tracking-widest border-b border-slate-800">#</th>
-                <th className="p-4 text-[9px] font-black uppercase text-slate-500 tracking-widest border-b border-slate-800">Name</th>
-                <th className="p-4 text-[9px] font-black uppercase text-slate-500 tracking-widest border-b border-slate-800">Team</th>
-                {columns.map(col => (
-                  <th 
-                    key={col} 
-                    onClick={() => toggleSort(col)}
-                    className="p-4 text-[9px] font-black uppercase text-slate-500 tracking-widest border-b border-slate-800 text-right cursor-pointer hover:text-amber-500 transition-colors"
-                  >
-                    <div className="flex items-center justify-end gap-1">
-                      {col}
-                      {localSort.key === col && (
-                        <span>{localSort.direction === 'desc' ? '↓' : '↑'}</span>
-                      )}
-                    </div>
-                  </th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {sortedCandidates.length === 0 ? (
-                <tr>
-                  <td colSpan={columns.length + 3} className="p-12 text-center text-slate-600 italic text-sm">
-                    No candidates yet... Keep simulating to see the race heat up.
-                  </td>
+
+        {candidates.length === 0 ? (
+          <div className="p-10 text-center space-y-2">
+            {!seasonActive ? (
+              <>
+                <p className="text-slate-500 font-bold text-sm">Season hasn't started yet</p>
+                <p className="text-[10px] text-slate-700 font-black uppercase tracking-widest">Race begins after tip-off</p>
+              </>
+            ) : (
+              <>
+                <p className="text-slate-400 font-bold text-sm">🔥 Race heating up after {gamesPlayed} game{gamesPlayed !== 1 ? 's' : ''}</p>
+                <p className="text-[10px] text-slate-600 font-black uppercase tracking-widest">Candidates being tracked — check back soon</p>
+              </>
+            )}
+          </div>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full text-left border-collapse">
+              <thead>
+                <tr className="bg-slate-950/50">
+                  <th className="p-3 text-[9px] font-black uppercase text-slate-500 tracking-widest border-b border-slate-800 whitespace-nowrap"># ±</th>
+                  <th className="p-3 text-[9px] font-black uppercase text-slate-500 tracking-widest border-b border-slate-800">Name</th>
+                  <th className="p-3 text-[9px] font-black uppercase text-slate-500 tracking-widest border-b border-slate-800">Team</th>
+                  {allCols.map(col => (
+                    <th
+                      key={col}
+                      onClick={() => toggleSort(col)}
+                      className={`p-3 text-[9px] font-black uppercase tracking-widest border-b border-slate-800 text-right cursor-pointer transition-colors select-none ${
+                        localSort.key === col ? 'text-amber-500' : 'text-slate-500 hover:text-slate-300'
+                      }`}
+                    >
+                      {col}{localSort.key === col ? (localSort.direction === 'desc' ? ' ↓' : ' ↑') : ''}
+                    </th>
+                  ))}
                 </tr>
-              ) : (
-                sortedCandidates.map((c, idx) => (
-                  <tr 
-                    key={c.player?.id || c.coach?.id} 
+              </thead>
+              <tbody>
+                {sortedCandidates.map((c, idx) => (
+                  <tr
+                    key={c.player?.id || c.coach?.id}
                     onClick={() => c.player ? onScout(c.player) : onScoutCoach(c.coach)}
-                    className={`group cursor-pointer border-b border-slate-800/50 hover:bg-slate-800/30 transition-colors ${idx < 3 ? 'bg-emerald-500/5' : ''}`}
+                    className={`group cursor-pointer border-b border-slate-800/40 hover:bg-slate-800/30 transition-colors ${
+                      idx === 0 ? 'bg-amber-500/5' : idx < 3 ? 'bg-emerald-500/3' : ''
+                    }`}
                   >
-                    <td className="p-4">
-                      <span className={`text-xs font-mono font-bold ${idx === 0 ? 'text-amber-500' : 'text-slate-600'}`}>{idx + 1}</span>
+                    <td className="p-3">
+                      <div className="flex items-center gap-1.5">
+                        <span className={`text-xs font-mono font-black ${
+                          idx === 0 ? 'text-amber-500' : idx === 1 ? 'text-slate-400' : idx === 2 ? 'text-amber-900' : 'text-slate-700'
+                        }`}>{idx + 1}</span>
+                        <RankArrow delta={deltas?.[c.player?.id ?? c.coach?.id ?? '']} />
+                      </div>
                     </td>
-                    <td className="p-4">
+                    <td className="p-3 min-w-[130px]">
                       <div className="flex flex-col">
-                        <span className="text-sm font-bold text-white group-hover:text-amber-500 transition-colors">{c.player?.name || c.coach?.name}</span>
+                        <span className="text-sm font-bold text-white group-hover:text-amber-500 transition-colors leading-tight">
+                          {c.player?.name || c.coach?.name}
+                        </span>
                         <span className="text-[9px] font-black text-slate-500 uppercase tracking-widest">
-                          {c.player ? `${c.player.position} • ${c.player.age}y` : 'Head Coach'}
+                          {c.player ? `${c.player.position} · ${c.player.age}y` : 'Head Coach'}
                         </span>
                       </div>
                     </td>
-                    <td className="p-4">
-                      <div 
-                        className="flex items-center gap-2 cursor-pointer group/team hover:opacity-80 transition-opacity"
-                        onClick={() => onManageTeam(c.team.id)}
+                    <td className="p-3 min-w-[110px]">
+                      <div
+                        className="flex items-center gap-1.5 cursor-pointer hover:opacity-75 transition-opacity"
+                        onClick={e => { e.stopPropagation(); onManageTeam(c.team.id); }}
                       >
-                         <TeamBadge team={c.team} size="xs" />
-                         <span className="text-[10px] font-bold text-slate-400 uppercase group-hover/team:text-amber-500 transition-colors">{c.team.name} ({c.team.wins}-{c.team.losses})</span>
+                        <TeamBadge team={c.team} size="xs" />
+                        <span className="text-[9px] font-bold text-slate-400 uppercase group-hover/team:text-amber-500 whitespace-nowrap">
+                          {c.team.abbreviation} {c.team.wins}-{c.team.losses}
+                        </span>
                       </div>
                     </td>
-                    {columns.map(col => (
-                      <td key={col} className="p-4 text-right">
-                        <span className={`text-xs font-mono font-bold ${idx < 3 ? 'text-emerald-400' : 'text-slate-300'}`}>{c.stats[col]}</span>
-                      </td>
-                    ))}
+                    {allCols.map(col => {
+                      const val = col === 'GP' ? c.stats.GP : c.stats[col];
+                      return (
+                        <td key={col} className="p-3 text-right whitespace-nowrap">
+                          <span className={`text-xs font-mono font-bold ${
+                            idx === 0 ? 'text-amber-400' : idx < 3 ? 'text-emerald-400' : 'text-slate-300'
+                          }`}>{val}</span>
+                        </td>
+                      );
+                    })}
                   </tr>
-                ))
-              )}
-            </tbody>
-          </table>
-        </div>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
       </div>
     );
   };
@@ -351,14 +439,22 @@ const Awards: React.FC<AwardsProps> = ({ league, onScout, onScoutCoach, onManage
       </header>
 
       {activeTab === 'races' && (
-        <div className="space-y-12 animate-in slide-in-from-bottom-4 duration-700">
-          <div className="grid grid-cols-1 xl:grid-cols-2 gap-8">
-            <RaceTable title="MVP" candidates={awardRaces.mvp} columns={['PPG', 'TRB', 'AST', 'PER']} />
-            <RaceTable title="DPOY" candidates={awardRaces.dpoy} columns={['BPG', 'SPG', 'TRB', 'DREB']} />
-            <RaceTable title="ROY" candidates={awardRaces.roy} columns={['PPG', 'TRB', 'AST', 'OVR']} />
-            <RaceTable title="6th Man" candidates={awardRaces.smoy} columns={['PPG', 'TRB', 'AST', 'MIN']} />
-            <RaceTable title="MIP" candidates={awardRaces.mip} columns={['PPG Jump', 'Curr PPG', 'Prev PPG', 'OVR']} />
-            <RaceTable title="Coach" candidates={awardRaces.coy} columns={['Wins', 'Losses', 'Record', 'W vs Exp']} />
+        <div className="space-y-8 animate-in slide-in-from-bottom-4 duration-700">
+          {awardRaces.seasonActive && (
+            <div className="flex items-center gap-3 px-1">
+              <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse shrink-0" />
+              <p className="text-[10px] font-black uppercase tracking-widest text-slate-500">
+                Live — {awardRaces.maxGamesPlayed} game{awardRaces.maxGamesPlayed !== 1 ? 's' : ''} played · Updates after every game
+              </p>
+            </div>
+          )}
+          <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
+            <RaceTable title="MVP"   candidates={awardRaces.mvp}  columns={['PPG', 'TRB', 'AST', 'FG', 'PER']}          gamesPlayed={awardRaces.maxGamesPlayed} seasonActive={awardRaces.seasonActive} deltas={rankDeltas.mvp} />
+            <RaceTable title="DPOY"  candidates={awardRaces.dpoy} columns={['BPG', 'SPG', 'TRB', 'DREB']}               gamesPlayed={awardRaces.maxGamesPlayed} seasonActive={awardRaces.seasonActive} deltas={rankDeltas.dpoy} />
+            <RaceTable title="ROY"   candidates={awardRaces.roy}  columns={['PPG', 'TRB', 'AST', 'OVR']}               gamesPlayed={awardRaces.maxGamesPlayed} seasonActive={awardRaces.seasonActive} deltas={rankDeltas.roy} />
+            <RaceTable title={league.settings.playerGenderRatio === 100 ? '6th Woman' : '6th Man'} candidates={awardRaces.smoy} columns={['PPG', 'TRB', 'AST', 'MIN']} gamesPlayed={awardRaces.maxGamesPlayed} seasonActive={awardRaces.seasonActive} deltas={rankDeltas.smoy} />
+            <RaceTable title="MIP"   candidates={awardRaces.mip}  columns={['PPG Jump', 'Curr PPG', 'Prev PPG', 'OVR']}  gamesPlayed={awardRaces.maxGamesPlayed} seasonActive={awardRaces.seasonActive} deltas={rankDeltas.mip} />
+            <RaceTable title="Coach" candidates={awardRaces.coy}  columns={['Wins', 'Losses', 'Record', 'W vs Exp']}     gamesPlayed={awardRaces.maxGamesPlayed} seasonActive={awardRaces.seasonActive} deltas={rankDeltas.coy} />
           </div>
         </div>
       )}
@@ -377,7 +473,7 @@ const Awards: React.FC<AwardsProps> = ({ league, onScout, onScoutCoach, onManage
             <AwardCard title="Defensive Player" winner={viewAwards.dpoy} icon="🛡️" />
             <AwardCard title="Rookie of the Year" winner={viewAwards.roy} icon="✨" />
             <AwardCard title="Executive of the Year" winner={viewAwards.executiveOfTheYear} icon="💼" />
-            <AwardCard title="Sixth Man of Year" winner={viewAwards.sixthMan} icon="⚡" />
+            <AwardCard title={league.settings.playerGenderRatio === 100 ? 'Sixth Woman of Year' : 'Sixth Man of Year'} winner={viewAwards.sixthMan} icon="⚡" />
             <AwardCard title="Most Improved" winner={viewAwards.mip} icon="📈" />
             <AwardCard title="Coach of the Year" winner={viewAwards.coy} icon="🧠" />
           </div>

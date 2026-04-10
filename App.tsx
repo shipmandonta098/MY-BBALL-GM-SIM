@@ -1,8 +1,9 @@
 
 import React, { useState, useEffect, useCallback } from 'react';
-import { LeagueState, Player, Team, GameResult, PlayerStatus, ScheduleGame, BulkSimSummary, Prospect, Coach, TradeProposal, Position, NewsItem, NewsCategory, LeagueSettings, SeasonAwards, PlayoffBracket, PlayoffSeries, Transaction, TransactionType, PowerRankingSnapshot, PowerRankingEntry, GMProfile, GMMilestone, RivalryStats, InjuryType, SeasonPhase, AllStarWeekendData, AllStarVoteEntry } from './types';
-import { generateLeagueTeams, generateSeasonSchedule, generateProspects, generateFreeAgentPool, generateCoachPool, EXPANSION_TEAM_POOL, generateCoach, generatePlayer, generateDefaultRotation, enforcePositionalBounds, ageFromBirthdate, getCoachPreferredScheme } from './constants';
+import { LeagueState, Player, Team, GameResult, PlayerStatus, ScheduleGame, BulkSimSummary, Prospect, Coach, TradeProposal, Position, NewsItem, NewsCategory, LeagueSettings, SeasonAwards, PlayoffBracket, PlayoffSeries, Transaction, TransactionType, PowerRankingSnapshot, PowerRankingEntry, GMProfile, GMMilestone, RivalryStats, InjuryType, SeasonPhase, AllStarWeekendData, AllStarVoteEntry, PreviousSeasonStanding } from './types';
+import { generateLeagueTeams, generateSeasonSchedule, generateProspects, generateFreeAgentPool, generateCoachPool, EXPANSION_TEAM_POOL, generateCoach, generatePlayer, generateDefaultRotation, enforcePositionalBounds, ageFromBirthdate, getCoachPreferredScheme, generateGMName } from './constants';
 import { simulateGame, normalizeLeagueOVRs } from './utils/simEngine';
+import { computeGameAttendance } from './utils/attendanceEngine';
 import { autoSimAllStarWeekend } from './utils/allStarSim';
 import { snapshotPlayerStats } from './utils/playerUtils';
 import { generateGameRecap, generateScoutingReport, generateSeasonNarrative, generateCoachScoutingReport, generateNewsHeadline } from './services/geminiService';
@@ -142,6 +143,39 @@ const App: React.FC = () => {
     }
   }, [league, status]);
 
+  // ── Trigger AI FA signings after draft completes ──────────────────────────
+  useEffect(() => {
+    if (status !== 'game' || !league || league.draftPhase !== 'completed' || !league.isOffseason) return;
+    // Only run once per offseason — guard with a flag in newsFeed
+    const alreadyRan = league.newsFeed.some(n => n.id === `ai-fa-run-${league.season}`);
+    if (alreadyRan) return;
+    setLeague(prev => {
+      if (!prev || prev.draftPhase !== 'completed' || !prev.isOffseason) return prev;
+      if (prev.newsFeed.some(n => n.id === `ai-fa-run-${prev.season}`)) return prev;
+      // Run pre-offseason agreements (verbals/informal) then full AI offseason
+      const preResult = aiGMPreOffseasonAgreements(prev, prev.settings.difficulty ?? 'Medium');
+      const afterPre = {
+        ...preResult.updatedState,
+        transactions: [...preResult.transactions, ...(prev.transactions || [])].slice(0, 1000),
+      };
+      const aiResult = runAIGMOffseason(afterPre, afterPre.settings.difficulty ?? 'Medium');
+      const sentinel: typeof prev.newsFeed[0] = {
+        id: `ai-fa-run-${prev.season}`,
+        category: 'transaction' as const,
+        headline: '🟢 Free Agency Opens',
+        content: 'The draft is complete. Teams are now active in free agency.',
+        timestamp: prev.currentDay,
+        realTimestamp: Date.now(),
+        isBreaking: true,
+      };
+      return {
+        ...aiResult.updatedState,
+        newsFeed: [sentinel, ...aiResult.updatedState.newsFeed].slice(0, 200),
+        transactions: [...aiResult.transactions, ...(afterPre.transactions || [])].slice(0, 1000),
+      };
+    });
+  }, [league?.draftPhase, league?.isOffseason, status]);
+
   const recordTransaction = (state: LeagueState, type: TransactionType, teamIds: string[], description: string, playerIds?: string[], value?: number): Transaction[] => {
     const newTransaction: Transaction = {
       id: `tx-${Date.now()}-${Math.random()}`,
@@ -211,6 +245,37 @@ const App: React.FC = () => {
       teams: updatedTeams,
       transactions: updatedTransactions,
       incomingTradeProposals: (league.incomingTradeProposals ?? []).filter(p => p.id !== proposal.id),
+    });
+  };
+
+  /** Accept a player's trade request: keeps them on trade block, boosts AI interest. */
+  const handleAcceptTradeRequest = (playerId: string) => {
+    if (!league) return;
+    updateLeagueState({
+      teams: league.teams.map(t =>
+        t.id === league.userTeamId
+          ? { ...t, roster: t.roster.map(p => p.id === playerId ? { ...p, requestedTrade: true, onTradeBlock: true } : p) }
+          : t
+      ),
+    });
+  };
+
+  /** Decline a player's trade request: clears the flag but drops morale. */
+  const handleDeclineTradeRequest = (playerId: string) => {
+    if (!league) return;
+    updateLeagueState({
+      teams: league.teams.map(t =>
+        t.id === league.userTeamId
+          ? {
+              ...t,
+              roster: t.roster.map(p =>
+                p.id === playerId
+                  ? { ...p, requestedTrade: false, morale: Math.max(0, (p.morale ?? 75) - 10) }
+                  : p
+              ),
+            }
+          : t
+      ),
     });
   };
 
@@ -625,7 +690,14 @@ const App: React.FC = () => {
       if (fireChance === 0 || Math.random() >= fireChance) continue;
 
       // ── FIRE ──
-      newState = await addNewsItem(newState, 'firing', { team, coach: hc, detail: `Fired following ${fireReason}.` }, true);
+      const pick = <T,>(arr: T[]): T => arr[Math.floor(Math.random() * arr.length)];
+      const firingDetail = pick([
+        `The ${team.name} have fired head coach ${hc.name} following ${fireReason}. The front office thanked him for his service but said a change was necessary.`,
+        `${team.name} part ways with ${hc.name} after ${fireReason}. The search for a permanent replacement begins immediately.`,
+        `Sources confirm: ${hc.name} is out in ${team.city ?? team.name}. The ${team.name} cited ${fireReason} as the deciding factor. An interim coach will be named shortly.`,
+        `${team.name} make a move — head coach ${hc.name} has been relieved of his duties following ${fireReason}.`,
+      ]);
+      newState = await addNewsItem(newState, 'firing', { team, coach: hc, detail: firingDetail }, true);
       newState.transactions = recordTransaction(newState, 'firing', [team.id], `${team.name} fired Head Coach ${hc.name} following ${fireReason}.`);
 
       // Released coach returns to market
@@ -693,8 +765,7 @@ const App: React.FC = () => {
       }, false);
     }
     // Rare practice/travel illness
-    if (Math.random() > 0.97) {
-      const active = newState.teams.flatMap(t => t.roster).filter(p => p.status !== 'Injured');
+    if (Math.random() > 0.97) {      const active = newState.teams.flatMap(t => t.roster).filter(p => p.status !== 'Injured');
       if (active.length > 0) {
         const unlucky = active[Math.floor(Math.random() * active.length)];
         const team = newState.teams.find(t => t.roster.some(p => p.id === unlucky.id))!;
@@ -720,6 +791,71 @@ const App: React.FC = () => {
         newState = await addNewsItem(newState, 'injury', { player: unlucky, team, detail: illnessDetail }, false);
       }
     }
+
+    // ── Off-court incident suspensions (very rare, ~once or twice per season league-wide)
+    // Only triggers on non-offseason days every 5 days; targets Hot Head / Diva/Star players
+    if (!newState.isOffseason && newState.currentDay % 5 === 0) {
+      const allActivePlayers = newState.teams.flatMap(t =>
+        t.roster
+          .filter(p => !p.isSuspended && p.status !== 'Injured' && !p.injuryDaysLeft)
+          .map(p => ({ player: p, team: t }))
+      );
+      for (const { player, team } of allActivePlayers) {
+        const traits = player.personalityTraits ?? [];
+        // Base chance: ~0.05% per 5-day check = ~1% per 100 checks (~season)
+        // Hot Head and Diva/Star are more likely; Professional nearly immune
+        let incidentChance = 0.0005;
+        if (traits.includes('Hot Head'))     incidentChance *= 6;
+        if (traits.includes('Diva/Star'))    incidentChance *= 3;
+        if (traits.includes('Tough/Alpha')) incidentChance *= 2;
+        if (traits.includes('Professional')) incidentChance *= 0.1;
+        if (traits.includes('Leader'))       incidentChance *= 0.3;
+        if (Math.random() >= incidentChance) continue;
+        // Cooldown: only one off-court incident per player per 20-day window
+        const cooldownId = `offcourt-incident-${player.id}-w${Math.floor(newState.currentDay / 20)}`;
+        if ((newState.newsFeed ?? []).some(n => n.id === cooldownId)) continue;
+        const games = 2 + Math.floor(Math.random() * 4); // 2-5 games
+        const lastName = player.name.split(' ').slice(-1)[0];
+        const pick = <T,>(arr: T[]): T => arr[Math.floor(Math.random() * arr.length)];
+        const incidentType = pick(['an off-court altercation', 'conduct detrimental to the league', 'a violation of league conduct policy', 'an incident at a public venue', 'an altercation during a team flight']);
+        const detail = `${player.name} has been suspended ${games} games by the league following ${incidentType}. The team was notified and issued a statement.`;
+        newState = {
+          ...newState,
+          teams: newState.teams.map(t => t.id !== team.id ? t : {
+            ...t,
+            roster: t.roster.map(p => p.id !== player.id ? p : {
+              ...p,
+              isSuspended: true,
+              suspensionGames: games,
+              suspensionReason: incidentType,
+              morale: Math.max(0, Math.min(100, (p.morale ?? 75) - 12)),
+            })
+          })
+        };
+        const updTeam = newState.teams.find(t => t.id === team.id)!;
+        const updPlayer = updTeam.roster.find(p => p.id === player.id)!;
+        newState = await addNewsItem(newState, 'suspension' as NewsCategory, { player: updPlayer, team: updTeam, detail }, true);
+        // Owner patience penalty
+        if (team.id === newState.userTeamId) {
+          newState = {
+            ...newState,
+            teams: newState.teams.map(t => t.id !== team.id ? t : {
+              ...t,
+              finances: { ...t.finances, ownerPatience: Math.max(0, Math.min(100, t.finances.ownerPatience - 5)) }
+            })
+          };
+        }
+        // Store cooldown so we don't spam for this player
+        const cooldownNewsItem: NewsItem = {
+          id: cooldownId, category: 'suspension' as NewsCategory,
+          headline: 'SUSPENSION', content: detail,
+          timestamp: newState.currentDay, realTimestamp: Date.now(),
+          teamId: team.id, playerId: player.id, isBreaking: false,
+        };
+        newState = { ...newState, newsFeed: [cooldownNewsItem, ...(newState.newsFeed ?? [])].slice(0, 200) };
+      }
+    }
+
     // Facilities morale boost — elite facilities add up to +20 baseline morale per week
     if (newState.currentDay % 7 === 0) {
       newState = {
@@ -754,11 +890,24 @@ const App: React.FC = () => {
             const lastName = unhappyDiva.name.split(' ').slice(-1)[0];
             const pick = <T,>(arr: T[]): T => arr[Math.floor(Math.random() * arr.length)];
             const detail = pick([
-              `${unhappyDiva.name} is reportedly frustrated with his role and has requested a trade.`,
-              `${lastName}'s camp has informed the front office: he wants out. A formal trade request is expected.`,
-              `${unhappyDiva.name} is seeking a change of scenery — sources say trade talks have quietly begun.`,
-              `Frustration has boiled over: ${unhappyDiva.name} wants a trade and his morale is at an all-time low.`,
+              `${unhappyDiva.name} has formally requested a trade from the ${team?.name}. Sources say he wants a fresh start in a winning environment.`,
+              `BREAKING: ${lastName}'s camp has delivered a trade request to ${team?.name} management. The star is seeking a change of scenery immediately.`,
+              `${unhappyDiva.name} is done in ${team?.city ?? team?.name}. Multiple sources confirm a formal trade request has been submitted to the front office.`,
+              `Sources close to ${unhappyDiva.name} say frustration has reached a breaking point. He's formally asked the ${team?.name} to trade him.`,
+              `${unhappyDiva.name} wants out. His agent has notified the ${team?.name} front office of a formal trade request, citing a desire to compete for a championship.`,
             ]);
+            // If this is the user's team, mark the player as having requested a trade
+            const isUserTeam = team?.id === newState.userTeamId;
+            if (isUserTeam) {
+              newState = {
+                ...newState,
+                teams: newState.teams.map(t =>
+                  t.id === team.id
+                    ? { ...t, roster: t.roster.map(p => p.id === unhappyDiva.id ? { ...p, requestedTrade: true, onTradeBlock: true } : p) }
+                    : t
+                ),
+              };
+            }
             newState = {
               ...newState,
               newsFeed: [{ id: cooldownId, category: 'trade_request' as const, headline: 'TRADE_REQUEST', content: detail, timestamp: newState.currentDay, realTimestamp: Date.now(), teamId: team?.id, playerId: unhappyDiva.id, isBreaking: true }, ...(newState.newsFeed ?? [])].slice(0, 100),
@@ -868,41 +1017,34 @@ const App: React.FC = () => {
   };
 
   const updateRivalryStats = (state: LeagueState, result: GameResult): RivalryStats[] => {
-    const history = [...(state.rivalryHistory || [])];
     const t1 = result.homeTeamId;
     const t2 = result.awayTeamId;
-    
-    let rivalry = history.find(r => (r.team1Id === t1 && r.team2Id === t2) || (r.team1Id === t2 && r.team2Id === t1));
-    
-    if (!rivalry) {
-      rivalry = {
-        team1Id: t1,
-        team2Id: t2,
-        team1Wins: 0,
-        team2Wins: 0,
-        totalGames: 0,
-        lastFiveGames: [],
-        playoffSeriesCount: 0,
-        buzzerBeaters: 0,
-        comebacks: 0,
-        otGames: 0,
-        badBloodScore: 0
-      };
-      history.push(rivalry);
-    }
+
+    // Find existing entry index so we can replace it (immutable update, no shared-ref mutation)
+    const existingIdx = (state.rivalryHistory || []).findIndex(
+      r => (r.team1Id === t1 && r.team2Id === t2) || (r.team1Id === t2 && r.team2Id === t1)
+    );
+    const history = [...(state.rivalryHistory || [])];
+
+    // Work on a copy of the found entry (or a brand-new one)
+    let rivalry: RivalryStats = existingIdx >= 0
+      ? { ...history[existingIdx] }
+      : { team1Id: t1, team2Id: t2, team1Wins: 0, team2Wins: 0, totalGames: 0, lastFiveGames: [], playoffSeriesCount: 0, buzzerBeaters: 0, comebacks: 0, otGames: 0, badBloodScore: 0 };
 
     const isT1Home = rivalry.team1Id === result.homeTeamId;
     const t1Won = (isT1Home && result.homeScore > result.awayScore) || (!isT1Home && result.awayScore > result.homeScore);
-    
+
     rivalry.totalGames += 1;
     if (t1Won) rivalry.team1Wins += 1; else rivalry.team2Wins += 1;
 
     // Season H2H — reset counters when a new season starts
     if (!rivalry.seasonH2H || rivalry.seasonH2H.season !== result.season) {
       rivalry.seasonH2H = { season: result.season, team1Wins: 0, team2Wins: 0 };
+    } else {
+      rivalry.seasonH2H = { ...rivalry.seasonH2H };
     }
     if (t1Won) rivalry.seasonH2H.team1Wins += 1; else rivalry.seasonH2H.team2Wins += 1;
-    
+
     rivalry.lastFiveGames = [t1Won ? 'team1' : 'team2', ...rivalry.lastFiveGames].slice(0, 5) as ('team1' | 'team2')[];
     rivalry.lastGameResult = {
       winnerId: t1Won ? rivalry.team1Id : rivalry.team2Id,
@@ -918,9 +1060,13 @@ const App: React.FC = () => {
     // Chippy Boosts
     const allStats = [...result.homePlayerStats, ...result.awayPlayerStats];
     allStats.forEach(p => {
-      if (p.techs > 0) rivalry!.badBloodScore += p.techs;
-      if (p.flagrants > 0) rivalry!.badBloodScore += p.flagrants * 1.5; // F1=1.5, F2=3
+      if (p.techs > 0) rivalry.badBloodScore += p.techs;
+      if (p.flagrants > 0) rivalry.badBloodScore += p.flagrants * 1.5;
     });
+
+    // Place the updated copy back into the new array
+    if (existingIdx >= 0) history[existingIdx] = rivalry;
+    else history.push(rivalry);
 
     return history;
   };
@@ -963,12 +1109,20 @@ const App: React.FC = () => {
       return t;
     });
 
-    const updateStats = (team: Team, lines: any[], isWinner: boolean) => {
+    const updateStats = (team: Team, lines: any[], isWinner: boolean, opponentTeamId: string, opponentTeamName: string) => {
       return {
         ...team,
         roster: team.roster.map(p => {
           const line = lines.find(l => l.playerId === p.id);
-          // No line, or DNP (injured/inactive) — leave all stats untouched
+          // Suspended players: decrement suspension games counter, clear when served
+          if (line?.dnp === 'Suspended') {
+            const remaining = (p.suspensionGames ?? 1) - 1;
+            if (remaining <= 0) {
+              return { ...p, isSuspended: false, suspensionGames: 0, suspensionReason: undefined, suspensionAppealed: undefined };
+            }
+            return { ...p, suspensionGames: remaining };
+          }
+          // No line, or other DNP (injured/inactive) — leave all stats untouched
           if (!line || line.dnp) return p;
           const newTechs = (p.stats.techs || 0) + (line.techs || 0);
           const newFlagrants = (p.stats.flagrants || 0) + (line.flagrants || 0);
@@ -976,11 +1130,13 @@ const App: React.FC = () => {
           
           let isSuspended = p.isSuspended;
           let suspensionGames = p.suspensionGames || 0;
+          let suspensionReason = p.suspensionReason;
           
-          // Suspension Logic (16 techs)
+          // Season tech foul accumulation: 16 techs = 1-game suspension (per NBA rule)
           if (newTechs >= 16 && (p.stats.techs || 0) < 16) {
             isSuspended = true;
-            suspensionGames = 1;
+            suspensionGames = Math.max(suspensionGames, 1);
+            suspensionReason = suspensionReason || '16th technical foul of the season';
           }
 
           let morale = p.morale ?? 75;
@@ -1058,27 +1214,38 @@ const App: React.FC = () => {
 
           morale = Math.min(100, Math.max(0, morale));
 
+          const logEntry = {
+            ...line,
+            date: state.currentDay,
+            opponentTeamId,
+            opponentTeamName,
+          };
+          // Keep last 30 games only to avoid unbounded save-game growth
+          const updatedGameLog = [...(p.gameLog ?? []), logEntry].slice(-30);
+
           return {
-            ...p, 
+            ...p,
             isSuspended,
             suspensionGames,
+            suspensionReason,
             morale,
-            stats: { 
-              ...p.stats, 
-              gamesPlayed: p.stats.gamesPlayed + 1, 
-              points: p.stats.points + line.pts, 
-              rebounds: p.stats.rebounds + line.reb, 
-              assists: p.stats.assists + line.ast, 
-              steals: p.stats.steals + line.stl, 
-              blocks: p.stats.blocks + line.blk, 
-              minutes: p.stats.minutes + line.min, 
-              fgm: p.stats.fgm + line.fgm, 
-              fga: p.stats.fga + line.fga, 
-              threepm: p.stats.threepm + line.threepm, 
-              threepa: p.stats.threepa + line.threepa, 
-              ftm: p.stats.ftm + line.ftm, 
-              fta: p.stats.fta + line.fta, 
-              tov: p.stats.tov + line.tov, 
+            gameLog: updatedGameLog,
+            stats: {
+              ...p.stats,
+              gamesPlayed: p.stats.gamesPlayed + 1,
+              points: p.stats.points + line.pts,
+              rebounds: p.stats.rebounds + line.reb,
+              assists: p.stats.assists + line.ast,
+              steals: p.stats.steals + line.stl,
+              blocks: p.stats.blocks + line.blk,
+              minutes: p.stats.minutes + line.min,
+              fgm: p.stats.fgm + line.fgm,
+              fga: p.stats.fga + line.fga,
+              threepm: p.stats.threepm + line.threepm,
+              threepa: p.stats.threepa + line.threepa,
+              ftm: p.stats.ftm + line.ftm,
+              fta: p.stats.fta + line.fta,
+              tov: p.stats.tov + line.tov,
               pf: p.stats.pf + line.pf,
               techs: newTechs,
               flagrants: newFlagrants,
@@ -1097,8 +1264,8 @@ const App: React.FC = () => {
 
     updatedTeams = updatedTeams.map(t => {
       const isWinner = (t.id === homeTeam.id && homeWon) || (t.id === awayTeam.id && !homeWon);
-      if (t.id === homeTeam.id) return updateStats(t, result.homePlayerStats, isWinner);
-      if (t.id === awayTeam.id) return updateStats(t, result.awayPlayerStats, isWinner);
+      if (t.id === homeTeam.id) return updateStats(t, result.homePlayerStats, isWinner, awayTeam.id, awayTeam.name);
+      if (t.id === awayTeam.id) return updateStats(t, result.awayPlayerStats, isWinner, homeTeam.id, homeTeam.name);
       return t;
     });
 
@@ -1114,7 +1281,8 @@ const App: React.FC = () => {
     }));
 
     const rivalryHistory = updateRivalryStats(state, result);
-    newState = { ...state, teams: updatedTeams, history: [result, ...state.history], schedule: state.schedule.map(sg => sg.id === gameId ? { ...sg, played: true, resultId: result.id } : sg), rivalryHistory };
+    const gameAttendance = computeGameAttendance(homeTeam, awayTeam);
+    newState = { ...state, teams: updatedTeams, history: [result, ...state.history], schedule: state.schedule.map(sg => sg.id === gameId ? { ...sg, played: true, resultId: result.id, attendance: gameAttendance } : sg), rivalryHistory };
 
     // Generate morale-based news (only for user team, deduplicated per player per cooldown window)
     const userTeamUpdated = newState.teams.find(t => t.id === newState.userTeamId);
@@ -1183,9 +1351,57 @@ const App: React.FC = () => {
       newState = await addNewsItem(newState, 'injury', { player, team, detail: ejDetail }, true);
     }
 
+    // ── Apply suspension events from in-game triggers ─────────────────────
+    if (result.gameSuspensions && result.gameSuspensions.length > 0) {
+      for (const susp of result.gameSuspensions) {
+        // Skip if the player is somehow already suspended for more games
+        const suspTeamBefore = newState.teams.find(t => t.id === susp.teamId);
+        const suspPlayerBefore = suspTeamBefore?.roster.find(p => p.id === susp.playerId);
+        if (!suspPlayerBefore || !suspTeamBefore) continue;
+        const totalGames = Math.max(susp.games, (suspPlayerBefore.suspensionGames ?? 0) + susp.games);
+        newState = {
+          ...newState,
+          teams: newState.teams.map(t => t.id !== susp.teamId ? t : {
+            ...t,
+            roster: t.roster.map(p => p.id !== susp.playerId ? p : {
+              ...p,
+              isSuspended: true,
+              suspensionGames: totalGames,
+              suspensionReason: susp.reason,
+              morale: Math.max(0, Math.min(100, (p.morale ?? 75) - 8)),
+            })
+          })
+        };
+        const suspTeam = newState.teams.find(t => t.id === susp.teamId)!;
+        const suspPlayer = suspTeam.roster.find(p => p.id === susp.playerId)!;
+        const gamesLabel = `${totalGames} game${totalGames !== 1 ? 's' : ''}`;
+        const suspDetail = `${suspPlayer.name} has been suspended ${gamesLabel} by the league following a ${susp.reason}.`;
+        newState = await addNewsItem(newState, 'suspension' as NewsCategory, { player: suspPlayer, team: suspTeam, detail: suspDetail }, true);
+        // Owner patience penalty for user team
+        if (susp.teamId === newState.userTeamId) {
+          newState = {
+            ...newState,
+            teams: newState.teams.map(t => t.id !== susp.teamId ? t : {
+              ...t,
+              finances: { ...t.finances, ownerPatience: Math.max(0, Math.min(100, t.finances.ownerPatience - 3)) }
+            })
+          };
+        }
+        // Morale hit across team (disruption to lineup)
+        newState = {
+          ...newState,
+          teams: newState.teams.map(t => t.id !== susp.teamId ? t : {
+            ...t,
+            roster: t.roster.map(p => p.id === susp.playerId ? p : {
+              ...p, morale: Math.max(0, Math.min(100, (p.morale ?? 75) - 2))
+            })
+          })
+        };
+      }
+    }
+
     // Apply in-game injuries
-    if (result.gameInjuries && result.gameInjuries.length > 0) {
-      for (const inj of result.gameInjuries) {
+    if (result.gameInjuries && result.gameInjuries.length > 0) {      for (const inj of result.gameInjuries) {
         newState = {
           ...newState,
           teams: newState.teams.map(t => t.id !== inj.teamId ? t : {
@@ -1289,8 +1505,11 @@ const App: React.FC = () => {
           newState = tradeResult.updatedState;
         }
       } catch (_e) { /* non-fatal */ }
+    }
 
-      // ── Generate incoming AI-to-user trade proposals ──
+    // ── Generate incoming AI-to-user trade proposals (every 3 sim-days) ──
+    // Decoupled from the weekly AI-to-AI block so it fires more frequently.
+    if (!newState.isOffseason && newState.currentDay % 3 === 0 && !newState.tradeDeadlinePassed && !newState.playoffBracket) {
       try {
         const newProposals = generateAITradeProposalsForUser(newState, newState.settings.difficulty ?? 'Medium');
         if (newProposals.length > 0) {
@@ -1321,13 +1540,11 @@ const App: React.FC = () => {
         const teamCapSpace = cap - teamSalary;
         const minSalary = 600_000;
         if (teamCapSpace >= minSalary) {
-          const eligible = newState.freeAgents.filter(fa => (fa.desiredContract?.salary ?? 600_000) <= teamCapSpace * 1.2);
+          const eligible = newState.freeAgents.filter(fa => (fa.desiredContract?.salary || 600_000) <= teamCapSpace * 1.2);
           if (eligible.length > 0) {
             const fa = eligible[Math.floor(Math.random() * Math.min(5, eligible.length))];
-            const salary = Math.min(
-              Math.round((fa.desiredContract?.salary ?? 1_500_000) * (0.8 + Math.random() * 0.3) / 250_000) * 250_000,
-              teamCapSpace
-            );
+            const rawSalary = Math.round((fa.desiredContract?.salary || 1_500_000) * (0.8 + Math.random() * 0.3) / 250_000) * 250_000;
+            const salary = Math.max(600_000, Math.min(rawSalary, teamCapSpace));
             const signingType = salary <= 700_000 ? '10-day' : 'rest-of-season minimum';
             const signedPlayer = { ...fa, isFreeAgent: false, inSeasonFA: false, salary, contractYears: 1, morale: Math.min(100, (fa.morale || 70) + 5) };
             newState = {
@@ -1337,8 +1554,8 @@ const App: React.FC = () => {
               newsFeed: [{
                 id: `in-season-sign-${Date.now()}-${fa.id}`,
                 category: 'transaction' as const,
-                headline: `${fa.name} signs with ${team.name}`,
-                content: `${team.name} signed ${fa.name} (${fa.position}, ${fa.rating} OVR) to a ${signingType} deal${salary > 0 ? ` worth ${(salary / 1_000_000).toFixed(1)}M` : ''}.`,
+                headline: `${fa.name} agrees to terms with ${team.name}`,
+                content: `The ${team.name} agree to terms with ${fa.name} (${fa.position}, ${fa.rating} OVR) on a ${signingType} deal worth $${(salary / 1_000_000).toFixed(1)}M.`,
                 timestamp: newState.currentDay,
                 realTimestamp: Date.now(),
                 isBreaking: false,
@@ -1550,8 +1767,8 @@ const App: React.FC = () => {
       }
     }
 
-    if (!tempState.schedule.some(g => !g.played) && !tempState.playoffBracket) {
-      const seasonAwards = await generateAwards(tempState.teams, tempState.season);
+    if (!tempState.isOffseason && !tempState.schedule.some(g => !g.played) && !tempState.playoffBracket) {
+      const seasonAwards = await generateAwards(tempState.teams, tempState.season, tempState.settings.playerGenderRatio);
       
       if (seasonAwards.executiveOfTheYear.teamId === tempState.userTeamId) {
         const gm = tempState.gmProfile;
@@ -1560,7 +1777,7 @@ const App: React.FC = () => {
           eoyWins: [...gm.eoyWins, tempState.season],
           reputation: Math.min(100, gm.reputation + 15),
           milestones: [...gm.milestones, {
-            id: `eoy-${Date.now()}`, year: tempState.season, day: tempState.currentDay, text: `Awarded Executive of the Year after leading team to ${tempState.teams.find(t=>t.id===tempState.userTeamId)!.wins} wins.`, type: 'award'
+            id: `eoy-${Date.now()}`, year: tempState.season, day: tempState.currentDay, text: `Awarded Executive of the Year after leading the ${tempState.teams.find(t=>t.id===tempState.userTeamId)!.name} to ${tempState.teams.find(t=>t.id===tempState.userTeamId)!.wins} wins.`, type: 'award'
           }]
         };
       }
@@ -1596,6 +1813,7 @@ const App: React.FC = () => {
   const handleStartOffseason = async () => {
     if (!league) return;
     setLoading(true);
+    try {
     let tempState = { ...league };
     
     // Check for championship milestone
@@ -1609,7 +1827,7 @@ const App: React.FC = () => {
       };
     }
 
-    tempState.gmProfile.totalSeasons += 1;
+    tempState.gmProfile = { ...tempState.gmProfile, totalSeasons: tempState.gmProfile.totalSeasons + 1 };
     tempState.playoffBracket = undefined;
     tempState.isOffseason = true;
     tempState.seasonPhase = 'Offseason' as SeasonPhase;
@@ -1686,6 +1904,36 @@ const App: React.FC = () => {
       ),
     }));
 
+    // ── Capture final standings snapshot before resetting wins/losses ───────────
+    const playoffSpotsPerConf = Math.floor((tempState.settings.playoffFormat ?? 16) / 2);
+    const prevStandings: PreviousSeasonStanding[] = [];
+    (['Eastern', 'Western'] as const).forEach(conf => {
+      const confTeams = [...tempState.teams]
+        .filter(t => t.conference === conf)
+        .sort((a, b) => {
+          const aPct = a.wins / Math.max(1, a.wins + a.losses);
+          const bPct = b.wins / Math.max(1, b.wins + b.losses);
+          if (bPct !== aPct) return bPct - aPct;
+          if (b.wins !== a.wins) return b.wins - a.wins;
+          return a.losses - b.losses;
+        });
+      confTeams.forEach((t, idx) => {
+        prevStandings.push({
+          teamId: t.id,
+          teamName: t.name,
+          teamCity: t.city,
+          teamAbbr: t.abbreviation,
+          conference: conf,
+          wins: t.wins,
+          losses: t.losses,
+          confRank: idx + 1,
+          madePlayoffs: idx < playoffSpotsPerConf,
+        });
+      });
+    });
+    tempState.previousSeasonStandings = prevStandings;
+    tempState.previousSeasonYear = tempState.season;
+
     tempState.teams = tempState.teams.map(t => {
       const facBudget     = t.finances?.budgets?.facilities ?? 20;
       const hcDevRating   = t.staff.headCoach?.ratingDevelopment ?? 50;
@@ -1722,7 +1970,7 @@ const App: React.FC = () => {
       });
       // Remove expired contracts from roster (they become free agents)
       const retained = rosterWithProg.filter(p => p.contractYears > 1);
-      return { ...t, roster: retained.map(p => ({ ...p, contractYears: p.contractYears - 1 })), prevSeasonWins: t.wins, wins: 0, losses: 0, lastTen: [] };
+      return { ...t, roster: retained.map(p => ({ ...p, contractYears: p.contractYears - 1 })), prevSeasonWins: t.wins, prevSeasonLosses: t.losses, wins: 0, losses: 0, lastTen: [] };
     });
 
     // Merge generated FA pool + expired-contract players (deduplicated by id)
@@ -1833,7 +2081,11 @@ const App: React.FC = () => {
 
     setLeague(tempState);
     setActiveTab('draft');
-    setLoading(false);
+    } catch (err) {
+      console.error('handleStartOffseason error:', err);
+    } finally {
+      setLoading(false);
+    }
   };
 
   const handleAdvanceToRegularSeason = () => {
@@ -1847,10 +2099,14 @@ const App: React.FC = () => {
       if (!prev) return null;
       const nextSeason = prev.season;
       const futureWindow = prev.settings.tradableDraftPickSeasons ?? 4;
-      // Seed future picks (next N seasons per setting) for every team that doesn't already have them
       const teamsWithPicks = prev.teams.map(t => {
-        const existingPickYears = new Set(t.picks.map(p => p.year));
+        // Strip picks that have already been exercised in the just-completed draft (year < nextSeason)
+        // and any legacy no-year picks. Current-year picks for nextSeason already exist as the
+        // previous season's "future pick + 1" — they are not re-generated here.
+        const activePicks = t.picks.filter(p => p.year !== undefined && p.year >= nextSeason);
+        const existingPickYears = new Set(activePicks.map(p => p.year));
         const newPicks = [] as typeof t.picks;
+        // Extend the future window (keeps it at tradableDraftPickSeasons deep)
         for (let f = 1; f <= futureWindow; f++) {
           const yr = nextSeason + f;
           if (!existingPickYears.has(yr)) {
@@ -1860,7 +2116,7 @@ const App: React.FC = () => {
             );
           }
         }
-        return newPicks.length > 0 ? { ...t, picks: [...t.picks, ...newPicks] } : t;
+        return { ...t, picks: [...activePicks, ...newPicks] };
       });
       return {
         ...prev,
@@ -2003,6 +2259,57 @@ const App: React.FC = () => {
   };
   
   const handleViewRoster = (teamId: string) => { setRosterTeamId(teamId); setActiveTab('roster'); };
+
+  const handleAppealSuspension = (playerId: string) => {
+    if (!league || !league.userTeamId) return;
+    const userTeam = league.teams.find(t => t.id === league.userTeamId)!;
+    const p = userTeam.roster.find(pl => pl.id === playerId);
+    if (!p || !p.isSuspended || !p.suspensionGames || p.suspensionGames <= 0) return;
+
+    // Lock in one appeal, costs 3 owner patience
+    const appealSucceeded = Math.random() < 0.25;
+    const newGames = appealSucceeded ? Math.max(0, p.suspensionGames - 1) : p.suspensionGames;
+    const stillSuspended = newGames > 0;
+    const headlineResult = appealSucceeded
+      ? `${p.name}'s suspension reduced to ${newGames}G after successful GM appeal`
+      : `${p.name}'s ${p.suspensionGames}G suspension upheld — GM appeal denied`;
+    const contentResult = appealSucceeded
+      ? `The league reviewed the appeal filed by ${userTeam.name} and elected to reduce ${p.name}'s suspension by one game.`
+      : `The league board reviewed and rejected ${userTeam.name}'s appeal. ${p.name} remains suspended for ${p.suspensionGames} game${p.suspensionGames !== 1 ? 's' : ''}.`;
+
+    const newsItem = {
+      id: `appeal-${Date.now()}`,
+      category: 'suspension' as const,
+      headline: headlineResult,
+      content: contentResult,
+      timestamp: league.currentDay,
+      realTimestamp: Date.now(),
+      isBreaking: false,
+    };
+
+    setLeague({
+      ...league,
+      ownerPatience: Math.max(0, (league.ownerPatience ?? 50) - 3),
+      teams: league.teams.map(t => {
+        if (t.id !== userTeam.id) return t;
+        return {
+          ...t,
+          roster: t.roster.map(pl => {
+            if (pl.id !== playerId) return pl;
+            return {
+              ...pl,
+              suspensionGames: newGames,
+              isSuspended: stillSuspended,
+              suspensionReason: stillSuspended ? pl.suspensionReason : undefined,
+              suspensionAppealed: true,
+            };
+          }),
+        };
+      }),
+      newsFeed: [newsItem, ...league.newsFeed],
+    });
+  };
+
   const handleViewFranchise = (teamId: string) => { setViewingFranchiseId(teamId); setActiveTab('franchise_history'); };
   const handleManageTeam = (teamId: string) => { setRosterTeamId(teamId); setActiveTab('roster'); };
   const updateLeagueState = (updated: Partial<LeagueState> | ((prev: LeagueState) => LeagueState)) => { 
@@ -2079,6 +2386,7 @@ const App: React.FC = () => {
             stadiumCapacity: data.market === 'Large' ? 20000 : data.market === 'Medium' ? 18500 : 17000,
             borderStyle: 'Solid',
             status: 'Active',
+            ...(() => { const gm = generateGMName(prev.settings?.playerGenderRatio ?? 0); return { gmName: gm.name, gmAge: gm.age }; })(),
           };
           return { ...prev, teams: [...prev.teams, newTeam] };
         });
@@ -2222,7 +2530,7 @@ const App: React.FC = () => {
               />
             )
           )}
-          {activeTab === 'standings' && <Standings teams={league.teams} userTeamId={league.userTeamId} seasonLength={league.settings.seasonLength ?? 82} playoffFormat={league.settings.playoffFormat ?? 16} season={league.season} isPlayoffs={!!league.playoffBracket} onViewRoster={handleViewRoster} onManageTeam={handleManageTeam} rivalryHistory={league.rivalryHistory} />}
+          {activeTab === 'standings' && <Standings teams={league.teams} userTeamId={league.userTeamId} seasonLength={league.settings.seasonLength ?? 82} playoffFormat={league.settings.playoffFormat ?? 16} season={league.season} isPlayoffs={!!league.playoffBracket} onViewRoster={handleViewRoster} onManageTeam={handleManageTeam} rivalryHistory={league.rivalryHistory} previousSeasonStandings={league.previousSeasonStandings} previousSeasonYear={league.previousSeasonYear} />}
           {activeTab === 'schedule' && <Schedule league={league} onSimulate={handleSimulate} onScout={handleViewPlayer} onWatchLive={handleWatchLive} onViewBoxScore={(res, home, away) => setViewingBoxScore({ result: res, home, away })} onManageTeam={handleManageTeam} onAdvanceToRegularSeason={handleAdvanceToRegularSeason} onViewAllStar={() => setActiveTab('allstar')} />}
           {activeTab === 'draft' && <Draft league={league} updateLeague={updateLeagueState} onScout={handleScoutPlayer} scoutingReport={scoutingReport} onNavigateToFreeAgency={() => setActiveTab('free_agency')} />}
           {activeTab === 'coaching' && <Coaching league={league} updateLeague={updateLeagueState} godMode={league.settings.godMode} />}
@@ -2239,6 +2547,8 @@ const App: React.FC = () => {
                 setCounterProposal(proposal);
                 setActiveTab('trade');
               }}
+              onAcceptRequest={handleAcceptTradeRequest}
+              onDeclineRequest={handleDeclineTradeRequest}
             />
           )}
           {activeTab === 'settings' && <Settings league={league} updateLeague={updateLeagueState} onRegenerateSchedule={async () => {
@@ -2319,6 +2629,8 @@ const App: React.FC = () => {
             isUserTeam={league.teams.find(t => t.id === league.userTeamId)?.roster.some(p => p.id === selectedPlayer.id) ?? false}
             onUpdateStatus={handleUpdatePlayerStatus}
             onRelease={handleReleasePlayer}
+            onAppealSuspension={handleAppealSuspension}
+            draftLocked={!!(league.isOffseason && league.draftPhase !== 'completed')}
             godMode={league.settings.godMode}
             onUpdatePlayer={handleUpdatePlayer}
             isCurrentAllStar={isCurrentAllStar}

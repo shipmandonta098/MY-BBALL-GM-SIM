@@ -3809,6 +3809,18 @@ export const simulateGame = (
         };
       }
 
+      // Hard gate: suspended players sit out — DNP–Suspended line.
+      if (p.isSuspended && (p.suspensionGames ?? 0) > 0) {
+        return {
+          playerId: p.id, name: p.name,
+          min: 0, pts: 0, reb: 0, offReb: 0, defReb: 0,
+          ast: 0, stl: 0, blk: 0,
+          fgm: 0, fga: 0, threepm: 0, threepa: 0, ftm: 0, fta: 0,
+          tov: 0, pf: 0, techs: 0, flagrants: 0, plusMinus: 0,
+          ejected: false, dnp: 'Suspended',
+        };
+      }
+
       let mins = 0;
       if (team.rotation && team.rotation.minutes[p.id] !== undefined) {
         mins = Math.round(team.rotation.minutes[p.id] * quarterLengthScale);
@@ -3845,21 +3857,63 @@ export const simulateGame = (
   totalHome = homePlayerStats.reduce((s, p) => s + p.pts, 0);
   totalAway = awayPlayerStats.reduce((s, p) => s + p.pts, 0);
 
-  // ── 8. Chippy / tech rolls ────────────────────────────────────────────────
+  // ── 8. Chippy / tech rolls + flagrant 2 + suspension triggers ──────────────
   let isChippy = false;
   const rivalryMod = ['Hot', 'Red Hot'].includes(rivalryLevel) ? 1.5 : 1.0;
+  const gameSuspensions: Array<{ playerId: string; playerName: string; teamId: string; games: number; reason: string }> = [];
+
   const rollForChippy = (stats: GamePlayerLine[], isHome: boolean) => {
+    const teamRef = isHome ? home : away;
     stats.forEach(p => {
-      const player = (isHome ? home : away).roster.find(pl => pl.id === p.playerId)!;
+      const player = teamRef.roster.find(pl => pl.id === p.playerId);
+      if (!player) return;
+      const traits = player.personalityTraits ?? [];
+
+      // ── Technical foul roll ───────────────────────────────────────────────
       let techChance = 0.02 * rivalryMod;
-      if (player?.personalityTraits.includes('Diva/Star'))    techChance *= 1.8;
-      if (player?.personalityTraits.includes('Tough/Alpha'))  techChance *= 1.4;
-      if (player?.personalityTraits.includes('Professional')) techChance *= 0.5;
-      if (player?.personalityTraits.includes('Leader'))       techChance *= 0.7;
+      if (traits.includes('Diva/Star'))    techChance *= 1.8;
+      if (traits.includes('Tough/Alpha'))  techChance *= 1.4;
+      if (traits.includes('Hot Head'))     techChance *= 1.6;
+      if (traits.includes('Professional')) techChance *= 0.5;
+      if (traits.includes('Leader'))       techChance *= 0.7;
       if (Math.random() < techChance) {
         p.techs += 1; isChippy = true;
         pbp.push({ time: `${Math.floor(Math.random() * 12)}:00`, quarter: Math.floor(Math.random() * 4) + 1, text: `${p.name} picks up a technical — bench reacts!`, type: 'foul' });
         if (isHome) totalAway += 1; else totalHome += 1;
+
+        // Second tech in same game → automatic ejection; only ~20% chance of 1-game suspension
+        if (p.techs >= 2 && !p.ejected) {
+          p.ejected = true;
+          pbp.push({ time: `${Math.floor(Math.random() * 12)}:00`, quarter: Math.floor(Math.random() * 4) + 1, text: `${p.name} EJECTED — second technical foul! He will be subject to league review.`, type: 'foul' });
+          // Rare suspension: 20% baseline, Hot Head 30%
+          const suspChance = traits.includes('Hot Head') ? 0.30 : 0.20;
+          if (Math.random() < suspChance) {
+            gameSuspensions.push({ playerId: player.id, playerName: player.name, teamId: teamRef.id, games: 1, reason: 'two technical fouls in one game' });
+          }
+        }
+      }
+
+      // ── Flagrant 2 roll (very rare — ~0.15–0.45% base, skip already-ejected) ──
+      // A Flagrant 2 always means ejection + fine. Suspension only on repeat offenses
+      // this season (player already has ≥1 flagrant) or a 25% chance on first offense.
+      if (!p.ejected) {
+        let flagrant2Chance = 0.0015 * rivalryMod; // halved from before
+        if (traits.includes('Hot Head'))     flagrant2Chance *= 3.0;
+        if (traits.includes('Tough/Alpha'))  flagrant2Chance *= 2.0;
+        if (traits.includes('Diva/Star'))    flagrant2Chance *= 1.5;
+        if (traits.includes('Professional')) flagrant2Chance *= 0.3;
+        if (Math.random() < flagrant2Chance) {
+          p.flagrants += 1; p.ejected = true; isChippy = true;
+          pbp.push({ time: `${Math.floor(Math.random() * 12)}:00`, quarter: Math.floor(Math.random() * 4) + 1, text: `FLAGRANT 2 on ${p.name} — automatic ejection! Fine issued; the league will determine if a suspension follows.`, type: 'foul' });
+          // Season-level flagrant count drives suspension decision
+          const seasonFlagrants = (player.stats?.flagrants ?? 0) + 1; // +1 for this game
+          const isRepeatOffender = seasonFlagrants >= 2;
+          const suspChance = isRepeatOffender ? 1.0 : 0.25; // first offense 25%, repeat = guaranteed
+          if (Math.random() < suspChance) {
+            const f2Games = isRepeatOffender ? 1 + Math.floor(Math.random() * 3) : 1; // 1–3 games for repeat, 1 for first
+            gameSuspensions.push({ playerId: player.id, playerName: player.name, teamId: teamRef.id, games: f2Games, reason: isRepeatOffender ? `repeat Flagrant 2 foul (${seasonFlagrants} this season)` : 'Flagrant 2 foul' });
+          }
+        }
       }
     });
   };
@@ -4129,7 +4183,7 @@ export const simulateGame = (
     awayPlayerStats,
     topPerformers: allLines.slice(0, 3).map(l => ({ playerId: l.playerId, points: l.pts, rebounds: l.reb, assists: l.ast })),
     playByPlay: pbp,
-    date, season, isOvertime, isBuzzerBeater, isComeback, isChippy, gameInjuries,
+    date, season, isOvertime, isBuzzerBeater, isComeback, isChippy, gameInjuries, gameSuspensions,
   };
 };
 

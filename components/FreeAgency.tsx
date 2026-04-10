@@ -85,12 +85,19 @@ const FreeAgency: React.FC<FreeAgencyProps> = ({
   onScout,
   recordTransaction,
 }) => {
+  // ── Market tab ──
+  const [marketTab, setMarketTab] = useState<'available' | 'upcoming'>('available');
+
   // ── Filter state ──
   const [search, setSearch] = useState('');
   const [posFilter, setPosFilter] = useState<Position | 'ALL'>('ALL');
   const [interestFilter, setInterestFilter] = useState<'ALL' | 'High' | 'Med' | 'Low'>('ALL');
   const [sortKey, setSortKey] = useState<SortKey>('rating');
   const [sortAsc, setSortAsc] = useState(false);
+
+  // ── Upcoming FA search ──
+  const [upcomingSearch, setUpcomingSearch] = useState('');
+  const [upcomingPos, setUpcomingPos] = useState<Position | 'ALL'>('ALL');
 
   // ── In-season signing state ──
   const [inSeasonPlayer, setInSeasonPlayer] = useState<Player | null>(null);
@@ -221,6 +228,27 @@ const FreeAgency: React.FC<FreeAgencyProps> = ({
 
     return list;
   }, [league.freeAgents, search, posFilter, interestFilter, sortKey, sortAsc]);
+
+  // ── Upcoming free agents (contractYears === 1 on any roster) ──
+  const upcomingFAs = useMemo(() => {
+    const teamById = Object.fromEntries(league.teams.map(t => [t.id, t]));
+    const list: (Player & { teamName: string; teamAbbr: string })[] = [];
+    league.teams.forEach(team => {
+      team.roster.forEach(p => {
+        if ((p.contractYears ?? 0) === 1) {
+          list.push({ ...p, teamName: team.name, teamAbbr: team.abbreviation });
+        }
+      });
+    });
+    return list
+      .filter(p => {
+        if (upcomingSearch && !p.name.toLowerCase().includes(upcomingSearch.toLowerCase()) &&
+            !p.teamName.toLowerCase().includes(upcomingSearch.toLowerCase())) return false;
+        if (upcomingPos !== 'ALL' && p.position !== upcomingPos) return false;
+        return true;
+      })
+      .sort((a, b) => b.rating - a.rating);
+  }, [league.teams, upcomingSearch, upcomingPos]);
 
   // ── Open negotiation ──
   const openNegotiation = (player: Player) => {
@@ -383,6 +411,9 @@ const FreeAgency: React.FC<FreeAgencyProps> = ({
 
   // ── Advance Day / AI signings ──
   const advanceDay = () => {
+    // Lock all FA activity until the draft is fully complete
+    if (league.draftPhase !== 'completed') return;
+
     let updatedFAs = [...league.freeAgents];
     const newNews: typeof league.newsFeed = [];
     const newTxs: Transaction[] = [];
@@ -419,8 +450,13 @@ const FreeAgency: React.FC<FreeAgencyProps> = ({
       const desired = getDesired(player);
       const years = desired.years + (Math.random() < 0.3 ? 1 : 0);
       const salaryMult = 0.85 + Math.random() * 0.3;
-      const salary = Math.round((desired.salary * salaryMult) / 250_000) * 250_000;
+      const teamSalary = team.roster.reduce((s, p) => s + (p.salary || 0), 0);
+      const teamCapSpace = (league.settings.salaryCap || 140_000_000) - teamSalary;
+      const rawSalary = Math.round((desired.salary * salaryMult) / 250_000) * 250_000;
+      const salary = Math.max(600_000, Math.min(rawSalary, teamCapSpace));
+      if (teamCapSpace < 600_000) continue;
 
+      const totalValue = salary * years;
       const tx: Transaction = {
         id: `tx-ai-${Date.now()}-${i}`,
         type: 'signing',
@@ -428,16 +464,16 @@ const FreeAgency: React.FC<FreeAgencyProps> = ({
         realTimestamp: Date.now() + i,
         teamIds: [team.id],
         playerIds: [player.id],
-        description: `${team.name} signed ${player.name} to a ${years}y/${fmt(salary)} contract.`,
-        value: salary * years,
+        description: `${team.name} agree to terms with ${player.name} on a ${years}-year, $${(totalValue / 1_000_000).toFixed(1)}M deal.`,
+        value: totalValue,
       };
       newTxs.push(tx);
 
       newNews.push({
         id: `fa-ai-${Date.now()}-${i}`,
         category: 'transaction',
-        headline: `${player.name} signs with ${team.name}`,
-        content: `${player.name} (${player.position}, ${player.rating} OVR) agreed to a ${years}-year deal with the ${team.name} worth ${fmt(salary)}/yr.`,
+        headline: `${player.name} agrees to terms with ${team.name}`,
+        content: `The ${team.name} agree to terms with ${player.name} (${player.position}, ${player.rating} OVR) on a ${years}-year, $${(totalValue / 1_000_000).toFixed(1)}M deal (${fmt(salary)}/yr).`,
         timestamp: league.currentDay,
         realTimestamp: Date.now() + i,
         teamId: team.id,
@@ -509,6 +545,28 @@ const FreeAgency: React.FC<FreeAgencyProps> = ({
               In-season waivers &amp; buyouts become available once the regular season begins.
               Advance your first game to unlock.
             </p>
+          </div>
+        </div>
+      )}
+
+      {/* ── Draft Lock Banner ── */}
+      {league.isOffseason && league.draftPhase !== 'completed' && (
+        <div className="bg-violet-500/10 border border-violet-500/30 rounded-[2rem] p-6 flex flex-col sm:flex-row items-center justify-between gap-4">
+          <div>
+            <p className="text-[10px] font-black uppercase tracking-[0.4em] text-violet-400 mb-1">
+              🚫 Draft In Progress
+            </p>
+            <h3 className="text-xl font-display font-bold text-white uppercase">
+              Free Agency Locked Until Draft Completes
+            </h3>
+            <p className="text-slate-500 text-xs mt-1">
+              No signings or roster moves are allowed until all draft rounds are finished. Head to Draft HQ to complete the draft.
+            </p>
+          </div>
+          <div className="shrink-0">
+            <span className="px-5 py-3 bg-violet-500/20 border border-violet-500/40 rounded-xl text-violet-300 font-bold text-sm uppercase tracking-wider">
+              {league.draftPhase === 'lottery' ? 'Lottery Phase' : league.draftPhase === 'draft' ? 'Live Draft' : 'Scouting Phase'}
+            </span>
           </div>
         </div>
       )}
@@ -599,7 +657,8 @@ const FreeAgency: React.FC<FreeAgencyProps> = ({
             {league.isOffseason && (
               <button
                 onClick={advanceDay}
-                className="px-7 py-4 bg-amber-500 hover:bg-amber-400 text-slate-950 font-display font-bold uppercase rounded-xl transition-all shadow-xl shadow-amber-500/20 active:scale-95"
+                disabled={league.draftPhase !== 'completed'}
+                className="px-7 py-4 bg-amber-500 hover:bg-amber-400 text-slate-950 font-display font-bold uppercase rounded-xl transition-all shadow-xl shadow-amber-500/20 active:scale-95 disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-amber-500"
               >
                 Advance Day →
               </button>
@@ -683,7 +742,136 @@ const FreeAgency: React.FC<FreeAgencyProps> = ({
         </div>
       </div>
 
+      {/* ── Market Tab Switcher ── */}
+      <div className="flex gap-1 bg-slate-900 border border-slate-800 rounded-2xl p-1 w-fit">
+        <button
+          onClick={() => setMarketTab('available')}
+          className={`px-5 py-2 rounded-xl text-xs font-black uppercase tracking-widest transition-all ${
+            marketTab === 'available' ? 'bg-amber-500 text-slate-950' : 'text-slate-500 hover:text-white'
+          }`}
+        >
+          Free Agents
+          <span className={`ml-2 text-[10px] font-bold ${marketTab === 'available' ? 'text-slate-900' : 'text-slate-600'}`}>
+            {league.freeAgents.length}
+          </span>
+        </button>
+        <button
+          onClick={() => setMarketTab('upcoming')}
+          className={`px-5 py-2 rounded-xl text-xs font-black uppercase tracking-widest transition-all ${
+            marketTab === 'upcoming' ? 'bg-amber-500 text-slate-950' : 'text-slate-500 hover:text-white'
+          }`}
+        >
+          Upcoming FAs
+          <span className={`ml-2 text-[10px] font-bold ${marketTab === 'upcoming' ? 'text-slate-900' : 'text-slate-600'}`}>
+            {league.teams.reduce((n, t) => n + t.roster.filter(p => (p.contractYears ?? 0) === 1).length, 0)}
+          </span>
+        </button>
+      </div>
+
+      {/* ── Upcoming FAs Table ── */}
+      {marketTab === 'upcoming' && (
+        <div className="bg-slate-900 border border-slate-800 rounded-3xl overflow-hidden shadow-2xl">
+          <div className="p-5 border-b border-slate-800 flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <h3 className="text-sm font-black uppercase tracking-widest text-white">Upcoming Free Agents</h3>
+              <p className="text-[10px] text-slate-500 mt-0.5 font-bold uppercase">Players on expiring contracts — eligible for FA next offseason</p>
+            </div>
+            <div className="flex items-center gap-2 flex-wrap">
+              {/* Search */}
+              <div className="relative">
+                <svg className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-slate-500" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-4.35-4.35M17 11A6 6 0 1 1 5 11a6 6 0 0 1 12 0z" /></svg>
+                <input
+                  type="text"
+                  placeholder="Search…"
+                  value={upcomingSearch}
+                  onChange={e => setUpcomingSearch(e.target.value)}
+                  className="bg-slate-950 border border-slate-800 rounded-xl pl-8 pr-3 py-2 text-white text-xs focus:outline-none focus:border-amber-500/50 w-40"
+                />
+              </div>
+              <select
+                value={upcomingPos}
+                onChange={e => setUpcomingPos(e.target.value as Position | 'ALL')}
+                className="bg-slate-950 border border-slate-800 text-slate-300 rounded-xl px-3 py-2 text-xs focus:border-amber-500 focus:outline-none"
+              >
+                <option value="ALL">All Pos</option>
+                {(['PG','SG','SF','PF','C'] as Position[]).map(p => <option key={p} value={p}>{p}</option>)}
+              </select>
+              <span className="text-[10px] text-slate-600 font-bold uppercase">{upcomingFAs.length} players</span>
+            </div>
+          </div>
+
+          {upcomingFAs.length === 0 ? (
+            <div className="p-12 text-center text-slate-600 text-sm italic">No expiring contracts match your filters.</div>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full text-left text-xs">
+                <thead>
+                  <tr className="bg-slate-950/50 border-b border-slate-800 text-[10px] font-black uppercase text-slate-500 tracking-widest">
+                    <th className="px-5 py-4">Player</th>
+                    <th className="px-4 py-4 text-center">OVR</th>
+                    <th className="px-4 py-4 text-center">Age</th>
+                    <th className="px-4 py-4">Pos</th>
+                    <th className="px-4 py-4">Team</th>
+                    <th className="px-4 py-4 text-right">Current $</th>
+                    <th className="px-4 py-4 text-right">Est. Ask</th>
+                    <th className="px-4 py-4 text-center hidden sm:table-cell">Yrs Wanted</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-800/40">
+                  {upcomingFAs.map(p => {
+                    const isUserTeamPlayer = p.teamAbbr === userTeam.abbreviation;
+                    const estAsk = computeDesiredSalary(p.rating);
+                    const estYrs = computeDesiredYears(p.age, p.rating);
+                    const canAfford = estAsk <= capSpace + (p.salary || 0);
+                    return (
+                      <tr
+                        key={p.id}
+                        className={`group hover:bg-slate-800/30 transition-all ${isUserTeamPlayer ? 'bg-amber-500/5' : ''}`}
+                      >
+                        <td className="px-5 py-4">
+                          <div className="flex items-center gap-2">
+                            <div>
+                              <p className="font-bold text-slate-200 uppercase tracking-tight group-hover:text-white">
+                                {p.name}
+                                {isUserTeamPlayer && (
+                                  <span className="ml-2 text-[9px] bg-amber-500/20 text-amber-400 border border-amber-500/30 rounded px-1.5 py-0.5 font-black uppercase">Your Team</span>
+                                )}
+                              </p>
+                              <p className="text-[10px] text-slate-500 mt-0.5">{p.archetype ?? p.position}</p>
+                            </div>
+                          </div>
+                        </td>
+                        <td className="px-4 py-4 text-center">
+                          <span className={`font-display font-black text-sm ${ratingColor(p.rating)}`}>{p.rating}</span>
+                        </td>
+                        <td className="px-4 py-4 text-center">
+                          <span className={`text-sm font-bold ${p.age >= 33 ? 'text-rose-400' : p.age <= 24 ? 'text-emerald-400' : 'text-slate-300'}`}>{p.age}</span>
+                        </td>
+                        <td className="px-4 py-4">
+                          <span className="text-amber-500 font-black text-xs">{p.position}</span>
+                        </td>
+                        <td className="px-4 py-4">
+                          <span className={`text-xs font-bold ${isUserTeamPlayer ? 'text-amber-400' : 'text-slate-400'}`}>{p.teamAbbr}</span>
+                        </td>
+                        <td className="px-4 py-4 text-right font-mono text-slate-400 text-xs">{fmt(p.salary || 0)}</td>
+                        <td className="px-4 py-4 text-right">
+                          <span className={`font-mono text-xs font-bold ${canAfford ? 'text-emerald-400' : 'text-rose-400'}`}>{fmt(estAsk)}</span>
+                        </td>
+                        <td className="px-4 py-4 text-center hidden sm:table-cell">
+                          <span className="text-slate-400 text-xs font-bold">{estYrs}yr{estYrs !== 1 ? 's' : ''}</span>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      )}
+
       {/* ── FA Table ── */}
+      {marketTab === 'available' && (
       <div className="bg-slate-900 border border-slate-800 rounded-3xl overflow-hidden shadow-2xl">
         <div className="p-5 border-b border-slate-800 flex items-center justify-between">
           <h3 className="text-sm font-black uppercase tracking-widest text-white">
@@ -816,6 +1004,7 @@ const FreeAgency: React.FC<FreeAgencyProps> = ({
           </div>
         )}
       </div>
+      )}
 
       {/* ── In-Season Signing Modal ── */}
       {inSeasonPlayer && (

@@ -56,19 +56,30 @@ const Playoffs: React.FC<PlayoffsProps> = ({ league, updateLeague, onStartOffsea
     // Ensure unique ID for playoff games
     result.id = `playoff-${state.season}-${series.id}-G${totalGames + 1}`;
     
-    // Update Rivalry Stats
-    const history = [...(state.rivalryHistory || [])];
+    // Update Rivalry Stats — immutable copy, no shared-ref mutation
     const rt1 = result.homeTeamId;
     const rt2 = result.awayTeamId;
-    let rivalry = history.find(r => (r.team1Id === rt1 && r.team2Id === rt2) || (r.team1Id === rt2 && r.team2Id === rt1));
-    if (!rivalry) {
-      rivalry = { team1Id: rt1, team2Id: rt2, team1Wins: 0, team2Wins: 0, totalGames: 0, lastFiveGames: [], playoffSeriesCount: 0, buzzerBeaters: 0, comebacks: 0, otGames: 0, badBloodScore: 0 };
-      history.push(rivalry);
-    }
+    const existingRivalryIdx = (state.rivalryHistory || []).findIndex(
+      r => (r.team1Id === rt1 && r.team2Id === rt2) || (r.team1Id === rt2 && r.team2Id === rt1)
+    );
+    const history = [...(state.rivalryHistory || [])];
+    let rivalry: RivalryStats = existingRivalryIdx >= 0
+      ? { ...history[existingRivalryIdx] }
+      : { team1Id: rt1, team2Id: rt2, team1Wins: 0, team2Wins: 0, totalGames: 0, lastFiveGames: [], playoffSeriesCount: 0, buzzerBeaters: 0, comebacks: 0, otGames: 0, badBloodScore: 0 };
+
     const isRivalryT1Home = rivalry.team1Id === result.homeTeamId;
     const rivalryT1Won = (isRivalryT1Home && result.homeScore > result.awayScore) || (!isRivalryT1Home && result.awayScore > result.homeScore);
     rivalry.totalGames += 1;
     if (rivalryT1Won) rivalry.team1Wins += 1; else rivalry.team2Wins += 1;
+
+    // Playoff games count toward This Season H2H — fix for inflated All-Time vs missing season counts
+    if (!rivalry.seasonH2H || rivalry.seasonH2H.season !== state.season) {
+      rivalry.seasonH2H = { season: state.season, team1Wins: 0, team2Wins: 0 };
+    } else {
+      rivalry.seasonH2H = { ...rivalry.seasonH2H };
+    }
+    if (rivalryT1Won) rivalry.seasonH2H.team1Wins += 1; else rivalry.seasonH2H.team2Wins += 1;
+
     rivalry.lastFiveGames = [rivalryT1Won ? 'team1' : 'team2', ...rivalry.lastFiveGames].slice(0, 5) as ('team1' | 'team2')[];
     rivalry.lastGameResult = { winnerId: rivalryT1Won ? rivalry.team1Id : rivalry.team2Id, score: `${result.homeScore}-${result.awayScore}`, day: result.date, season: result.season };
     if (result.isOvertime) rivalry.otGames += 1;
@@ -77,8 +88,11 @@ const Playoffs: React.FC<PlayoffsProps> = ({ league, updateLeague, onStartOffsea
 
     const allStats = [...result.homePlayerStats, ...result.awayPlayerStats];
     allStats.forEach(p => {
-      if (p.techs > 0) rivalry!.badBloodScore += p.techs;
+      if (p.techs > 0) rivalry.badBloodScore += p.techs;
     });
+
+    if (existingRivalryIdx >= 0) history[existingRivalryIdx] = rivalry;
+    else history.push(rivalry);
 
     // Update Playoff Stats (separate from regular season stats)
     const EMPTY_PO = { gamesPlayed: 0, gamesStarted: 0, points: 0, rebounds: 0, offReb: 0, defReb: 0, assists: 0, steals: 0, blocks: 0, minutes: 0, fgm: 0, fga: 0, threepm: 0, threepa: 0, ftm: 0, fta: 0, tov: 0, pf: 0, techs: 0, flagrants: 0, ejections: 0, plusMinus: 0 };

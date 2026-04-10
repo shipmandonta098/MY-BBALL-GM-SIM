@@ -35,9 +35,17 @@ const traitIcons: Record<PersonalityTrait, string> = {
 const isPlayerInjured = (p: Player) =>
   p.status === 'Injured' || (p.injuryDaysLeft != null && p.injuryDaysLeft > 0);
 
-/** Derive display status from rotation slot, overriding with injury when applicable. */
+/** True if a player is currently serving a suspension. */
+const isPlayerSuspended = (p: Player) =>
+  !!p.isSuspended && (p.suspensionGames ?? 0) > 0;
+
+/** True if a player is unavailable for any reason */
+const isPlayerUnavailable = (p: Player) => isPlayerInjured(p) || isPlayerSuspended(p);
+
+/** Derive display status from rotation slot, overriding with injury/suspension when applicable. */
 const getEffectiveStatus = (p: Player, rotation?: TeamRotation): PlayerStatus => {
   if (isPlayerInjured(p)) return 'Injured';
+  if (isPlayerSuspended(p)) return 'Injured'; // reuse Injured slot for display, badge overrides
   if (!rotation) return p.status;
   const starterIds = Object.values(rotation.starters);
   if (starterIds.includes(p.id)) return 'Starter';
@@ -111,7 +119,7 @@ const Roster: React.FC<RosterProps> = ({ leagueTeams, userTeamId, initialTeamId,
         const matchesSearch = p.name.toLowerCase().includes(searchTerm.toLowerCase());
         const matchesPos = posFilter === 'ALL' || p.position === posFilter;
         const matchesOvr = p.rating >= minOvr;
-        const matchesInjured = !injuredOnly || isPlayerInjured(p);
+          const matchesInjured = !injuredOnly || isPlayerUnavailable(p);
         return matchesSearch && matchesPos && matchesOvr && matchesInjured;
       })
       .sort((a, b) => {
@@ -325,7 +333,7 @@ const Roster: React.FC<RosterProps> = ({ leagueTeams, userTeamId, initialTeamId,
             injuredOnly ? 'bg-rose-500/20 border-rose-500 text-rose-400 shadow-lg shadow-rose-900/20' : 'bg-slate-900 border-slate-800 text-slate-500 hover:border-slate-600'
           }`}
         >
-          <span>🤕</span> {injuredOnly ? 'Showing Injured Only' : 'Show Injured Only'}
+          <span>🤕</span> {injuredOnly ? 'Showing Injured/Suspended' : 'Show Injured / Suspended'}
         </button>
         {injuredOnly && filteredRoster.length > 0 && (
           <span className="text-[10px] text-rose-400 font-bold uppercase tracking-widest">{filteredRoster.length} on injured list</span>
@@ -411,12 +419,19 @@ const Roster: React.FC<RosterProps> = ({ leagueTeams, userTeamId, initialTeamId,
               {filteredRoster.map((player) => (
                 <tr 
                   key={player.id} 
-                  className={`group hover:bg-slate-800/40 transition-all cursor-pointer ${isPlayerInjured(player) ? 'bg-rose-950/20 border-l-2 border-rose-500/30' : ''}`}
+                  className={`group hover:bg-slate-800/40 transition-all cursor-pointer ${
+                    isPlayerSuspended(player) ? 'bg-red-950/25 border-l-2 border-red-500/40' :
+                    isPlayerInjured(player)   ? 'bg-rose-950/20 border-l-2 border-rose-500/30' : ''
+                  }`}
                   onClick={() => onScout(player)}
                 >
                   <td className="px-8 py-6">
                     <div className="flex items-center gap-4">
-                      <div className={`w-12 h-12 rounded-xl flex items-center justify-center font-display text-xl border ${isPlayerInjured(player) ? 'bg-rose-950/40 border-rose-500/40 text-rose-400' : 'bg-slate-800 border-slate-700 text-slate-600'}`}>
+                      <div className={`w-12 h-12 rounded-xl flex items-center justify-center font-display text-xl border ${
+                        isPlayerSuspended(player) ? 'bg-red-950/40 border-red-500/40 text-red-400' :
+                        isPlayerInjured(player)   ? 'bg-rose-950/40 border-rose-500/40 text-rose-400' :
+                        'bg-slate-800 border-slate-700 text-slate-600'
+                      }`}>
                         {player.name.charAt(0)}
                       </div>
                       <div className="min-w-0">
@@ -424,12 +439,20 @@ const Roster: React.FC<RosterProps> = ({ leagueTeams, userTeamId, initialTeamId,
                           {player.country && (
                             <span className="text-base leading-none" title={player.country}>{getFlag(player.country)}</span>
                           )}
-                          <span className={`font-display font-bold text-lg uppercase tracking-tight transition-colors group-hover:text-amber-500 ${isPlayerInjured(player) ? 'text-rose-400' : 'text-slate-100'}`}>
+                          <span className={`font-display font-bold text-lg uppercase tracking-tight transition-colors group-hover:text-amber-500 ${
+                            isPlayerSuspended(player) ? 'text-red-400' :
+                            isPlayerInjured(player)   ? 'text-rose-400' : 'text-slate-100'
+                          }`}>
                             {player.name}
                           </span>
                         </div>
                         <div className="flex items-center gap-2 mt-1 flex-wrap">
                           {(() => {
+                            if (isPlayerSuspended(player)) return (
+                              <span className="text-[10px] font-black uppercase tracking-widest px-1.5 py-0.5 rounded bg-red-500/10 text-red-400 border border-red-500/20 whitespace-nowrap">
+                                ⛔ SUSP{(player.suspensionGames ?? 0) > 0 ? ` · ${player.suspensionGames}G` : ''}
+                              </span>
+                            );
                             const eff = getEffectiveStatus(player, activeTeam.rotation);
                             if (eff === 'Injured') return (
                               <span className="text-[10px] font-black uppercase tracking-widest px-1.5 py-0.5 rounded bg-rose-500/10 text-rose-400 border border-rose-500/20 whitespace-nowrap">
