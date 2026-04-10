@@ -440,7 +440,8 @@ export interface Team {
   activeScheme: CoachScheme;
   wins: number;
   losses: number;
-  prevSeasonWins?: number; // Added for EOY logic
+  prevSeasonWins?: number;  // Added for EOY logic
+  prevSeasonLosses?: number; // Added for EOY logic (used by draft lottery sorting)
   homeWins: number;
   homeLosses: number;
   roadWins: number; roadLosses: number;
@@ -752,6 +753,18 @@ export interface RivalryStats {
   };
 }
 
+export interface PreviousSeasonStanding {
+  teamId: string;
+  teamName: string;
+  teamCity: string;
+  teamAbbr: string;
+  conference: Conference;
+  wins: number;
+  losses: number;
+  confRank: number;
+  madePlayoffs: boolean;
+}
+
 export interface LeagueState {
   id: string;
   lastUpdated: number;
@@ -782,6 +795,10 @@ export interface LeagueState {
   currentDraftPickIndex?: number;
   championshipHistory?: ChampionshipRecord[];
   rivalryHistory?: RivalryStats[];
+  /** Final standings snapshot from the most recently completed season, saved at season end. */
+  previousSeasonStandings?: PreviousSeasonStanding[];
+  /** Season number that previousSeasonStandings was captured from. */
+  previousSeasonYear?: number;
   expansionDraft?: {
     active: boolean;
     phase: 'setup' | 'protection' | 'draft' | 'completed';

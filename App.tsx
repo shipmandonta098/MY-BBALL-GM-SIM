@@ -1,6 +1,6 @@
 
 import React, { useState, useEffect, useCallback } from 'react';
-import { LeagueState, Player, Team, GameResult, PlayerStatus, ScheduleGame, BulkSimSummary, Prospect, Coach, TradeProposal, Position, NewsItem, NewsCategory, LeagueSettings, SeasonAwards, PlayoffBracket, PlayoffSeries, Transaction, TransactionType, PowerRankingSnapshot, PowerRankingEntry, GMProfile, GMMilestone, RivalryStats, InjuryType, SeasonPhase, AllStarWeekendData, AllStarVoteEntry } from './types';
+import { LeagueState, Player, Team, GameResult, PlayerStatus, ScheduleGame, BulkSimSummary, Prospect, Coach, TradeProposal, Position, NewsItem, NewsCategory, LeagueSettings, SeasonAwards, PlayoffBracket, PlayoffSeries, Transaction, TransactionType, PowerRankingSnapshot, PowerRankingEntry, GMProfile, GMMilestone, RivalryStats, InjuryType, SeasonPhase, AllStarWeekendData, AllStarVoteEntry, PreviousSeasonStanding } from './types';
 import { generateLeagueTeams, generateSeasonSchedule, generateProspects, generateFreeAgentPool, generateCoachPool, EXPANSION_TEAM_POOL, generateCoach, generatePlayer, generateDefaultRotation, enforcePositionalBounds, ageFromBirthdate, getCoachPreferredScheme, generateGMName } from './constants';
 import { simulateGame, normalizeLeagueOVRs } from './utils/simEngine';
 import { computeGameAttendance } from './utils/attendanceEngine';
@@ -1904,6 +1904,36 @@ const App: React.FC = () => {
       ),
     }));
 
+    // ── Capture final standings snapshot before resetting wins/losses ───────────
+    const playoffSpotsPerConf = Math.floor((tempState.settings.playoffFormat ?? 16) / 2);
+    const prevStandings: PreviousSeasonStanding[] = [];
+    (['Eastern', 'Western'] as const).forEach(conf => {
+      const confTeams = [...tempState.teams]
+        .filter(t => t.conference === conf)
+        .sort((a, b) => {
+          const aPct = a.wins / Math.max(1, a.wins + a.losses);
+          const bPct = b.wins / Math.max(1, b.wins + b.losses);
+          if (bPct !== aPct) return bPct - aPct;
+          if (b.wins !== a.wins) return b.wins - a.wins;
+          return a.losses - b.losses;
+        });
+      confTeams.forEach((t, idx) => {
+        prevStandings.push({
+          teamId: t.id,
+          teamName: t.name,
+          teamCity: t.city,
+          teamAbbr: t.abbreviation,
+          conference: conf,
+          wins: t.wins,
+          losses: t.losses,
+          confRank: idx + 1,
+          madePlayoffs: idx < playoffSpotsPerConf,
+        });
+      });
+    });
+    tempState.previousSeasonStandings = prevStandings;
+    tempState.previousSeasonYear = tempState.season;
+
     tempState.teams = tempState.teams.map(t => {
       const facBudget     = t.finances?.budgets?.facilities ?? 20;
       const hcDevRating   = t.staff.headCoach?.ratingDevelopment ?? 50;
@@ -1940,7 +1970,7 @@ const App: React.FC = () => {
       });
       // Remove expired contracts from roster (they become free agents)
       const retained = rosterWithProg.filter(p => p.contractYears > 1);
-      return { ...t, roster: retained.map(p => ({ ...p, contractYears: p.contractYears - 1 })), prevSeasonWins: t.wins, wins: 0, losses: 0, lastTen: [] };
+      return { ...t, roster: retained.map(p => ({ ...p, contractYears: p.contractYears - 1 })), prevSeasonWins: t.wins, prevSeasonLosses: t.losses, wins: 0, losses: 0, lastTen: [] };
     });
 
     // Merge generated FA pool + expired-contract players (deduplicated by id)
@@ -2500,7 +2530,7 @@ const App: React.FC = () => {
               />
             )
           )}
-          {activeTab === 'standings' && <Standings teams={league.teams} userTeamId={league.userTeamId} seasonLength={league.settings.seasonLength ?? 82} playoffFormat={league.settings.playoffFormat ?? 16} season={league.season} isPlayoffs={!!league.playoffBracket} onViewRoster={handleViewRoster} onManageTeam={handleManageTeam} rivalryHistory={league.rivalryHistory} />}
+          {activeTab === 'standings' && <Standings teams={league.teams} userTeamId={league.userTeamId} seasonLength={league.settings.seasonLength ?? 82} playoffFormat={league.settings.playoffFormat ?? 16} season={league.season} isPlayoffs={!!league.playoffBracket} onViewRoster={handleViewRoster} onManageTeam={handleManageTeam} rivalryHistory={league.rivalryHistory} previousSeasonStandings={league.previousSeasonStandings} previousSeasonYear={league.previousSeasonYear} />}
           {activeTab === 'schedule' && <Schedule league={league} onSimulate={handleSimulate} onScout={handleViewPlayer} onWatchLive={handleWatchLive} onViewBoxScore={(res, home, away) => setViewingBoxScore({ result: res, home, away })} onManageTeam={handleManageTeam} onAdvanceToRegularSeason={handleAdvanceToRegularSeason} onViewAllStar={() => setActiveTab('allstar')} />}
           {activeTab === 'draft' && <Draft league={league} updateLeague={updateLeagueState} onScout={handleScoutPlayer} scoutingReport={scoutingReport} onNavigateToFreeAgency={() => setActiveTab('free_agency')} />}
           {activeTab === 'coaching' && <Coaching league={league} updateLeague={updateLeagueState} godMode={league.settings.godMode} />}
