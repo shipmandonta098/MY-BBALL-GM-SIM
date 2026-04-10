@@ -27,10 +27,16 @@ const DraftLottery: React.FC<DraftLotteryProps> = ({ league, updateLeague }) => 
   const [fullOrder, setFullOrder] = useState<DraftPick[]>([]);
   const ballAnimRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
-  // Sort bottom 14 teams by worst record for lottery eligibility
+  // Sort bottom 14 teams by worst record for lottery eligibility.
+  // During offseason the current wins/losses are reset to 0, so use prevSeasonWins/prevSeasonLosses
+  // which are captured at season end before the reset. Fall back to current record if not available.
   const sortedByRecord = [...league.teams].sort((a, b) => {
-    const aWinPct = a.wins / Math.max(1, a.wins + a.losses);
-    const bWinPct = b.wins / Math.max(1, b.wins + b.losses);
+    const aW = a.prevSeasonWins ?? a.wins;
+    const aL = a.prevSeasonLosses ?? a.losses;
+    const bW = b.prevSeasonWins ?? b.wins;
+    const bL = b.prevSeasonLosses ?? b.losses;
+    const aWinPct = aW / Math.max(1, aW + aL);
+    const bWinPct = bW / Math.max(1, bW + bL);
     return aWinPct - bWinPct;
   });
   const lotteryTeams = sortedByRecord.slice(0, 14);
@@ -274,7 +280,7 @@ const DraftLottery: React.FC<DraftLotteryProps> = ({ league, updateLeague }) => 
                         {team.name}
                       </p>
                       <p className="text-[10px] text-slate-500 font-bold uppercase">
-                        {team.wins}–{team.losses}
+                        {team.prevSeasonWins ?? team.wins}–{team.prevSeasonLosses ?? team.losses}
                       </p>
                     </div>
                     {jumped && (
@@ -327,7 +333,7 @@ const DraftLottery: React.FC<DraftLotteryProps> = ({ league, updateLeague }) => 
                         {team.name}
                       </span>
                       <span className="ml-auto text-[10px] text-slate-600 font-bold">
-                        {team.wins}–{team.losses}
+                        {team.prevSeasonWins ?? team.wins}–{team.prevSeasonLosses ?? team.losses}
                       </span>
                     </div>
                   );
@@ -384,7 +390,9 @@ const DraftLottery: React.FC<DraftLotteryProps> = ({ league, updateLeague }) => 
                 {lotteryTeams.map((team, idx) => {
                   const isUser = team.id === league.userTeamId;
                   const pct = LOTTERY_ODDS_PCT[idx];
-                  const winPct = (team.wins / Math.max(1, team.wins + team.losses) * 100).toFixed(1);
+                  const prevW = team.prevSeasonWins ?? team.wins;
+                  const prevL = team.prevSeasonLosses ?? team.losses;
+                  const winPct = (prevW / Math.max(1, prevW + prevL) * 100).toFixed(1);
                   return (
                     <tr key={team.id} className={`group hover:bg-slate-800/30 transition-all ${isUser ? 'bg-amber-500/5' : ''}`}>
                       <td className="px-6 py-4">
@@ -406,7 +414,9 @@ const DraftLottery: React.FC<DraftLotteryProps> = ({ league, updateLeague }) => 
                         </div>
                       </td>
                       <td className="px-6 py-4 text-center">
-                        <span className="font-mono text-slate-300">{team.wins}–{team.losses}</span>
+                        <span className="font-mono text-slate-300">
+                          {team.prevSeasonWins ?? team.wins}–{team.prevSeasonLosses ?? team.losses}
+                        </span>
                       </td>
                       <td className="px-6 py-4 text-center text-slate-500 font-mono">{winPct}%</td>
                       <td className="px-6 py-4 text-right">
