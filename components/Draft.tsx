@@ -102,7 +102,13 @@ const Draft: React.FC<DraftProps> = ({ league, updateLeague, onScout, scoutingRe
           realTimestamp: Date.now(),
           isBreaking: true,
         };
-        updateLeague({ draftPhase: 'completed', newsFeed: [newsItem, ...league.newsFeed] });
+        // Remove current-year picks from team.picks — they've been exercised in the draft
+        const draftedSeason = league.season - 1;
+        const cleanedTeams = league.teams.map(t => ({
+          ...t,
+          picks: t.picks.filter(p => p.year !== undefined && p.year > draftedSeason),
+        }));
+        updateLeague({ draftPhase: 'completed', teams: cleanedTeams, newsFeed: [newsItem, ...league.newsFeed] });
       }
       return;
     }

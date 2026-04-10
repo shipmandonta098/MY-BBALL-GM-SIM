@@ -2069,10 +2069,14 @@ const App: React.FC = () => {
       if (!prev) return null;
       const nextSeason = prev.season;
       const futureWindow = prev.settings.tradableDraftPickSeasons ?? 4;
-      // Seed future picks (next N seasons per setting) for every team that doesn't already have them
       const teamsWithPicks = prev.teams.map(t => {
-        const existingPickYears = new Set(t.picks.map(p => p.year));
+        // Strip picks that have already been exercised in the just-completed draft (year < nextSeason)
+        // and any legacy no-year picks. Current-year picks for nextSeason already exist as the
+        // previous season's "future pick + 1" — they are not re-generated here.
+        const activePicks = t.picks.filter(p => p.year !== undefined && p.year >= nextSeason);
+        const existingPickYears = new Set(activePicks.map(p => p.year));
         const newPicks = [] as typeof t.picks;
+        // Extend the future window (keeps it at tradableDraftPickSeasons deep)
         for (let f = 1; f <= futureWindow; f++) {
           const yr = nextSeason + f;
           if (!existingPickYears.has(yr)) {
@@ -2082,7 +2086,7 @@ const App: React.FC = () => {
             );
           }
         }
-        return newPicks.length > 0 ? { ...t, picks: [...t.picks, ...newPicks] } : t;
+        return { ...t, picks: [...activePicks, ...newPicks] };
       });
       return {
         ...prev,
