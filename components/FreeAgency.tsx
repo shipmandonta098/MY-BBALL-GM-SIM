@@ -921,14 +921,18 @@ const FreeAgency: React.FC<FreeAgencyProps> = ({
                           <p className="font-bold text-slate-200 uppercase tracking-tight hover:text-amber-500 transition-colors">
                             {p.name}
                           </p>
-                          <p className="text-[10px] text-slate-600 font-bold uppercase mt-0.5">
-                            {p.inSeasonFA && (
-                              <span className="text-orange-400 mr-1.5">WAIVED ·</span>
+                          {/* Previous team badge */}
+                          <p className="text-[11px] font-black uppercase tracking-wide mt-0.5">
+                            {p.inSeasonFA ? (
+                              <span className="text-orange-400">WAIVED</span>
+                            ) : p.lastTeamId ? (
+                              <span className="text-sky-400">{league.teams.find(t => t.id === p.lastTeamId)?.name ?? 'FA'}</span>
+                            ) : (
+                              <span className="text-slate-500">Unrestricted FA</span>
                             )}
+                          </p>
+                          <p className="text-[10px] text-slate-600 font-bold uppercase mt-0.5">
                             {p.position} · {getFlag(p.country)}{p.hometown}
-                            {p.lastTeamId
-                              ? ` · ${league.teams.find(t => t.id === p.lastTeamId)?.name ?? 'FA'}`
-                              : ' · Free Agent'}
                           </p>
                         </button>
                       </td>

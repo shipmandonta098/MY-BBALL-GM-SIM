@@ -1628,15 +1628,24 @@ const PlayerModal: React.FC<PlayerModalProps> = ({
                           </tbody>
                         </table>
                       </div>
-                      <div className="border-t border-slate-800/60 grid grid-cols-3 divide-x divide-slate-800/60">
-                        {[
-                          { label: 'PER',  value: isNaN(pPer) ? '—' : pPer.toFixed(1) },
-                          { label: 'TS%',  value: isNaN(pTs)  ? '—' : (pTs * 100).toFixed(1) + '%' },
-                          { label: 'GP',   value: String(po.gamesPlayed) },
-                        ].map(c => (
+                      <div className="border-t border-slate-800/60 grid grid-cols-3 sm:grid-cols-6 divide-x divide-slate-800/60">
+                        {(() => {
+                          const pPmPg = po.gamesPlayed > 0 ? po.plusMinus / po.gamesPlayed : 0;
+                          const pPoss = (po.fga / pgp) - (po.offReb / pgp) + 0.44 * (po.fta / pgp) + ptpg;
+                          const pORtg = pPoss > 0.5 ? Math.round((pppg / pPoss) * 100) : 0;
+                          const pDRtg = Math.max(85, Math.round(110 - (pspg + pbpg) * 2.5 - (po.defReb / pgp) * 0.5));
+                          return [
+                            { label: 'PER',   value: isNaN(pPer)  ? '—' : pPer.toFixed(1),          hi: pPer >= 20 },
+                            { label: 'TS%',   value: isNaN(pTs)   ? '—' : (pTs * 100).toFixed(1) + '%', hi: pTs >= 0.58 },
+                            { label: 'eFG%',  value: po.fga > 0   ? (peFG * 100).toFixed(1) + '%' : '—', hi: peFG >= 0.53 },
+                            { label: '+/-',   value: po.gamesPlayed > 0 ? (pPmPg >= 0 ? '+' : '') + pPmPg.toFixed(1) : '—', hi: pPmPg >= 5 },
+                            { label: 'ORtg',  value: pORtg > 0    ? String(pORtg) : '—',              hi: pORtg >= 115 },
+                            { label: 'DRtg',  value: po.gamesPlayed > 0 ? String(pDRtg) : '—',        hi: pDRtg <= 105 },
+                          ];
+                        })().map(c => (
                           <div key={c.label} className="py-3 text-center">
                             <div className="text-[10px] font-black uppercase tracking-widest text-slate-500">{c.label}</div>
-                            <div className="font-display font-bold text-slate-300 tabular-nums mt-0.5">{c.value}</div>
+                            <div className={`font-display font-bold tabular-nums mt-0.5 text-sm ${c.hi ? 'text-amber-400' : 'text-slate-300'}`}>{c.value}</div>
                           </div>
                         ))}
                       </div>

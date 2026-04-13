@@ -124,6 +124,7 @@ const Playoffs: React.FC<PlayoffsProps> = ({ league, updateLeague, onStartOffsea
               fta:      ps.fta      + line.fta,
               tov:      ps.tov      + line.tov,
               pf:       ps.pf       + line.pf,
+              plusMinus: ps.plusMinus + (line.plusMinus ?? 0),
             }
           };
         })
