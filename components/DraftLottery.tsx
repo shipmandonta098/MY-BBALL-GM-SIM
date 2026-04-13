@@ -174,11 +174,12 @@ const DraftLottery: React.FC<DraftLotteryProps> = ({ league, updateLeague }) => 
         }
 
         const pick = order[revealIdx];
+        const pickNum = revealIdx + 1; // snapshot BEFORE decrement — updater runs after callback returns (React 18 batching), so revealIdx would already be decremented if we closed over it directly
         const originalSlot = lotteryTeams.findIndex(t => t.id === pick.currentTeamId) + 1; // 1-based, -1 + 1 = 0 if playoff team
-        const jumped = originalSlot > 0 && originalSlot > revealIdx + 1;
+        const jumped = originalSlot > 0 && originalSlot > pickNum;
 
         setRevealedPicks(prev => [
-          { pick: revealIdx + 1, teamId: pick.currentTeamId, originalSlot, jumped },
+          { pick: pickNum, teamId: pick.currentTeamId, originalSlot, jumped },
           ...prev,
         ]);
         revealIdx--;
