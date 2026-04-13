@@ -149,42 +149,121 @@ const Playoffs: React.FC<PlayoffsProps> = ({ league, updateLeague, onStartOffsea
 
     let newsFeed = [...state.newsFeed];
 
-    // Helper: build an engaging series-complete headline
-    const buildSeriesContent = (winner: Team, loser: Team, winsW: number, winsL: number): string => {
-      const pick = (arr: string[]): string => arr[Math.floor(Math.random() * arr.length)];
+    // Helper: build round-specific, varied playoff series news
+    const buildSeriesNews = (winner: Team, loser: Team, winsW: number, winsL: number): { headline: string; content: string } => {
+      const pick = <T,>(arr: T[]): T => arr[Math.floor(Math.random() * arr.length)];
       const margin = Math.abs(result.homeScore - result.awayScore);
-      const topLine = result.topPerformers?.[0];
-      const topName = topLine ? (() => {
-        const allRoster = [...winner.roster, ...loser.roster];
-        return allRoster.find(p => p.id === topLine.playerId)?.name ?? null;
-      })() : null;
       const seriesRecord = `${winsW}-${winsL}`;
-      const finalScore = `${Math.max(result.homeScore, result.awayScore)}-${Math.min(result.homeScore, result.awayScore)}`;
-      const roundName = newSeries.round === 4 ? 'Championship' : newSeries.round === 3 ? 'Conference Finals' : newSeries.round === 2 ? 'Semifinals' : 'First Round';
-
+      const totalGamesInSeries = winsW + winsL;
       const isSweep = winsL === 0;
+      const wentToSeven = winsL === 3 && totalGamesInSeries === 7;
       const isClose = winsL >= 3;
       const isBlowout = margin >= 20;
+      const W = `${winner.city} ${winner.name}`;
+      const L = `${loser.city} ${loser.name}`;
 
-      if (isSweep) return pick([
-        `${winner.name} sweep the ${roundName} series in dominant fashion, dispatching ${loser.name} without dropping a single game. The message to the rest of the bracket is clear.`,
-        `Four and done. ${winner.name} eliminate ${loser.name} in a sweep to advance. ${topName ? `${topName} led the charge throughout.` : 'They never trailed in the series.'}`,
-        `${winner.name} roll through the ${roundName} — a clean sweep over ${loser.name}. They look like the team to beat.`,
-      ]);
-      if (isClose && isBlowout) return pick([
-        `After a grueling ${seriesRecord} series, ${winner.name} put it away emphatically — a ${finalScore} blowout in the deciding game ends ${loser.name}'s run.`,
-        `${winner.name} survive a back-and-forth ${roundName} series and close it out in convincing fashion, ${finalScore}. ${loser.name} fought hard but ran out of answers.`,
-      ]);
-      if (isClose) return pick([
-        `${winner.name} edge ${loser.name} in a hard-fought ${seriesRecord} series. The deciding game came down to the wire — final: ${finalScore}. ${topName ? `${topName} was brilliant.` : ''}`,
-        `A battle for the ages. ${winner.name} advance after a ${seriesRecord} war with ${loser.name}, winning the clincher ${finalScore}. Neither team gave an inch.`,
-        `${loser.name} pushed them to the brink, but ${winner.name} close out the ${roundName} ${seriesRecord}. A series that lived up to every expectation.`,
-      ]);
-      return pick([
-        `${winner.name} advance past ${loser.name} with a ${seriesRecord} series win, closing out ${finalScore}. ${topName ? `${topName} was the difference-maker.` : 'On to the next round.'}`,
-        `${winner.name} punch their ticket to the next round, beating ${loser.name} ${seriesRecord} in the ${roundName}. Final: ${finalScore}.`,
-        `The ${roundName} belongs to ${winner.name}. They eliminate ${loser.name} ${seriesRecord} and look primed for a deep run.`,
-      ]);
+      // Compute series PPG for the winner's top scorer by scanning series game history
+      const prevSeriesGames = state.history.filter(g => (series.games as string[]).includes(g.id));
+      const allSeriesGames: GameResult[] = [...prevSeriesGames, result];
+      const ppgMap: Record<string, { name: string; pts: number; gp: number }> = {};
+      for (const game of allSeriesGames) {
+        const isHome = game.homeTeamId === winner.id;
+        const lines = isHome ? game.homePlayerStats : game.awayPlayerStats;
+        for (const line of lines) {
+          const player = winner.roster.find(p => p.id === line.playerId);
+          if (!player) continue;
+          if (!ppgMap[line.playerId]) ppgMap[line.playerId] = { name: player.name, pts: 0, gp: 0 };
+          ppgMap[line.playerId].pts += line.pts;
+          ppgMap[line.playerId].gp += 1;
+        }
+      }
+      const topScorer = Object.values(ppgMap)
+        .filter(p => p.gp >= Math.max(1, Math.floor(totalGamesInSeries / 2)))
+        .sort((a, b) => (b.pts / b.gp) - (a.pts / a.gp))[0] ?? null;
+      const topPPG = topScorer ? +(topScorer.pts / topScorer.gp).toFixed(1) : 0;
+      const standout = topScorer && topPPG >= 20
+        ? pick([
+            ` ${topScorer.name} was the difference-maker with ${topPPG} PPG in the series.`,
+            ` ${topScorer.name} averaged ${topPPG} points per game throughout the series.`,
+            ` ${topScorer.name} led the charge, averaging ${topPPG} PPG.`,
+            ` ${topScorer.name} stepped up when it counted, posting ${topPPG} PPG for the series.`,
+          ])
+        : '';
+
+      // Round-specific labels and advancement phrasing
+      const roundLabel: Record<number, string> = {
+        1: 'First Round', 2: 'Conference Semifinals', 3: 'Conference Finals', 4: 'Finals',
+      };
+      const round = newSeries.round;
+      const roundName = roundLabel[round] ?? 'First Round';
+      const advanceTo: Record<number, string[]> = {
+        1: ['advance to the Conference Semifinals', 'punch their ticket to the Conference Semifinals', 'move on to the Conference Semifinals'],
+        2: ['advance to the Conference Finals', 'earn a berth in the Conference Finals', 'punch their ticket to the Conference Finals'],
+        3: ['advance to the Finals', 'punch their ticket to the Finals', 'earn a trip to the Finals', 'book their place in the Finals'],
+        4: [],
+      };
+      const advancePhrase = round < 4 ? pick(advanceTo[round] ?? advanceTo[1]) : '';
+
+      // Finals — most dramatic templates
+      if (round === 4) {
+        const yr = state.season;
+        const headline = isSweep ? `🏆 ${yr} CHAMPIONS` : wentToSeven ? `🏆 SEVEN-GAME CLASSIC — ${yr} CHAMPIONS` : `🏆 ${yr} CHAMPIONSHIP`;
+        if (isSweep) return { headline, content: pick([
+          `${W} sweep the ${L} 4-0 to win the ${yr} Championship!${standout}`,
+          `CHAMPIONS! ${W} complete a dominant sweep of the ${L} and hoist the trophy in ${yr}.${standout}`,
+          `Four and done — ${W} are the ${yr} Champions, dismissing the ${L} in a clean sweep.${standout}`,
+        ]) };
+        if (wentToSeven) return { headline, content: pick([
+          `In a seven-game classic, ${W} defeat the ${L} ${seriesRecord} to win the ${yr} Championship!${standout}`,
+          `Seven games. One champion. ${W} outlast the ${L} in an epic Finals, closing it out ${seriesRecord} to claim ${yr} glory.${standout}`,
+          `The ${yr} title goes to ${W}! They edge the ${L} in seven unforgettable games.${standout}`,
+        ]) };
+        if (isClose) return { headline, content: pick([
+          `${W} defeat the ${L} ${seriesRecord} to win the ${yr} Championship! A hard-fought series goes down to the wire.${standout}`,
+          `After a thrilling Finals, ${W} capture the ${yr} title with a ${seriesRecord} series win over the ${L}.${standout}`,
+          `${W} are ${yr} Champions! They close out the ${L} ${seriesRecord} in an instant classic.${standout}`,
+        ]) };
+        return { headline, content: pick([
+          `${W} defeat the ${L} ${seriesRecord} to win the ${yr} Championship!${standout}`,
+          `CHAMPIONS! ${W} claim the ${yr} title, taking down the ${L} ${seriesRecord} in the Finals.${standout}`,
+          `${W} are ${yr} Champions, finishing off the ${L} ${seriesRecord} in an impressive Finals run.${standout}`,
+        ]) };
+      }
+
+      // Round-specific headlines
+      const headlines: Record<number, string[]> = {
+        1: ['FIRST ROUND — SERIES COMPLETE', 'FIRST ROUND OVER'],
+        2: ['CONFERENCE SEMIFINALS — SERIES COMPLETE', 'SEMIFINALS DECIDED'],
+        3: ['CONFERENCE FINALS — SERIES COMPLETE', 'CONFERENCE FINALS OVER'],
+      };
+      const headline = pick(headlines[round] ?? headlines[1]);
+
+      if (isSweep) return { headline, content: pick([
+        `${W} sweep ${L} 4-0 and ${advancePhrase}.${standout}`,
+        `A dominant showing — ${W} eliminate ${L} in a sweep and ${advancePhrase}. The message to the league is clear.${standout}`,
+        `Four and done. ${W} storm past ${L} without dropping a game and ${advancePhrase}.${standout}`,
+      ]) };
+      if (wentToSeven) return { headline, content: pick([
+        `${W} defeat ${L} ${seriesRecord} in a seven-game thriller and ${advancePhrase}.${standout}`,
+        `Seven games, everything on the line — ${W} eliminate ${L} ${seriesRecord} in the ${roundName} and ${advancePhrase}.${standout}`,
+        `A classic ${roundName} series ends — ${W} edge ${L} in seven and ${advancePhrase}.${standout}`,
+      ]) };
+      if (isClose && isBlowout) return { headline, content: pick([
+        `After a grueling ${seriesRecord} series, ${W} close it out with a statement performance and ${advancePhrase}. ${L} had no answers in the end.${standout}`,
+        `${W} survive a back-and-forth ${roundName} battle with ${L} and ${advancePhrase}, putting it away emphatically in the clincher.${standout}`,
+      ]) };
+      if (isClose) return { headline, content: pick([
+        `${W} eliminate ${L} ${seriesRecord} in the ${roundName} and ${advancePhrase}.${standout}`,
+        `A hard-fought ${seriesRecord} series goes to ${W}, who ${advancePhrase}. ${L} took them to the limit.${standout}`,
+        `${W} edge ${L} ${seriesRecord} in a tight ${roundName} battle and ${advancePhrase}.${standout}`,
+        `${L} pushed them to ${winsL} games, but ${W} close out the ${roundName} ${seriesRecord} and ${advancePhrase}.${standout}`,
+      ]) };
+      return { headline, content: pick([
+        `${W} defeat ${L} ${seriesRecord} in the ${roundName} and ${advancePhrase}.${standout}`,
+        `${W} eliminate ${L} ${seriesRecord} and ${advancePhrase}.${standout}`,
+        `The ${roundName} belongs to ${W} — they take down ${L} ${seriesRecord} and ${advancePhrase}.${standout}`,
+        `${W} take care of business in the ${roundName}, beating ${L} ${seriesRecord} to ${advancePhrase}.${standout}`,
+      ]) };
     };
 
     if (newSeries.team1Wins === 4) {
@@ -192,11 +271,12 @@ const Playoffs: React.FC<PlayoffsProps> = ({ league, updateLeague, onStartOffsea
       rivalry.playoffSeriesCount += 1;
       const winner = updatedTeams.find(t => t.id === newSeries.winnerId)!;
       const loser  = updatedTeams.find(t => t.id === series.team2Id)!;
+      const { headline, content } = buildSeriesNews(winner, loser, newSeries.team1Wins, newSeries.team2Wins);
       newsFeed.unshift({
         id: `playoff-win-${Date.now()}`,
         category: 'playoffs',
-        headline: 'SERIES COMPLETE',
-        content: buildSeriesContent(winner, loser, newSeries.team1Wins, newSeries.team2Wins),
+        headline,
+        content,
         timestamp: state.currentDay,
         realTimestamp: Date.now(),
         teamId: winner.id,
@@ -208,11 +288,12 @@ const Playoffs: React.FC<PlayoffsProps> = ({ league, updateLeague, onStartOffsea
       rivalry.playoffSeriesCount += 1;
       const winner = updatedTeams.find(t => t.id === newSeries.winnerId)!;
       const loser  = updatedTeams.find(t => t.id === series.team1Id)!;
+      const { headline, content } = buildSeriesNews(winner, loser, newSeries.team2Wins, newSeries.team1Wins);
       newsFeed.unshift({
         id: `playoff-win-${Date.now()}`,
         category: 'playoffs',
-        headline: 'SERIES COMPLETE',
-        content: buildSeriesContent(winner, loser, newSeries.team2Wins, newSeries.team1Wins),
+        headline,
+        content,
         timestamp: state.currentDay,
         realTimestamp: Date.now(),
         teamId: winner.id,
