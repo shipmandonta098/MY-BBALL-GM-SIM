@@ -353,6 +353,9 @@ export function runAIGMOffseason(
   const newsItems: NewsItem[] = [];
   const txs: Transaction[] = [];
   const salaryCap = s.settings.salaryCap;
+  // Absolute luxury ceiling — NO team may sign players that push payroll above this.
+  // Win Now gets up to 1.30x, all others up to 1.15x; nobody exceeds 1.35x ever.
+  const LUXURY_CEILING = salaryCap * 1.35;
 
   // Build a sorted list of top FAs for "superstar chaser" detection
   const topFAIds = new Set(
@@ -413,6 +416,38 @@ export function runAIGMOffseason(
       });
     }
 
+    // ── 1.8 EMERGENCY CAP RELIEF ────────────────────────────────
+    // If current payroll already exceeds the luxury ceiling, force-release
+    // the worst-value (lowest rating/salary ratio) non-star contracts until
+    // the team is back under the ceiling. Never cut 88+ OVR players, never
+    // go below the minimum roster size.
+    {
+      const minRoster = s.settings.minRosterSize ?? 10;
+      let emergencyCuts = 0;
+      while (
+        rosterSalary({ ...t, roster: currentRoster }) > LUXURY_CEILING &&
+        currentRoster.length > minRoster &&
+        emergencyCuts < 5
+      ) {
+        const candidates = currentRoster
+          .filter(p => p.rating < 88)
+          .sort((a, b) => (a.rating / Math.max(1, a.salary)) - (b.rating / Math.max(1, b.salary)));
+        if (candidates.length === 0) break;
+        const toCut = candidates[0];
+        currentRoster = currentRoster.filter(p => p.id !== toCut.id);
+        faPool.push({ ...toCut, isFreeAgent: true, contractYears: 0 });
+        emergencyCuts++;
+        const salaryM = (toCut.salary / 1_000_000).toFixed(1);
+        newsItems.push(makeNewsItem(
+          'transaction',
+          `${t.abbreviation} CAP RELIEF`,
+          `${t.name} release ${toCut.name} ($${salaryM}M) in a cap-clearing move to get under the luxury tax ceiling.`,
+          s.currentDay, t.id, toCut.id
+        ));
+        txs.push(makeTransaction(s, 'release', [t.id], `${t.name} released ${toCut.name} (cap relief).`, [toCut.id]));
+      }
+    }
+
     // ── 1.5 + 2. RE-SIGNINGS & FA SIGNINGS ────────────────────
     {
       // ── 1.5. RE-SIGN OWN EXPIRING STARS (83+ OVR) ──────────
@@ -426,6 +461,8 @@ export function runAIGMOffseason(
         const isHardCap = s.settings.salaryCapType === 'Hard Cap';
         if (isHardCap && currentSalary + offerAmt > salaryCap) continue;
         if (!isHardCap && currentSalary + offerAmt > salaryCap * 1.15 && personality !== 'Win Now') continue;
+        if (!isHardCap && personality === 'Win Now' && currentSalary + offerAmt > salaryCap * 1.30) continue;
+        if (currentSalary + offerAmt > LUXURY_CEILING) continue; // universal hard ceiling
         const maxYears = s.settings.maxContractYears ?? 5;
         const rawYears = 2 + Math.floor(Math.random() * 3);
         const signedPlayer: Player = {
@@ -494,6 +531,8 @@ export function runAIGMOffseason(
         const isHardCap = s.settings.salaryCapType === 'Hard Cap';
         if (isHardCap && currentSalary + offerAmt > salaryCap) continue;
         if (!isHardCap && currentSalary + offerAmt > salaryCap * 1.1 && personality !== 'Win Now') continue;
+        if (!isHardCap && personality === 'Win Now' && currentSalary + offerAmt > salaryCap * 1.25) continue;
+        if (currentSalary + offerAmt > LUXURY_CEILING) continue; // universal hard ceiling
         if (currentRoster.length >= (s.settings.maxRosterSize ?? 15)) continue;
 
         const maxYears = s.settings.maxContractYears ?? 5;
