@@ -1851,8 +1851,8 @@ const App: React.FC = () => {
         if (p.rating < 88) return p;             // not a franchise star
         if ((p.morale ?? 75) < 60) return p;     // unhappy — let them walk
         const extSalary = Math.round((
-          p.rating >= 95 ? 38_000_000 + (p.rating - 95) * 1_400_000 :
-                           26_000_000 + (p.rating - 88) * 1_714_286
+          p.rating >= 95 ? 35_000_000 + (p.rating - 95) * 1_750_000 :
+                           18_000_000 + (p.rating - 88) * 2_428_571
         ) / 250_000) * 250_000;
         if (currentPayroll + extSalary > cap * 1.1) return p; // not enough cap
         return { ...p, contractYears: 3 + Math.floor(Math.random() * 2), salary: extSalary };
@@ -1868,11 +1868,11 @@ const App: React.FC = () => {
           // Player enters free agency
           const _r = p.rating;
           const desiredBase = Math.round((
-            _r >= 95 ? 38_000_000 + (_r - 95) * 1_400_000 :
-            _r >= 88 ? 26_000_000 + (_r - 88) * 1_714_286 :
-            _r >= 80 ? 16_000_000 + (_r - 80) * 1_250_000 :
-            _r >= 70 ? 7_000_000  + (_r - 70) * 900_000   :
-            _r >= 60 ? 3_000_000  + (_r - 60) * 400_000   : 1_500_000
+            _r >= 95 ? 35_000_000 + (_r - 95) * 1_750_000 :
+            _r >= 88 ? 18_000_000 + (_r - 88) * 2_428_571 :
+            _r >= 80 ? 8_500_000  + (_r - 80) * 1_187_500 :
+            _r >= 70 ? 3_500_000  + (_r - 70) * 500_000   :
+            _r >= 60 ? 1_500_000  + (_r - 60) * 200_000   : 1_100_000
           ) / 250_000) * 250_000;
           const desiredYears = p.rating >= 80 ? 4 : p.rating >= 70 ? 3 : p.age >= 33 ? 1 : 2;
           // Interest in user's team: based on wins + market size

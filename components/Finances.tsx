@@ -11,15 +11,21 @@ interface FinancesProps {
 const Finances: React.FC<FinancesProps> = ({ league, updateLeague }) => {
   const userTeam = league.teams.find(t => t.id === league.userTeamId)!;
   
-  // Fix: Explicitly cast Object.values to (Coach | null)[] to resolve 'unknown' type access errors on line 13/14.
   const payroll = userTeam.roster.reduce((sum, p) => sum + p.salary, 0);
   const staffPayroll = (Object.values(userTeam.staff) as (Coach | null)[]).reduce((sum, s) => sum + (s?.salary || 0), 0);
-  
-  const capFloor = 100000000;
-  const capCeiling = 140000000;
-  const taxLine = 160000000;
 
-  const luxuryTax = payroll > taxLine ? (payroll - taxLine) * 1.5 : 0;
+  // Cap thresholds from league settings (fall back to NBA-accurate defaults)
+  const capCeiling  = league.settings.salaryCap      || 140_000_000;
+  const taxLine     = league.settings.luxuryTaxLine  || 170_000_000;
+  const capFloor    = Math.round(capCeiling * 0.90);          // floor = 90% of cap
+  const firstApron  = capCeiling + 56_000_000;                // ~$196M on $140M cap
+  const secondApron = capCeiling + 68_000_000;                // ~$208M on $140M cap (near-hard cap)
+
+  const isOverTax    = payroll > taxLine;
+  const isOverFirst  = payroll > firstApron;
+  const isOverSecond = payroll > secondApron;
+  const taxMultiplier = league.settings.luxuryTaxMultiplier ?? 1.75;
+  const luxuryTax = isOverTax ? (payroll - taxLine) * taxMultiplier : 0;
   const totalExpenses = payroll + staffPayroll + luxuryTax + 5000000; // Operational constant
 
   const estimatedGateReceipts = userTeam.wins * 500000 + (userTeam.finances.ticketPrice * 20000);
@@ -221,54 +227,70 @@ const Finances: React.FC<FinancesProps> = ({ league, updateLeague }) => {
             Payroll vs League Salary Cap
          </h3>
 
-         <div className="relative h-20 mb-12">
-            {/* Background Track */}
+         {/* Bar scales to secondApron as 100% */}
+         <div className="relative h-20 mb-16">
             <div className="absolute inset-0 bg-slate-950 border border-slate-800 rounded-2xl"></div>
-            
-            {/* Threshold Lines */}
-            <div className="absolute top-0 bottom-0 border-l-2 border-dashed border-emerald-500/40 z-10" style={{ left: `${(capFloor/200000000)*100}%` }}>
-               <span className="absolute -top-6 left-0 -translate-x-1/2 text-[8px] font-black text-emerald-500 uppercase tracking-widest">Cap Floor</span>
-            </div>
-            <div className="absolute top-0 bottom-0 border-l-2 border-dashed border-slate-700 z-10" style={{ left: `${(capCeiling/200000000)*100}%` }}>
-               <span className="absolute -top-6 left-0 -translate-x-1/2 text-[8px] font-black text-slate-500 uppercase tracking-widest">Cap Soft-Limit</span>
-            </div>
-            <div className="absolute top-0 bottom-0 border-l-2 border-dashed border-rose-500/40 z-10" style={{ left: `${(taxLine/200000000)*100}%` }}>
-               <span className="absolute -top-6 left-0 -translate-x-1/2 text-[8px] font-black text-rose-500 uppercase tracking-widest">Luxury Tax</span>
-            </div>
 
-            {/* Progress Bar */}
-            <div 
-               className={`absolute top-0 bottom-0 left-0 rounded-2xl transition-all duration-1000 ${payroll > taxLine ? 'bg-gradient-to-r from-amber-500 to-rose-600 shadow-[0_0_20px_rgba(244,63,94,0.3)]' : 'bg-gradient-to-r from-emerald-500 to-amber-500 shadow-[0_0_20px_rgba(245,158,11,0.2)]'}`}
-               style={{ width: `${Math.min(100, (payroll/200000000)*100)}%` }}
-            >
-               <div className="absolute inset-0 bg-[url('https://www.transparenttextures.com/patterns/carbon-fibre.png')] opacity-20"></div>
-            </div>
+            {/* Threshold tick lines — cap floor, soft cap, lux tax, 1st apron, 2nd apron */}
+            {[
+              { val: capFloor,    label: 'Floor',   cls: 'border-emerald-500/40 text-emerald-500'  },
+              { val: capCeiling,  label: 'Cap',     cls: 'border-slate-500/70   text-slate-400'    },
+              { val: taxLine,     label: 'Tax',     cls: 'border-amber-500/70   text-amber-400'    },
+              { val: firstApron,  label: '1st Apr', cls: 'border-orange-500/70  text-orange-400'   },
+              { val: secondApron, label: '2nd Apr', cls: 'border-rose-500/70    text-rose-400'     },
+            ].map(({ val, label, cls }) => (
+              <div key={label} className={`absolute top-0 bottom-0 border-l-2 border-dashed z-10 ${cls}`} style={{ left: `${Math.min(99, (val / secondApron) * 100)}%` }}>
+                <span className={`absolute -top-6 left-0 -translate-x-1/2 text-[8px] font-black uppercase tracking-widest ${cls.split(' ')[1]}`}>{label}</span>
+              </div>
+            ))}
 
-            {/* Current Indicator */}
-            <div className="absolute top-0 bottom-0 z-20 flex flex-col items-center justify-center transition-all duration-1000" style={{ left: `${(payroll/200000000)*100}%` }}>
-               <div className="w-1 h-full bg-white shadow-xl"></div>
+            {/* Progress bar */}
+            <div
+               className={`absolute top-0 bottom-0 left-0 rounded-2xl transition-all duration-1000 ${
+                 isOverSecond ? 'bg-gradient-to-r from-rose-600 to-rose-700 shadow-[0_0_24px_rgba(225,29,72,0.4)]' :
+                 isOverFirst  ? 'bg-gradient-to-r from-orange-500 to-rose-500 shadow-[0_0_20px_rgba(249,115,22,0.35)]' :
+                 isOverTax    ? 'bg-gradient-to-r from-amber-500 to-orange-500 shadow-[0_0_20px_rgba(245,158,11,0.3)]' :
+                                'bg-gradient-to-r from-emerald-500 to-amber-500 shadow-[0_0_20px_rgba(245,158,11,0.2)]'
+               }`}
+               style={{ width: `${Math.min(100, (payroll / secondApron) * 100)}%` }}
+            />
+
+            {/* Current value indicator */}
+            <div className="absolute top-0 bottom-0 z-20 flex flex-col items-center justify-center transition-all duration-1000" style={{ left: `${Math.min(99, (payroll / secondApron) * 100)}%` }}>
+               <div className="w-1 h-full bg-white shadow-xl" />
                <div className="absolute -bottom-8 px-3 py-1 bg-white text-slate-950 text-xs font-black rounded-lg shadow-2xl whitespace-nowrap">
-                  CURRENT: {formatMoney(payroll)}
+                  {formatMoney(payroll)}
                </div>
             </div>
          </div>
 
-         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mt-20">
+         {/* Cap status cards */}
+         <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-3 mt-20">
             <div className="p-4 rounded-xl bg-slate-950/50 border border-slate-800">
-               <p className="text-[9px] text-slate-600 font-black uppercase mb-1">Roster Salaries</p>
-               <p className="text-xl font-display font-bold text-white">{formatMoney(payroll)}</p>
+               <p className="text-[9px] text-slate-600 font-black uppercase mb-1">Roster Payroll</p>
+               <p className="text-lg font-display font-bold text-white">{formatMoney(payroll)}</p>
+               <p className={`text-[10px] font-bold mt-0.5 ${payroll > capCeiling ? 'text-amber-400' : 'text-slate-600'}`}>
+                 {payroll > capCeiling ? `${formatMoney(payroll - capCeiling)} over cap` : `${formatMoney(capCeiling - payroll)} cap room`}
+               </p>
             </div>
             <div className="p-4 rounded-xl bg-slate-950/50 border border-slate-800">
                <p className="text-[9px] text-slate-600 font-black uppercase mb-1">Staff Salaries</p>
-               <p className="text-xl font-display font-bold text-white">{formatMoney(staffPayroll)}</p>
+               <p className="text-lg font-display font-bold text-white">{formatMoney(staffPayroll)}</p>
             </div>
-            <div className="p-4 rounded-xl bg-slate-950/50 border border-slate-800">
-               <p className="text-[9px] text-rose-500/80 font-black uppercase mb-1">Luxury Tax Penalty</p>
-               <p className="text-xl font-display font-bold text-rose-500">{luxuryTax > 0 ? formatMoney(luxuryTax) : '$0.0M'}</p>
+            <div className={`p-4 rounded-xl border ${isOverTax ? 'bg-amber-900/20 border-amber-500/30' : 'bg-slate-950/50 border-slate-800'}`}>
+               <p className="text-[9px] text-amber-500/80 font-black uppercase mb-1">Luxury Tax Bill</p>
+               <p className={`text-lg font-display font-bold ${isOverTax ? 'text-amber-400' : 'text-slate-600'}`}>{isOverTax ? formatMoney(luxuryTax) : '—'}</p>
+               {isOverTax && <p className="text-[10px] text-amber-400/70 mt-0.5">{formatMoney(payroll - taxLine)} over tax line</p>}
             </div>
-            <div className="p-4 rounded-xl bg-amber-500/10 border border-amber-500/20">
-               <p className="text-[9px] text-amber-500 font-black uppercase mb-1">MLE Available</p>
-               <p className="text-xl font-display font-bold text-amber-500">$12.4M</p>
+            <div className={`p-4 rounded-xl border ${isOverFirst ? 'bg-orange-900/20 border-orange-500/30' : 'bg-slate-950/50 border-slate-800'}`}>
+               <p className="text-[9px] text-orange-400/80 font-black uppercase mb-1">1st Apron</p>
+               <p className={`text-lg font-display font-bold ${isOverFirst ? 'text-orange-400' : 'text-slate-600'}`}>{formatMoney(firstApron)}</p>
+               {isOverFirst && <p className="text-[10px] text-orange-400 mt-0.5">OVER — roster restrictions apply</p>}
+            </div>
+            <div className={`p-4 rounded-xl border ${isOverSecond ? 'bg-rose-900/30 border-rose-500/50' : 'bg-slate-950/50 border-slate-800'}`}>
+               <p className="text-[9px] text-rose-400/80 font-black uppercase mb-1">2nd Apron</p>
+               <p className={`text-lg font-display font-bold ${isOverSecond ? 'text-rose-400' : 'text-slate-600'}`}>{formatMoney(secondApron)}</p>
+               {isOverSecond && <p className="text-[10px] text-rose-400 mt-0.5">OVER — severely restricted</p>}
             </div>
          </div>
       </div>

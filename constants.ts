@@ -1411,11 +1411,12 @@ export const generatePlayer = (id: string, ageRange: [number, number] = [19, 38]
     potential,
     attributes: pAttrs as Player['attributes'],
     salary: Math.round((
-      rating >= 95 ? 38_000_000 + (rating - 95) * 1_400_000 :
-      rating >= 88 ? 26_000_000 + (rating - 88) * 1_714_286 :
-      rating >= 80 ? 16_000_000 + (rating - 80) * 1_250_000 :
-      rating >= 70 ? 7_000_000  + (rating - 70) * 900_000   :
-      rating >= 60 ? 3_000_000  + (rating - 60) * 400_000   : 1_500_000
+      rating >= 95 ? 35_000_000 + (rating - 95) * 1_750_000 :  // $35M–$42M (supermax tier)
+      rating >= 88 ? 18_000_000 + (rating - 88) * 2_428_571 :  // $18M–$33M (star tier)
+      rating >= 80 ? 8_500_000  + (rating - 80) * 1_187_500 :  // $8.5M–$17.5M (starter tier)
+      rating >= 70 ? 3_500_000  + (rating - 70) * 500_000   :  // $3.5M–$8.5M (role player)
+      rating >= 60 ? 1_500_000  + (rating - 60) * 200_000   :  // $1.5M–$3.5M (bench)
+                     1_100_000                                  // league minimum
     ) * (0.85 + Math.random() * 0.30) / 250_000) * 250_000,
     contractYears: Math.floor(Math.random() * 5) + 1,
     stats: { 
@@ -1471,11 +1472,11 @@ export const generateFreeAgentPool = (count: number, season: number, genderRatio
       desiredContract: {
         years: Math.floor(Math.random() * 3) + 1,
         salary: Math.round((
-          skewedRating >= 95 ? 38_000_000 + (skewedRating - 95) * 1_400_000 :
-          skewedRating >= 88 ? 26_000_000 + (skewedRating - 88) * 1_714_286 :
-          skewedRating >= 80 ? 16_000_000 + (skewedRating - 80) * 1_250_000 :
-          skewedRating >= 70 ? 7_000_000  + (skewedRating - 70) * 900_000   :
-          skewedRating >= 60 ? 3_000_000  + (skewedRating - 60) * 400_000   : 1_500_000
+          skewedRating >= 95 ? 35_000_000 + (skewedRating - 95) * 1_750_000 :
+          skewedRating >= 88 ? 18_000_000 + (skewedRating - 88) * 2_428_571 :
+          skewedRating >= 80 ? 8_500_000  + (skewedRating - 80) * 1_187_500 :
+          skewedRating >= 70 ? 3_500_000  + (skewedRating - 70) * 500_000   :
+          skewedRating >= 60 ? 1_500_000  + (skewedRating - 60) * 200_000   : 1_100_000
         ) * (0.90 + Math.random() * 0.20) / 250_000) * 250_000
       },
       interestScore: 30 + Math.floor(Math.random() * 50)
@@ -1748,9 +1749,24 @@ export const generateLeagueTeams = (genderRatio: number = 0, season: number = 20
     const draftCtx: DraftContext = { season, teamNames, usedPicks };
     const tier = (tierList[i] ?? 'average') as keyof typeof TIER_SLOT_FLOORS;
     const slotFloors = TIER_SLOT_FLOORS[tier];
-    const roster = Array.from({ length: 14 }).map((_, j) =>
+    let roster = Array.from({ length: 14 }).map((_, j) =>
       generatePlayer(`p-${i}-${j}`, [19, 38], genderRatio, draftCtx, season, slotFloors[j] ?? 68)
     );
+
+    // ── Payroll normalization: cap total payroll at NBA first-apron equivalent.
+    // This prevents individual random variation from stacking into absurd totals
+    // (e.g. a full roster of high-floor players). Hard ceiling = $185M.
+    {
+      const PAYROLL_HARD_CAP = 185_000_000;
+      const rawPayroll = roster.reduce((s, p) => s + p.salary, 0);
+      if (rawPayroll > PAYROLL_HARD_CAP) {
+        const scale = PAYROLL_HARD_CAP / rawPayroll;
+        roster = roster.map(p => ({
+          ...p,
+          salary: Math.round(Math.max(1_100_000, p.salary * scale) / 250_000) * 250_000,
+        }));
+      }
+    }
 
     return {
       id: teamId,
