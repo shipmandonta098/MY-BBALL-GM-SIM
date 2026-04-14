@@ -381,6 +381,25 @@ export interface Player {
   allStarSelections?: number[];
   /** Years in which this player won the All-Star Game MVP award */
   allStarMvpYears?: number[];
+
+  // ── Contract extensions ──────────────────────────────────────────────────
+  /** Free-agency classification once contract expires */
+  faType?: 'UFA' | 'RFA';
+  /** True when the TEAM holds an option on this contract */
+  teamOption?: boolean;
+  /** Contract year (1-based) in which the team option is exercisable */
+  teamOptionYear?: number;
+  /** True when the PLAYER holds an option on this contract */
+  playerOption?: boolean;
+  /** Contract year (1-based) in which the player option is exercisable */
+  playerOptionYear?: number;
+  /** Pending offer sheet submitted to an RFA by an outside team */
+  rfaOfferSheet?: {
+    salary: number;
+    years: number;
+    offeringTeamId: string;
+    offeringTeamName: string;
+  } | null;
 }
 
 export interface Prospect extends Omit<Player, 'stats' | 'status' | 'morale' | 'salary' | 'contractYears'> {
