@@ -28,12 +28,12 @@ const fmtFull = (val: number) => `$${(val / 1_000_000).toFixed(2)}M`;
  *  Piecewise curve: 70-79 OVR → $7-16M, 80-87 → $16-26M, 88+ → $26-45M. */
 const computeDesiredSalary = (rating: number): number => {
   let base: number;
-  if (rating >= 95)      base = 38_000_000 + (rating - 95) * 1_400_000;
-  else if (rating >= 88) base = 26_000_000 + (rating - 88) * 1_714_286;
-  else if (rating >= 80) base = 16_000_000 + (rating - 80) * 1_250_000;
-  else if (rating >= 70) base = 7_000_000  + (rating - 70) * 900_000;
-  else if (rating >= 60) base = 3_000_000  + (rating - 60) * 400_000;
-  else                   base = 1_500_000;
+  if (rating >= 95)      base = 35_000_000 + (rating - 95) * 1_750_000;  // $35M–$42M supermax
+  else if (rating >= 88) base = 18_000_000 + (rating - 88) * 2_428_571;  // $18M–$33M star
+  else if (rating >= 80) base = 8_500_000  + (rating - 80) * 1_187_500;  // $8.5M–$17.5M starter
+  else if (rating >= 70) base = 3_500_000  + (rating - 70) * 500_000;    // $3.5M–$8.5M role
+  else if (rating >= 60) base = 1_500_000  + (rating - 60) * 200_000;    // $1.5M–$3.5M bench
+  else                   base = 1_100_000;
   return Math.round(base / 250_000) * 250_000;
 };
 
@@ -117,13 +117,18 @@ const FreeAgency: React.FC<FreeAgencyProps> = ({
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   // ── Cap math ──
-  const salaryCap = league.settings.salaryCap || 140_000_000;
-  const luxuryTax = league.settings.luxuryTaxLine || 170_000_000;
+  const salaryCap  = league.settings.salaryCap  || 140_000_000;
+  const luxuryTax  = league.settings.luxuryTaxLine || 170_000_000;
+  // NBA apron thresholds (proportional to cap)
+  const firstApron  = salaryCap + 56_000_000;   // ~$196M on $140M cap (first apron)
+  const secondApron = salaryCap + 68_000_000;   // ~$208M on $140M cap (second apron / hard cap)
   const userTeam = league.teams.find(t => t.id === league.userTeamId)!;
   const currentSalary = userTeam.roster.reduce((sum, p) => sum + (p.salary || 0), 0);
   const capSpace = salaryCap - currentSalary;
-  const isOverCap = capSpace < 0;
-  const isOverLux = currentSalary > luxuryTax;
+  const isOverCap   = capSpace < 0;
+  const isOverLux   = currentSalary > luxuryTax;
+  const isOverFirst  = currentSalary > firstApron;
+  const isOverSecond = currentSalary > secondApron;
 
   const moratoriumActive = league.isOffseason && league.offseasonDay < MORATORIUM_DAYS;
   const daysUntilOpen = league.isOffseason ? Math.max(0, MORATORIUM_DAYS - league.offseasonDay) : 0;
@@ -670,25 +675,43 @@ const FreeAgency: React.FC<FreeAgencyProps> = ({
         <div className="relative z-10 mt-5">
           <div className="flex justify-between text-[10px] text-slate-600 font-bold uppercase mb-1">
             <span>Payroll</span>
-            <span className={isOverCap ? 'text-rose-400' : 'text-slate-500'}>
-              {fmt(currentSalary)} / {fmt(salaryCap)} cap · Lux: {fmt(luxuryTax)}
+            <span className={isOverSecond ? 'text-rose-400' : isOverFirst ? 'text-orange-400' : isOverCap ? 'text-amber-400' : 'text-slate-500'}>
+              {fmt(currentSalary)} / {fmt(salaryCap)} cap
+              {isOverSecond ? ' · ⚠ 2ND APRON' : isOverFirst ? ' · 1ST APRON' : isOverLux ? ' · LUX TAX' : ''}
             </span>
           </div>
+          {/* Bar scales to secondApron as 100% */}
           <div className="h-2 bg-slate-800 rounded-full overflow-hidden">
             <div
               className={`h-full rounded-full transition-all duration-700 ${
-                isOverLux ? 'bg-rose-500' : isOverCap ? 'bg-orange-500' : 'bg-emerald-500'
+                isOverSecond ? 'bg-rose-600' : isOverFirst ? 'bg-orange-500' : isOverLux ? 'bg-amber-500' : isOverCap ? 'bg-orange-400' : 'bg-emerald-500'
               }`}
-              style={{ width: `${Math.min(100, (currentSalary / luxuryTax) * 100)}%` }}
+              style={{ width: `${Math.min(100, (currentSalary / secondApron) * 100)}%` }}
             />
           </div>
-          {/* Cap & lux tick marks */}
-          <div className="relative h-0">
-            <div
-              className="absolute top-0 w-0.5 h-3 bg-amber-500/60 -translate-y-2"
-              style={{ left: `${Math.min(100, (salaryCap / luxuryTax) * 100)}%` }}
-            />
+          {/* Cap / lux / first-apron / second-apron tick marks */}
+          <div className="relative h-3">
+            {[
+              { val: salaryCap,   label: 'Cap',      color: 'bg-slate-500/70' },
+              { val: luxuryTax,   label: 'Tax',      color: 'bg-amber-500/60' },
+              { val: firstApron,  label: '1st',      color: 'bg-orange-500/60' },
+              { val: secondApron, label: '2nd',      color: 'bg-rose-500/60'   },
+            ].map(({ val, label, color }) => {
+              const pct = Math.min(99, (val / secondApron) * 100);
+              return (
+                <div key={label} className="absolute top-0 flex flex-col items-center" style={{ left: `${pct}%` }}>
+                  <div className={`w-0.5 h-2 ${color}`} />
+                  <span className={`text-[8px] font-black uppercase tracking-wide -translate-x-1/2 ${color.replace('bg-', 'text-').replace('/60', '/80').replace('/70', '/80')}`}>{label}</span>
+                </div>
+              );
+            })}
           </div>
+          {/* Second-apron hard-stop warning */}
+          {isOverSecond && (
+            <p className="mt-1 text-[10px] font-bold text-rose-400 uppercase tracking-wide">
+              ⚠ Second Apron — roster moves severely restricted. Waive players to regain flexibility.
+            </p>
+          )}
         </div>
       </header>
 

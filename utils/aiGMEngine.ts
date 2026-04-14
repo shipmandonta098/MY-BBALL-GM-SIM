@@ -323,10 +323,21 @@ function makeTransaction(
 
 // ─── Roster evaluation: who gets cut ────────────────────────
 function shouldRelease(p: Player, salary: number, personality: AIGMPersonality): boolean {
-  if (salary > 200_000 && p.rating < 75) return true;
-  if (salary > 150_000 && p.rating < 70) return true;
+  // Rating floor cuts — always release severely underpaid talent
+  if (salary > 500_000 && p.rating < 70) return true;
+  if (p.rating < 68) return true;
+
+  // Personality-specific age/rating thresholds
   if (personality === 'Rebuilder' && p.age > 32 && p.rating < 82) return true;
-  if (personality === 'Win Now' && p.rating < 72) return true;
+  if (personality === 'Win Now' && p.rating < 74) return true;
+
+  // Value-efficiency: release obviously overpaid players relative to their rating
+  const salaryM = salary / 1_000_000;
+  if (p.rating < 76 && salaryM > 10) return true;   // $10M+ on a <76 OVR player is dead money
+  if (p.rating < 80 && salaryM > 18) return true;   // $18M+ on a <80 OVR player — cut bait
+  if (p.rating < 84 && salaryM > 26) return true;   // $26M+ on a <84 OVR — not worth it
+  if (p.rating < 87 && salaryM > 34) return true;   // $34M+ on a <87 OVR — restructure/waive
+
   return false;
 }
 
@@ -353,9 +364,15 @@ export function runAIGMOffseason(
   const newsItems: NewsItem[] = [];
   const txs: Transaction[] = [];
   const salaryCap = s.settings.salaryCap;
-  // Absolute luxury ceiling — NO team may sign players that push payroll above this.
-  // Win Now gets up to 1.30x, all others up to 1.15x; nobody exceeds 1.35x ever.
-  const LUXURY_CEILING = salaryCap * 1.35;
+  const luxuryTaxLine = s.settings.luxuryTaxLine || (salaryCap * 1.21);
+  // NBA-calibrated apron thresholds (same offsets used in FreeAgency/Finances UI)
+  const FIRST_APRON   = salaryCap + 56_000_000;  // ~$196M on $140M cap
+  const SECOND_APRON  = salaryCap + 68_000_000;  // ~$208M — near-hard cap
+  // Emergency relief triggers at first apron; hard signing block at second apron
+  const LUXURY_CEILING  = FIRST_APRON;           // nobody signs past first apron
+  // Personality-specific signing caps (below first apron)
+  const CAP_WIN_NOW    = luxuryTaxLine + 28_000_000; // Win Now: up to ~$30M over tax
+  const CAP_STANDARD   = luxuryTaxLine + 8_000_000;  // Others: ~$8M over tax
 
   // Build a sorted list of top FAs for "superstar chaser" detection
   const topFAIds = new Set(
@@ -417,17 +434,20 @@ export function runAIGMOffseason(
     }
 
     // ── 1.8 EMERGENCY CAP RELIEF ────────────────────────────────
-    // If current payroll already exceeds the luxury ceiling, force-release
-    // the worst-value (lowest rating/salary ratio) non-star contracts until
-    // the team is back under the ceiling. Never cut 88+ OVR players, never
-    // go below the minimum roster size.
+    // If current payroll already exceeds the first-apron threshold (LUXURY_CEILING),
+    // force-release worst-value non-star contracts until back under. Also apply a
+    // softer pass at the luxury tax line for rebuilding/balanced teams.
+    // Never cut 88+ OVR players, never drop below min roster size.
     {
       const minRoster = s.settings.minRosterSize ?? 10;
       let emergencyCuts = 0;
+      const reliefTarget = (personality === 'Win Now' || personality === 'Superstar Chaser')
+        ? LUXURY_CEILING      // aggressive teams: only cut if above first apron
+        : luxuryTaxLine + 15_000_000;  // others: cut down to near tax line
       while (
-        rosterSalary({ ...t, roster: currentRoster }) > LUXURY_CEILING &&
+        rosterSalary({ ...t, roster: currentRoster }) > reliefTarget &&
         currentRoster.length > minRoster &&
-        emergencyCuts < 5
+        emergencyCuts < 8
       ) {
         const candidates = currentRoster
           .filter(p => p.rating < 88)
@@ -460,9 +480,9 @@ export function runAIGMOffseason(
         const offerAmt = faOfferAmount(fa, { ...t, roster: currentRoster }, salaryCap, personality, ratings.negotiation, difficulty, topFAIds.has(fa.id));
         const isHardCap = s.settings.salaryCapType === 'Hard Cap';
         if (isHardCap && currentSalary + offerAmt > salaryCap) continue;
-        if (!isHardCap && currentSalary + offerAmt > salaryCap * 1.15 && personality !== 'Win Now') continue;
-        if (!isHardCap && personality === 'Win Now' && currentSalary + offerAmt > salaryCap * 1.30) continue;
-        if (currentSalary + offerAmt > LUXURY_CEILING) continue; // universal hard ceiling
+        if (!isHardCap && personality === 'Win Now' && currentSalary + offerAmt > CAP_WIN_NOW) continue;
+        if (!isHardCap && personality !== 'Win Now' && currentSalary + offerAmt > CAP_STANDARD) continue;
+        if (currentSalary + offerAmt > LUXURY_CEILING) continue; // absolute ceiling = first apron
         const maxYears = s.settings.maxContractYears ?? 5;
         const rawYears = 2 + Math.floor(Math.random() * 3);
         const signedPlayer: Player = {
@@ -530,9 +550,9 @@ export function runAIGMOffseason(
         );
         const isHardCap = s.settings.salaryCapType === 'Hard Cap';
         if (isHardCap && currentSalary + offerAmt > salaryCap) continue;
-        if (!isHardCap && currentSalary + offerAmt > salaryCap * 1.1 && personality !== 'Win Now') continue;
-        if (!isHardCap && personality === 'Win Now' && currentSalary + offerAmt > salaryCap * 1.25) continue;
-        if (currentSalary + offerAmt > LUXURY_CEILING) continue; // universal hard ceiling
+        if (!isHardCap && personality === 'Win Now' && currentSalary + offerAmt > CAP_WIN_NOW) continue;
+        if (!isHardCap && personality !== 'Win Now' && currentSalary + offerAmt > CAP_STANDARD) continue;
+        if (currentSalary + offerAmt > LUXURY_CEILING) continue; // absolute ceiling = first apron
         if (currentRoster.length >= (s.settings.maxRosterSize ?? 15)) continue;
 
         const maxYears = s.settings.maxContractYears ?? 5;
