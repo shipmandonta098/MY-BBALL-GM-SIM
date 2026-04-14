@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useCallback } from 'react';
+import React, { useState, useMemo, useCallback, useEffect, useRef } from 'react';
 import { LeagueState, Player, ContractOffer, Transaction, Position } from '../types';
 import { getFlag } from '../constants';
 
@@ -116,6 +116,10 @@ const FreeAgency: React.FC<FreeAgencyProps> = ({
   const [counterOffer, setCounterOffer] = useState<{ years: number; salary: number } | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
+  // ── RFA offer-sheet state ──
+  /** Tracks which player IDs have already had offer-sheet generation attempted */
+  const rfaOffersProcessed = useRef<Set<string>>(new Set());
+
   // ── Cap math ──
   const salaryCap  = league.settings.salaryCap  || 140_000_000;
   const luxuryTax  = league.settings.luxuryTaxLine || 170_000_000;
@@ -139,6 +143,100 @@ const FreeAgency: React.FC<FreeAgencyProps> = ({
   // In-season: regular season / trade deadline / all-star — signing fully open
   const isInSeason = !league.isOffseason && !isPreseason && league.seasonPhase !== 'Offseason';
   const gamesRemaining = isInSeason ? league.schedule.filter(g => !g.played).length : 0;
+
+  // ── RFA offer-sheet generation (runs once per offseason when moratorium lifts) ──
+  useEffect(() => {
+    if (!league.isOffseason || moratoriumActive) return;
+
+    const userRFAs = league.freeAgents.filter(
+      p => p.faType === 'RFA' && p.lastTeamId === userTeam.id && !rfaOffersProcessed.current.has(p.id)
+    );
+    if (userRFAs.length === 0) return;
+
+    const aiTeams = league.teams.filter(t => t.id !== league.userTeamId);
+    const updatedFAs = league.freeAgents.map(p => {
+      if (!userRFAs.find(r => r.id === p.id)) return p;
+      rfaOffersProcessed.current.add(p.id);
+      // 65% chance an AI team submits an offer sheet
+      if (Math.random() >= 0.65) return { ...p, rfaOfferSheet: null };
+      const offeringTeam = aiTeams[Math.floor(Math.random() * aiTeams.length)];
+      const offerSalary = Math.round(
+        computeDesiredSalary(p.rating) * (1.05 + Math.random() * 0.30) / 250_000
+      ) * 250_000;
+      const offerYears = 2 + Math.floor(Math.random() * 3);
+      return {
+        ...p,
+        rfaOfferSheet: {
+          salary: offerSalary,
+          years: offerYears,
+          offeringTeamId: offeringTeam?.id ?? '',
+          offeringTeamName: offeringTeam?.name ?? 'Unknown Team',
+        },
+      };
+    });
+    updateLeague({ freeAgents: updatedFAs });
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [league.isOffseason, moratoriumActive]);
+
+  // ── Match RFA offer sheet (sign at exact terms) ──
+  const handleMatchOffer = useCallback((player: Player) => {
+    const sheet = player.rfaOfferSheet;
+    if (!sheet) return;
+    const maxRoster = league.settings.maxRosterSize ?? 15;
+    if (userTeam.roster.length >= maxRoster) {
+      alert(`Roster full (max ${maxRoster}). Release a player before matching.`);
+      return;
+    }
+    const signedPlayer: Player = {
+      ...player,
+      isFreeAgent: false,
+      salary: sheet.salary,
+      contractYears: sheet.years,
+      rfaOfferSheet: null,
+      faType: undefined,
+      morale: Math.min(100, (player.morale || 70) + 8),
+    };
+    const updatedTeams = league.teams.map(t =>
+      t.id === userTeam.id ? { ...t, roster: [...t.roster, signedPlayer] } : t
+    );
+    const updatedFAs = league.freeAgents.filter(p => p.id !== player.id);
+    const updatedTxs = recordTransaction(
+      league, 'signing', [userTeam.id],
+      `${userTeam.name} matched the offer sheet for RFA ${player.name} — ${sheet.years}y/${fmt(sheet.salary)}.`,
+      [player.id], sheet.salary * sheet.years
+    );
+    updateLeague({
+      teams: updatedTeams,
+      freeAgents: updatedFAs,
+      transactions: updatedTxs,
+      newsFeed: [{
+        id: `rfa-match-${Date.now()}`,
+        category: 'transaction' as const,
+        headline: `🔒 RFA MATCHED: ${player.name}`,
+        content: `${userTeam.name} exercise their right of first refusal and match ${sheet.offeringTeamName}'s offer sheet for ${player.name}: ${sheet.years}yr / ${fmt(sheet.salary)}/yr.`,
+        timestamp: league.currentDay, realTimestamp: Date.now(), isBreaking: true,
+      }, ...league.newsFeed],
+    });
+  }, [league, userTeam, recordTransaction, updateLeague]);
+
+  // ── Decline to match RFA offer (player signs with AI team) ──
+  const handleDeclineMatch = useCallback((player: Player) => {
+    const sheet = player.rfaOfferSheet;
+    // Clear the offer sheet and convert to UFA (they walk)
+    const updatedFAs = league.freeAgents.map(p =>
+      p.id === player.id ? { ...p, rfaOfferSheet: null, faType: 'UFA' as const } : p
+    );
+    updateLeague({
+      freeAgents: updatedFAs,
+      newsFeed: [{
+        id: `rfa-declined-${Date.now()}`,
+        category: 'transaction' as const,
+        headline: `🚪 RFA WALKS: ${player.name}`,
+        content: `${userTeam.name} decline to match ${sheet?.offeringTeamName ?? 'an AI team'}'s offer for ${player.name}. He will sign elsewhere.`,
+        timestamp: league.currentDay, realTimestamp: Date.now(), isBreaking: false,
+      }, ...league.newsFeed],
+    });
+  }, [league, userTeam, updateLeague]);
 
   // ── In-season signing handler ──
   const handleInSeasonSign = (player: Player, contractType: InSeasonContractType, salary: number) => {
@@ -311,6 +409,8 @@ const FreeAgency: React.FC<FreeAgencyProps> = ({
         salary: offer.salary,
         contractYears: Math.min(offer.years, league.settings.maxContractYears ?? 5),
         morale: Math.min(100, (negotiatingPlayer.morale || 80) + 10),
+        rfaOfferSheet: null,
+        faType: undefined,
       };
 
       const updatedTeams = league.teams.map(t =>
@@ -380,6 +480,8 @@ const FreeAgency: React.FC<FreeAgencyProps> = ({
       salary: acceptedOffer.salary,
       contractYears: acceptedOffer.years,
       morale: Math.min(100, (negotiatingPlayer.morale || 80) + 5),
+      rfaOfferSheet: null,
+      faType: undefined,
     };
 
     const updatedTeams = league.teams.map(t =>
@@ -893,6 +995,62 @@ const FreeAgency: React.FC<FreeAgencyProps> = ({
         </div>
       )}
 
+      {/* ── RFA Offer Sheets ── */}
+      {marketTab === 'available' && league.isOffseason && !moratoriumActive && (() => {
+        const pendingOffers = league.freeAgents.filter(
+          p => p.faType === 'RFA' && p.lastTeamId === userTeam.id && p.rfaOfferSheet
+        );
+        if (pendingOffers.length === 0) return null;
+        return (
+          <div className="bg-amber-500/5 border border-amber-500/25 rounded-3xl overflow-hidden shadow-xl">
+            <div className="px-5 py-3 bg-amber-500/10 border-b border-amber-500/20 flex items-center gap-3">
+              <span className="w-2 h-2 rounded-full bg-amber-400 animate-pulse" />
+              <h3 className="text-amber-400 font-black uppercase text-xs tracking-[0.3em]">
+                RFA Offer Sheets Pending — Right of First Refusal
+              </h3>
+            </div>
+            <div className="divide-y divide-amber-500/10">
+              {pendingOffers.map(p => {
+                const sheet = p.rfaOfferSheet!;
+                return (
+                  <div key={p.id} className="px-5 py-4 flex flex-col sm:flex-row sm:items-center gap-4">
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span className="font-black text-white uppercase tracking-tight">{p.name}</span>
+                        <span className={`text-[10px] font-black px-2 py-0.5 rounded-full border ${p.rating >= 88 ? 'text-amber-400 border-amber-500/30 bg-amber-500/10' : 'text-emerald-400 border-emerald-500/30 bg-emerald-500/10'}`}>
+                          {p.rating} OVR
+                        </span>
+                        <span className="text-[10px] font-bold text-rose-400 px-2 py-0.5 rounded-full border border-rose-500/30 bg-rose-500/10 uppercase">RFA</span>
+                      </div>
+                      <p className="text-[11px] text-slate-400 mt-1">
+                        <span className="text-amber-300 font-black">{sheet.offeringTeamName}</span>
+                        {' '}submitted an offer sheet:{' '}
+                        <span className="text-white font-bold">{sheet.years}yr / {fmt(sheet.salary)}/yr</span>
+                        <span className="text-slate-600 ml-2">· Total: {fmt(sheet.salary * sheet.years)}</span>
+                      </p>
+                    </div>
+                    <div className="flex items-center gap-2 shrink-0">
+                      <button
+                        onClick={() => handleMatchOffer(p)}
+                        className="px-5 py-2.5 bg-emerald-500 hover:bg-emerald-400 text-slate-950 text-[11px] font-black uppercase rounded-xl transition-all shadow-lg shadow-emerald-500/20 active:scale-95"
+                      >
+                        ✓ Match Offer
+                      </button>
+                      <button
+                        onClick={() => handleDeclineMatch(p)}
+                        className="px-5 py-2.5 bg-slate-800 hover:bg-rose-500/20 border border-slate-700 hover:border-rose-500/40 text-slate-400 hover:text-rose-400 text-[11px] font-black uppercase rounded-xl transition-all active:scale-95"
+                      >
+                        Let Walk
+                      </button>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        );
+      })()}
+
       {/* ── FA Table ── */}
       {marketTab === 'available' && (
       <div className="bg-slate-900 border border-slate-800 rounded-3xl overflow-hidden shadow-2xl">
@@ -930,6 +1088,10 @@ const FreeAgency: React.FC<FreeAgencyProps> = ({
                   const canSign = isInSeason
                     ? capSpace >= 600_000
                     : !moratoriumActive && capSpace >= desired.salary * 0.7;
+                  // Re-sign context: player previously on this team
+                  const isFormerPlayer = p.lastTeamId === userTeam.id;
+                  // Low morale blocks re-signing (bad relationship with org)
+                  const refuses = isFormerPlayer && (p.morale ?? 70) < 40;
                   return (
                     <tr
                       key={p.id}
@@ -941,15 +1103,20 @@ const FreeAgency: React.FC<FreeAgencyProps> = ({
                           onClick={() => onScout(p)}
                           className="text-left"
                         >
-                          <p className="font-bold text-slate-200 uppercase tracking-tight hover:text-amber-500 transition-colors">
-                            {p.name}
-                          </p>
+                          <div className="flex items-center gap-1.5 flex-wrap">
+                            <p className="font-bold text-slate-200 uppercase tracking-tight hover:text-amber-500 transition-colors">
+                              {p.name}
+                            </p>
+                            {p.faType === 'RFA' && (
+                              <span className="text-[9px] font-black px-1.5 py-0.5 rounded bg-rose-500/20 border border-rose-500/30 text-rose-400 uppercase tracking-wide">RFA</span>
+                            )}
+                          </div>
                           {/* Previous team badge */}
                           <p className="text-[11px] font-black uppercase tracking-wide mt-0.5">
                             {p.inSeasonFA ? (
                               <span className="text-orange-400">WAIVED</span>
                             ) : p.lastTeamId ? (
-                              <span className="text-sky-400">{league.teams.find(t => t.id === p.lastTeamId)?.name ?? 'FA'}</span>
+                              <span className={isFormerPlayer ? 'text-sky-400' : 'text-slate-400'}>{league.teams.find(t => t.id === p.lastTeamId)?.name ?? 'FA'}</span>
                             ) : (
                               <span className="text-slate-500">Unrestricted FA</span>
                             )}
@@ -1007,19 +1174,29 @@ const FreeAgency: React.FC<FreeAgencyProps> = ({
                           >
                             {p.inSeasonFA ? '🟠 Waived' : 'Sign'}
                           </button>
+                        ) : moratoriumActive ? (
+                          <span className="text-[10px] text-slate-700 font-bold uppercase">Locked</span>
+                        ) : refuses ? (
+                          <span
+                            className="text-[10px] text-rose-500/60 font-black uppercase cursor-not-allowed"
+                            title="Player refuses to negotiate — low relationship with your organization"
+                          >
+                            Refuses
+                          </span>
                         ) : (
                           <button
                             onClick={() => openNegotiation(p)}
-                            disabled={moratoriumActive}
                             className={`px-4 py-2 text-[10px] font-black uppercase rounded-lg transition-all ${
-                              moratoriumActive
-                                ? 'bg-slate-800 text-slate-700 cursor-not-allowed'
+                              isFormerPlayer
+                                ? canSign
+                                  ? 'bg-sky-900/60 hover:bg-sky-500 border border-sky-500/40 text-sky-400 hover:text-slate-950'
+                                  : 'bg-sky-900/30 border border-sky-500/20 text-sky-500/50 cursor-not-allowed'
                                 : canSign
                                   ? 'bg-slate-800 hover:bg-emerald-500 text-slate-400 hover:text-slate-950'
                                   : 'bg-slate-800 hover:bg-amber-500/20 border border-slate-700 hover:border-amber-500/40 text-slate-500 hover:text-amber-400'
                             }`}
                           >
-                            {moratoriumActive ? 'Locked' : 'Negotiate'}
+                            {isFormerPlayer ? '↩ Re-sign' : 'Negotiate'}
                           </button>
                         )}
                       </td>

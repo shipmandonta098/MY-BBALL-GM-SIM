@@ -294,7 +294,7 @@ const PlayerModal: React.FC<PlayerModalProps> = ({
     }));
   };
 
-  const handleContractChange = (key: 'salary' | 'contractYears', val: number) => {
+  const handleContractChange = (key: keyof Player, val: any) => {
     setEditedPlayer(prev => ({
       ...prev,
       [key]: val
@@ -658,6 +658,72 @@ const PlayerModal: React.FC<PlayerModalProps> = ({
                         />
                       </div>
                     </div>
+                    {/* ── FA Type ── */}
+                    <div className="space-y-2">
+                      <label className="text-[10px] font-black uppercase text-slate-500 tracking-widest">FA Classification</label>
+                      <select
+                        value={editedPlayer.faType ?? 'none'}
+                        onChange={e => handleContractChange('faType', e.target.value === 'none' ? undefined : (e.target.value as 'UFA' | 'RFA'))}
+                        className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-3 text-white font-bold focus:outline-none focus:border-amber-500/50"
+                      >
+                        <option value="none">— None —</option>
+                        <option value="UFA">Unrestricted FA (UFA)</option>
+                        <option value="RFA">Restricted FA (RFA)</option>
+                      </select>
+                    </div>
+
+                    {/* ── Team Option ── */}
+                    <div className="space-y-2">
+                      <div className="flex items-center justify-between">
+                        <label className="text-[10px] font-black uppercase text-slate-500 tracking-widest">Team Option</label>
+                        <button
+                          type="button"
+                          onClick={() => handleContractChange('teamOption', !editedPlayer.teamOption)}
+                          className={`relative w-10 h-5 rounded-full transition-colors ${editedPlayer.teamOption ? 'bg-amber-500' : 'bg-slate-700'}`}
+                        >
+                          <span className={`absolute top-0.5 w-4 h-4 bg-white rounded-full shadow transition-all ${editedPlayer.teamOption ? 'left-5' : 'left-0.5'}`} />
+                        </button>
+                      </div>
+                      {editedPlayer.teamOption && (
+                        <div className="flex items-center gap-2">
+                          <span className="text-[10px] text-slate-500 font-bold">Year</span>
+                          <input
+                            type="number"
+                            min="1" max="5"
+                            value={editedPlayer.teamOptionYear ?? 1}
+                            onChange={e => handleContractChange('teamOptionYear', parseInt(e.target.value))}
+                            className="w-full bg-slate-950 border border-amber-500/30 rounded-xl px-4 py-2 text-white font-bold focus:outline-none focus:border-amber-500"
+                          />
+                        </div>
+                      )}
+                    </div>
+
+                    {/* ── Player Option ── */}
+                    <div className="space-y-2">
+                      <div className="flex items-center justify-between">
+                        <label className="text-[10px] font-black uppercase text-slate-500 tracking-widest">Player Option</label>
+                        <button
+                          type="button"
+                          onClick={() => handleContractChange('playerOption', !editedPlayer.playerOption)}
+                          className={`relative w-10 h-5 rounded-full transition-colors ${editedPlayer.playerOption ? 'bg-sky-500' : 'bg-slate-700'}`}
+                        >
+                          <span className={`absolute top-0.5 w-4 h-4 bg-white rounded-full shadow transition-all ${editedPlayer.playerOption ? 'left-5' : 'left-0.5'}`} />
+                        </button>
+                      </div>
+                      {editedPlayer.playerOption && (
+                        <div className="flex items-center gap-2">
+                          <span className="text-[10px] text-slate-500 font-bold">Year</span>
+                          <input
+                            type="number"
+                            min="1" max="5"
+                            value={editedPlayer.playerOptionYear ?? 1}
+                            onChange={e => handleContractChange('playerOptionYear', parseInt(e.target.value))}
+                            className="w-full bg-slate-950 border border-sky-500/30 rounded-xl px-4 py-2 text-white font-bold focus:outline-none focus:border-sky-500"
+                          />
+                        </div>
+                      )}
+                    </div>
+
                     <div className="grid grid-cols-2 gap-4">
                       <div className="space-y-2">
                         <label className="text-[10px] font-black uppercase text-slate-500 tracking-widest">Draft Year</label>
