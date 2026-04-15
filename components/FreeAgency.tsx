@@ -139,13 +139,14 @@ const FreeAgency: React.FC<FreeAgencyProps> = ({
 
   const moratoriumActive = league.isOffseason && league.offseasonDay < MORATORIUM_DAYS;
   const daysUntilOpen = league.isOffseason ? Math.max(0, MORATORIUM_DAYS - league.offseasonDay) : 0;
-  // Preseason: no games played yet (or phase explicitly says so) — FA locked until tip-off
   const gamesPlayedSoFar = league.schedule.filter(g => g.played).length;
+  // isPreseason: used only for the info banner — signing behavior is identical to in-season.
   const isPreseason = !league.isOffseason &&
     (league.seasonPhase === 'Preseason' || gamesPlayedSoFar === 0);
-  // In-season: regular season / trade deadline / all-star — signing fully open
-  const isInSeason = !league.isOffseason && !isPreseason && league.seasonPhase !== 'Offseason';
-  const gamesRemaining = isInSeason ? league.schedule.filter(g => !g.played).length : 0;
+  // isInSeason: any active (non-offseason) phase including preseason.
+  // Minimum contracts, waivers, and training-camp deals are open throughout preseason — no lock.
+  const isInSeason = !league.isOffseason && league.seasonPhase !== 'Offseason';
+  const gamesRemaining = league.schedule.filter(g => !g.played).length;
 
   // ── RFA offer-sheet generation (runs once per offseason when moratorium lifts) ──
   useEffect(() => {
@@ -631,8 +632,8 @@ const FreeAgency: React.FC<FreeAgencyProps> = ({
   return (
     <div className="space-y-6 animate-in fade-in duration-500 pb-40">
 
-      {/* ── In-Season Banner ── */}
-      {isInSeason && (
+      {/* ── In-Season / Preseason Signing Banner ── */}
+      {isInSeason && !isPreseason && (
         <div className="bg-orange-500/10 border border-orange-500/30 rounded-[2rem] p-5 flex flex-col sm:flex-row items-center justify-between gap-4">
           <div>
             <p className="text-[10px] font-black uppercase tracking-[0.4em] text-orange-400 mb-1">
@@ -654,14 +655,14 @@ const FreeAgency: React.FC<FreeAgencyProps> = ({
 
       {/* ── Preseason Banner ── */}
       {isPreseason && (
-        <div className="bg-slate-800/40 border border-slate-700/60 rounded-[2rem] p-5 flex items-center gap-5">
-          <div className="text-3xl shrink-0">⏸️</div>
+        <div className="bg-sky-500/10 border border-sky-500/30 rounded-[2rem] p-5 flex items-center gap-5">
+          <div className="text-3xl shrink-0">🏕️</div>
           <div>
-            <p className="text-[10px] font-black uppercase tracking-[0.4em] text-slate-500 mb-0.5">Preseason</p>
-            <h3 className="text-lg font-display font-bold text-slate-300 uppercase">FA Market opens at tip-off</h3>
-            <p className="text-slate-600 text-xs mt-0.5">
-              In-season waivers &amp; buyouts become available once the regular season begins.
-              Advance your first game to unlock.
+            <p className="text-[10px] font-black uppercase tracking-[0.4em] text-sky-400 mb-0.5">Training Camp</p>
+            <h3 className="text-lg font-display font-bold text-white uppercase">Minimum contracts &amp; waivers available now</h3>
+            <p className="text-slate-400 text-xs mt-0.5">
+              Sign players to 10-day, rest-of-season, or veteran minimum deals during preseason.
+              Full unrestricted free agency opens at the start of the regular season.
             </p>
           </div>
         </div>
@@ -716,24 +717,28 @@ const FreeAgency: React.FC<FreeAgencyProps> = ({
 
       {/* ── Header ── */}
       <header className="bg-slate-900 border border-slate-800 rounded-[2.5rem] p-8 shadow-2xl relative overflow-hidden">
-        <div className={`absolute top-0 right-0 w-80 h-80 blur-[100px] rounded-full -mr-40 -mt-40 ${isInSeason ? 'bg-orange-500/5' : 'bg-emerald-500/5'}`} />
+        <div className={`absolute top-0 right-0 w-80 h-80 blur-[100px] rounded-full -mr-40 -mt-40 ${isPreseason ? 'bg-sky-500/5' : isInSeason ? 'bg-orange-500/5' : 'bg-emerald-500/5'}`} />
         <div className="relative z-10 flex flex-col md:flex-row items-center justify-between gap-6">
           <div>
             <h2 className="text-4xl font-display font-bold uppercase tracking-tight text-white mb-1">
-              {isInSeason ? <>Waiver <span className="text-orange-400">Wire</span></> : <>Free Agency <span className="text-emerald-400">Hub</span></>}
+              {isPreseason
+                ? <>Training <span className="text-sky-400">Camp</span></>
+                : isInSeason
+                  ? <>Waiver <span className="text-orange-400">Wire</span></>
+                  : <>Free Agency <span className="text-emerald-400">Hub</span></>}
             </h2>
             <p className="text-slate-500 text-sm font-bold uppercase tracking-widest">
               {isInSeason
-                ? <span className="text-orange-400">🟠 In-Season Signings Open</span>
-                : isPreseason
-                  ? <span className="text-slate-500">⏸ Preseason — Market Opens Soon</span>
-                  : moratoriumActive
-                    ? <span className="text-amber-500">🔒 Moratorium Active</span>
-                    : <span className="text-emerald-400">🟢 Signings Open — Day {league.offseasonDay}</span>
+                ? isPreseason
+                  ? <span className="text-sky-400">🏕 Training Camp — Min Signings Open</span>
+                  : <span className="text-orange-400">🟠 In-Season Signings Open</span>
+                : moratoriumActive
+                  ? <span className="text-amber-500">🔒 Moratorium Active</span>
+                  : <span className="text-emerald-400">🟢 Signings Open — Day {league.offseasonDay}</span>
               }
               <span className="ml-3 text-slate-700">·</span>
               <span className="ml-3 text-slate-500">
-                {isInSeason
+                {isInSeason && !isPreseason
                   ? `${filteredFAs.filter(p => p.inSeasonFA).length} waived · ${filteredFAs.filter(p => !p.inSeasonFA).length} free agents`
                   : `${filteredFAs.length} players available`}
               </span>
@@ -1178,9 +1183,7 @@ const FreeAgency: React.FC<FreeAgencyProps> = ({
                       </td>
 
                       <td className="px-5 py-4 text-right" onClick={e => e.stopPropagation()}>
-                        {isPreseason ? (
-                          <span className="text-[10px] text-slate-700 font-bold uppercase">Preseason</span>
-                        ) : isInSeason ? (
+                        {isInSeason ? (
                           <button
                             onClick={() => { setInSeasonPlayer(p); setInSeasonResult(null); }}
                             disabled={!canSignMin}
@@ -1246,12 +1249,12 @@ const FreeAgency: React.FC<FreeAgencyProps> = ({
             {/* Header */}
             <div className="p-5 border-b border-slate-800 flex items-start justify-between gap-4">
               <div>
-                <p className="text-[10px] font-black uppercase tracking-[0.4em] text-orange-400 mb-1">
-                  {inSeasonPlayer.inSeasonFA ? '🟠 Waiver Claim' : 'In-Season Signing'}
+                <p className={`text-[10px] font-black uppercase tracking-[0.4em] mb-1 ${isPreseason ? 'text-sky-400' : 'text-orange-400'}`}>
+                  {inSeasonPlayer.inSeasonFA ? '🟠 Waiver Claim' : isPreseason ? '🏕 Training Camp Signing' : 'In-Season Signing'}
                 </p>
                 <h2 className="text-2xl font-display font-black uppercase text-white">{inSeasonPlayer.name}</h2>
                 <p className="text-sm text-slate-400 mt-1">
-                  <span className="text-orange-400 font-bold">{inSeasonPlayer.position}</span>
+                  <span className={`font-bold ${isPreseason ? 'text-sky-400' : 'text-orange-400'}`}>{inSeasonPlayer.position}</span>
                   {' · '}{inSeasonPlayer.age} yrs · {inSeasonPlayer.rating} OVR
                 </p>
               </div>
