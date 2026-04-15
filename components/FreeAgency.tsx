@@ -133,6 +133,9 @@ const FreeAgency: React.FC<FreeAgencyProps> = ({
   const isOverLux   = currentSalary > luxuryTax;
   const isOverFirst  = currentSalary > firstApron;
   const isOverSecond = currentSalary > secondApron;
+  // Veteran minimum exception: always signable under NBA soft cap unless at/over the 2nd apron hard cap
+  const VET_MIN = 1_100_000;
+  const canSignMin = !isOverSecond;
 
   const moratoriumActive = league.isOffseason && league.offseasonDay < MORATORIUM_DAYS;
   const daysUntilOpen = league.isOffseason ? Math.max(0, MORATORIUM_DAYS - league.offseasonDay) : 0;
@@ -557,11 +560,19 @@ const FreeAgency: React.FC<FreeAgencyProps> = ({
       const desired = getDesired(player);
       const years = desired.years + (Math.random() < 0.3 ? 1 : 0);
       const salaryMult = 0.85 + Math.random() * 0.3;
+      const aiCapLine = league.settings.salaryCap || 140_000_000;
       const teamSalary = team.roster.reduce((s, p) => s + (p.salary || 0), 0);
-      const teamCapSpace = (league.settings.salaryCap || 140_000_000) - teamSalary;
+      const teamCapSpace = aiCapLine - teamSalary;
+      const aiSecondApron = aiCapLine + 68_000_000;
+      // Hard cap check: teams at/over second apron cannot sign anyone
+      if (teamSalary >= aiSecondApron) continue;
       const rawSalary = Math.round((desired.salary * salaryMult) / 250_000) * 250_000;
-      const salary = Math.max(600_000, Math.min(rawSalary, teamCapSpace));
-      if (teamCapSpace < 600_000) continue;
+      // Soft cap: over cap but under 2nd apron → minimum only; otherwise use cap space
+      const salary = teamCapSpace >= rawSalary
+        ? rawSalary                                          // has full space
+        : teamCapSpace > 0
+          ? Math.max(1_100_000, teamCapSpace)               // partial space: use what's available
+          : 1_100_000;                                       // over soft cap: veteran minimum only
 
       const totalValue = salary * years;
       const tx: Transaction = {
@@ -732,12 +743,17 @@ const FreeAgency: React.FC<FreeAgencyProps> = ({
           <div className="flex items-center gap-3 flex-wrap justify-end">
             {/* Cap Space */}
             <div className={`px-5 py-3 rounded-2xl border text-center min-w-[110px] ${
-              isOverCap ? 'bg-rose-900/20 border-rose-500/30' : 'bg-slate-950/50 border-slate-800'
+              isOverSecond ? 'bg-rose-900/30 border-rose-600/40' : isOverCap ? 'bg-rose-900/20 border-rose-500/30' : 'bg-slate-950/50 border-slate-800'
             }`}>
               <p className="text-[10px] text-slate-500 uppercase font-bold mb-0.5">Cap Space</p>
               <p className={`text-xl font-display font-bold ${isOverCap ? 'text-rose-400' : 'text-emerald-400'}`}>
                 {isOverCap ? '-' : ''}{fmt(Math.abs(capSpace))}
               </p>
+              {isOverSecond ? (
+                <p className="text-[9px] text-rose-400 font-bold uppercase mt-0.5">Hard cap — no moves</p>
+              ) : isOverCap && canSignMin ? (
+                <p className="text-[9px] text-amber-400/80 font-bold uppercase mt-0.5">Min contracts available</p>
+              ) : null}
             </div>
 
             {/* Luxury tax indicator */}
@@ -1084,10 +1100,12 @@ const FreeAgency: React.FC<FreeAgencyProps> = ({
                 {filteredFAs.map(p => {
                   const interest = interestLabel(p.interestScore ?? 50);
                   const desired = getDesired(p);
-                  // In-season: only needs minimum cap room; offseason: full cap check + no moratorium
-                  const canSign = isInSeason
-                    ? capSpace >= 600_000
+                  // Full deal: needs actual cap space. Min deal: always OK under soft cap (unless 2nd apron)
+                  const canSignFull = isInSeason
+                    ? capSpace >= desired.salary * 0.8
                     : !moratoriumActive && capSpace >= desired.salary * 0.7;
+                  const canSign = canSignFull || canSignMin; // min exception always opens the door
+                  const minOnlyMode = !canSignFull && canSignMin; // over cap but minimum still available
                   // Re-sign context: player previously on this team
                   const isFormerPlayer = p.lastTeamId === userTeam.id;
                   // Low morale blocks re-signing (bad relationship with org)
@@ -1165,11 +1183,14 @@ const FreeAgency: React.FC<FreeAgencyProps> = ({
                         ) : isInSeason ? (
                           <button
                             onClick={() => { setInSeasonPlayer(p); setInSeasonResult(null); }}
-                            disabled={capSpace < 600_000}
+                            disabled={!canSignMin}
+                            title={!canSignMin ? 'Over the second apron — no signings' : isOverCap ? 'Minimum contracts available' : undefined}
                             className={`px-4 py-2 text-[10px] font-black uppercase rounded-lg transition-all ${
-                              capSpace < 600_000
+                              !canSignMin
                                 ? 'bg-slate-800 text-slate-700 cursor-not-allowed'
-                                : 'bg-slate-800 hover:bg-orange-500 text-slate-400 hover:text-slate-950'
+                                : isOverCap
+                                  ? 'bg-amber-900/30 hover:bg-amber-500 border border-amber-500/30 text-amber-400 hover:text-slate-950'
+                                  : 'bg-slate-800 hover:bg-orange-500 text-slate-400 hover:text-slate-950'
                             }`}
                           >
                             {p.inSeasonFA ? '🟠 Waived' : 'Sign'}
@@ -1186,17 +1207,21 @@ const FreeAgency: React.FC<FreeAgencyProps> = ({
                         ) : (
                           <button
                             onClick={() => openNegotiation(p)}
+                            disabled={!canSign}
+                            title={!canSign ? 'Over the second apron hard cap — no new signings' : minOnlyMode ? 'Over cap — minimum contracts only' : undefined}
                             className={`px-4 py-2 text-[10px] font-black uppercase rounded-lg transition-all ${
-                              isFormerPlayer
-                                ? canSign
-                                  ? 'bg-sky-900/60 hover:bg-sky-500 border border-sky-500/40 text-sky-400 hover:text-slate-950'
-                                  : 'bg-sky-900/30 border border-sky-500/20 text-sky-500/50 cursor-not-allowed'
-                                : canSign
-                                  ? 'bg-slate-800 hover:bg-emerald-500 text-slate-400 hover:text-slate-950'
-                                  : 'bg-slate-800 hover:bg-amber-500/20 border border-slate-700 hover:border-amber-500/40 text-slate-500 hover:text-amber-400'
+                              !canSign
+                                ? 'bg-slate-800/50 text-slate-700 cursor-not-allowed'
+                                : isFormerPlayer
+                                  ? minOnlyMode
+                                    ? 'bg-amber-900/30 hover:bg-amber-500 border border-amber-500/30 text-amber-400 hover:text-slate-950'
+                                    : 'bg-sky-900/60 hover:bg-sky-500 border border-sky-500/40 text-sky-400 hover:text-slate-950'
+                                  : minOnlyMode
+                                    ? 'bg-amber-900/30 hover:bg-amber-500 border border-amber-500/30 text-amber-400 hover:text-slate-950'
+                                    : 'bg-slate-800 hover:bg-emerald-500 text-slate-400 hover:text-slate-950'
                             }`}
                           >
-                            {isFormerPlayer ? '↩ Re-sign' : 'Negotiate'}
+                            {isFormerPlayer ? '↩ Re-sign' : minOnlyMode ? '⚠ Min Only' : 'Negotiate'}
                           </button>
                         )}
                       </td>
@@ -1268,7 +1293,14 @@ const FreeAgency: React.FC<FreeAgencyProps> = ({
                   <div className="bg-slate-950/60 border border-slate-800 rounded-2xl p-4 flex justify-between items-center">
                     <div>
                       <p className="text-[10px] text-slate-500 uppercase font-bold">Cap Space Available</p>
-                      <p className={`text-lg font-bold ${capSpace < 0 ? 'text-rose-400' : 'text-emerald-400'}`}>{fmt(Math.abs(capSpace))}{capSpace < 0 ? ' over cap' : ''}</p>
+                      <p className={`text-lg font-bold ${capSpace < 0 ? 'text-rose-400' : 'text-emerald-400'}`}>
+                        {capSpace < 0 ? '-' : ''}{fmt(Math.abs(capSpace))}{capSpace < 0 ? ' over cap' : ''}
+                      </p>
+                      {isOverSecond ? (
+                        <p className="text-[10px] text-rose-400 font-bold mt-0.5">⚠ 2nd apron — no signings</p>
+                      ) : isOverCap ? (
+                        <p className="text-[10px] text-amber-400 font-bold mt-0.5">Minimum contracts still available</p>
+                      ) : null}
                     </div>
                     <div className="text-right">
                       <p className="text-[10px] text-slate-500 uppercase font-bold">Games Remaining</p>
@@ -1279,7 +1311,10 @@ const FreeAgency: React.FC<FreeAgencyProps> = ({
                   <div className="space-y-2">
                     <p className="text-[10px] font-black uppercase text-slate-500 tracking-widest">Choose Contract Type</p>
                     {getInSeasonContracts(inSeasonPlayer.rating, gamesRemaining).map(contract => {
-                      const affordable = contract.salary <= capSpace + (capSpace < 0 ? 0 : 0);
+                      // Min-tier contracts ($600K 10-day and rest-of-season) follow soft cap rules:
+                      // always affordable unless team is at the 2nd apron hard cap
+                      const isMinTierContract = contract.salary <= VET_MIN * 1.15;
+                      const affordable = isMinTierContract ? canSignMin : contract.salary <= capSpace;
                       return (
                         <button
                           key={contract.type}
@@ -1505,7 +1540,7 @@ const FreeAgency: React.FC<FreeAgencyProps> = ({
                     </button>
                   </div>
 
-                  {/* Cap warning */}
+                  {/* Cap warning — tiered by cap position */}
                   {offer.salary > capSpace && !isOverCap && (
                     <div className="flex items-center gap-2 bg-amber-500/10 border border-amber-500/20 rounded-xl p-3">
                       <span className="text-amber-400">⚠</span>
@@ -1514,11 +1549,19 @@ const FreeAgency: React.FC<FreeAgencyProps> = ({
                       </p>
                     </div>
                   )}
-                  {isOverCap && (
+                  {isOverCap && !isOverSecond && (
+                    <div className="flex items-center gap-2 bg-amber-500/10 border border-amber-500/20 rounded-xl p-3">
+                      <span className="text-amber-400">⚠</span>
+                      <p className="text-[11px] text-amber-400 font-bold">
+                        Over cap — only minimum contracts ({fmt(VET_MIN)}/yr) are available. Larger deals require cap space or exceptions.
+                      </p>
+                    </div>
+                  )}
+                  {isOverSecond && (
                     <div className="flex items-center gap-2 bg-rose-500/10 border border-rose-500/20 rounded-xl p-3">
                       <span className="text-rose-400">🚫</span>
                       <p className="text-[11px] text-rose-400 font-bold">
-                        You are over the salary cap. Use mid-level or bi-annual exceptions to sign.
+                        Second apron hard cap — no new contracts can be signed. Waive players to free up flexibility.
                       </p>
                     </div>
                   )}
