@@ -1311,32 +1311,41 @@ const FreeAgency: React.FC<FreeAgencyProps> = ({
                   <div className="space-y-2">
                     <p className="text-[10px] font-black uppercase text-slate-500 tracking-widest">Choose Contract Type</p>
                     {getInSeasonContracts(inSeasonPlayer.rating, gamesRemaining).map(contract => {
-                      // Min-tier contracts ($600K 10-day and rest-of-season) follow soft cap rules:
-                      // always affordable unless team is at the 2nd apron hard cap
-                      const isMinTierContract = contract.salary <= VET_MIN * 1.15;
-                      const affordable = isMinTierContract ? canSignMin : contract.salary <= capSpace;
+                      // 10-day, rest-of-season, and season-minimum are ALL minimum contracts.
+                      // Under NBA soft cap rules, minimum contracts are ALWAYS signable unless
+                      // the team is AT or ABOVE the 2nd apron hard cap.
+                      // Only 'full' (market value) requires actual cap space.
+                      const isMinContract = contract.type !== 'full';
+                      const affordable = isMinContract ? canSignMin : contract.salary <= capSpace;
+                      // Style: available min contract when over cap → amber (not green, not gray)
+                      const btnClass = !affordable
+                        ? 'bg-slate-950/30 border-slate-800/50 text-slate-700 cursor-not-allowed'
+                        : isMinContract && isOverCap
+                          ? 'bg-amber-500/10 hover:bg-amber-500/20 border-amber-500/30 hover:border-amber-500/50 text-amber-300 hover:text-amber-200'
+                          : 'bg-slate-800/50 hover:bg-orange-500/10 border-slate-700 hover:border-orange-500/40 text-white hover:text-orange-300';
                       return (
                         <button
                           key={contract.type}
                           onClick={() => handleInSeasonSign(inSeasonPlayer, contract.type, contract.salary)}
                           disabled={!affordable}
-                          className={`w-full flex items-center justify-between p-4 rounded-2xl border transition-all text-left ${
-                            affordable
-                              ? 'bg-slate-800/50 hover:bg-orange-500/10 border-slate-700 hover:border-orange-500/40 text-white hover:text-orange-300'
-                              : 'bg-slate-950/30 border-slate-800/50 text-slate-700 cursor-not-allowed'
-                          }`}
+                          className={`w-full flex items-center justify-between p-4 rounded-2xl border transition-all text-left ${btnClass}`}
                         >
                           <div>
                             <p className="text-sm font-black uppercase">{contract.label}</p>
-                            <p className="text-[10px] text-slate-500 mt-0.5">
+                            <p className="text-[10px] mt-0.5 opacity-60">
                               {contract.type === '10day' ? '10 game days · team option to convert' :
                                contract.type === 'rest-of-season' ? `${gamesRemaining} games remaining` :
-                               contract.type === 'minimum' ? 'Full season minimum' : 'Full market value'}
+                               contract.type === 'minimum' ? 'Full season minimum · soft cap exception' :
+                               'Full market value · requires cap space'}
                             </p>
                           </div>
                           <div className="text-right shrink-0">
                             <p className="font-black text-lg">{fmt(contract.salary)}</p>
-                            {!affordable && <p className="text-[10px] text-rose-500">Over cap</p>}
+                            {!affordable
+                              ? <p className="text-[10px] text-rose-500">{isOverSecond ? 'Hard cap' : 'Needs cap space'}</p>
+                              : isMinContract && isOverCap
+                                ? <p className="text-[10px] text-amber-400/80">Min exception ✓</p>
+                                : null}
                           </div>
                         </button>
                       );
@@ -1582,7 +1591,8 @@ const FreeAgency: React.FC<FreeAgencyProps> = ({
                 {negotiationResult !== 'declined' && (
                   <button
                     onClick={submitOffer}
-                    disabled={isSubmitting || offer.salary <= 0}
+                    disabled={isSubmitting || offer.salary <= 0 || isOverSecond || (isOverCap && offer.salary > VET_MIN * 2)}
+                    title={isOverSecond ? 'Hard cap — no signings' : (isOverCap && offer.salary > VET_MIN * 2) ? `Over cap — max offer is ${fmt(VET_MIN * 2)} (minimum exception)` : undefined}
                     className="flex-1 py-3 bg-emerald-500 hover:bg-emerald-400 disabled:opacity-50 disabled:cursor-not-allowed text-slate-950 font-display font-black uppercase text-sm rounded-xl transition-all active:scale-95 shadow-lg shadow-emerald-500/20"
                   >
                     {isSubmitting ? (
@@ -1593,7 +1603,7 @@ const FreeAgency: React.FC<FreeAgencyProps> = ({
                         </svg>
                         Consulting Agent…
                       </span>
-                    ) : 'Send Offer'}
+                    ) : isOverCap && offer.salary > VET_MIN * 2 ? 'Reduce to Min Contract' : 'Send Offer'}
                   </button>
                 )}
                 {negotiationResult === 'declined' && (
