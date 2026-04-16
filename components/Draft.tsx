@@ -149,6 +149,16 @@ const Draft: React.FC<DraftProps> = ({ league, updateLeague, onScout, scoutingRe
     return league.prospects.filter(p => !draftedIds.has(p.id));
   }, [league.prospects, league.teams]);
 
+  const draftClassTalent = useMemo((): 'Strong' | 'Average' | 'Weak' => {
+    const sorted = [...league.prospects].sort((a, b) => b.rating - a.rating);
+    const top10 = sorted.slice(0, 10);
+    const avgRating = top10.length > 0 ? top10.reduce((s, p) => s + p.rating, 0) / top10.length : 0;
+    const eliteCount = sorted.filter(p => p.rating >= 90).length;
+    if (avgRating >= 82 && eliteCount >= 3) return 'Strong';
+    if (avgRating >= 75 || eliteCount >= 1) return 'Average';
+    return 'Weak';
+  }, [league.prospects]);
+
   // Needs for the user's team (recalculated when roster/scheme/record changes)
   const userTeamNeeds = useMemo(
     () => computeTeamNeeds(userTeam),
@@ -594,7 +604,18 @@ const Draft: React.FC<DraftProps> = ({ league, updateLeague, onScout, scoutingRe
           <div className="bg-slate-900 border border-slate-800 rounded-3xl overflow-hidden shadow-2xl">
             <div className="p-6 border-b border-slate-800 flex justify-between items-center">
               <h3 className="text-xl font-display font-bold uppercase tracking-widest text-white">Big Board</h3>
-              <span className="text-[10px] text-slate-500 font-bold uppercase">{availableProspects.length} available</span>
+              <div className="flex items-center gap-3">
+                <span className={`text-[9px] font-black uppercase px-2.5 py-1 rounded-lg border ${
+                  draftClassTalent === 'Strong'
+                    ? 'text-emerald-400 bg-emerald-500/15 border-emerald-500/30'
+                    : draftClassTalent === 'Average'
+                    ? 'text-amber-400 bg-amber-500/15 border-amber-500/30'
+                    : 'text-red-400 bg-red-500/15 border-red-500/30'
+                }`}>
+                  {draftClassTalent} Class
+                </span>
+                <span className="text-[10px] text-slate-500 font-bold uppercase">{availableProspects.length} available</span>
+              </div>
             </div>
             <div className="overflow-x-auto">
               <table className="w-full text-left text-xs">
