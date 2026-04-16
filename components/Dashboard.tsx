@@ -542,36 +542,108 @@ const Dashboard: React.FC<DashboardProps> = ({ league, news, onSimulate, onScout
         {/* Right Panel: Quick Actions & News */}
         <div className="space-y-8">
 
-          {/* ── Preseason Banner ── */}
-          {(league.seasonPhase === 'Preseason' || (league.isOffseason && league.draftPhase === 'completed')) && onAdvanceToRegularSeason && (
+          {/* ── Preseason / Offseason Banner ── */}
+          {(league.isOffseason && league.draftPhase === 'completed') && onAdvanceToRegularSeason && (
             <div className="bg-gradient-to-br from-amber-900/30 to-slate-900 border border-amber-500/30 rounded-3xl p-6 shadow-2xl animate-in slide-in-from-top-2">
               <div className="flex items-center gap-3 mb-4">
                 <span className="text-2xl">🏀</span>
                 <div>
-                  <p className="text-[10px] font-black uppercase tracking-[0.4em] text-amber-500">
-                    {league.isOffseason ? 'Offseason Complete' : 'Preseason'}
-                  </p>
-                  <h3 className="text-lg font-display font-black text-white uppercase">
-                    {league.isOffseason ? 'Ready to Tip Off' : 'Season Locked & Loaded'}
-                  </h3>
+                  <p className="text-[10px] font-black uppercase tracking-[0.4em] text-amber-500">Offseason Complete</p>
+                  <h3 className="text-lg font-display font-black text-white uppercase">Ready to Tip Off</h3>
                 </div>
               </div>
               <p className="text-slate-400 text-xs mb-5 leading-relaxed">
-                {league.isOffseason
-                  ? 'Draft and free agency are complete. Generate a fresh schedule and begin the new season.'
-                  : 'A schedule has been generated. You can regenerate it in Settings → League, or advance to start the regular season now.'}
+                Draft and free agency are complete. Start the preseason exhibition slate and get your squad game-ready before the regular season.
               </p>
               <button
                 onClick={onAdvanceToRegularSeason}
                 className="w-full py-4 bg-amber-500 hover:bg-amber-400 active:scale-95 text-slate-950 font-display font-black uppercase text-sm rounded-2xl transition-all shadow-lg shadow-amber-500/20 flex items-center justify-center gap-2"
               >
                 <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M13 9l3 3m0 0l-3 3m3-3H8m13 0a9 9 0 11-18 0 9 9 0 0118 0z" />
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z" />
                 </svg>
-                Advance to Regular Season
+                Start Preseason
               </button>
             </div>
           )}
+
+          {/* ── Live Preseason Banner (active preseason games) ── */}
+          {league.seasonPhase === 'Preseason' && !league.isOffseason && (() => {
+            const preSched   = league.preseasonSchedule ?? [];
+            const preRecord  = league.preseasonRecord ?? { wins: 0, losses: 0 };
+            const totalPre   = preSched.length;
+            const playedPre  = preSched.filter(g => g.played).length;
+            const unplayed   = preSched.filter(
+              g => !g.played && (g.homeTeamId === league.userTeamId || g.awayTeamId === league.userTeamId)
+            );
+            const nextPreGame = unplayed[0] ?? null;
+            const nextOpp    = nextPreGame
+              ? league.teams.find(t => t.id === (nextPreGame.homeTeamId === league.userTeamId ? nextPreGame.awayTeamId : nextPreGame.homeTeamId))
+              : null;
+            const nextIsHome = nextPreGame ? nextPreGame.homeTeamId === league.userTeamId : false;
+
+            if (totalPre === 0) return null;
+
+            return (
+              <div className="bg-gradient-to-br from-amber-900/25 to-slate-900 border border-amber-500/30 rounded-3xl p-6 shadow-2xl animate-in slide-in-from-top-2">
+                <div className="flex items-center justify-between mb-4">
+                  <div className="flex items-center gap-3">
+                    <span className="text-2xl">🏋️</span>
+                    <div>
+                      <p className="text-[10px] font-black uppercase tracking-[0.4em] text-amber-500">Preseason — Exhibition</p>
+                      <h3 className="text-lg font-display font-black text-white uppercase">
+                        {playedPre === totalPre ? 'Preseason Complete!' : `${totalPre - playedPre} Game${totalPre - playedPre !== 1 ? 's' : ''} Left`}
+                      </h3>
+                    </div>
+                  </div>
+                  <div className="text-right">
+                    <p className="text-2xl font-display font-black text-white">{preRecord.wins}–{preRecord.losses}</p>
+                    <p className="text-[9px] text-slate-500 font-bold uppercase tracking-widest">Preseason Record</p>
+                  </div>
+                </div>
+
+                {/* Progress bar */}
+                <div className="h-1 bg-slate-800 rounded-full mb-4 overflow-hidden">
+                  <div className="h-full bg-amber-500 rounded-full transition-all duration-500" style={{ width: `${totalPre > 0 ? (playedPre / totalPre) * 100 : 0}%` }} />
+                </div>
+
+                {/* Next game */}
+                {nextPreGame && nextOpp && (
+                  <div className="bg-slate-950/60 border border-slate-800 rounded-2xl p-3 mb-4 flex items-center gap-3">
+                    <span className="text-xl">{nextOpp.logo}</span>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-[9px] text-slate-500 font-black uppercase tracking-widest">
+                        Next Preseason Game — {nextIsHome ? '🏠 Home' : '🛫 Away'}
+                      </p>
+                      <p className="text-sm font-bold text-white truncate">{nextOpp.city} {nextOpp.name}</p>
+                    </div>
+                    <span className="px-2 py-1 bg-amber-500/10 border border-amber-500/20 rounded-lg text-[8px] text-amber-500 font-black uppercase whitespace-nowrap">
+                      No standings impact
+                    </span>
+                  </div>
+                )}
+
+                <div className="flex gap-2">
+                  <button
+                    onClick={() => onSimulate('next')}
+                    className="flex-1 py-3 bg-amber-500 hover:bg-amber-400 active:scale-95 text-slate-950 font-display font-black uppercase text-xs rounded-2xl transition-all shadow-lg shadow-amber-500/20 flex items-center justify-center gap-2"
+                  >
+                    <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24"><path d="M8 5v14l11-7z" /></svg>
+                    {playedPre === totalPre ? 'Start Regular Season' : 'Sim Next Exhibition'}
+                  </button>
+                  {onAdvanceToRegularSeason && playedPre < totalPre && (
+                    <button
+                      onClick={onAdvanceToRegularSeason}
+                      className="px-4 py-3 bg-slate-800 hover:bg-slate-700 text-slate-400 font-display font-black uppercase text-xs rounded-2xl transition-all border border-slate-700 whitespace-nowrap"
+                      title="Skip remaining preseason games"
+                    >
+                      Skip
+                    </button>
+                  )}
+                </div>
+              </div>
+            );
+          })()}
 
           <section className="bg-slate-900 border border-slate-800 rounded-3xl p-6 shadow-2xl">
             <h3 className="text-xs font-black uppercase tracking-[0.2em] text-slate-500 mb-6 pb-2 border-b border-slate-800">Simulation Hub</h3>

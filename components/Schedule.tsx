@@ -414,30 +414,210 @@ const Schedule: React.FC<ScheduleProps> = ({ league, onSimulate, onScout, onWatc
     );
   };
 
-  const isPreseason = league.seasonPhase === 'Preseason' && !league.schedule.some(g => g.played);
+  // Preseason state helpers
+  const preseasonSchedule = league.preseasonSchedule ?? [];
+  const isPreseasonPhase  = league.seasonPhase === 'Preseason';
+  const hasPreseasonGames = preseasonSchedule.length > 0;
+  const preseasonPlayed   = preseasonSchedule.filter(g => g.played).length;
+  const preseasonTotal    = preseasonSchedule.length;
+  const userPreseasonGames = preseasonSchedule.filter(
+    g => g.homeTeamId === league.userTeamId || g.awayTeamId === league.userTeamId
+  );
+  const preRecord = league.preseasonRecord ?? { wins: 0, losses: 0 };
+
+  // Look up preseason result from preseasonHistory
+  const getPreseasonResult = (gameId: string) =>
+    (league.preseasonHistory ?? []).find(r => r.id === gameId) ?? null;
 
   return (
     <div className="space-y-8 animate-in fade-in duration-500 pb-40">
 
-      {/* ── Preseason banner ── */}
-      {isPreseason && onAdvanceToRegularSeason && (
-        <div className="bg-gradient-to-br from-amber-900/30 to-slate-900 border border-amber-500/30 rounded-[2rem] p-7 flex flex-col sm:flex-row items-center justify-between gap-5 shadow-xl animate-in slide-in-from-top-2">
-          <div className="space-y-1">
-            <p className="text-[10px] font-black uppercase tracking-[0.5em] text-amber-500">⏸ Preseason</p>
-            <h2 className="text-xl font-display font-black text-white uppercase">Schedule Generated — Season Not Started</h2>
-            <p className="text-slate-400 text-xs leading-relaxed">
-              Regenerate the schedule in <span className="text-slate-300 font-bold">Settings → League</span>, or lock it in and advance to the regular season now.
-            </p>
+      {/* ── Preseason Schedule Section ── */}
+      {isPreseasonPhase && hasPreseasonGames && (
+        <div className="space-y-4 animate-in slide-in-from-top-2">
+          {/* Header bar */}
+          <div className="bg-gradient-to-br from-amber-900/30 to-slate-900 border border-amber-500/30 rounded-[2rem] p-6 shadow-xl">
+            <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+              <div className="space-y-1">
+                <p className="text-[10px] font-black uppercase tracking-[0.5em] text-amber-500">🏋️ Preseason — Exhibition Slate</p>
+                <h2 className="text-xl font-display font-black text-white uppercase">
+                  {preseasonPlayed === preseasonTotal ? 'Preseason Complete' : `${preseasonTotal - preseasonPlayed} Exhibition Game${preseasonTotal - preseasonPlayed !== 1 ? 's' : ''} Remaining`}
+                </h2>
+                <div className="flex items-center gap-4 mt-1">
+                  <span className="text-slate-400 text-xs">Your Record: <span className="text-white font-black">{preRecord.wins}–{preRecord.losses}</span></span>
+                  <span className="text-slate-600 text-xs">•</span>
+                  <span className="text-slate-400 text-xs">{preseasonPlayed}/{preseasonTotal} games played</span>
+                  <span className="text-slate-600 text-xs">•</span>
+                  <span className="text-xs text-amber-500/80 font-bold uppercase tracking-wider">No standings impact</span>
+                </div>
+                {/* Progress bar */}
+                <div className="h-1 bg-slate-800 rounded-full mt-2 w-64 overflow-hidden">
+                  <div className="h-full bg-amber-500 rounded-full transition-all duration-500" style={{ width: `${preseasonTotal > 0 ? (preseasonPlayed / preseasonTotal) * 100 : 0}%` }} />
+                </div>
+              </div>
+              <div className="flex flex-col sm:flex-row gap-2 shrink-0">
+                <button
+                  onClick={() => onSimulate('next')}
+                  className="px-5 py-3 bg-amber-500 hover:bg-amber-400 active:scale-95 text-slate-950 font-display font-black uppercase text-xs rounded-2xl transition-all shadow-lg shadow-amber-500/20 flex items-center gap-2 whitespace-nowrap"
+                >
+                  <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24"><path d="M8 5v14l11-7z" /></svg>
+                  Sim Next Game
+                </button>
+                {onAdvanceToRegularSeason && (
+                  <button
+                    onClick={onAdvanceToRegularSeason}
+                    className="px-5 py-3 bg-slate-800 hover:bg-slate-700 active:scale-95 text-slate-300 font-display font-black uppercase text-xs rounded-2xl transition-all flex items-center gap-2 whitespace-nowrap border border-slate-700"
+                  >
+                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M13 9l3 3m0 0l-3 3m3-3H8m13 0a9 9 0 11-18 0 9 9 0 0118 0z" />
+                    </svg>
+                    Skip to Regular Season
+                  </button>
+                )}
+              </div>
+            </div>
           </div>
-          <button
-            onClick={onAdvanceToRegularSeason}
-            className="shrink-0 px-8 py-4 bg-amber-500 hover:bg-amber-400 active:scale-95 text-slate-950 font-display font-black uppercase text-sm rounded-2xl transition-all shadow-lg shadow-amber-500/20 flex items-center gap-2 whitespace-nowrap"
-          >
-            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M13 9l3 3m0 0l-3 3m3-3H8m13 0a9 9 0 11-18 0 9 9 0 0118 0z" />
-            </svg>
-            Advance to Regular Season
-          </button>
+
+          {/* User's preseason games */}
+          <div className="bg-slate-900 border border-slate-800 rounded-[2rem] p-6 shadow-xl">
+            <h3 className="text-[10px] font-black uppercase tracking-[0.3em] text-slate-500 mb-5 pb-3 border-b border-slate-800 flex items-center gap-2">
+              <span className="w-2 h-2 rounded-full bg-amber-500 inline-block" />
+              Your Preseason Schedule
+            </h3>
+            <div className="space-y-3">
+              {userPreseasonGames.map((game, idx) => {
+                const isHome   = game.homeTeamId === league.userTeamId;
+                const opp      = league.teams.find(t => t.id === (isHome ? game.awayTeamId : game.homeTeamId))!;
+                const userTeam = league.teams.find(t => t.id === league.userTeamId)!;
+                const result   = getPreseasonResult(game.id);
+                const userScore = result ? (isHome ? result.homeScore : result.awayScore) : null;
+                const oppScore  = result ? (isHome ? result.awayScore : result.homeScore) : null;
+                const isWin     = userScore !== null && oppScore !== null && userScore > oppScore;
+                const isNext    = !game.played && (idx === 0 || userPreseasonGames[idx - 1]?.played);
+
+                return (
+                  <div
+                    key={game.id}
+                    className={`flex flex-col sm:flex-row items-start sm:items-center gap-4 p-4 rounded-2xl border transition-all ${
+                      isNext
+                        ? 'bg-amber-500/5 border-amber-500/30 ring-1 ring-amber-500/20'
+                        : game.played
+                        ? 'bg-slate-950/50 border-slate-800 opacity-80'
+                        : 'bg-slate-950/50 border-slate-800'
+                    }`}
+                  >
+                    {/* Game number & exhibition badge */}
+                    <div className="flex items-center gap-3 min-w-[110px]">
+                      <div className="text-center">
+                        <p className="text-[9px] text-slate-500 font-black uppercase tracking-widest">PRE {idx + 1}</p>
+                        <p className="text-[9px] text-slate-600 font-bold">Day {game.day}</p>
+                      </div>
+                      <span className="px-2 py-0.5 bg-amber-500/10 border border-amber-500/20 rounded-full text-[8px] font-black text-amber-500 uppercase tracking-widest whitespace-nowrap">
+                        Exhibition
+                      </span>
+                    </div>
+
+                    {/* Opponent */}
+                    <div className="flex items-center gap-3 flex-1">
+                      <div className="w-10 h-10 bg-slate-800 rounded-xl flex items-center justify-center border border-slate-700 shrink-0">
+                        <span className="text-lg">{opp.logo}</span>
+                      </div>
+                      <div>
+                        <p className="text-[9px] font-black text-slate-500 uppercase tracking-widest leading-none mb-0.5">
+                          {isHome ? '🏠 Home' : '🛫 Away'}
+                        </p>
+                        <p className="text-sm font-bold text-white">{opp.city} {opp.name}</p>
+                        <p className="text-[9px] text-slate-500 font-bold">OVR {Math.round(opp.roster.reduce((s, p) => s + p.rating, 0) / (opp.roster.length || 1))}</p>
+                      </div>
+                    </div>
+
+                    {/* Result / actions */}
+                    <div className="flex items-center gap-3 sm:ml-auto">
+                      {game.played && result ? (
+                        <>
+                          <div className="text-right">
+                            <p className={`text-xl font-display font-black ${isWin ? 'text-emerald-400' : 'text-rose-500'}`}>
+                              {isWin ? 'W' : 'L'} {userScore}-{oppScore}
+                            </p>
+                            <p className="text-[9px] text-slate-500 font-bold uppercase">Exhibition</p>
+                          </div>
+                          <button
+                            onClick={() => {
+                              const homeTeam = league.teams.find(t => t.id === game.homeTeamId)!;
+                              const awayTeam = league.teams.find(t => t.id === game.awayTeamId)!;
+                              onViewBoxScore(result, homeTeam, awayTeam);
+                            }}
+                            className="px-3 py-1.5 bg-amber-500/10 hover:bg-amber-500 text-amber-500 hover:text-slate-950 text-[9px] font-black uppercase tracking-widest rounded-lg border border-amber-500/20 transition-all whitespace-nowrap"
+                          >
+                            Box Score
+                          </button>
+                        </>
+                      ) : (
+                        <>
+                          {isNext && (
+                            <span className="px-2 py-1 bg-amber-500/10 border border-amber-500/30 rounded-lg text-[9px] text-amber-500 font-black uppercase">
+                              Next Up
+                            </span>
+                          )}
+                          <button
+                            onClick={() => onSimulate('single-instant', game.id)}
+                            className="px-4 py-2 bg-amber-500/10 hover:bg-amber-500 text-amber-500 hover:text-slate-950 text-[9px] font-black uppercase tracking-widest rounded-xl border border-amber-500/20 transition-all whitespace-nowrap"
+                          >
+                            Simulate
+                          </button>
+                          <button
+                            onClick={() => onSimulate('to-game', game.id)}
+                            className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-400 text-[9px] font-black uppercase tracking-widest rounded-xl transition-all whitespace-nowrap"
+                          >
+                            Sim To
+                          </button>
+                        </>
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
+              {userPreseasonGames.length === 0 && (
+                <p className="text-slate-500 text-sm text-center py-4">No preseason games scheduled for your team.</p>
+              )}
+            </div>
+          </div>
+
+          {/* League-wide preseason results summary */}
+          {preseasonPlayed > 0 && (
+            <div className="bg-slate-900 border border-slate-800 rounded-[2rem] p-6 shadow-xl">
+              <h3 className="text-[10px] font-black uppercase tracking-[0.3em] text-slate-500 mb-4 pb-3 border-b border-slate-800">
+                Recent Exhibition Results
+              </h3>
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+                {(league.preseasonHistory ?? []).slice(0, 9).map(result => {
+                  const home = league.teams.find(t => t.id === result.homeTeamId);
+                  const away = league.teams.find(t => t.id === result.awayTeamId);
+                  if (!home || !away) return null;
+                  return (
+                    <div
+                      key={result.id}
+                      className="flex items-center justify-between px-3 py-2.5 bg-slate-950/60 border border-slate-800 rounded-xl cursor-pointer hover:border-amber-500/30 transition-all"
+                      onClick={() => onViewBoxScore(result, home, away)}
+                    >
+                      <div className="flex items-center gap-2 min-w-0">
+                        <span className="text-base shrink-0">{away.logo}</span>
+                        <span className="text-[10px] text-slate-400 font-bold truncate">{away.abbreviation}</span>
+                      </div>
+                      <div className="text-center px-2">
+                        <p className="text-[10px] font-black font-mono text-white">{result.awayScore}-{result.homeScore}</p>
+                        <p className="text-[8px] text-amber-500/60 font-bold uppercase">Exhib.</p>
+                      </div>
+                      <div className="flex items-center gap-2 min-w-0 flex-row-reverse">
+                        <span className="text-base shrink-0">{home.logo}</span>
+                        <span className="text-[10px] text-slate-400 font-bold truncate">{home.abbreviation}</span>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
         </div>
       )}
 

@@ -2,6 +2,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { LeagueState, Player, Team, GameResult, PlayerStatus, ScheduleGame, BulkSimSummary, Prospect, Coach, TradeProposal, Position, NewsItem, NewsCategory, LeagueSettings, SeasonAwards, PlayoffBracket, PlayoffSeries, Transaction, TransactionType, PowerRankingSnapshot, PowerRankingEntry, GMProfile, GMMilestone, RivalryStats, InjuryType, SeasonPhase, AllStarWeekendData, AllStarVoteEntry, PreviousSeasonStanding } from './types';
 import { generateLeagueTeams, generateSeasonSchedule, generateProspects, generateFreeAgentPool, generateCoachPool, EXPANSION_TEAM_POOL, generateCoach, generatePlayer, generateDefaultRotation, enforcePositionalBounds, ageFromBirthdate, getCoachPreferredScheme, generateGMName } from './constants';
+import { generatePreseasonSchedule, buildPreseasonHeadline, buildPreseasonRookieHeadline } from './utils/preseasonEngine';
 import { simulateGame, normalizeLeagueOVRs } from './utils/simEngine';
 import { computeGameAttendance } from './utils/attendanceEngine';
 import { autoSimAllStarWeekend } from './utils/allStarSim';
@@ -538,12 +539,16 @@ const App: React.FC = () => {
       }]
     };
 
+    const numPreseasonGames = finalSettings.preseasonGames ?? 6;
+    const freshPreseasonSchedule = generatePreseasonSchedule(freshTeams, numPreseasonGames);
+
     const newLeague: LeagueState = {
       id: `league-${Date.now()}`, lastUpdated: Date.now(), currentDay: 1, season: year, leagueName: name, userTeamId: '',
       gmProfile: initialGMProfile, teams: teamsWithAI, schedule: freshSchedule, isOffseason: false, offseasonDay: 0,
       draftPhase: 'scouting', prospects: freshProspects, freeAgents: initialFAs, coachPool, history: [],
       savedTrades: [], newsFeed: [], awardHistory: [], championshipHistory: [], transactions: [], settings: finalSettings,
       draftPicks: [], seasonPhase: 'Preseason' as SeasonPhase, tradeDeadlinePassed: false,
+      preseasonSchedule: freshPreseasonSchedule, preseasonHistory: [], preseasonRecord: { wins: 0, losses: 0 },
       ownerApproval: 55, fanApproval: 60
     };
 
@@ -1100,6 +1105,188 @@ const App: React.FC = () => {
     return history;
   };
 
+  // ── Preseason game finaliser ───────────────────────────────────────────────
+  // Stats don't count toward season totals; no W/L/streak impact.
+  // Injuries are real, morale changes are small, news is generated.
+  const finalizePreseasonGameResult = async (
+    state: LeagueState,
+    gameId: string,
+    result: GameResult,
+  ): Promise<LeagueState> => {
+    let newState = { ...state };
+    const homeTeam = state.teams.find(t => t.id === result.homeTeamId)!;
+    const awayTeam = state.teams.find(t => t.id === result.awayTeamId)!;
+    const homeWon  = result.homeScore > result.awayScore;
+    const winTeam  = homeWon ? homeTeam : awayTeam;
+    const loseTeam = homeWon ? awayTeam : homeTeam;
+
+    // ── Small morale shifts (scaled way down vs regular season) ───────────
+    const applyPreseasonMorale = (team: typeof homeTeam, lines: typeof result.homePlayerStats, isWinner: boolean) => ({
+      ...team,
+      roster: team.roster.map(p => {
+        const line = lines.find(l => l.playerId === p.id);
+        if (!line || line.dnp) return p;
+        let morale = p.morale ?? 75;
+        morale += isWinner ? 0.5 : -0.5;
+        // Star player performance boost / frustration
+        if (isWinner && line.pts >= 20) morale += 0.3;
+        if (!isWinner && line.pts < 6 && p.rating >= 80) morale -= 0.4;
+        // Personality modifiers
+        if (p.personalityTraits?.includes('Loyal'))            morale += 0.1;
+        if (p.personalityTraits?.includes('Gym Rat'))          morale += 0.1;
+        if (p.personalityTraits?.includes('Professional'))     morale += 0.1;
+        if (p.personalityTraits?.includes('Hot Head') && !isWinner) morale -= 0.3;
+        // Natural drift toward baseline
+        const baseline = 72 + (p.rating - 65) * 0.1;
+        morale += (baseline - morale) * 0.02;
+        morale = Math.min(100, Math.max(0, morale));
+        return { ...p, morale };
+      }),
+    });
+
+    let updatedTeams = state.teams.map(t => {
+      if (t.id === homeTeam.id) return applyPreseasonMorale(t, result.homePlayerStats, homeWon);
+      if (t.id === awayTeam.id) return applyPreseasonMorale(t, result.awayPlayerStats, !homeWon);
+      return t;
+    });
+
+    // ── Mark game played in preseasonSchedule ────────────────────────────
+    const updatedPreseasonSchedule = (state.preseasonSchedule ?? []).map(sg =>
+      sg.id === gameId ? { ...sg, played: true } : sg,
+    );
+
+    // ── Track preseason W/L for user's team only ─────────────────────────
+    const isUserGame = homeTeam.id === state.userTeamId || awayTeam.id === state.userTeamId;
+    const userWonPreseason = isUserGame && (
+      (homeTeam.id === state.userTeamId && homeWon) ||
+      (awayTeam.id === state.userTeamId && !homeWon)
+    );
+    const prevRecord = state.preseasonRecord ?? { wins: 0, losses: 0 };
+    const updatedRecord = isUserGame
+      ? { wins: prevRecord.wins + (userWonPreseason ? 1 : 0), losses: prevRecord.losses + (userWonPreseason ? 0 : 1) }
+      : prevRecord;
+
+    newState = {
+      ...newState,
+      teams: updatedTeams,
+      preseasonSchedule: updatedPreseasonSchedule,
+      preseasonHistory: [result, ...(state.preseasonHistory ?? [])],
+      preseasonRecord: updatedRecord,
+    };
+
+    // ── Apply in-game injuries (same severity as regular season) ─────────
+    if (result.gameInjuries && result.gameInjuries.length > 0) {
+      for (const inj of result.gameInjuries) {
+        // Preseason injury chance modifier: 50% of regular duration unless unlucky
+        const preseasonDaysOut = Math.random() < 0.15 ? inj.daysOut : Math.max(1, Math.floor(inj.daysOut * 0.5));
+        newState = {
+          ...newState,
+          teams: newState.teams.map(t => t.id !== inj.teamId ? t : {
+            ...t,
+            roster: t.roster.map(p => p.id !== inj.playerId ? p : {
+              ...p, status: 'Injured' as PlayerStatus, injuryType: inj.injuryType as InjuryType, injuryDaysLeft: preseasonDaysOut,
+            }),
+          }),
+        };
+        const injTeam   = newState.teams.find(t => t.id === inj.teamId)!;
+        const injPlayer = injTeam.roster.find(p => p.id === inj.playerId)!;
+        const timeLabel = preseasonDaysOut >= 14 ? `${Math.round(preseasonDaysOut / 7)} weeks` : `${preseasonDaysOut} day${preseasonDaysOut !== 1 ? 's' : ''}`;
+        const detail = preseasonDaysOut >= 7
+          ? `${injPlayer.name} suffered a ${inj.injuryType} during a preseason game. He faces approximately ${timeLabel} of recovery — could miss the start of the regular season.`
+          : `${injPlayer.name} left a preseason game with a ${inj.injuryType}. The team is being cautious; he's expected back within ${timeLabel}.`;
+        newState = await addNewsItem(newState, 'injury', { player: injPlayer, team: injTeam, detail }, preseasonDaysOut >= 14);
+      }
+    }
+
+    // ── Preseason game news ──────────────────────────────────────────────
+    const gamesPlayedSoFar = updatedPreseasonSchedule.filter(g => g.played).length - 1;
+    const winScore  = homeWon ? result.homeScore : result.awayScore;
+    const loseScore = homeWon ? result.awayScore : result.homeScore;
+
+    // Always post a news item for the user's team game
+    if (isUserGame) {
+      const userTeam = state.teams.find(t => t.id === state.userTeamId)!;
+      const oppTeam  = homeTeam.id === state.userTeamId ? awayTeam : homeTeam;
+      const userScore = homeTeam.id === state.userTeamId ? result.homeScore : result.awayScore;
+      const oppScore  = homeTeam.id === state.userTeamId ? result.awayScore : result.homeScore;
+      const { headline, content } = buildPreseasonHeadline(
+        userWonPreseason ? userTeam.name : oppTeam.name,
+        userWonPreseason ? oppTeam.name  : userTeam.name,
+        userWonPreseason ? userScore : oppScore,
+        userWonPreseason ? oppScore  : userScore,
+        gamesPlayedSoFar,
+      );
+      const recordLabel = `(${updatedRecord.wins}-${updatedRecord.losses} preseason)`;
+      newState = {
+        ...newState,
+        newsFeed: [{
+          id: `pre-game-${gameId}`,
+          category: 'milestone' as const,
+          headline: `${userWonPreseason ? 'W' : 'L'} ${userScore}-${oppScore} — ${headline} ${recordLabel}`,
+          content,
+          timestamp: newState.currentDay,
+          realTimestamp: Date.now(),
+          teamId: state.userTeamId,
+          isBreaking: false,
+        }, ...newState.newsFeed].slice(0, 200),
+      };
+    } else {
+      // For non-user games, post ~30% of the time to avoid flooding the feed
+      if (Math.random() < 0.30) {
+        const { headline, content } = buildPreseasonHeadline(
+          winTeam.name, loseTeam.name, winScore, loseScore, gamesPlayedSoFar,
+        );
+        newState = {
+          ...newState,
+          newsFeed: [{
+            id: `pre-game-${gameId}`,
+            category: 'milestone' as const,
+            headline,
+            content,
+            timestamp: newState.currentDay,
+            realTimestamp: Date.now(),
+            teamId: winTeam.id,
+            isBreaking: false,
+          }, ...newState.newsFeed].slice(0, 200),
+        };
+      }
+    }
+
+    // ── Rookie / notable performer spotlight ─────────────────────────────
+    const allLines = [...result.homePlayerStats, ...result.awayPlayerStats];
+    for (const line of allLines) {
+      if (line.dnp || line.pts < 20) continue;
+      const player = state.teams.flatMap(t => t.roster).find(p => p.id === line.playerId);
+      const team   = state.teams.find(t => t.roster.some(p => p.id === line.playerId));
+      if (!player || !team) continue;
+      // Only spotlight young players (≤23) or user-team players
+      if (player.age > 23 && team.id !== state.userTeamId) continue;
+      // Rate-limit: skip if we already posted for this player in this preseason day
+      const cooldownId = `pre-rookie-${line.playerId}-day${newState.currentDay}`;
+      if (newState.newsFeed.some(n => n.id === cooldownId)) continue;
+      const { headline, content } = buildPreseasonRookieHeadline(
+        player.name, team.name, line.pts, line.reb, line.ast, player.age,
+      );
+      newState = {
+        ...newState,
+        newsFeed: [{
+          id: cooldownId,
+          category: 'milestone' as const,
+          headline,
+          content,
+          timestamp: newState.currentDay,
+          realTimestamp: Date.now(),
+          teamId: team.id,
+          playerId: player.id,
+          isBreaking: false,
+        }, ...newState.newsFeed].slice(0, 200),
+      };
+      break; // one spotlight per game max
+    }
+
+    return newState;
+  };
+
   const finalizeGameResult = async (state: LeagueState, gameId: string, result: GameResult): Promise<LeagueState> => {
     let newState = { ...state };
     let updatedTeams = [...state.teams];
@@ -1477,7 +1664,15 @@ const App: React.FC = () => {
   };
 
   const executeSimDay = async (state: LeagueState): Promise<{newState: LeagueState, dayResults: GameResult[]}> => {
-    const gamesToPlay = state.schedule.filter(g => g.day === state.currentDay && !g.played);
+    // ── Determine whether we are simulating preseason or regular season ───
+    const isPreseasonPhase = state.seasonPhase === 'Preseason';
+    const preseasonUnplayed = (state.preseasonSchedule ?? []).filter(g => !g.played);
+    const usePreseason = isPreseasonPhase && preseasonUnplayed.length > 0;
+
+    const gamesToPlay = usePreseason
+      ? (state.preseasonSchedule ?? []).filter(g => g.day === state.currentDay && !g.played)
+      : state.schedule.filter(g => g.day === state.currentDay && !g.played);
+
     let newState = { ...state };
     const dayResults: GameResult[] = [];
     for (const game of gamesToPlay) {
@@ -1488,8 +1683,39 @@ const App: React.FC = () => {
       const result = simulateGame(homeTeam, awayTeam, newState.currentDay, newState.season, game.homeB2B, game.awayB2B, rivalryLevel, newState.settings);
       result.id = game.id;
       if (homeTeam.id === state.userTeamId || awayTeam.id === state.userTeamId) dayResults.push(result);
-      newState = await finalizeGameResult(newState, game.id, result);
+      if (usePreseason) {
+        newState = await finalizePreseasonGameResult(newState, game.id, result);
+      } else {
+        newState = await finalizeGameResult(newState, game.id, result);
+      }
     }
+
+    // ── After preseason day: check if all preseason games are complete ────
+    if (usePreseason) {
+      const allPreseasonDone = (newState.preseasonSchedule ?? []).every(g => g.played);
+      if (allPreseasonDone) {
+        // Auto-transition to Regular Season; reset currentDay to 1 for regular schedule
+        newState = {
+          ...newState,
+          seasonPhase: 'Regular Season' as SeasonPhase,
+          currentDay: 1,
+          newsFeed: [{
+            id: `preseason-complete-${newState.season}`,
+            category: 'milestone' as const,
+            headline: 'PRESEASON COMPLETE — REGULAR SEASON BEGINS',
+            content: `The preseason slate is done. Check your rotations and depth chart — the regular season tips off now. Good luck!`,
+            timestamp: 1,
+            realTimestamp: Date.now(),
+            isBreaking: true,
+          }, ...newState.newsFeed].slice(0, 200),
+        };
+        return { newState, dayResults }; // don't increment day again
+      }
+      // Preseason still has games — run basic daily events (injury recovery only) and advance day
+      newState = await processDailyLeagueEvents(newState);
+      return { newState: { ...newState, currentDay: newState.currentDay + 1 }, dayResults };
+    }
+
     newState = await processDailyLeagueEvents(newState);
 
     // ── 10-game win% reality check (advisory only, no sim changes) ──
@@ -1697,16 +1923,24 @@ const App: React.FC = () => {
   const handleSimulate = async (mode: 'next' | 'day' | 'week' | 'month' | 'season' | 'to-game' | 'x-games' | 'single-instant' | 'to-deadline' | 'to-allstar', targetGameId?: string, numGames?: number) => {
     if (!league) return;
     if (mode === 'single-instant' && targetGameId) {
-      const game = league.schedule.find(g => g.id === targetGameId)!;
+      // Check both regular and preseason schedules
+      const game = league.schedule.find(g => g.id === targetGameId)
+        ?? (league.preseasonSchedule ?? []).find(g => g.id === targetGameId);
+      if (!game) return;
+      const isPreseasonGame = !!(league.preseasonSchedule ?? []).find(g => g.id === targetGameId);
       const home = league.teams.find(t => t.id === game.homeTeamId)!;
       const away = league.teams.find(t => t.id === game.awayTeamId)!;
       const rivalry = league.rivalryHistory?.find(r => (r.team1Id === home.id && r.team2Id === away.id) || (r.team1Id === away.id && r.team2Id === home.id));
       const rivalryLevel = getRivalryLevel(rivalry);
       const result = simulateGame(home, away, league.currentDay, league.season, game.homeB2B, game.awayB2B, rivalryLevel, league.settings);
       result.id = game.id;
-      const recap = await generateGameRecap(result, home, away);
-      result.aiRecap = recap;
-      let newState = await finalizeGameResult(league, game.id, result);
+      if (!isPreseasonGame) {
+        const recap = await generateGameRecap(result, home, away);
+        result.aiRecap = recap;
+      }
+      let newState = isPreseasonGame
+        ? await finalizePreseasonGameResult(league, game.id, result)
+        : await finalizeGameResult(league, game.id, result);
       newState = await processDailyLeagueEvents(newState);
       setLeague(newState);
       setViewingBoxScore({ result, home, away });
@@ -1723,14 +1957,28 @@ const App: React.FC = () => {
         if (win) summary.userWins++; else summary.userLosses++;
       });
     };
+
+    /** Helper: does the current day have a game for the user's team in either schedule? */
+    const hasUserGameToday = (s: LeagueState) => {
+      const uid = s.userTeamId;
+      const preUnplayed = (s.preseasonSchedule ?? []).filter(g => !g.played);
+      const usePreSched  = s.seasonPhase === 'Preseason' && preUnplayed.length > 0;
+      const sched = usePreSched ? (s.preseasonSchedule ?? []) : s.schedule;
+      return sched.some(g => g.day === s.currentDay && !g.played && (g.homeTeamId === uid || g.awayTeamId === uid));
+    };
+
+    /** Helper: any games remaining (preseason or regular)? */
+    const hasAnyGamesLeft = (s: LeagueState) =>
+      (s.preseasonSchedule ?? []).some(g => !g.played) || s.schedule.some(g => !g.played);
+
     if (mode === 'next') {
       let foundUserGame = false;
       while (!foundUserGame && tempState.currentDay < 500) {
-        const hasUserGame = tempState.schedule.some(g => g.day === tempState.currentDay && (g.homeTeamId === tempState.userTeamId || g.awayTeamId === tempState.userTeamId));
+        const had = hasUserGameToday(tempState);
         const step = await executeSimDay(tempState);
         tempState = step.newState;
         processResults(step.dayResults);
-        if (hasUserGame) foundUserGame = true;
+        if (had) foundUserGame = true;
       }
     } else if (mode === 'day') {
       const step = await executeSimDay(tempState);
@@ -1749,7 +1997,8 @@ const App: React.FC = () => {
         processResults(step.dayResults);
       }
     } else if (mode === 'season') {
-      while (tempState.currentDay < 500 && tempState.schedule.some(g => !g.played)) {
+      // Sim through preseason AND regular season
+      while (tempState.currentDay < 500 && hasAnyGamesLeft(tempState)) {
         const step = await executeSimDay(tempState);
         tempState = step.newState;
         processResults(step.dayResults);
@@ -2237,7 +2486,32 @@ const App: React.FC = () => {
 
   const handleAdvanceToRegularSeason = () => {
     if (!league) return;
-    // If offseason or previous season's games are all played, generate a fresh schedule
+
+    // ── Case 1: Skip preseason → jump straight to Regular Season ─────────
+    if (league.seasonPhase === 'Preseason' && !league.isOffseason) {
+      setLeague(prev => {
+        if (!prev) return null;
+        return {
+          ...prev,
+          currentDay: 1,
+          seasonPhase: 'Regular Season' as SeasonPhase,
+          newsFeed: [{
+            id: `preseason-skipped-${prev.season}`,
+            category: 'milestone' as const,
+            headline: 'PRESEASON SKIPPED — REGULAR SEASON BEGINS',
+            content: 'The preseason has been skipped. The regular season is now underway — finalize your rotations!',
+            timestamp: 1,
+            realTimestamp: Date.now(),
+            isBreaking: true,
+          }, ...prev.newsFeed].slice(0, 200),
+        };
+      });
+      return;
+    }
+
+    // ── Case 2: After offseason (or first season init) → enter Preseason ─
+    const numPreseasonGames = league.settings.preseasonGames ?? 6;
+    const freshPreseasonSchedule = generatePreseasonSchedule(league.teams, numPreseasonGames);
     const needsFreshSchedule = league.isOffseason || league.schedule.every(g => g.played);
     const newSchedule = needsFreshSchedule
       ? generateSeasonSchedule(league.teams, league.settings.seasonLength, league.settings.divisionGames, league.settings.conferenceGames)
@@ -2247,13 +2521,9 @@ const App: React.FC = () => {
       const nextSeason = prev.season;
       const futureWindow = prev.settings.tradableDraftPickSeasons ?? 4;
       const teamsWithPicks = prev.teams.map(t => {
-        // Strip picks that have already been exercised in the just-completed draft (year < nextSeason)
-        // and any legacy no-year picks. Current-year picks for nextSeason already exist as the
-        // previous season's "future pick + 1" — they are not re-generated here.
         const activePicks = t.picks.filter(p => p.year !== undefined && p.year >= nextSeason);
         const existingPickYears = new Set(activePicks.map(p => p.year));
         const newPicks = [] as typeof t.picks;
-        // Extend the future window (keeps it at tradableDraftPickSeasons deep)
         for (let f = 1; f <= futureWindow; f++) {
           const yr = nextSeason + f;
           if (!existingPickYears.has(yr)) {
@@ -2269,9 +2539,12 @@ const App: React.FC = () => {
         ...prev,
         teams: teamsWithPicks,
         schedule: newSchedule,
+        preseasonSchedule: freshPreseasonSchedule,
+        preseasonHistory: [],
+        preseasonRecord: { wins: 0, losses: 0 },
         currentDay: 1,
         isOffseason: false,
-        seasonPhase: 'Regular Season' as SeasonPhase,
+        seasonPhase: 'Preseason' as SeasonPhase,
         tradeDeadlinePassed: false,
         allStarWeekend: undefined,
       };
