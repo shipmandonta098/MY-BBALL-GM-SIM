@@ -28,6 +28,8 @@ const Trade: React.FC<TradeProps> = ({ league, updateLeague, recordTransaction, 
   const [finderPos, setFinderPos] = useState<Position | 'ALL'>('ALL');
   const [finderMaxSalary, setFinderMaxSalary] = useState(50000000);
   const [finderResults, setFinderResults] = useState<{ player: Player, team: Team }[]>([]);
+  // Approval feedback shown briefly after executing a trade
+  const [tradeApproval, setTradeApproval] = useState<{ ownerDelta: number; fanDelta: number } | null>(null);
 
   const userTeam = league.teams.find(t => t.id === league.userTeamId)!;
   const partnerTeam = league.teams.find(t => t.id === partnerTeamId)!;
@@ -247,9 +249,21 @@ const Trade: React.FC<TradeProps> = ({ league, updateLeague, recordTransaction, 
       });
     }
 
-    updateLeague({ teams: updatedTeams, transactions: updatedTransactions, rivalryHistory });
+    // ── Approval impact ────────────────────────────────────────────────────────
+    const outRatings = userPieces.filter(p => p.type === 'player').map(p => (p.data as Player).rating);
+    const inRatings  = partnerPieces.filter(p => p.type === 'player').map(p => (p.data as Player).rating);
+    const outAvg = outRatings.length ? outRatings.reduce((s, r) => s + r, 0) / outRatings.length : 75;
+    const inAvg  = inRatings.length  ? inRatings.reduce((s, r) => s + r, 0)  / inRatings.length  : 75;
+    const diff   = inAvg - outAvg;
+    const ownerDelta = diff > 10 ? 12 : diff > 5 ? 8 : diff > 1 ? 4 : diff > -2 ? 0 : diff > -6 ? -5 : diff > -10 ? -9 : -13;
+    const fanDelta   = Math.round(ownerDelta * 0.75);
+    const newOwner   = Math.max(0, Math.min(100, (league.ownerApproval ?? 55) + ownerDelta));
+    const newFan     = Math.max(0, Math.min(100, (league.fanApproval   ?? 60) + fanDelta));
+
+    updateLeague({ teams: updatedTeams, transactions: updatedTransactions, rivalryHistory, ownerApproval: newOwner, fanApproval: newFan });
     setUserPieces([]);
     setPartnerPieces([]);
+    if (ownerDelta !== 0) setTradeApproval({ ownerDelta, fanDelta });
     setAiResponse({ status: 'neutral', message: 'Trade finalized! Roster updates complete.' });
   };
 
@@ -426,6 +440,23 @@ const Trade: React.FC<TradeProps> = ({ league, updateLeague, recordTransaction, 
                     "{aiResponse.message}"
                   </p>
                </div>
+
+               {/* ── Approval feedback toast (shown after trade executes) ── */}
+               {tradeApproval && (
+                 <div className={`rounded-2xl border p-4 flex items-center justify-between animate-in fade-in duration-500 ${
+                   tradeApproval.ownerDelta >= 0 ? 'bg-emerald-500/10 border-emerald-500/30' : 'bg-rose-500/10 border-rose-500/30'
+                 }`}>
+                   <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">Approval Impact</p>
+                   <div className="flex items-center gap-4 text-sm font-black">
+                     <span className={tradeApproval.ownerDelta >= 0 ? 'text-emerald-400' : 'text-rose-400'}>
+                       👔 Owner {tradeApproval.ownerDelta >= 0 ? '+' : ''}{tradeApproval.ownerDelta}
+                     </span>
+                     <span className={tradeApproval.fanDelta >= 0 ? 'text-emerald-400' : 'text-rose-400'}>
+                       📣 Fans {tradeApproval.fanDelta >= 0 ? '+' : ''}{tradeApproval.fanDelta}
+                     </span>
+                   </div>
+                 </div>
+               )}
 
                <div className="space-y-3">
                  <button onClick={handlePropose} disabled={!canPropose} className="w-full py-5 bg-amber-500 hover:bg-amber-400 disabled:opacity-20 text-slate-950 font-display font-bold uppercase rounded-2xl shadow-xl">Propose Trade</button>

@@ -47,6 +47,8 @@ import Rotations from './components/Rotations';
 import TeamManagement from './components/TeamManagement';
 import Players from './components/Players';
 import AllStar from './components/AllStar';
+import OwnerReview from './components/OwnerReview';
+import type { OwnerReviewData } from './types';
 
 const SETTINGS_KEY = 'HOOPS_DYNASTY_SETTINGS_V1';
 
@@ -241,10 +243,20 @@ const App: React.FC = () => {
     ];
     const updatedTransactions = recordTransaction(league, 'trade', [userTeam.id, partnerTeam.id], description, playerIds);
 
+    // Compute approval delta for this trade
+    const outRatings = proposal.userPieces.filter(p => p.type === 'player').map(p => (p.data as Player).rating);
+    const inRatings  = proposal.partnerPieces.filter(p => p.type === 'player').map(p => (p.data as Player).rating);
+    const approvalDelta = tradeApprovalDelta(outRatings, inRatings, {
+      owner: league.ownerApproval ?? 55,
+      fan:   league.fanApproval   ?? 60,
+    });
+
     updateLeagueState({
       teams: updatedTeams,
       transactions: updatedTransactions,
       incomingTradeProposals: (league.incomingTradeProposals ?? []).filter(p => p.id !== proposal.id),
+      ownerApproval: approvalDelta.owner,
+      fanApproval:   approvalDelta.fan,
     });
   };
 
@@ -529,7 +541,8 @@ const App: React.FC = () => {
       gmProfile: initialGMProfile, teams: teamsWithAI, schedule: freshSchedule, isOffseason: false, offseasonDay: 0,
       draftPhase: 'scouting', prospects: freshProspects, freeAgents: initialFAs, coachPool, history: [],
       savedTrades: [], newsFeed: [], awardHistory: [], championshipHistory: [], transactions: [], settings: finalSettings,
-      draftPicks: [], seasonPhase: 'Preseason' as SeasonPhase, tradeDeadlinePassed: false
+      draftPicks: [], seasonPhase: 'Preseason' as SeasonPhase, tradeDeadlinePassed: false,
+      ownerApproval: 55, fanApproval: 60
     };
 
     setLeague(newLeague);
@@ -1810,8 +1823,120 @@ const App: React.FC = () => {
     setLoading(false);
   };
 
+  /** Compute end-of-season grade, comments, and approval deltas from the final league state. */
+  const computeOwnerReview = (state: LeagueState): Omit<OwnerReviewData, 'ownerApprovalBefore' | 'ownerApprovalAfter' | 'fanApprovalBefore' | 'fanApprovalAfter'> => {
+    const userTeam = state.teams.find(t => t.id === state.userTeamId)!;
+    const wins = userTeam.wins;
+    const losses = userTeam.losses;
+    const winPct = wins / Math.max(1, wins + losses);
+
+    // Playoff depth
+    const bracket = state.playoffBracket;
+    const champ = bracket?.championId;
+    let playoffResult: OwnerReviewData['playoffResult'] = 'none';
+    let madePlayoffs = false;
+    if (bracket) {
+      const inBracket = bracket.series.some(s => s.team1Id === state.userTeamId || s.team2Id === state.userTeamId);
+      if (inBracket) {
+        madePlayoffs = true;
+        if (champ === state.userTeamId) {
+          playoffResult = 'champion';
+        } else {
+          const seriesWon = bracket.series.filter(
+            s => (s.team1Id === state.userTeamId && s.team1Wins === 4) ||
+                 (s.team2Id === state.userTeamId && s.team2Wins === 4)
+          ).length;
+          playoffResult = seriesWon >= 3 ? 'finals' : seriesWon >= 2 ? 'semifinals' : 'first_round';
+        }
+      }
+    }
+
+    // Cap health
+    const cap = state.settings.salaryCap || 140_000_000;
+    const luxLine = state.settings.luxuryTaxLine || 170_000_000;
+    const payroll = userTeam.roster.reduce((s, p) => s + (p.salary || 0), 0);
+    const isOverLux = payroll > luxLine;
+    const isOverFirstApron = payroll > cap + 56_000_000;
+
+    // Approval deltas + comments
+    let ownerChange = 0;
+    let fanChange = 0;
+    const comments: string[] = [];
+
+    // Record
+    if (wins >= 60)      { ownerChange += 12; fanChange += 10; comments.push(`Dominant ${wins}–${losses} record — elite regular season.`); }
+    else if (wins >= 50) { ownerChange += 6;  fanChange += 5;  comments.push(`Solid ${wins}–${losses} season — above .600 winning percentage.`); }
+    else if (wins >= 41) { ownerChange += 2;  fanChange += 2;  comments.push(`Respectable ${wins}–${losses} record.`); }
+    else if (wins >= 35) { ownerChange -= 5;  fanChange -= 5;  comments.push(`Disappointing ${wins}–${losses} finish. Fell short of expectations.`); }
+    else if (wins >= 25) { ownerChange -= 12; fanChange -= 10; comments.push(`Poor ${wins}–${losses} record. Major rebuild needed.`); }
+    else                 { ownerChange -= 18; fanChange -= 15; comments.push(`Terrible ${wins}–${losses} season. Franchise is in crisis.`); }
+
+    // Playoffs
+    if      (playoffResult === 'champion')    { ownerChange += 22; fanChange += 25; comments.push('Led the team to a championship — exactly what this franchise expects.'); }
+    else if (playoffResult === 'finals')      { ownerChange += 14; fanChange += 16; comments.push('Finals appearance — a great run, but we need to close it out next time.'); }
+    else if (playoffResult === 'semifinals')  { ownerChange += 8;  fanChange += 10; comments.push('Conference Finals exit — strong postseason, but we can do better.'); }
+    else if (playoffResult === 'first_round') { ownerChange += 3;  fanChange += 4;  comments.push('First-round exit — made the playoffs, but need to show more in the postseason.'); }
+    else                                      { ownerChange -= 12; fanChange -= 10; comments.push('Failed to make the playoffs. This market demands postseason basketball.'); }
+
+    // Cap management
+    if (isOverFirstApron) {
+      ownerChange -= 6; comments.push('Payroll above the first apron — steep luxury tax penalties are cutting into revenue.');
+    } else if (isOverLux) {
+      ownerChange -= 3; comments.push('Over the luxury tax line — manageable, but watch the spending.');
+    } else if (winPct >= 0.5) {
+      ownerChange += 3; comments.push('Good cap discipline — competitive team without overpaying.');
+    }
+
+    // Grade from composite score
+    const composite =
+      (playoffResult === 'champion' ? 100 : playoffResult === 'finals' ? 82 : playoffResult === 'semifinals' ? 68 :
+       playoffResult === 'first_round' ? 55 : 25) + winPct * 40;
+    const grade: OwnerReviewData['grade'] =
+      composite >= 128 ? 'A+' : composite >= 110 ? 'A' : composite >= 96 ? 'B+' : composite >= 82 ? 'B' :
+      composite >= 68  ? 'C+' : composite >= 52  ? 'C' : composite >= 38 ? 'D'  : 'F';
+
+    return {
+      season: state.season,
+      wins, losses, madePlayoffs, playoffResult, grade, comments,
+      ownerApprovalChange: Math.round(ownerChange),
+      fanApprovalChange: Math.round(fanChange),
+    };
+  };
+
+  /** Compute approval delta from a user trade and clamp to 0-100. */
+  const tradeApprovalDelta = (
+    userOutRatings: number[], userInRatings: number[], current: { owner: number; fan: number }
+  ): { owner: number; fan: number; ownerDelta: number; fanDelta: number } => {
+    const outAvg = userOutRatings.length ? userOutRatings.reduce((s, r) => s + r, 0) / userOutRatings.length : 75;
+    const inAvg  = userInRatings.length  ? userInRatings.reduce((s, r) => s + r, 0)  / userInRatings.length  : 75;
+    const diff   = inAvg - outAvg;
+    const ownerDelta = diff > 10 ? 12 : diff > 5 ? 8 : diff > 1 ? 4 : diff > -2 ? 0 : diff > -6 ? -5 : diff > -10 ? -9 : -13;
+    const fanDelta   = Math.round(ownerDelta * 0.75);
+    return {
+      ownerDelta,
+      fanDelta,
+      owner: Math.max(0, Math.min(100, current.owner + ownerDelta)),
+      fan:   Math.max(0, Math.min(100, current.fan   + fanDelta)),
+    };
+  };
+
   const handleStartOffseason = async () => {
     if (!league) return;
+
+    // ── Compute owner review BEFORE any state mutations (bracket + wins still reflect the season) ──
+    const reviewBase = computeOwnerReview(league);
+    const ownerBefore = league.ownerApproval ?? 55;
+    const fanBefore   = league.fanApproval   ?? 60;
+    const ownerAfter  = Math.max(0, Math.min(100, ownerBefore + reviewBase.ownerApprovalChange));
+    const fanAfter    = Math.max(0, Math.min(100, fanBefore   + reviewBase.fanApprovalChange));
+    const reviewData: OwnerReviewData = {
+      ...reviewBase,
+      ownerApprovalBefore: ownerBefore,
+      ownerApprovalAfter:  ownerAfter,
+      fanApprovalBefore:   fanBefore,
+      fanApprovalAfter:    fanAfter,
+    };
+
     setLoading(true);
     try {
     let tempState = { ...league };
@@ -2078,6 +2203,12 @@ const App: React.FC = () => {
       realTimestamp: Date.now(),
       isBreaking: true
     });
+
+    // ── Attach owner review data (shown as overlay on the draft page) ──
+    tempState.ownerApproval    = ownerAfter;
+    tempState.fanApproval      = fanAfter;
+    tempState.showOwnerReview  = true;
+    tempState.ownerReviewData  = reviewData;
 
     setLeague(tempState);
     setActiveTab('draft');
@@ -2694,6 +2825,15 @@ const App: React.FC = () => {
             }} />
         );
       })()}
+
+      {/* ── End-of-Season Owner Review overlay ── */}
+      {league.showOwnerReview && league.ownerReviewData && (
+        <OwnerReview
+          data={league.ownerReviewData}
+          teamName={userTeam?.name ?? 'Your Team'}
+          onDismiss={() => updateLeagueState({ showOwnerReview: false })}
+        />
+      )}
 
       {viewingBoxScore && <BoxScoreModal result={viewingBoxScore.result} homeTeam={viewingBoxScore.home} awayTeam={viewingBoxScore.away} onClose={() => setViewingBoxScore(null)} />}
       {watchingGame && (

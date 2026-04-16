@@ -840,6 +840,14 @@ export interface LeagueState {
   seasonPhase?: SeasonPhase;
   tradeDeadlinePassed?: boolean;
   allStarWeekend?: AllStarWeekendData;
+  /** Owner satisfaction (0–100). Changes based on wins, playoffs, cap management. */
+  ownerApproval?: number;
+  /** Fan satisfaction (0–100). Reacts to wins, star moves, playoff success. */
+  fanApproval?: number;
+  /** When true, the end-of-season Owner Review overlay is shown. */
+  showOwnerReview?: boolean;
+  /** Data payload for the end-of-season Owner Review screen. */
+  ownerReviewData?: OwnerReviewData;
   liveGame?: {
     gameId: string;
     homeScore: number;
@@ -855,6 +863,22 @@ export interface LeagueState {
 }
 
 export type TransactionType = 'trade' | 'signing' | 'release' | 'hiring' | 'firing' | 'injury' | 'waiver' | 'draft';
+
+export interface OwnerReviewData {
+  season: number;
+  wins: number;
+  losses: number;
+  madePlayoffs: boolean;
+  playoffResult: 'none' | 'first_round' | 'semifinals' | 'finals' | 'champion';
+  grade: 'A+' | 'A' | 'B+' | 'B' | 'C+' | 'C' | 'D' | 'F';
+  comments: string[];
+  ownerApprovalChange: number;
+  fanApprovalChange: number;
+  ownerApprovalBefore: number;
+  ownerApprovalAfter: number;
+  fanApprovalBefore: number;
+  fanApprovalAfter: number;
+}
 
 export type SeasonPhase = 'Preseason' | 'Regular Season' | 'Trade Deadline' | 'All-Star Weekend' | 'Playoffs' | 'Offseason';
 
