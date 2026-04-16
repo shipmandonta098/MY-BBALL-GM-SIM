@@ -48,11 +48,12 @@ import TeamManagement from './components/TeamManagement';
 import Players from './components/Players';
 import AllStar from './components/AllStar';
 import OwnerReview from './components/OwnerReview';
+import OwnerWelcome from './components/OwnerWelcome';
 import type { OwnerReviewData } from './types';
 
 const SETTINGS_KEY = 'HOOPS_DYNASTY_SETTINGS_V1';
 
-type AppStatus = 'title' | 'config' | 'setup' | 'game';
+type AppStatus = 'title' | 'config' | 'setup' | 'owner_welcome' | 'game';
 
 // ── Interim HC promotion helper ───────────────────────────────────────────────
 // Finds the best available assistant and promotes them to Interim Head Coach.
@@ -108,6 +109,7 @@ function pickInterimCoach(
 const App: React.FC = () => {
   const [status, setStatus] = useState<AppStatus>('title');
   const [league, setLeague] = useState<LeagueState | null>(null);
+  const [pendingTeamId, setPendingTeamId] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<'dashboard' | 'news' | 'roster' | 'rotations' | 'free_agency' | 'results' | 'standings' | 'schedule' | 'draft' | 'coaching' | 'stats' | 'finances' | 'trade' | 'trade_proposals' | 'expansion' | 'settings' | 'coach_market' | 'awards' | 'playoffs' | 'transactions' | 'power_rankings' | 'gm_profile' | 'team_management' | 'players' | 'allstar' | 'league_history' | 'franchise_history'>('dashboard');
   const [counterProposal, setCounterProposal] = useState<import('./types').TradeProposal | null>(null);
   const [rosterTeamId, setRosterTeamId] = useState<string>('');
@@ -596,17 +598,31 @@ const App: React.FC = () => {
     await refreshSaves();
   };
 
-  const handleSelectTeam = async (teamId: string) => {
+  // Step 1: user picks a team → show the owner welcome message first
+  const handleSelectTeam = (teamId: string) => {
     if (!league) return;
-    const team = league.teams.find(t => t.id === teamId)!;
+    setPendingTeamId(teamId);
+    setStatus('owner_welcome');
+  };
+
+  // Step 2: user clicks "Accept Position" → actually start the game
+  const handleOwnerWelcomeContinue = async () => {
+    if (!league || !pendingTeamId) return;
+    const teamId = pendingTeamId;
+    const team   = league.teams.find(t => t.id === teamId)!;
     const updatedMilestones = [...league.gmProfile.milestones, {
-       id: `hired-${Date.now()}`, year: league.season, day: league.currentDay, text: `Named General Manager of the ${team.city} ${team.name}.`, type: 'signing'
+      id: `hired-${Date.now()}`, year: league.season, day: league.currentDay,
+      text: `Named General Manager of the ${team.city} ${team.name}.`, type: 'signing',
     }];
-    const updated = { ...league, userTeamId: teamId, gmProfile: { ...league.gmProfile, milestones: updatedMilestones }, lastUpdated: Date.now() };
-    // Assign AI GM personalities now that we know which team the user picked
+    const updated = {
+      ...league, userTeamId: teamId,
+      gmProfile: { ...league.gmProfile, milestones: updatedMilestones },
+      lastUpdated: Date.now(),
+    };
     const updatedWithAI = { ...updated, teams: assignAIPersonalities(updated.teams, teamId) };
     setLeague(updatedWithAI);
     setRosterTeamId(teamId);
+    setPendingTeamId(null);
     await db.leagues.put(updatedWithAI);
     setStatus('game');
   };
@@ -2454,6 +2470,16 @@ const App: React.FC = () => {
 
   if (status === 'title') return <TitleScreen onNewLeague={handleNewLeague} onLoadSave={handleLoadSave} onDeleteSave={handleDeleteSave} onRenameSave={handleRenameSave} onImportSave={handleImportSave} saves={allSaves} />;
   if (status === 'config') return <LeagueConfiguration onConfirm={handleConfigLeague} onCancel={() => setStatus('title')} />;
+  if (status === 'owner_welcome' && league && pendingTeamId) {
+    const welcomeTeam = league.teams.find(t => t.id === pendingTeamId)!;
+    return (
+      <OwnerWelcome
+        team={welcomeTeam}
+        season={league.season}
+        onContinue={handleOwnerWelcomeContinue}
+      />
+    );
+  }
   if (status === 'setup' && league) {
     const usedExpansionNames = new Set(league.teams.map(t => t.name));
     const nextExpansion = EXPANSION_TEAM_POOL.find(e => !usedExpansionNames.has(e.name));
