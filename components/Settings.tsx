@@ -641,6 +641,14 @@ const Settings: React.FC<SettingsProps> = ({ league, updateLeague, onRegenerateS
             )}
             {inSeason ? (
               <LockedField>
+                <SliderField label="Preseason Games Per Team" value={s.preseasonGames ?? 6} min={0} max={10} onChange={() => {}} />
+              </LockedField>
+            ) : (
+              <SliderField label="Preseason Games Per Team" value={s.preseasonGames ?? 6} min={0} max={10}
+                onChange={v => updateSettings({ preseasonGames: v }, 'Preseason Games')} />
+            )}
+            {inSeason ? (
+              <LockedField>
                 <ButtonField label="Quarter Length (Minutes)" options={[8, 10, 12, 15, 20]} value={s.quarterLength ?? 12} onChange={() => {}} />
               </LockedField>
             ) : (

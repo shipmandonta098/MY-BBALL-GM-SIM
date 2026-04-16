@@ -522,6 +522,8 @@ export interface ScheduleGame {
   awayB2BCount: number;
   gameNumber?: number;
   attendance?: number;
+  /** True for preseason / exhibition games — no standings impact */
+  isPreseason?: boolean;
 }
 
 export interface PlayByPlayEvent {
@@ -713,6 +715,9 @@ export interface LeagueSettings {
   rookieContractLengths?: number[]; // per-round lengths, default [3,2]
   canRefuseAfterRookie?: boolean;  // player can refuse extension after rookie deal, default false
 
+  // ── Preseason ────────────────────────────────────────────────────────────
+  preseasonGames?: number;           // 4-10, default 6
+
   // ── God Mode additions ────────────────────────────────────────────────────
   editAnyPlayer?: boolean;
   editAnyTeam?: boolean;
@@ -837,6 +842,12 @@ export interface LeagueState {
   };
   /** Populated when the human roster OVR ranks top-3 at season start (advisory only). */
   humanOvrAlert?: string;
+  /** Preseason exhibition games — separate from regular-season schedule. No standings impact. */
+  preseasonSchedule?: ScheduleGame[];
+  /** Box-score results for preseason games. */
+  preseasonHistory?: GameResult[];
+  /** Preseason record for the user's team this exhibition slate. */
+  preseasonRecord?: { wins: number; losses: number };
   seasonPhase?: SeasonPhase;
   tradeDeadlinePassed?: boolean;
   allStarWeekend?: AllStarWeekendData;
