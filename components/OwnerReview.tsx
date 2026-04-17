@@ -7,15 +7,15 @@ interface OwnerReviewProps {
   onDismiss: () => void;
 }
 
-const GRADE_META: Record<OwnerReviewData['grade'], { color: string; glow: string; label: string }> = {
-  'A+': { color: 'text-amber-400',   glow: 'shadow-amber-500/40',   label: 'Exceptional'   },
-  'A':  { color: 'text-amber-300',   glow: 'shadow-amber-400/30',   label: 'Excellent'      },
-  'B+': { color: 'text-emerald-400', glow: 'shadow-emerald-500/40', label: 'Very Good'      },
-  'B':  { color: 'text-emerald-300', glow: 'shadow-emerald-400/30', label: 'Good'           },
-  'C+': { color: 'text-sky-400',     glow: 'shadow-sky-500/30',     label: 'Average'        },
-  'C':  { color: 'text-slate-300',   glow: 'shadow-slate-500/20',   label: 'Below Average'  },
-  'D':  { color: 'text-orange-400',  glow: 'shadow-orange-500/30',  label: 'Poor'           },
-  'F':  { color: 'text-rose-500',    glow: 'shadow-rose-500/40',    label: 'Unacceptable'   },
+const GRADE_META: Record<OwnerReviewData['grade'], { color: string; glow: string; label: string; bg: string }> = {
+  'A+': { color: 'text-amber-400',   glow: 'shadow-amber-500/50',   label: 'Exceptional',   bg: 'bg-amber-500/20 border-amber-500/50'    },
+  'A':  { color: 'text-emerald-400', glow: 'shadow-emerald-500/40', label: 'Excellent',     bg: 'bg-emerald-500/20 border-emerald-500/50' },
+  'B+': { color: 'text-blue-400',    glow: 'shadow-blue-500/40',    label: 'Very Good',     bg: 'bg-blue-500/20 border-blue-500/50'      },
+  'B':  { color: 'text-blue-300',    glow: 'shadow-blue-400/30',    label: 'Good',          bg: 'bg-blue-500/15 border-blue-400/40'      },
+  'C+': { color: 'text-yellow-400',  glow: 'shadow-yellow-500/30',  label: 'Average',       bg: 'bg-yellow-500/15 border-yellow-500/40'  },
+  'C':  { color: 'text-yellow-300',  glow: 'shadow-yellow-400/20',  label: 'Below Average', bg: 'bg-yellow-500/10 border-yellow-400/30'  },
+  'D':  { color: 'text-red-400',     glow: 'shadow-red-500/30',     label: 'Poor',          bg: 'bg-red-500/15 border-red-500/40'        },
+  'F':  { color: 'text-red-500',     glow: 'shadow-red-700/40',     label: 'Unacceptable',  bg: 'bg-red-900/20 border-red-700/50'        },
 };
 
 const PLAYOFF_LABEL: Record<OwnerReviewData['playoffResult'], string> = {
@@ -40,8 +40,11 @@ function ApprovalBar({ label, before, after, change }: { label: string; before: 
     <div className="space-y-1.5">
       <div className="flex items-center justify-between text-[11px] font-black uppercase tracking-widest">
         <span className="text-slate-400">{label}</span>
-        <span className={positive ? 'text-emerald-400' : 'text-rose-400'}>
-          {positive ? '+' : ''}{change} → <span className="text-white">{after}</span>/100
+        <span className={`flex items-center gap-1 ${positive ? 'text-emerald-400' : 'text-rose-400'}`}>
+          <span className="text-base leading-none">{positive ? '↑' : '↓'}</span>
+          {positive ? '+' : ''}{change}
+          <span className="text-slate-600 mx-0.5">→</span>
+          <span className="text-white">{after}</span><span className="text-slate-600 font-normal">/100</span>
         </span>
       </div>
       <div className="relative h-3 bg-slate-800 rounded-full overflow-hidden">
@@ -75,10 +78,11 @@ const OwnerReview: React.FC<OwnerReviewProps> = ({ data, teamName, onDismiss }) 
 
         {/* Ambient glow behind grade */}
         <div className={`absolute top-0 left-1/2 -translate-x-1/2 w-96 h-96 blur-[120px] rounded-full opacity-30 pointer-events-none ${
-          data.grade === 'A+' || data.grade === 'A' ? 'bg-amber-500' :
-          data.grade === 'B+' || data.grade === 'B' ? 'bg-emerald-500' :
-          data.grade === 'C+' || data.grade === 'C' ? 'bg-sky-500' :
-          data.grade === 'D' ? 'bg-orange-500' : 'bg-rose-700'
+          data.grade === 'A+' ? 'bg-amber-500' :
+          data.grade === 'A'  ? 'bg-emerald-500' :
+          data.grade === 'B+' || data.grade === 'B' ? 'bg-blue-500' :
+          data.grade === 'C+' || data.grade === 'C' ? 'bg-yellow-500' :
+          'bg-red-700'
         }`} />
 
         <div className="relative bg-slate-950 border border-slate-800 rounded-[2.5rem] overflow-hidden shadow-2xl">
@@ -106,7 +110,7 @@ const OwnerReview: React.FC<OwnerReviewProps> = ({ data, teamName, onDismiss }) 
             {/* Grade + record row */}
             <div className="flex flex-col sm:flex-row items-center gap-6">
               {/* Grade badge */}
-              <div className={`shrink-0 w-32 h-32 rounded-3xl bg-slate-900 border-2 border-slate-700 flex flex-col items-center justify-center shadow-2xl ${grade.glow}`}>
+              <div className={`shrink-0 w-32 h-32 rounded-3xl border-2 flex flex-col items-center justify-center shadow-2xl ${grade.bg} ${grade.glow}`}>
                 <span className={`text-6xl font-display font-black leading-none ${grade.color}`}>{data.grade}</span>
                 <span className={`text-[10px] font-black uppercase tracking-widest mt-1 ${grade.color} opacity-80`}>{grade.label}</span>
               </div>
@@ -139,6 +143,15 @@ const OwnerReview: React.FC<OwnerReviewProps> = ({ data, teamName, onDismiss }) 
                   <p className="text-sm text-slate-300">{c}</p>
                 </div>
               ))}
+              {data.expectation && (
+                <div className="mt-4 pt-4 border-t border-slate-800 flex items-start gap-3">
+                  <span className={`text-sm font-black shrink-0 leading-tight ${grade.color}`}>→</span>
+                  <div>
+                    <p className="text-[9px] font-black uppercase tracking-[0.3em] text-slate-600 mb-1">Expectation for Next Season</p>
+                    <p className={`text-sm italic font-medium ${grade.color}`}>{data.expectation}</p>
+                  </div>
+                </div>
+              )}
             </div>
 
             {/* Approval meters */}

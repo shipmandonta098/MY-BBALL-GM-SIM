@@ -883,6 +883,7 @@ export interface OwnerReviewData {
   playoffResult: 'none' | 'first_round' | 'semifinals' | 'finals' | 'champion';
   grade: 'A+' | 'A' | 'B+' | 'B' | 'C+' | 'C' | 'D' | 'F';
   comments: string[];
+  expectation: string;
   ownerApprovalChange: number;
   fanApprovalChange: number;
   ownerApprovalBefore: number;
