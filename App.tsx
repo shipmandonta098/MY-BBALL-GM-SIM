@@ -2095,6 +2095,12 @@ const App: React.FC = () => {
     const losses = userTeam.losses;
     const winPct = wins / Math.max(1, wins + losses);
 
+    // Standout / weak players
+    const sorted = [...userTeam.roster].sort((a, b) => b.rating - a.rating);
+    const starName = sorted[0]?.name ?? 'our best player';
+    const bottomThree = sorted.slice(-3);
+    const weakName = bottomThree[Math.floor(Math.random() * bottomThree.length)]?.name ?? '';
+
     // Playoff depth
     const bracket = state.playoffBracket;
     const champ = bracket?.championId;
@@ -2123,36 +2129,114 @@ const App: React.FC = () => {
     const isOverLux = payroll > luxLine;
     const isOverFirstApron = payroll > cap + 56_000_000;
 
-    // Approval deltas + comments
+    const pick = <T,>(arr: T[]): T => arr[Math.floor(Math.random() * arr.length)];
+
     let ownerChange = 0;
     let fanChange = 0;
     const comments: string[] = [];
 
-    // Record
-    if (wins >= 60)      { ownerChange += 12; fanChange += 10; comments.push(`Dominant ${wins}–${losses} record — elite regular season.`); }
-    else if (wins >= 50) { ownerChange += 6;  fanChange += 5;  comments.push(`Solid ${wins}–${losses} season — above .600 winning percentage.`); }
-    else if (wins >= 41) { ownerChange += 2;  fanChange += 2;  comments.push(`Respectable ${wins}–${losses} record.`); }
-    else if (wins >= 35) { ownerChange -= 5;  fanChange -= 5;  comments.push(`Disappointing ${wins}–${losses} finish. Fell short of expectations.`); }
-    else if (wins >= 25) { ownerChange -= 12; fanChange -= 10; comments.push(`Poor ${wins}–${losses} record. Major rebuild needed.`); }
-    else                 { ownerChange -= 18; fanChange -= 15; comments.push(`Terrible ${wins}–${losses} season. Franchise is in crisis.`); }
-
-    // Playoffs
-    if      (playoffResult === 'champion')    { ownerChange += 22; fanChange += 25; comments.push('Led the team to a championship — exactly what this franchise expects.'); }
-    else if (playoffResult === 'finals')      { ownerChange += 14; fanChange += 16; comments.push('Finals appearance — a great run, but we need to close it out next time.'); }
-    else if (playoffResult === 'semifinals')  { ownerChange += 8;  fanChange += 10; comments.push('Conference Finals exit — strong postseason, but we can do better.'); }
-    else if (playoffResult === 'first_round') { ownerChange += 3;  fanChange += 4;  comments.push('First-round exit — made the playoffs, but need to show more in the postseason.'); }
-    else                                      { ownerChange -= 12; fanChange -= 10; comments.push('Failed to make the playoffs. This market demands postseason basketball.'); }
-
-    // Cap management
-    if (isOverFirstApron) {
-      ownerChange -= 6; comments.push('Payroll above the first apron — steep luxury tax penalties are cutting into revenue.');
-    } else if (isOverLux) {
-      ownerChange -= 3; comments.push('Over the luxury tax line — manageable, but watch the spending.');
-    } else if (winPct >= 0.5) {
-      ownerChange += 3; comments.push('Good cap discipline — competitive team without overpaying.');
+    // ── Record ──────────────────────────────────────────────────────────────
+    if (wins >= 60) {
+      ownerChange += 12; fanChange += 10;
+      comments.push(pick([
+        `An elite ${wins}–${losses} season — ${starName} was unstoppable and the whole roster delivered.`,
+        `${wins} wins is a historic pace for this franchise. ${starName} was the engine all year long.`,
+        `Dominant ${wins}–${losses} record — we were a problem for every team we faced this season.`,
+      ]));
+    } else if (wins >= 50) {
+      ownerChange += 6; fanChange += 5;
+      comments.push(pick([
+        `Solid ${wins}–${losses} campaign. ${starName} was a standout and the supporting cast held their own.`,
+        `Above .600 at ${wins}–${losses}. ${starName} gave us everything we asked for this season.`,
+        `A competitive ${wins}–${losses} finish. The team showed real character and depth throughout the year.`,
+      ]));
+    } else if (wins >= 41) {
+      ownerChange += 2; fanChange += 2;
+      comments.push(pick([
+        `A .500-plus finish at ${wins}–${losses}. ${starName} kept us competitive but we need more around him.`,
+        `Respectable ${wins}–${losses} record, though we left wins on the table. The roster needs more depth.`,
+        `${wins}–${losses} is a stepping stone, not a destination. ${starName} was strong, but the supporting cast needs upgrading.`,
+      ]));
+    } else if (wins >= 35) {
+      ownerChange -= 5; fanChange -= 5;
+      comments.push(pick([
+        `Disappointing ${wins}–${losses} finish. ${starName} tried to carry us, but the supporting cast wasn't enough.`,
+        `${wins}–${losses} is not the standard I set for this team. We need to surround ${starName} with better talent.`,
+        `We fell short at ${wins}–${losses}.${weakName ? ` ${weakName} in particular was a liability this year.` : ' The depth chart was our biggest problem.'}`,
+      ]));
+    } else if (wins >= 25) {
+      ownerChange -= 12; fanChange -= 10;
+      comments.push(pick([
+        `Poor ${wins}–${losses} record — this roster is not good enough. Major changes are needed this offseason.`,
+        `${wins} wins isn't cutting it.${weakName ? ` Players like ${weakName} aren't the answer at this level.` : ' We need significant personnel upgrades across the board.'}`,
+        `A difficult ${wins}–${losses} season. The front office has to be more aggressive in rebuilding around ${starName}.`,
+      ]));
+    } else {
+      ownerChange -= 18; fanChange -= 15;
+      comments.push(pick([
+        `Unacceptable ${wins}–${losses} season. This franchise is in crisis and I expect major changes before next year.`,
+        `${wins} wins is an embarrassment. Even ${starName} couldn't mask how bad this team was. Full reset required.`,
+        `${wins}–${losses} is the worst we've looked in years. The coaching staff and roster both need serious evaluation.`,
+      ]));
     }
 
-    // Grade from composite score
+    // ── Playoffs ─────────────────────────────────────────────────────────────
+    if (playoffResult === 'champion') {
+      ownerChange += 22; fanChange += 25;
+      comments.push(pick([
+        `Champions. ${starName} was magnificent when it mattered most — this is exactly what we built for.`,
+        `We did it. ${starName} and this team proved they belong at the top of the league. Unforgettable postseason run.`,
+        `A championship is the ultimate goal and we achieved it. ${starName} was the difference-maker throughout the playoffs.`,
+      ]));
+    } else if (playoffResult === 'finals') {
+      ownerChange += 14; fanChange += 16;
+      comments.push(pick([
+        `Finals appearance is a tremendous achievement — but ${starName} and this group can finish the job next year.`,
+        `We got to the Finals and that's something to build on. Next year, we close it out.`,
+        `A great run to the Finals. ${starName} was brilliant — we just ran into a buzzsaw at the end.`,
+      ]));
+    } else if (playoffResult === 'semifinals') {
+      ownerChange += 8; fanChange += 10;
+      comments.push(pick([
+        `Conference Finals exit is solid progress. ${starName} showed up, but we need one more piece to go all the way.`,
+        `Getting to the semis was encouraging. ${starName} was excellent — we need better depth to make the next step.`,
+        `Postseason exit in the Conference Finals. Good effort from ${starName} and company, but the ceiling has to be higher.`,
+      ]));
+    } else if (playoffResult === 'first_round') {
+      ownerChange += 3; fanChange += 4;
+      comments.push(pick([
+        `We made the playoffs but a first-round exit isn't the standard I set for this team. ${starName} deserves better.`,
+        `First-round out — ${starName} carried us to the postseason, but we weren't built to go deep. That changes this offseason.`,
+        `Playoff appearance is the bare minimum. Getting bounced in round one is not acceptable progress for this franchise.`,
+      ]));
+    } else {
+      ownerChange -= 12; fanChange -= 10;
+      comments.push(pick([
+        `Missing the playoffs is not acceptable. ${starName} is too good to be sitting at home in April. We failed him.`,
+        `No postseason. This market demands playoff basketball and we didn't deliver. Significant changes are coming.`,
+        `Failing to qualify for the playoffs reflects poor execution across the board. ${starName} is wasted without a better cast.`,
+      ]));
+    }
+
+    // ── Cap management ───────────────────────────────────────────────────────
+    if (isOverFirstApron) {
+      ownerChange -= 6;
+      comments.push(pick([
+        'Payroll above the first apron — the luxury tax penalties are unsustainable. We need smarter cap management.',
+        'We\'re spending recklessly above the apron. Unless we\'re winning championships, this isn\'t a sustainable model.',
+      ]));
+    } else if (isOverLux) {
+      ownerChange -= 3;
+      comments.push('Over the luxury tax line — manageable for now, but the spending has to be more strategic going forward.');
+    } else if (winPct >= 0.5) {
+      ownerChange += 3;
+      comments.push(pick([
+        'Good cap discipline this year — competitive roster without breaking the bank. That\'s how you build long-term.',
+        'We stayed fiscally responsible while remaining competitive. That\'s the right approach for sustained success.',
+      ]));
+    }
+
+    // ── Grade ────────────────────────────────────────────────────────────────
     const composite =
       (playoffResult === 'champion' ? 100 : playoffResult === 'finals' ? 82 : playoffResult === 'semifinals' ? 68 :
        playoffResult === 'first_round' ? 55 : 25) + winPct * 40;
@@ -2160,9 +2244,19 @@ const App: React.FC = () => {
       composite >= 128 ? 'A+' : composite >= 110 ? 'A' : composite >= 96 ? 'B+' : composite >= 82 ? 'B' :
       composite >= 68  ? 'C+' : composite >= 52  ? 'C' : composite >= 38 ? 'D'  : 'F';
 
+    // ── Expectation ──────────────────────────────────────────────────────────
+    const expectation =
+      playoffResult === 'champion'    ? pick([`Defend this title. I expect us back in the Finals — anything less is a step backward.`, `Championship or bust next year. ${starName} is in his prime — let's make the most of it.`]) :
+      playoffResult === 'finals'      ? pick([`I expect us to finish the job next year. We have the talent — we need the execution.`, `Back to the Finals and this time, we win it. That's the expectation going into next season.`]) :
+      playoffResult === 'semifinals'  ? pick([`Semis is nice, but I expect a Finals run next season. Get ${starName} the pieces he needs.`, `${starName} is good enough to take us all the way. Use this offseason to build the right roster around him.`]) :
+      playoffResult === 'first_round' ? pick([`Deeper playoff run required next year — first-round exits are not the standard here.`, `I want to see us competing deep into May next season. Make the right moves this offseason.`]) :
+      wins >= 35                      ? pick([`Make the playoffs next year — that's the bare minimum expectation for this franchise.`, `Get ${starName} into the postseason. That's priority number one this offseason.`]) :
+      wins >= 25                      ? pick([`We need a full rebuild — be smart with the cap and draft wisely. No panic moves.`, `The priority is rebuilding intelligently. Young talent and cap flexibility come first.`]) :
+                                        pick([`Complete roster overhaul. I want a new identity for this team by opening night.`, `Major changes are coming. This franchise needs a reset from top to bottom — and fast.`]);
+
     return {
       season: state.season,
-      wins, losses, madePlayoffs, playoffResult, grade, comments,
+      wins, losses, madePlayoffs, playoffResult, grade, comments, expectation,
       ownerApprovalChange: Math.round(ownerChange),
       fanApprovalChange: Math.round(fanChange),
     };
