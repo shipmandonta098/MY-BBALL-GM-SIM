@@ -1694,16 +1694,34 @@ const App: React.FC = () => {
     if (usePreseason) {
       const allPreseasonDone = (newState.preseasonSchedule ?? []).every(g => g.played);
       if (allPreseasonDone) {
-        // Auto-transition to Regular Season; reset currentDay to 1 for regular schedule
+        // Cut AI team rosters to 15 (final roster) — release excess to FA pool
+        const MAX_ROSTER = 15;
+        const releasedCuts: typeof newState.freeAgents = [];
+        const postCutTeams = newState.teams.map(t => {
+          if (t.id === newState.userTeamId) return t; // user manages own cuts
+          if (t.roster.length <= MAX_ROSTER) return t;
+          const sorted = [...t.roster].sort((a, b) => b.rating - a.rating);
+          const released = sorted.slice(MAX_ROSTER).map(p => ({ ...p, isFreeAgent: true, inSeasonFA: true, contractYears: 0 }));
+          releasedCuts.push(...released);
+          return { ...t, roster: sorted.slice(0, MAX_ROSTER) };
+        });
+        const cutFAIds = new Set(newState.freeAgents.map(p => p.id));
+        const updatedFAsAfterCuts = [
+          ...newState.freeAgents,
+          ...releasedCuts.filter(p => !cutFAIds.has(p.id)),
+        ];
+
         newState = {
           ...newState,
+          teams: postCutTeams,
+          freeAgents: updatedFAsAfterCuts,
           seasonPhase: 'Regular Season' as SeasonPhase,
           currentDay: 1,
           newsFeed: [{
             id: `preseason-complete-${newState.season}`,
             category: 'milestone' as const,
             headline: 'PRESEASON COMPLETE — REGULAR SEASON BEGINS',
-            content: `The preseason slate is done. Check your rotations and depth chart — the regular season tips off now. Good luck!`,
+            content: `Training camp is over. AI teams have set their 15-man rosters. Check your own depth chart — the regular season tips off now!`,
             timestamp: 1,
             realTimestamp: Date.now(),
             isBreaking: true,
@@ -1779,34 +1797,41 @@ const App: React.FC = () => {
       } catch (_e) { /* non-fatal */ }
     }
 
-    // ── AI in-season signings (~30% chance per sim-day when FAs available) ──
-    // After trade deadline, AI teams sign more aggressively for the playoff push
-    const postDeadlineSigningThreshold = newState.tradeDeadlinePassed ? 13 : 10;
-    if (!newState.isOffseason && newState.freeAgents.length > 0 && Math.random() < 0.3) {
+    // ── AI in-season / preseason signings ──────────────────────────────────
+    // Preseason (training camp): fill ALL short-roster AI teams every sim-day.
+    // Regular season: ~30% chance, one random team per day.
+    const isPreseasonPhaseSign = newState.seasonPhase === 'Preseason';
+    const signingThreshold = isPreseasonPhaseSign ? 16 : (newState.tradeDeadlinePassed ? 13 : 10);
+    if (!newState.isOffseason && newState.freeAgents.length > 0) {
       const cap = newState.settings.salaryCap || 140_000_000;
       const aiTeamsNeedingHelp = newState.teams.filter(t => {
         if (t.id === newState.userTeamId) return false;
         const activeRoster = t.roster.filter(p => !p.injuryDaysLeft || p.injuryDaysLeft === 0);
-        return activeRoster.length < postDeadlineSigningThreshold;
+        return activeRoster.length < signingThreshold;
       });
-      if (aiTeamsNeedingHelp.length > 0) {
-        const team = aiTeamsNeedingHelp[Math.floor(Math.random() * aiTeamsNeedingHelp.length)];
+      const teamsToProcess = isPreseasonPhaseSign
+        ? aiTeamsNeedingHelp
+        : (Math.random() < 0.3 && aiTeamsNeedingHelp.length > 0
+            ? [aiTeamsNeedingHelp[Math.floor(Math.random() * aiTeamsNeedingHelp.length)]]
+            : []);
+      for (const team of teamsToProcess) {
         const teamSalary = team.roster.reduce((s, p) => s + (p.salary || 0), 0);
         const teamCapSpace = cap - teamSalary;
-        const minSalary = 600_000;
-        if (teamCapSpace >= minSalary) {
-          const eligible = newState.freeAgents.filter(fa => (fa.desiredContract?.salary || 600_000) <= teamCapSpace * 1.2);
-          if (eligible.length > 0) {
-            const fa = eligible[Math.floor(Math.random() * Math.min(5, eligible.length))];
-            const rawSalary = Math.round((fa.desiredContract?.salary || 1_500_000) * (0.8 + Math.random() * 0.3) / 250_000) * 250_000;
-            const salary = Math.max(600_000, Math.min(rawSalary, teamCapSpace));
-            const signingType = salary <= 700_000 ? '10-day' : 'rest-of-season minimum';
-            const signedPlayer = { ...fa, isFreeAgent: false, inSeasonFA: false, salary, contractYears: 1, morale: Math.min(100, (fa.morale || 70) + 5) };
-            newState = {
-              ...newState,
-              teams: newState.teams.map(t => t.id === team.id ? { ...t, roster: [...t.roster, signedPlayer] } : t),
-              freeAgents: newState.freeAgents.filter(p => p.id !== fa.id),
-              newsFeed: [{
+        if (teamCapSpace < 600_000) continue;
+        const eligible = newState.freeAgents.filter(fa => (fa.desiredContract?.salary || 600_000) <= teamCapSpace * 1.2);
+        if (eligible.length === 0) continue;
+        const fa = eligible[Math.floor(Math.random() * Math.min(5, eligible.length))];
+        const rawSalary = Math.round((fa.desiredContract?.salary || 1_500_000) * (0.8 + Math.random() * 0.3) / 250_000) * 250_000;
+        const salary = Math.max(600_000, Math.min(rawSalary, teamCapSpace));
+        const signingType = isPreseasonPhaseSign ? 'training camp contract' : (salary <= 700_000 ? '10-day' : 'rest-of-season minimum');
+        const signedPlayer = { ...fa, isFreeAgent: false, inSeasonFA: false, salary, contractYears: 1, morale: Math.min(100, (fa.morale || 70) + 5) };
+        newState = {
+          ...newState,
+          teams: newState.teams.map(t => t.id === team.id ? { ...t, roster: [...t.roster, signedPlayer] } : t),
+          freeAgents: newState.freeAgents.filter(p => p.id !== fa.id),
+          newsFeed: isPreseasonPhaseSign
+            ? newState.newsFeed
+            : [{
                 id: `in-season-sign-${Date.now()}-${fa.id}`,
                 category: 'transaction' as const,
                 headline: `${fa.name} agrees to terms with ${team.name}`,
@@ -1815,9 +1840,7 @@ const App: React.FC = () => {
                 realTimestamp: Date.now(),
                 isBreaking: false,
               }, ...newState.newsFeed].slice(0, 200),
-            };
-          }
-        }
+        };
       }
     }
 
@@ -2629,9 +2652,37 @@ const App: React.FC = () => {
         }
         return { ...t, picks: [...activePicks, ...newPicks] };
       });
+
+      // Convert undrafted prospects from the completed draft into free agents
+      let trainingCampFAs = [...prev.freeAgents];
+      if (prev.draftPhase === 'completed') {
+        const draftedIds = new Set(teamsWithPicks.flatMap(t => t.roster.map(p => p.id)));
+        const existingFAIds = new Set(trainingCampFAs.map(p => p.id));
+        const undraftedRookies = (prev.prospects ?? [])
+          .filter(p => !draftedIds.has(p.id) && !existingFAIds.has(p.id))
+          .map(p => ({
+            ...p,
+            isFreeAgent: true,
+            inSeasonFA: false,
+            salary: 600_000,
+            contractYears: 1,
+            status: 'Active' as const,
+            morale: 70,
+            stats: {
+              points: 0, rebounds: 0, offReb: 0, defReb: 0, assists: 0, steals: 0, blocks: 0,
+              gamesPlayed: 0, gamesStarted: 0, minutes: 0, fgm: 0, fga: 0,
+              threepm: 0, threepa: 0, ftm: 0, fta: 0, tov: 0, pf: 0,
+              techs: 0, flagrants: 0, ejections: 0, plusMinus: 0,
+            },
+            desiredContract: { salary: 600_000, years: 1 },
+          } as Player));
+        trainingCampFAs = [...trainingCampFAs, ...undraftedRookies];
+      }
+
       return {
         ...prev,
         teams: teamsWithPicks,
+        freeAgents: trainingCampFAs,
         schedule: newSchedule,
         preseasonSchedule: freshPreseasonSchedule,
         preseasonHistory: [],
