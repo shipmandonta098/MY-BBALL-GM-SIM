@@ -2712,7 +2712,9 @@ const App: React.FC = () => {
   
   const handleWatchLive = (gameId: string) => {
     if (!league) return;
-    const game = league.schedule.find(g => g.id === gameId)!;
+    const game = league.schedule.find(g => g.id === gameId)
+      ?? (league.preseasonSchedule ?? []).find(g => g.id === gameId);
+    if (!game) return;
     const home = league.teams.find(t => t.id === game.homeTeamId)!;
     const away = league.teams.find(t => t.id === game.awayTeamId)!;
     setWatchingGame({ game, home, away });
@@ -3241,7 +3243,9 @@ const App: React.FC = () => {
             updateLeagueState({ liveGame });
           }}
           onComplete={async (result) => {
-            const newState = await finalizeGameResult(league, watchingGame.game.id, result);
+            const newState = watchingGame.game.isPreseason
+              ? await finalizePreseasonGameResult(league, watchingGame.game.id, result)
+              : await finalizeGameResult(league, watchingGame.game.id, result);
             updateLeagueState({ ...newState, liveGame: undefined });
             setWatchingGame(null);
           }}

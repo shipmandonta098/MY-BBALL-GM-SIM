@@ -565,6 +565,15 @@ const Schedule: React.FC<ScheduleProps> = ({ league, onSimulate, onScout, onWatc
                           >
                             Simulate
                           </button>
+                          {onWatchLive && (
+                            <button
+                              onClick={() => onWatchLive(game.id)}
+                              className="px-4 py-2 bg-emerald-500/10 hover:bg-emerald-500 text-emerald-500 hover:text-slate-950 text-[9px] font-black uppercase tracking-widest rounded-xl border border-emerald-500/20 transition-all whitespace-nowrap flex items-center gap-1.5"
+                            >
+                              <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 24 24"><path d="M8 5v14l11-7z" /></svg>
+                              Watch Live
+                            </button>
+                          )}
                           <button
                             onClick={() => onSimulate('to-game', game.id)}
                             className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-400 text-[9px] font-black uppercase tracking-widest rounded-xl transition-all whitespace-nowrap"
