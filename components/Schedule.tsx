@@ -420,10 +420,23 @@ const Schedule: React.FC<ScheduleProps> = ({ league, onSimulate, onScout, onWatc
   const hasPreseasonGames = preseasonSchedule.length > 0;
   const preseasonPlayed   = preseasonSchedule.filter(g => g.played).length;
   const preseasonTotal    = preseasonSchedule.length;
-  const userPreseasonGames = preseasonSchedule.filter(
-    g => g.homeTeamId === league.userTeamId || g.awayTeamId === league.userTeamId
+
+  // Use selectedTeamId so the preseason section updates when the team selector changes
+  const focusTeamPreseasonGames = preseasonSchedule.filter(
+    g => g.homeTeamId === selectedTeamId || g.awayTeamId === selectedTeamId
   );
-  const preRecord = league.preseasonRecord ?? { wins: 0, losses: 0 };
+
+  // Compute preseason record for whichever team is selected
+  const focusPreRecord = (() => {
+    if (selectedTeamId === league.userTeamId) return league.preseasonRecord ?? { wins: 0, losses: 0 };
+    const hist = league.preseasonHistory ?? [];
+    const wins = hist.filter(g =>
+      (g.homeTeamId === selectedTeamId && g.homeScore > g.awayScore) ||
+      (g.awayTeamId === selectedTeamId && g.awayScore > g.homeScore)
+    ).length;
+    const played = hist.filter(g => g.homeTeamId === selectedTeamId || g.awayTeamId === selectedTeamId).length;
+    return { wins, losses: played - wins };
+  })();
 
   // Look up preseason result from preseasonHistory
   const getPreseasonResult = (gameId: string) =>
@@ -444,7 +457,10 @@ const Schedule: React.FC<ScheduleProps> = ({ league, onSimulate, onScout, onWatc
                   {preseasonPlayed === preseasonTotal ? 'Preseason Complete' : `${preseasonTotal - preseasonPlayed} Exhibition Game${preseasonTotal - preseasonPlayed !== 1 ? 's' : ''} Remaining`}
                 </h2>
                 <div className="flex items-center gap-4 mt-1">
-                  <span className="text-slate-400 text-xs">Your Record: <span className="text-white font-black">{preRecord.wins}–{preRecord.losses}</span></span>
+                  <span className="text-slate-400 text-xs">
+                    {selectedTeamId === league.userTeamId ? 'Your' : selectedTeam.abbreviation} Record:{' '}
+                    <span className="text-white font-black">{focusPreRecord.wins}–{focusPreRecord.losses}</span>
+                  </span>
                   <span className="text-slate-600 text-xs">•</span>
                   <span className="text-slate-400 text-xs">{preseasonPlayed}/{preseasonTotal} games played</span>
                   <span className="text-slate-600 text-xs">•</span>
@@ -482,18 +498,17 @@ const Schedule: React.FC<ScheduleProps> = ({ league, onSimulate, onScout, onWatc
           <div className="bg-slate-900 border border-slate-800 rounded-[2rem] p-6 shadow-xl">
             <h3 className="text-[10px] font-black uppercase tracking-[0.3em] text-slate-500 mb-5 pb-3 border-b border-slate-800 flex items-center gap-2">
               <span className="w-2 h-2 rounded-full bg-amber-500 inline-block" />
-              Your Preseason Schedule
+              {selectedTeamId === league.userTeamId ? 'Your' : selectedTeam.name} Preseason Schedule
             </h3>
             <div className="space-y-3">
-              {userPreseasonGames.map((game, idx) => {
-                const isHome   = game.homeTeamId === league.userTeamId;
-                const opp      = league.teams.find(t => t.id === (isHome ? game.awayTeamId : game.homeTeamId))!;
-                const userTeam = league.teams.find(t => t.id === league.userTeamId)!;
-                const result   = getPreseasonResult(game.id);
+              {focusTeamPreseasonGames.map((game, idx) => {
+                const isHome    = game.homeTeamId === selectedTeamId;
+                const opp       = league.teams.find(t => t.id === (isHome ? game.awayTeamId : game.homeTeamId))!;
+                const result    = getPreseasonResult(game.id);
                 const userScore = result ? (isHome ? result.homeScore : result.awayScore) : null;
                 const oppScore  = result ? (isHome ? result.awayScore : result.homeScore) : null;
                 const isWin     = userScore !== null && oppScore !== null && userScore > oppScore;
-                const isNext    = !game.played && (idx === 0 || userPreseasonGames[idx - 1]?.played);
+                const isNext    = !game.played && (idx === 0 || focusTeamPreseasonGames[idx - 1]?.played);
 
                 return (
                   <div
@@ -586,7 +601,7 @@ const Schedule: React.FC<ScheduleProps> = ({ league, onSimulate, onScout, onWatc
                   </div>
                 );
               })}
-              {userPreseasonGames.length === 0 && (
+              {focusTeamPreseasonGames.length === 0 && (
                 <p className="text-slate-500 text-sm text-center py-4">No preseason games scheduled for your team.</p>
               )}
             </div>

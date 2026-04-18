@@ -154,7 +154,11 @@ const FranchiseHistory: React.FC<FranchiseHistoryProps> = ({ league, initialTeam
     const totalLosses = seasonRecords.reduce((acc, r) => acc + r.losses, 0);
     const winPct = (totalWins + totalLosses > 0) ? (totalWins / (totalWins + totalLosses)).toFixed(3) : '.000';
     const championships = seasonRecords.filter(r => r.isChampion).map(r => r.year);
-    const playoffApps = seasonRecords.filter(r => r.playoffResult !== 'Missed Playoffs').length;
+    const playoffApps = seasonRecords.filter(r =>
+      r.playoffResult !== 'Missed Playoffs' &&
+      r.playoffResult !== 'Not Started' &&
+      r.playoffResult !== 'In Progress'
+    ).length;
     const startYear = seasonRecords.length > 0 ? Math.min(...seasonRecords.map(r => r.year)) : league.season;
     const endYear = league.season;
     return {
