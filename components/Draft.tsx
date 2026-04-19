@@ -1,6 +1,7 @@
 import React, { useState, useMemo, useEffect, useRef } from 'react';
 import { LeagueState, Team, Prospect, DraftPick, Player } from '../types';
 import { getFlag } from '../constants';
+import WatchToggle from './WatchToggle';
 import { aiGMDraftPick, computeTeamNeeds, prospectNeedFit, TeamNeedItem } from '../utils/aiGMEngine';
 import DraftLottery from './DraftLottery';
 import ProspectProfile from './ProspectProfile';
@@ -22,6 +23,12 @@ const Draft: React.FC<DraftProps> = ({ league, updateLeague, onScout, scoutingRe
   const [isSimToEnd, setIsSimToEnd] = useState(false);
   const [showSimToEndConfirm, setShowSimToEndConfirm] = useState(false);
   const [draftLog, setDraftLog] = useState<string[]>([]);
+
+  // Watch list
+  const watchList = league.watchList ?? [];
+  const toggleWatch = (id: string) => {
+    updateLeague({ watchList: watchList.includes(id) ? watchList.filter(x => x !== id) : [...watchList, id] });
+  };
 
   // Prospect profile modal
   const [selectedProspect, setSelectedProspect] = useState<Prospect | null>(null);
@@ -666,8 +673,11 @@ const Draft: React.FC<DraftProps> = ({ league, updateLeague, onScout, scoutingRe
                       <td className="px-6 py-5">
                         <span className="font-display font-bold text-slate-500 group-hover:text-amber-500">#{p.mockRank}</span>
                       </td>
-                      <td className="px-6 py-5">
-                        <p className="font-bold text-slate-200 uppercase tracking-tight group-hover:text-white">{p.name}</p>
+                      <td className="px-6 py-5" onClick={e => e.stopPropagation()}>
+                        <div className="flex items-center gap-2">
+                          <WatchToggle playerId={p.id} watchList={watchList} onToggle={toggleWatch} />
+                          <p className="font-bold text-slate-200 uppercase tracking-tight group-hover:text-white cursor-pointer" onClick={() => setSelectedProspect(p)}>{p.name}</p>
+                        </div>
                       </td>
                       <td className="px-6 py-5">
                         <span className="text-amber-500 font-black">{p.position}</span>

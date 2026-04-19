@@ -2879,6 +2879,13 @@ const App: React.FC = () => {
 
   const handleViewFranchise = (teamId: string) => { setViewingFranchiseId(teamId); setActiveTab('franchise_history'); };
   const handleManageTeam = (teamId: string) => { setRosterTeamId(teamId); setActiveTab('roster'); };
+  const handleToggleWatch = (playerId: string) => {
+    setLeague(prev => {
+      if (!prev) return prev;
+      const wl = prev.watchList ?? [];
+      return { ...prev, watchList: wl.includes(playerId) ? wl.filter(id => id !== playerId) : [...wl, playerId] };
+    });
+  };
   const updateLeagueState = (updated: Partial<LeagueState> | ((prev: LeagueState) => LeagueState)) => { 
     if (!league) return; 
     if (typeof updated === 'function') {
@@ -3016,7 +3023,7 @@ const App: React.FC = () => {
           {activeTab === 'transactions' && <Transactions league={league} />}
           {activeTab === 'power_rankings' && <PowerRankings league={league} onViewRoster={handleViewRoster} onManageTeam={handleManageTeam} />}
           {activeTab === 'expansion' && <Expansion league={league} updateLeague={updateLeagueState} onScout={handleViewPlayer} />}
-          {activeTab === 'roster' && <Roster leagueTeams={league.teams} userTeamId={league.userTeamId} initialTeamId={rosterTeamId} onScout={handleViewPlayer} onScoutCoach={handleScoutCoach} scoutingReport={scoutingReport} onUpdateTeamRoster={handleUpdateTeamRoster} onManageTeam={handleManageTeam} godMode={league.settings.godMode} />}
+          {activeTab === 'roster' && <Roster leagueTeams={league.teams} userTeamId={league.userTeamId} initialTeamId={rosterTeamId} onScout={handleViewPlayer} onScoutCoach={handleScoutCoach} scoutingReport={scoutingReport} onUpdateTeamRoster={handleUpdateTeamRoster} onManageTeam={handleManageTeam} godMode={league.settings.godMode} watchList={league.watchList ?? []} onToggleWatch={handleToggleWatch} />}
           {activeTab === 'rotations' && <Rotations league={league} updateLeague={updateLeagueState} />}
           {activeTab === 'free_agency' && <FreeAgency league={league} updateLeague={updateLeagueState} onScout={handleViewPlayer} recordTransaction={recordTransaction} />}
           {activeTab === 'coach_market' && <CoachesMarket league={league} updateLeague={updateLeagueState} onScout={handleScoutCoach} />}
@@ -3112,7 +3119,7 @@ const App: React.FC = () => {
           {activeTab === 'draft' && <Draft league={league} updateLeague={updateLeagueState} onScout={handleScoutPlayer} scoutingReport={scoutingReport} onNavigateToFreeAgency={() => setActiveTab('free_agency')} />}
           {activeTab === 'coaching' && <Coaching league={league} updateLeague={updateLeagueState} godMode={league.settings.godMode} />}
           {activeTab === 'stats' && <Stats league={league} onViewRoster={handleViewRoster} onManageTeam={handleManageTeam} onViewPlayer={p => setSelectedPlayer(p)} />}
-          {activeTab === 'players' && <Players league={league} onViewPlayer={p => setSelectedPlayer(p)} />}
+          {activeTab === 'players' && <Players league={league} onViewPlayer={p => setSelectedPlayer(p)} watchList={league.watchList ?? []} onToggleWatch={handleToggleWatch} />}
           {activeTab === 'finances' && <Finances league={league} updateLeague={updateLeagueState} />}
           {activeTab === 'trade' && <Trade league={league} updateLeague={updateLeagueState} recordTransaction={recordTransaction} initialProposal={counterProposal} onClearInitialProposal={() => setCounterProposal(null)} />}
           {activeTab === 'trade_proposals' && (

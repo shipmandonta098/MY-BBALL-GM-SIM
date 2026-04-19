@@ -824,6 +824,7 @@ export interface LeagueState {
   previousSeasonStandings?: PreviousSeasonStanding[];
   /** Season number that previousSeasonStandings was captured from. */
   previousSeasonYear?: number;
+  watchList?: string[];
   expansionDraft?: {
     active: boolean;
     phase: 'setup' | 'protection' | 'draft' | 'completed';

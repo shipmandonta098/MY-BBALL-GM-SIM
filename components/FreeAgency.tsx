@@ -1,6 +1,7 @@
 import React, { useState, useMemo, useCallback, useEffect, useRef } from 'react';
 import { LeagueState, Player, ContractOffer, Transaction, Position } from '../types';
 import { getFlag } from '../constants';
+import WatchToggle from './WatchToggle';
 
 // ── Constants ──────────────────────────────────────────────────────────────
 const MORATORIUM_DAYS = 5; // signing window opens after day 5
@@ -98,6 +99,12 @@ const FreeAgency: React.FC<FreeAgencyProps> = ({
   // ── Upcoming FA search ──
   const [upcomingSearch, setUpcomingSearch] = useState('');
   const [upcomingPos, setUpcomingPos] = useState<Position | 'ALL'>('ALL');
+
+  // ── Watch list helper ──
+  const watchList = league.watchList ?? [];
+  const toggleWatch = (id: string) => {
+    updateLeague({ watchList: watchList.includes(id) ? watchList.filter(x => x !== id) : [...watchList, id] });
+  };
 
   // ── In-season signing state ──
   const [inSeasonPlayer, setInSeasonPlayer] = useState<Player | null>(null);
@@ -976,6 +983,7 @@ const FreeAgency: React.FC<FreeAgencyProps> = ({
                       >
                         <td className="px-5 py-4">
                           <div className="flex items-center gap-2">
+                            <WatchToggle playerId={p.id} watchList={watchList} onToggle={toggleWatch} />
                             <div>
                               <p className="font-bold text-slate-200 uppercase tracking-tight group-hover:text-white">
                                 {p.name}
@@ -1122,7 +1130,9 @@ const FreeAgency: React.FC<FreeAgencyProps> = ({
                       onClick={() => onScout(p)}
                     >
                       <td className="px-5 py-4" onClick={e => e.stopPropagation()}>
-                        <button
+                        <div className="flex items-start gap-2">
+                          <WatchToggle playerId={p.id} watchList={watchList} onToggle={toggleWatch} className="mt-0.5" />
+                          <button
                           onClick={() => onScout(p)}
                           className="text-left"
                         >
@@ -1148,6 +1158,7 @@ const FreeAgency: React.FC<FreeAgencyProps> = ({
                             {p.position} · {getFlag(p.country)}{p.hometown}
                           </p>
                         </button>
+                        </div>
                       </td>
 
                       <td className="px-4 py-4 text-center" onClick={e => e.stopPropagation()}>

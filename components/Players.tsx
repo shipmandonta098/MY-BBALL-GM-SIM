@@ -1,13 +1,16 @@
 import React, { useState, useMemo } from 'react';
 import { LeagueState, Player, Position, PersonalityTrait } from '../types';
 import TeamBadge from './TeamBadge';
+import WatchToggle from './WatchToggle';
 
 interface PlayersProps {
   league: LeagueState;
   onViewPlayer: (player: Player) => void;
+  watchList: string[];
+  onToggleWatch: (id: string) => void;
 }
 
-type SubTab = 'ratings' | 'bios' | 'stats';
+type SubTab = 'ratings' | 'bios' | 'stats' | 'watchlist';
 
 // ─── Trait abbreviation map ─────────────────────────────────
 const TRAIT_ABBR: Record<PersonalityTrait, string> = {
@@ -59,7 +62,7 @@ const attrColor = (v: number) => {
 
 const PAGE_SIZES = [25, 50, 100] as const;
 
-const Players: React.FC<PlayersProps> = ({ league, onViewPlayer }) => {
+const Players: React.FC<PlayersProps> = ({ league, onViewPlayer, watchList, onToggleWatch }) => {
   const [subTab, setSubTab] = useState<SubTab>('ratings');
   const [sortKey, setSortKey] = useState<string>('rating');
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc');
@@ -174,7 +177,7 @@ const Players: React.FC<PlayersProps> = ({ league, onViewPlayer }) => {
               </p>
             </div>
             {/* Sub-tabs */}
-            <div className="flex gap-2">
+            <div className="flex gap-2 flex-wrap justify-end">
               {(['ratings', 'bios', 'stats'] as SubTab[]).map(t => (
                 <button
                   key={t}
@@ -186,11 +189,28 @@ const Players: React.FC<PlayersProps> = ({ league, onViewPlayer }) => {
                   {t}
                 </button>
               ))}
+              <button
+                onClick={() => setSubTab('watchlist')}
+                className={`flex items-center gap-1.5 text-[10px] font-black uppercase tracking-widest px-5 py-2 rounded-full transition-all ${
+                  subTab === 'watchlist' ? 'bg-cyan-500 text-slate-950' : 'bg-slate-800 text-slate-500 hover:text-cyan-400'
+                }`}
+              >
+                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-3.5 h-3.5">
+                  <path d="M10 12.5a2.5 2.5 0 1 0 0-5 2.5 2.5 0 0 0 0 5Z" />
+                  <path fillRule="evenodd" d="M.664 10.59a1.651 1.651 0 0 1 0-1.186A10.004 10.004 0 0 1 10 3c4.257 0 7.893 2.66 9.336 6.41.147.381.146.804 0 1.186A10.004 10.004 0 0 1 10 17c-4.257 0-7.893-2.66-9.336-6.41Z" clipRule="evenodd" />
+                </svg>
+                Watch List
+                {watchList.length > 0 && (
+                  <span className={`text-[9px] font-black px-1.5 py-0.5 rounded-full ${subTab === 'watchlist' ? 'bg-slate-950/30 text-slate-900' : 'bg-cyan-500/20 text-cyan-400'}`}>
+                    {watchList.length}
+                  </span>
+                )}
+              </button>
             </div>
           </div>
 
           {/* ─── Filter Bar ─────────────────────────────────── */}
-          <div className="flex flex-wrap gap-3 items-center">
+          {subTab !== 'watchlist' && <div className="flex flex-wrap gap-3 items-center">
             {/* Search */}
             <input
               type="text"
@@ -253,12 +273,117 @@ const Players: React.FC<PlayersProps> = ({ league, onViewPlayer }) => {
                 className="text-[10px] font-black uppercase px-3 py-2 rounded-lg text-slate-600 hover:text-rose-400 transition-colors"
               >✕ Clear</button>
             )}
-          </div>
+          </div>}
         </div>
       </header>
 
+      {/* ─── Watch List View ─────────────────────────────────── */}
+      {subTab === 'watchlist' && (() => {
+        const allPlayers = [
+          ...league.teams.flatMap(t => t.roster.map(p => ({ player: p, team: t as typeof league.teams[0] | null, isFa: false }))),
+          ...(league.freeAgents ?? []).map(p => ({ player: p, team: null as typeof league.teams[0] | null, isFa: true })),
+        ];
+        const watched = allPlayers.filter(r => watchList.includes(r.player.id)).sort((a, b) => b.player.rating - a.player.rating);
+        if (watched.length === 0) return (
+          <div className="bg-slate-900 border border-slate-800 rounded-3xl p-16 text-center shadow-2xl">
+            <div className="text-5xl mb-4 opacity-20">
+              <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1} stroke="currentColor" className="w-16 h-16 mx-auto text-slate-600">
+                <path strokeLinecap="round" strokeLinejoin="round" d="M2.036 12.322a1.012 1.012 0 0 1 0-.639C3.423 7.51 7.36 4.5 12 4.5c4.638 0 8.573 3.007 9.963 7.178.07.207.07.431 0 .639C20.577 16.49 16.64 19.5 12 19.5c-4.638 0-8.573-3.007-9.963-7.178Z" />
+                <path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 1 1-6 0 3 3 0 0 1 6 0Z" />
+              </svg>
+            </div>
+            <p className="text-slate-600 font-black uppercase tracking-widest text-sm">No players on Watch List</p>
+            <p className="text-slate-700 text-xs mt-2">Click the eye icon next to any player name to add them.</p>
+          </div>
+        );
+        const fmtSal = (s: number) => s > 0 ? `$${(s / 1_000_000).toFixed(1)}M` : '—';
+        const ovr = (v: number) => v >= 90 ? 'text-amber-400' : v >= 80 ? 'text-emerald-400' : v >= 70 ? 'text-sky-400' : 'text-slate-400';
+        const potGrade = (v: number) => v >= 90 ? { l: 'A', c: 'text-amber-400' } : v >= 80 ? { l: 'B', c: 'text-emerald-400' } : v >= 70 ? { l: 'C', c: 'text-slate-300' } : { l: 'D', c: 'text-slate-500' };
+        return (
+          <div className="bg-slate-900 border border-slate-800 rounded-3xl overflow-hidden shadow-2xl">
+            <div className="px-6 py-4 border-b border-slate-800 flex items-center justify-between">
+              <p className="text-[10px] font-black uppercase tracking-[0.4em] text-slate-500">
+                Watch List — <span className="text-cyan-400">{watched.length} player{watched.length !== 1 ? 's' : ''}</span>
+              </p>
+            </div>
+            <div className="overflow-x-auto">
+              <table className="w-full text-left text-xs">
+                <thead>
+                  <tr className="bg-slate-950/50 border-b border-slate-800 text-[10px] font-black uppercase text-slate-500 tracking-widest">
+                    <th className="px-4 py-3 w-8" />
+                    <th className="px-4 py-3">Player</th>
+                    <th className="px-4 py-3">Team</th>
+                    <th className="px-4 py-3 text-center">OVR</th>
+                    <th className="px-4 py-3 text-center">Pot</th>
+                    <th className="px-4 py-3 text-center">Age</th>
+                    <th className="px-4 py-3 text-center">PPG</th>
+                    <th className="px-4 py-3 text-center">RPG</th>
+                    <th className="px-4 py-3 text-center">APG</th>
+                    <th className="px-4 py-3 text-right">Salary</th>
+                    <th className="px-4 py-3 text-right">Action</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-800/40">
+                  {watched.map(({ player: p, team, isFa }) => {
+                    const gp = Math.max(1, p.stats.gamesPlayed);
+                    const ppg = (p.stats.points / gp).toFixed(1);
+                    const rpg = (p.stats.rebounds / gp).toFixed(1);
+                    const apg = (p.stats.assists / gp).toFixed(1);
+                    const pot = potGrade(p.potential);
+                    return (
+                      <tr key={p.id} className="hover:bg-slate-800/40 transition-all cursor-pointer group" onClick={() => onViewPlayer(p)}>
+                        <td className="px-4 py-4" onClick={e => e.stopPropagation()}>
+                          <WatchToggle playerId={p.id} watchList={watchList} onToggle={onToggleWatch} />
+                        </td>
+                        <td className="px-4 py-4">
+                          <p className="font-bold text-slate-200 uppercase tracking-tight group-hover:text-white">{p.name}</p>
+                          <p className="text-[10px] text-slate-500 mt-0.5 uppercase">{p.position} · {p.archetype ?? p.position}</p>
+                        </td>
+                        <td className="px-4 py-4">
+                          {isFa ? (
+                            <span className="text-[10px] font-black px-2 py-1 rounded-lg bg-amber-500/10 text-amber-400 border border-amber-500/20 uppercase">
+                              {p.faType === 'RFA' ? 'RFA' : 'Free Agent'}
+                            </span>
+                          ) : team ? (
+                            <div className="flex items-center gap-2">
+                              <TeamBadge team={team} size="xs" />
+                              <span className="text-slate-400 font-bold">{team.abbreviation}</span>
+                            </div>
+                          ) : null}
+                        </td>
+                        <td className="px-4 py-4 text-center">
+                          <span className={`font-display font-black text-base ${ovr(p.rating)}`}>{p.rating}</span>
+                        </td>
+                        <td className="px-4 py-4 text-center">
+                          <span className={`font-black ${pot.c}`}>{pot.l}</span>
+                        </td>
+                        <td className="px-4 py-4 text-center">
+                          <span className={`font-bold ${p.age <= 24 ? 'text-emerald-400' : p.age >= 33 ? 'text-rose-400' : 'text-slate-300'}`}>{p.age}</span>
+                        </td>
+                        <td className="px-4 py-4 text-center font-mono text-slate-300">{ppg}</td>
+                        <td className="px-4 py-4 text-center font-mono text-slate-300">{rpg}</td>
+                        <td className="px-4 py-4 text-center font-mono text-slate-300">{apg}</td>
+                        <td className="px-4 py-4 text-right font-mono text-slate-400">{fmtSal(p.salary ?? 0)}</td>
+                        <td className="px-4 py-4 text-right" onClick={e => e.stopPropagation()}>
+                          <button
+                            onClick={() => onViewPlayer(p)}
+                            className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-300 hover:text-white text-[10px] font-black uppercase rounded-lg transition-all active:scale-95"
+                          >
+                            View
+                          </button>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        );
+      })()}
+
       {/* ─── Table ──────────────────────────────────────────── */}
-      <div className="bg-slate-900 border border-slate-800 rounded-3xl overflow-hidden shadow-2xl">
+      {subTab !== 'watchlist' && <div className="bg-slate-900 border border-slate-800 rounded-3xl overflow-hidden shadow-2xl">
         <div className="overflow-x-auto">
           <table className="w-full text-left border-collapse">
             <thead>
@@ -390,6 +515,7 @@ const Players: React.FC<PlayersProps> = ({ league, onViewPlayer }) => {
                       <div className="flex items-center gap-1.5">
                         {rookie  && <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 shrink-0" title="Rookie (≤2 seasons pro)" />}
                         {injured && <span className="w-1.5 h-1.5 rounded-full bg-rose-500 shrink-0" title={`Injured: ${p.injuryType}`} />}
+                        <WatchToggle playerId={p.id} watchList={watchList} onToggle={onToggleWatch} />
                         <span className="font-bold text-slate-200 text-xs uppercase tracking-tight">{p.name}</span>
                         {subTab === 'ratings' && traits.map(trait => (
                           <span
@@ -630,7 +756,7 @@ const Players: React.FC<PlayersProps> = ({ league, onViewPlayer }) => {
             </div>
           )}
         </div>
-      </div>
+      </div>}
 
       {/* ─── Legend ─────────────────────────────────────────── */}
       <div className="flex flex-wrap gap-4 px-2 text-[9px] font-black text-slate-600 uppercase tracking-widest">
