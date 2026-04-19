@@ -1506,11 +1506,54 @@ export const generateProspects = (year: number, count: number = 100, genderRatio
     const id = `prospect-${year}-${i}`;
     const pos = POSITIONS[Math.floor(Math.random() * POSITIONS.length)];
     
-    let rating = 60 + Math.floor(Math.random() * 15);
-    if (i < 5) rating = 78 + Math.floor(Math.random() * 5); 
-    else if (i < 15) rating = 72 + Math.floor(Math.random() * 6); 
-    
-    const potential = Math.min(99, rating + Math.floor(Math.random() * 20) + 5);
+    // ── Traits first — they drive bust risk and potential ceiling ──────────
+    const prospectTraits = getRandomTraits();
+    const badCount  = prospectTraits.filter(t => (t === 'Lazy' || t === 'Hot Head' || t === 'Money Hungry' || t === 'Diva/Star')).length;
+    const goodCount = prospectTraits.filter(t => (t === 'Gym Rat' || t === 'Workhorse' || t === 'Leader' || t === 'Professional' || t === 'Clutch')).length;
+
+    // ── OVR by pick slot (realistic rookie ranges — strong prospects, not superstars) ─
+    let rating: number;
+    if (i === 0) {
+      rating = 83 + Math.floor(Math.random() * 6);          // #1 overall: 83-88
+    } else if (i < 5) {
+      rating = 80 + Math.floor(Math.random() * 7);          // Top 5: 80-86
+    } else if (i < 14) {
+      rating = 76 + Math.floor(Math.random() * 8);          // Lottery 6-14: 76-83
+    } else if (i < 30) {
+      rating = 72 + Math.floor(Math.random() * 7);          // Late first: 72-78
+    } else if (i < 60) {
+      rating = Math.random() < 0.08                         // 2nd round: sleeper or normal
+        ? 75 + Math.floor(Math.random() * 4)                //   sleeper:  75-78
+        : 65 + Math.floor(Math.random() * 10);              //   normal:   65-74
+    } else {
+      rating = 60 + Math.floor(Math.random() * 11);         // Undrafted: 60-70
+    }
+
+    // ── Trait bust-risk modifier ─────────────────────────────────────────
+    // Late picks are more sensitive — less polish, more variance from character flaws.
+    // Good traits (Gym Rat, Workhorse…) can nudge a player above their slot ceiling.
+    const bustMultiplier = i >= 14 ? 2.0 : i >= 5 ? 1.0 : 0.5;
+    const traitDelta     = Math.round((goodCount - badCount * 1.5) * bustMultiplier);
+    const maxAdjust      = i === 0 ? 2 : i < 5 ? 3 : i < 14 ? 4 : 6;
+    rating = Math.min(99, Math.max(60, rating + Math.max(-maxAdjust, Math.min(maxAdjust, traitDelta))));
+
+    // ── Potential: high ceiling for top prospects, tiered down for late picks ─
+    let potential: number;
+    if (i === 0) {
+      potential = 92 + Math.floor(Math.random() * 8);                // #1 pick:    92-99
+    } else if (i < 5) {
+      potential = Math.min(99, 88 + Math.floor(Math.random() * 12)); // Top 5:      88-99
+    } else if (i < 14) {
+      potential = Math.min(99, rating + Math.floor(Math.random() * 16) + 6); // Lottery: good upside
+    } else if (i < 30) {
+      potential = Math.min(99, rating + Math.floor(Math.random() * 13) + 4); // Late 1st: moderate
+    } else {
+      potential = Math.min(99, rating + Math.floor(Math.random() * 10) + 2); // 2nd rd / undrafted
+    }
+    // Bad traits erode ceiling for mid/late picks — bust signal
+    if (badCount > 0 && i >= 5) {
+      potential = Math.max(rating + 4, potential - badCount * 3);
+    }
     
     // Apply regional flavor
     const f = region.flavor;
@@ -1554,7 +1597,6 @@ export const generateProspects = (year: number, count: number = 100, genderRatio
       heightBonus: phys.heightIn >= (HEIGHT_WEIGHT[pos]?.[physGender]?.avgH ?? 0) + 3 ? 5 : 0,
     });
     const bAttrs = gender === 'Female' ? applyFemaleAttrCaps(bAttrsRaw) : bAttrsRaw;
-    const prospectTraits = getRandomTraits();
 
     const prospectAge = ageMin + Math.floor(Math.random() * (Math.max(ageMin, ageMax) - ageMin + 1));
     const rawProspect = {
