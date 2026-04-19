@@ -167,7 +167,12 @@ const Standings: React.FC<StandingsProps> = ({
                 {/* Team name + clinch badge + H2H tiebreaker */}
                 <td className="px-6 py-5">
                   <div className="flex items-center gap-4 cursor-pointer group/team" onClick={() => onManageTeam(t.id)}>
-                    <TeamBadge team={t} size="sm" />
+                    <div className="flex items-center gap-1 shrink-0">
+                      <TeamBadge team={t} size="sm" />
+                      {t.secondaryLogo && (
+                        <TeamBadge team={t} size="xs" useSecondary />
+                      )}
+                    </div>
                     <div>
                       <div className="flex items-center">
                         <span className={`font-display font-bold uppercase ${t.id === userTeamId ? 'text-amber-500' : 'text-slate-100 group-hover/team:text-amber-500'} transition-colors`}>
@@ -271,7 +276,14 @@ const Standings: React.FC<StandingsProps> = ({
                     </td>
                     <td className="px-6 py-5">
                       <div className="flex items-center gap-4 cursor-pointer group/team" onClick={() => team && onManageTeam(row.teamId)}>
-                        {team ? <TeamBadge team={team} size="sm" /> : (
+                        {team ? (
+                          <div className="flex items-center gap-1 shrink-0">
+                            <TeamBadge team={team} size="sm" />
+                            {team.secondaryLogo && (
+                              <TeamBadge team={team} size="xs" useSecondary />
+                            )}
+                          </div>
+                        ) : (
                           <div className="w-8 h-8 rounded-full bg-slate-700 flex items-center justify-center text-xs font-black text-slate-400">
                             {row.teamAbbr}
                           </div>
