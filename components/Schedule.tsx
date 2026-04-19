@@ -317,7 +317,7 @@ const Schedule: React.FC<ScheduleProps> = ({ league, onSimulate, onScout, onWatc
                   className="w-16 h-16 bg-slate-800 rounded-2xl flex items-center justify-center border border-slate-700 relative overflow-hidden shrink-0 group-hover:scale-110 transition-transform cursor-pointer"
                   onClick={() => onManageTeam?.(opp.id)}
                 >
-                  <TeamBadge team={opp} size="lg" />
+                  <TeamBadge team={opp} size="lg" useSecondary={!isHome} />
                 </div>
                 <div>
                   <div className="flex items-center gap-2">
@@ -746,7 +746,7 @@ const Schedule: React.FC<ScheduleProps> = ({ league, onSimulate, onScout, onWatc
                           {/* Away Team */}
                           <div className="flex items-center gap-2 flex-1 min-w-0">
                             <div className="w-8 h-8 bg-slate-800 rounded-lg flex items-center justify-center border border-slate-700 shrink-0">
-                              <TeamBadge team={away} size="sm" />
+                              <TeamBadge team={away} size="sm" useSecondary />
                             </div>
                             <div className="min-w-0">
                               <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest leading-none mb-0.5">🛫 Away</p>

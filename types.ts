@@ -468,6 +468,7 @@ export interface Team {
   lastTen: ('W' | 'L')[];
   budget: number;
   logo: string;
+  secondaryLogo?: string;
   conference: Conference;
   division: Division;
   marketSize: MarketSize;
