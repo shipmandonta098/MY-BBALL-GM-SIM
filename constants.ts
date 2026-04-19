@@ -1331,7 +1331,7 @@ const applyPhysical = (attrs: AttrMap, pos: string, gender: 'Male'|'Female', hei
   return a;
 };
 
-export const generatePlayer = (id: string, ageRange: [number, number] = [19, 38], genderRatio: number = 0, draftCtx?: DraftContext, leagueYear?: number, minRating = 68): Player => {
+export const generatePlayer = (id: string, ageRange: [number, number] = [19, 38], genderRatio: number = 0, draftCtx?: DraftContext, leagueYear?: number, minRating = 58): Player => {
   const gender = getRandomGender(genderRatio);
   
   // Pick a region based on weights
@@ -1350,11 +1350,12 @@ export const generatePlayer = (id: string, ageRange: [number, number] = [19, 38]
   const lastNames = gender === 'Male' ? region.lastNamesMale : NAMES_FEMALE.last;
   
   const rand = Math.random();
-  // Shifted distribution — avg ~78, producing realistic NBA-caliber league quality
-  let baseRating = rand > 0.97 ? 91 + Math.floor(Math.random() * 8)  // 3%: 91–98 (stars)
+  // Shifted distribution — avg ~77, includes G-League-caliber fringe players
+  let baseRating = rand > 0.97 ? 91 + Math.floor(Math.random() * 8)  // 3%:  91–98 (stars)
                  : rand > 0.83 ? 83 + Math.floor(Math.random() * 9)  // 14%: 83–91 (good starters)
-                 : rand > 0.45 ? 76 + Math.floor(Math.random() * 8)  // 38%: 76–83 (starters/rotation)
-                               : 68 + Math.floor(Math.random() * 9); // 45%: 68–76 (role players)
+                 : rand > 0.50 ? 76 + Math.floor(Math.random() * 8)  // 33%: 76–83 (starters/rotation)
+                 : rand > 0.15 ? 68 + Math.floor(Math.random() * 9)  // 35%: 68–76 (role players)
+                               : 58 + Math.floor(Math.random() * 10); // 15%: 58–67 (fringe/G-League)
   const rating = Math.min(99, Math.max(minRating, baseRating));
   const potential = Math.min(99, rating + Math.floor(Math.random() * 12));
   const pos = POSITIONS[Math.floor(Math.random() * POSITIONS.length)];
@@ -1514,19 +1515,19 @@ export const generateProspects = (year: number, count: number = 100, genderRatio
     // ── OVR by pick slot (realistic rookie ranges — strong prospects, not superstars) ─
     let rating: number;
     if (i === 0) {
-      rating = 83 + Math.floor(Math.random() * 6);          // #1 overall: 83-88
+      rating = 88 + Math.floor(Math.random() * 7);          // #1 overall: 88-94
     } else if (i < 5) {
-      rating = 80 + Math.floor(Math.random() * 7);          // Top 5: 80-86
+      rating = 82 + Math.floor(Math.random() * 8);          // Top 5: 82-89
     } else if (i < 14) {
       rating = 76 + Math.floor(Math.random() * 8);          // Lottery 6-14: 76-83
     } else if (i < 30) {
-      rating = 72 + Math.floor(Math.random() * 7);          // Late first: 72-78
+      rating = 71 + Math.floor(Math.random() * 8);          // Late first: 71-78
     } else if (i < 60) {
       rating = Math.random() < 0.08                         // 2nd round: sleeper or normal
-        ? 75 + Math.floor(Math.random() * 4)                //   sleeper:  75-78
-        : 65 + Math.floor(Math.random() * 10);              //   normal:   65-74
+        ? 74 + Math.floor(Math.random() * 5)                //   sleeper:  74-78
+        : 63 + Math.floor(Math.random() * 10);              //   normal:   63-72
     } else {
-      rating = 60 + Math.floor(Math.random() * 11);         // Undrafted: 60-70
+      rating = 58 + Math.floor(Math.random() * 9);          // Undrafted: 58-66
     }
 
     // ── Trait bust-risk modifier ─────────────────────────────────────────
@@ -1535,7 +1536,7 @@ export const generateProspects = (year: number, count: number = 100, genderRatio
     const bustMultiplier = i >= 14 ? 2.0 : i >= 5 ? 1.0 : 0.5;
     const traitDelta     = Math.round((goodCount - badCount * 1.5) * bustMultiplier);
     const maxAdjust      = i === 0 ? 2 : i < 5 ? 3 : i < 14 ? 4 : 6;
-    rating = Math.min(99, Math.max(60, rating + Math.max(-maxAdjust, Math.min(maxAdjust, traitDelta))));
+    rating = Math.min(99, Math.max(55, rating + Math.max(-maxAdjust, Math.min(maxAdjust, traitDelta))));
 
     // ── Potential: high ceiling for top prospects, tiered down for late picks ─
     let potential: number;
@@ -1715,13 +1716,13 @@ export const generateDefaultRotation = (roster: Player[]): TeamRotation => {
 // These are minimum ratings per roster slot so teams have a realistic spread.
 const TIER_SLOT_FLOORS: Record<string, number[]> = {
   // elite: full-roster avg ≈ 85–87  (2–4 per 30-team league)
-  elite:      [96, 93, 90, 88, 87, 86, 85, 84, 83, 83, 82, 81, 80, 79],
+  elite:      [96, 93, 90, 88, 87, 86, 85, 84, 83, 83, 82, 80, 76, 70],
   // solid: full-roster avg ≈ 82–84  (6–8 teams)
-  solid:      [92, 89, 87, 85, 84, 83, 82, 81, 80, 80, 79, 78, 77, 76],
+  solid:      [92, 89, 87, 85, 84, 83, 82, 81, 80, 79, 77, 74, 70, 64],
   // average: full-roster avg ≈ 78–80 (bulk of the league)
-  average:    [87, 84, 82, 80, 80, 79, 78, 77, 76, 76, 75, 74, 74, 74],
-  // rebuilding: full-roster avg ≈ 75–77 (floor teams; normalizeOVRs lifts to 76 min)
-  rebuilding: [84, 81, 79, 77, 77, 76, 75, 74, 74, 73, 73, 72, 71, 71],
+  average:    [87, 84, 82, 80, 79, 78, 77, 76, 75, 74, 72, 69, 64, 60],
+  // rebuilding: full-roster avg ≈ 74–76 (floor teams)
+  rebuilding: [84, 81, 79, 77, 76, 75, 74, 73, 72, 71, 68, 65, 61, 58],
 };
 
 // ── Executive (GM) name generation ───────────────────────────────────────────
