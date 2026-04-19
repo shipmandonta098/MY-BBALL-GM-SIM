@@ -326,28 +326,54 @@ const Draft: React.FC<DraftProps> = ({ league, updateLeague, onScout, scoutingRe
                 <p className="text-2xl font-display font-bold text-amber-500">{scoutPoints}</p>
               </div>
             )}
-            {!isDrafting && (
-              <>
-                <button
-                  onClick={startDraftSim}
-                  className="px-8 py-4 bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-display font-bold uppercase rounded-xl transition-all shadow-xl shadow-emerald-500/20 active:scale-95"
-                >
-                  Start Live Draft
-                </button>
-                <button
-                  onClick={startSimToMyPick}
-                  className="px-6 py-4 bg-blue-600 hover:bg-blue-500 text-white font-display font-bold uppercase rounded-xl transition-all shadow-xl shadow-blue-500/20 active:scale-95 text-sm"
-                >
-                  ⚡ Sim to My Pick
-                </button>
-                <button
-                  onClick={() => setShowSimToEndConfirm(true)}
-                  className="px-6 py-4 bg-rose-700 hover:bg-rose-600 text-white font-display font-bold uppercase rounded-xl transition-all shadow-xl shadow-rose-500/20 active:scale-95 text-sm"
-                >
-                  ⚡⚡ Sim to End
-                </button>
-              </>
-            )}
+            {!isDrafting && (() => {
+              const lotteryPending = league.draftPhase !== 'draft';
+              return (
+                <>
+                  {lotteryPending && (
+                    <span className="text-[10px] font-black uppercase tracking-widest text-slate-600 bg-slate-900 border border-slate-800 rounded-xl px-3 py-2 hidden sm:block">
+                      ⚠ Complete lottery first
+                    </span>
+                  )}
+                  <button
+                    onClick={lotteryPending ? undefined : startDraftSim}
+                    disabled={lotteryPending}
+                    title={lotteryPending ? 'Available after lottery' : undefined}
+                    className={`px-8 py-4 font-display font-bold uppercase rounded-xl transition-all text-base ${
+                      lotteryPending
+                        ? 'bg-slate-800 text-slate-600 cursor-not-allowed opacity-60'
+                        : 'bg-emerald-500 hover:bg-emerald-400 text-slate-950 shadow-xl shadow-emerald-500/20 active:scale-95'
+                    }`}
+                  >
+                    Start Live Draft
+                  </button>
+                  <button
+                    onClick={lotteryPending ? undefined : startSimToMyPick}
+                    disabled={lotteryPending}
+                    title={lotteryPending ? 'Available after lottery' : undefined}
+                    className={`px-6 py-4 font-display font-bold uppercase rounded-xl transition-all text-sm ${
+                      lotteryPending
+                        ? 'bg-slate-800 text-slate-600 cursor-not-allowed opacity-60'
+                        : 'bg-blue-600 hover:bg-blue-500 text-white shadow-xl shadow-blue-500/20 active:scale-95'
+                    }`}
+                  >
+                    ⚡ Sim to My Pick
+                  </button>
+                  <button
+                    onClick={lotteryPending ? undefined : () => setShowSimToEndConfirm(true)}
+                    disabled={lotteryPending}
+                    title={lotteryPending ? 'Available after lottery' : undefined}
+                    className={`px-6 py-4 font-display font-bold uppercase rounded-xl transition-all text-sm ${
+                      lotteryPending
+                        ? 'bg-slate-800 text-slate-600 cursor-not-allowed opacity-60'
+                        : 'bg-rose-700 hover:bg-rose-600 text-white shadow-xl shadow-rose-500/20 active:scale-95'
+                    }`}
+                  >
+                    ⚡⚡ Sim to End
+                  </button>
+                </>
+              );
+            })()}
             {isDrafting && !isSimming && !isSimToEnd && !isUserTurn && (
               <>
                 <button
