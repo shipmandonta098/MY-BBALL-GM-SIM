@@ -1,6 +1,7 @@
 import React, { useState, useMemo, useEffect, useRef } from 'react';
 import { Team, Player, Position, PlayerStatus, PersonalityTrait, Coach, TeamRotation } from '../types';
 import TeamBadge from './TeamBadge';
+import WatchToggle from './WatchToggle';
 import { getFlag } from '../constants';
 
 export interface RosterProps {
@@ -13,6 +14,8 @@ export interface RosterProps {
   onUpdateTeamRoster?: (teamId: string, updatedRoster: Player[]) => void;
   onManageTeam?: (teamId: string) => void;
   godMode?: boolean;
+  watchList?: string[];
+  onToggleWatch?: (id: string) => void;
 }
 
 const traitIcons: Record<PersonalityTrait, string> = {
@@ -65,7 +68,7 @@ const ARCHETYPE_COLORS: Record<string, string> = {
   'Two-Way Forward':    'bg-teal-500/20 text-teal-400 border-teal-500/30',
 };
 
-const Roster: React.FC<RosterProps> = ({ leagueTeams, userTeamId, initialTeamId, onScout, onScoutCoach, scoutingReport, onUpdateTeamRoster, onManageTeam, godMode }) => {
+const Roster: React.FC<RosterProps> = ({ leagueTeams, userTeamId, initialTeamId, onScout, onScoutCoach, scoutingReport, onUpdateTeamRoster, onManageTeam, godMode, watchList = [], onToggleWatch }) => {
   const [selectedTeamId, setSelectedTeamId] = useState(initialTeamId || userTeamId);
   const [searchTerm, setSearchTerm] = useState('');
   const [posFilter, setPosFilter] = useState<string>('ALL');
@@ -438,6 +441,11 @@ const Roster: React.FC<RosterProps> = ({ leagueTeams, userTeamId, initialTeamId,
                         <div className="flex items-center gap-2 flex-wrap">
                           {player.country && (
                             <span className="text-base leading-none" title={player.country}>{getFlag(player.country)}</span>
+                          )}
+                          {onToggleWatch && (
+                            <span onClick={e => e.stopPropagation()}>
+                              <WatchToggle playerId={player.id} watchList={watchList} onToggle={onToggleWatch} />
+                            </span>
                           )}
                           <span className={`font-display font-bold text-lg uppercase tracking-tight transition-colors group-hover:text-amber-500 ${
                             isPlayerSuspended(player) ? 'text-red-400' :
