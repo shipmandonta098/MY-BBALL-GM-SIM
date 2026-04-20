@@ -48,10 +48,14 @@ const LiveGameModal: React.FC<LiveGameModalProps> = ({
   onUpdate,
   onClose 
 }) => {
+  const quarterLength = league.settings?.quarterLength ?? 12;
+  const quarterSecs   = quarterLength * 60;
+  const qStartTime    = `${quarterLength}:00`;
+
   const [isPlaying, setIsPlaying] = useState(true);
   const [speed, setSpeed] = useState(2);
   const [quarter, setQuarter] = useState(1);
-  const [timeLeft, setTimeLeft] = useState(720);
+  const [timeLeft, setTimeLeft] = useState(quarterSecs);
   const [homeScore, setHomeScore] = useState(0);
   const [awayScore, setAwayScore] = useState(0);
   const [homeQScore, setHomeQScore] = useState<number[]>([0, 0, 0, 0]);
@@ -175,7 +179,7 @@ const LiveGameModal: React.FC<LiveGameModalProps> = ({
     possessionRef.current = tipWinnerTeam.id;
     setEvents([
       {
-        time: '12:00',
+        time: qStartTime,
         quarter: 1,
         text: `Jump ball: ${abbrevLocal(hcName)} vs. ${abbrevLocal(acName)}. ${abbrevLocal(twName)} wins the tip (${tipWinnerTeam.city} ${tipWinnerTeam.name}).`,
         type: 'info',
@@ -1209,10 +1213,10 @@ const LiveGameModal: React.FC<LiveGameModalProps> = ({
       lastSubCheckHome.current = 0;
       lastSubCheckAway.current = 0;
       setQuarter(q => q + 1);
-      setTimeLeft(720);
+      setTimeLeft(quarterSecs);
       setEvents(prev => [
         ...prev,
-        { time: '12:00', quarter: quarter + 1, text: `--- Start of Quarter ${quarter + 1} ---`, type: 'info' as const },
+        { time: qStartTime, quarter: quarter + 1, text: `--- Start of Quarter ${quarter + 1} ---`, type: 'info' as const },
         ...qBreakEvts
       ]);
     } else if (timeLeft === 0 && quarter >= 4) {
