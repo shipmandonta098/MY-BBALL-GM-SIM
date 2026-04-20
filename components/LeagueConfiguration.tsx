@@ -432,8 +432,12 @@ const LeagueConfiguration: React.FC<LeagueConfigurationProps> = ({ onConfirm, on
               className={`w-full bg-slate-950 border rounded-xl px-4 py-3 text-white font-display text-lg focus:outline-none focus:border-amber-500/50 transition-colors ${errors.name ? 'border-rose-500' : 'border-slate-800'}`} />
           </Field>
           <Field label="Starting Year" error={errors.year}>
-            <NumericInput value={year} min={1900} max={2200} onChange={setYear}
-              className={`w-full bg-slate-950 border rounded-xl px-4 py-3 text-white font-display text-lg focus:outline-none ${errors.year ? 'border-rose-500' : 'border-slate-800'}`} />
+            <select value={year} onChange={e => setYear(parseInt(e.target.value))}
+              className={`w-full bg-slate-950 border rounded-xl px-4 py-3 text-white font-display text-lg focus:outline-none appearance-none cursor-pointer ${errors.year ? 'border-rose-500' : 'border-slate-800'}`}>
+              {Array.from({ length: 80 }, (_, i) => 1947 + i).map(y => (
+                <option key={y} value={y}>{y}</option>
+              ))}
+            </select>
           </Field>
         </div>
 
