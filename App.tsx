@@ -1939,12 +1939,15 @@ const App: React.FC = () => {
     }
 
     // ── AI in-season / preseason signings ──────────────────────────────────
-    // Preseason (training camp): fill ALL short-roster AI teams every sim-day.
-    // Regular season: ~30% chance, one random team per day.
+    // Pass 1 – Fill short rosters (preseason: every team; regular: ~30% chance).
+    // Pass 2 – Upgrade/waive-and-sign evaluation, staggered every 4-6 days per team.
     const isPreseasonPhaseSign = newState.seasonPhase === 'Preseason';
     const signingThreshold = isPreseasonPhaseSign ? 16 : (newState.tradeDeadlinePassed ? 13 : 10);
     if (!newState.isOffseason && newState.freeAgents.length > 0) {
       const cap = newState.settings.salaryCap || 140_000_000;
+      const maxRoster = newState.settings.maxRosterSize ?? 15;
+
+      // Pass 1: fill short-roster teams
       const aiTeamsNeedingHelp = newState.teams.filter(t => {
         if (t.id === newState.userTeamId) return false;
         const activeRoster = t.roster.filter(p => !p.injuryDaysLeft || p.injuryDaysLeft === 0);
@@ -1959,9 +1962,11 @@ const App: React.FC = () => {
         const teamSalary = team.roster.reduce((s, p) => s + (p.salary || 0), 0);
         const teamCapSpace = cap - teamSalary;
         if (teamCapSpace < 600_000) continue;
-        const eligible = newState.freeAgents.filter(fa => (fa.desiredContract?.salary || 600_000) <= teamCapSpace * 1.2);
+        const eligible = [...newState.freeAgents]
+          .filter(fa => (fa.desiredContract?.salary || 600_000) <= teamCapSpace * 1.2)
+          .sort((a, b) => b.rating - a.rating);
         if (eligible.length === 0) continue;
-        const fa = eligible[Math.floor(Math.random() * Math.min(5, eligible.length))];
+        const fa = eligible[Math.floor(Math.random() * Math.min(3, eligible.length))];
         const rawSalary = Math.round((fa.desiredContract?.salary || 1_500_000) * (0.8 + Math.random() * 0.3) / 250_000) * 250_000;
         const salary = Math.max(600_000, Math.min(rawSalary, teamCapSpace));
         const signingType = isPreseasonPhaseSign ? 'training camp contract' : (salary <= 700_000 ? '10-day' : 'rest-of-season minimum');
@@ -1982,6 +1987,104 @@ const App: React.FC = () => {
                 isBreaking: false,
               }, ...newState.newsFeed].slice(0, 200),
         };
+      }
+
+      // Pass 2: regular-season upgrade and waive-and-sign evaluation (staggered per team)
+      if (!isPreseasonPhaseSign) {
+        const pickArr = <T,>(arr: T[]): T => arr[Math.floor(Math.random() * arr.length)];
+        const qualityFAs = [...newState.freeAgents]
+          .filter(fa => fa.rating >= 72)
+          .sort((a, b) => b.rating - a.rating);
+
+        for (const team of newState.teams) {
+          if (team.id === newState.userTeamId) continue;
+          // Stagger: each team evaluates on a different day cadence using a hash
+          const teamHash = team.id.split('').reduce((acc, c) => acc + c.charCodeAt(0), 0);
+          const evalInterval = 4 + (teamHash % 3); // 4, 5, or 6 days per team
+          if ((newState.currentDay + teamHash) % evalInterval !== 0) continue;
+          if (qualityFAs.length === 0) break;
+
+          const teamSalary = team.roster.reduce((s, p) => s + (p.salary || 0), 0);
+          const teamCapSpace = cap - teamSalary;
+
+          if (team.roster.length < maxRoster) {
+            // Has room — sign if best affordable FA is a meaningful upgrade over current bench
+            const affordable = qualityFAs.find(fa =>
+              (fa.desiredContract?.salary || 600_000) <= teamCapSpace * 1.1
+            );
+            if (!affordable) continue;
+            const benchOVRs = [...team.roster].sort((a, b) => a.rating - b.rating).slice(0, 4);
+            const avgBenchOVR = benchOVRs.reduce((s, p) => s + p.rating, 0) / Math.max(1, benchOVRs.length);
+            if (affordable.rating < avgBenchOVR + 4) continue; // not a meaningful upgrade
+            const rawSal = Math.round((affordable.desiredContract?.salary || 1_500_000) * (0.85 + Math.random() * 0.25) / 250_000) * 250_000;
+            const salary = Math.max(600_000, Math.min(rawSal, teamCapSpace));
+            const sigType = salary <= 700_000 ? '10-day deal' : 'rest-of-season deal';
+            const signedFa = { ...affordable, isFreeAgent: false, inSeasonFA: false, salary, contractYears: 1, morale: Math.min(100, (affordable.morale || 70) + 8) };
+            newState = {
+              ...newState,
+              teams: newState.teams.map(t => t.id === team.id ? { ...t, roster: [...t.roster, signedFa] } : t),
+              freeAgents: newState.freeAgents.filter(p => p.id !== affordable.id),
+              newsFeed: [{
+                id: `upgrade-sign-${newState.currentDay}-${affordable.id}`,
+                category: 'transaction' as const,
+                headline: `${team.name} sign ${affordable.name}`,
+                content: pickArr([
+                  `${team.name} agree to terms with ${affordable.name} (${affordable.position}, ${affordable.rating} OVR) on a ${sigType}. He'll compete for minutes immediately.`,
+                  `${affordable.name} finds a new home — the ${team.name} sign the ${affordable.rating}-OVR ${affordable.position} on a ${sigType}.`,
+                  `Roster move: ${team.city} ${team.name} add ${affordable.name} (${affordable.rating} OVR) on a ${sigType} to bolster their rotation.`,
+                ]),
+                timestamp: newState.currentDay,
+                realTimestamp: Date.now(),
+                isBreaking: affordable.rating >= 82,
+              }, ...newState.newsFeed].slice(0, 200),
+            };
+            // Remove from qualityFAs to avoid double-signing same player
+            qualityFAs.splice(qualityFAs.indexOf(affordable), 1);
+
+          } else {
+            // Full roster — evaluate waive-and-sign if a quality FA is significantly better than worst bench
+            const bestFA = qualityFAs[0];
+            const nonStarters = [...team.roster]
+              .filter(p => p.status !== 'Starter' && !p.isSuspended && !(p.injuryDaysLeft && p.injuryDaysLeft > 0))
+              .sort((a, b) => a.rating - b.rating);
+            const worstBench = nonStarters[0];
+            if (!worstBench || bestFA.rating < worstBench.rating + 8) continue;
+            // Check affordability after waiving
+            const capAfterWaive = cap - (teamSalary - (worstBench.salary || 0));
+            const affordable = qualityFAs.find(fa =>
+              fa.id !== worstBench.id &&
+              (fa.desiredContract?.salary || 600_000) <= capAfterWaive * 1.1
+            );
+            if (!affordable) continue;
+            const rawSal = Math.round((affordable.desiredContract?.salary || 1_500_000) * (0.85 + Math.random() * 0.25) / 250_000) * 250_000;
+            const salary = Math.max(600_000, Math.min(rawSal, capAfterWaive));
+            const signedFa = { ...affordable, isFreeAgent: false, inSeasonFA: false, salary, contractYears: 1, morale: Math.min(100, (affordable.morale || 70) + 8) };
+            const waived: Player = { ...worstBench, isFreeAgent: true, salary: 0, contractYears: 0 };
+            const rosterAfterWaive = team.roster.filter(p => p.id !== worstBench.id);
+            newState = {
+              ...newState,
+              teams: newState.teams.map(t => t.id === team.id ? { ...t, roster: [...rosterAfterWaive, signedFa] } : t),
+              freeAgents: [...newState.freeAgents.filter(p => p.id !== affordable.id), waived],
+              newsFeed: [
+                {
+                  id: `waive-sign-${newState.currentDay}-${affordable.id}`,
+                  category: 'transaction' as const,
+                  headline: `${team.name} waive ${worstBench.name}, sign ${affordable.name}`,
+                  content: pickArr([
+                    `Roster shuffle in ${team.city}: ${team.name} waive ${worstBench.name} (${worstBench.rating} OVR) and sign ${affordable.name} (${affordable.rating} OVR) in a clear upgrade move.`,
+                    `${team.name} make a move — ${worstBench.name} is released and ${affordable.name} (${affordable.position}, ${affordable.rating} OVR) joins the rotation on a rest-of-season deal.`,
+                    `${affordable.name} heads to ${team.city}. ${team.name} waive ${worstBench.name} to make room for the ${affordable.rating}-rated ${affordable.position}.`,
+                  ]),
+                  timestamp: newState.currentDay,
+                  realTimestamp: Date.now(),
+                  isBreaking: affordable.rating >= 82,
+                },
+                ...newState.newsFeed,
+              ].slice(0, 200),
+            };
+            qualityFAs.splice(qualityFAs.indexOf(affordable), 1);
+          }
+        }
       }
     }
 
@@ -2308,7 +2411,116 @@ const App: React.FC = () => {
       tempState.playoffBracket = generateInitialBracket(tempState.teams, tempState.season);
       tempState.seasonPhase = 'Playoffs' as SeasonPhase;
       setActiveTab('playoffs');
-      tempState = await addNewsItem(tempState, 'playoffs', { detail: `The Regular Season has concluded. Playoff seeds are locked!` }, true);
+
+      // ── Playoff seeding & first-round matchup news ─────────────────────────
+      {
+        const pickN = <T,>(arr: T[]): T => arr[Math.floor(Math.random() * arr.length)];
+        const getTeam = (id: string) => tempState.teams.find(t => t.id === id)!;
+        const bracket = tempState.playoffBracket!;
+        const nowDay = tempState.currentDay;
+
+        // 1. Season-end headline
+        tempState = {
+          ...tempState,
+          newsFeed: [{
+            id: `season-end-${tempState.season}`,
+            category: 'playoffs' as NewsCategory,
+            headline: 'REGULAR SEASON FINAL',
+            content: pickN([
+              `The Regular Season has concluded. Playoff seeds are locked! The postseason begins now — who wants it most?`,
+              `82 games. Countless battles. The Regular Season is over, and 16 teams punch their tickets to the playoffs. Let the madness begin.`,
+              `It's officially playoff time. The regular season books are closed — seeds are set and first-round matchups are locked in.`,
+            ]),
+            timestamp: nowDay,
+            realTimestamp: Date.now(),
+            isBreaking: true,
+          }, ...(tempState.newsFeed ?? [])].slice(0, 300),
+        };
+
+        // 2. #1 seed announcements (East + West)
+        for (const conf of ['Eastern', 'Western'] as const) {
+          const top = bracket.series.find(s => s.conference === conf && s.team1Seed === 1);
+          if (!top) continue;
+          const t = getTeam(top.team1Id);
+          const confLabel = conf === 'Eastern' ? 'East' : 'West';
+          tempState = {
+            ...tempState,
+            newsFeed: [{
+              id: `seed1-${tempState.season}-${conf}`,
+              category: 'playoffs' as NewsCategory,
+              headline: `#1 SEED — ${confLabel.toUpperCase()}`,
+              content: pickN([
+                `${t.city} ${t.name} clinch the #1 seed in the ${conf} Conference! A dominant ${t.wins}-${t.losses} regular season earns them home-court advantage throughout the playoffs.`,
+                `The ${t.name} are the top dogs in the ${confLabel}. ${t.city} finishes ${t.wins}-${t.losses} and will enjoy home-court in every round.`,
+                `${t.city} owns the ${confLabel}. The ${t.name} lock up the #1 seed with a ${t.wins}-win regular season — a statement of dominance.`,
+              ]),
+              timestamp: nowDay,
+              realTimestamp: Date.now(),
+              teamId: t.id,
+              isBreaking: true,
+            }, ...(tempState.newsFeed ?? [])].slice(0, 300),
+          };
+        }
+
+        // 3. First-round matchup announcements (all 8 series, newest first so East shows below West)
+        const orderedSeries = [...bracket.series].sort((a, b) => {
+          const confOrder = a.conference === 'Western' ? 0 : 1;
+          const confOrderB = b.conference === 'Western' ? 0 : 1;
+          return confOrder - confOrderB || a.team1Seed - b.team1Seed;
+        });
+        for (const series of orderedSeries) {
+          const t1 = getTeam(series.team1Id);
+          const t2 = getTeam(series.team2Id);
+          const confLabel = series.conference === 'Eastern' ? 'East' : 'West';
+          const newsId = `matchup-${tempState.season}-${series.conference}-${series.team1Seed}v${series.team2Seed}`;
+          tempState = {
+            ...tempState,
+            newsFeed: [{
+              id: newsId,
+              category: 'playoffs' as NewsCategory,
+              headline: `FIRST ROUND — ${confLabel.toUpperCase()}`,
+              content: pickN([
+                `#${series.team1Seed} ${t1.city} ${t1.name} (${t1.wins}-${t1.losses}) will face off against #${series.team2Seed} ${t2.city} ${t2.name} (${t2.wins}-${t2.losses}) in the first round.`,
+                `Bracket set: #${series.team1Seed} ${t1.name} vs. #${series.team2Seed} ${t2.name} in the ${series.conference} Conference first round. Who advances?`,
+                `First-round ${confLabel} matchup — ${t1.city} ${t1.name} (#${series.team1Seed}, ${t1.wins}W) will matchup against ${t2.city} ${t2.name} (#${series.team2Seed}, ${t2.wins}W).`,
+              ]),
+              timestamp: nowDay,
+              realTimestamp: Date.now(),
+              teamId: t1.id,
+              isBreaking: false,
+            }, ...(tempState.newsFeed ?? [])].slice(0, 300),
+          };
+        }
+
+        // 4. Elimination announcements (bubble teams that just missed, up to 3 per conf)
+        const allPlayoffIds = new Set(bracket.series.flatMap(s => [s.team1Id, s.team2Id]));
+        for (const conf of ['Eastern', 'Western'] as const) {
+          const confLabel = conf === 'Eastern' ? 'East' : 'West';
+          const eliminated = tempState.teams
+            .filter(t => t.conference === conf && !allPlayoffIds.has(t.id))
+            .sort((a, b) => b.wins - a.wins)
+            .slice(0, 3);
+          for (const t of eliminated) {
+            tempState = {
+              ...tempState,
+              newsFeed: [{
+                id: `elim-${tempState.season}-${t.id}`,
+                category: 'playoffs' as NewsCategory,
+                headline: 'ELIMINATED',
+                content: pickN([
+                  `${t.city} ${t.name} have been eliminated from playoff contention, finishing the regular season ${t.wins}-${t.losses}. A tough offseason looms.`,
+                  `The ${t.name}'s season is over — ${t.wins}-${t.losses} wasn't enough to crack the ${confLabel} playoff picture. Time to retool.`,
+                  `${t.city} misses the postseason at ${t.wins}-${t.losses}. The front office will have questions to answer this offseason.`,
+                ]),
+                timestamp: nowDay,
+                realTimestamp: Date.now(),
+                teamId: t.id,
+                isBreaking: false,
+              }, ...(tempState.newsFeed ?? [])].slice(0, 300),
+            };
+          }
+        }
+      }
     }
     setLeague(tempState);
     setLoading(false);
