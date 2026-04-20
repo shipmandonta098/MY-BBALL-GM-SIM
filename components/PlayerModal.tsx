@@ -37,6 +37,8 @@ interface PlayerModalProps {
     teamLosses?: number;
     /** Team's actual rotation — used to derive true role (Starter/Rotation/Bench) */
     teamRotation?: TeamRotation;
+    teamLogo?: string;
+    teamPrimaryColor?: string;
   };
   /** All team names for the draft-team dropdown in god mode */
   teams?: string[];
@@ -940,10 +942,31 @@ const PlayerModal: React.FC<PlayerModalProps> = ({
           </button>
         </div>
 
-        <div className="relative h-64 bg-slate-800 shrink-0">
-          <div className="absolute inset-0 bg-gradient-to-t from-slate-900 via-slate-900/40 to-transparent"></div>
+        <div
+          className="relative h-64 shrink-0 overflow-hidden"
+          style={leagueContext?.teamPrimaryColor
+            ? { background: `linear-gradient(135deg, #0f172a 0%, ${leagueContext.teamPrimaryColor}26 100%)` }
+            : { backgroundColor: '#1e293b' }}
+        >
+          {/* Team logo — faded background element */}
+          {leagueContext?.teamLogo ? (
+            <img
+              src={leagueContext.teamLogo}
+              alt=""
+              className="absolute right-0 top-1/2 -translate-y-1/2 w-72 h-72 object-contain pointer-events-none select-none"
+              style={{ opacity: 0.07 }}
+              referrerPolicy="no-referrer"
+              onError={e => { (e.currentTarget as HTMLImageElement).style.display = 'none'; }}
+            />
+          ) : (
+            <div className="text-[12rem] md:text-[14rem] font-display font-black text-white/[0.03] absolute -top-10 md:-top-20 right-4 pointer-events-none select-none">
+              #{player.jerseyNumber}
+            </div>
+          )}
+          {/* Gradient overlay — sits above logo, keeps text readable */}
+          <div className="absolute inset-0 bg-gradient-to-r from-slate-950/95 via-slate-950/60 to-transparent" />
+          <div className="absolute inset-0 bg-gradient-to-t from-slate-950 via-transparent to-slate-950/30" />
           <div className="absolute bottom-8 left-10 md:bottom-10 md:left-12 flex items-end gap-8">
-            <div className="text-[12rem] md:text-[14rem] font-display font-black text-white/[0.03] absolute -top-10 md:-top-20 -left-10 md:-left-16 pointer-events-none select-none">#{player.jerseyNumber}</div>
 
             <div className="relative z-10 flex flex-col">
               <h2 className="text-5xl md:text-8xl font-display font-bold uppercase tracking-tighter text-white drop-shadow-lg leading-tight">{player.name}</h2>
