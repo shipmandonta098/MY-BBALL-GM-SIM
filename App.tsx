@@ -12,6 +12,8 @@ import { generateAwards } from './utils/awardEngine';
 import { assignAIPersonalities, runAIGMOffseason, aiGMTradeDeadlineAction, aiGMInSeasonTrades, aiGMPreOffseasonAgreements, generateAITradeProposalsForUser } from './utils/aiGMEngine';
 import { db } from './db';
 import { NavigationProvider } from './context/NavigationContext';
+import { generateOffseasonAlerts } from './utils/offseasonAlerts';
+import OffseasonAlertsModal from './components/OffseasonAlertsModal';
 
 // Components
 import Sidebar from './components/Sidebar';
@@ -125,6 +127,7 @@ const App: React.FC = () => {
   const [selectedCoach, setSelectedCoach] = useState<Coach | null>(null);
   
   const [viewingBoxScore, setViewingBoxScore] = useState<{result: GameResult, home: Team, away: Team} | null>(null);
+  const [showOffseasonAlerts, setShowOffseasonAlerts] = useState(false);
   const [viewingFranchiseId, setViewingFranchiseId] = useState<string | null>(null);
   const [bulkSummary, setBulkSummary] = useState<BulkSimSummary | null>(null);
   const leagueRef = React.useRef<LeagueState | null>(null);
@@ -173,13 +176,22 @@ const App: React.FC = () => {
         realTimestamp: Date.now(),
         isBreaking: true,
       };
+      const freshAlerts = generateOffseasonAlerts(aiResult.updatedState);
       return {
         ...aiResult.updatedState,
         newsFeed: [sentinel, ...aiResult.updatedState.newsFeed].slice(0, 200),
         transactions: [...aiResult.transactions, ...(afterPre.transactions || [])].slice(0, 1000),
+        offseasonAlerts: freshAlerts,
       };
     });
   }, [league?.draftPhase, league?.isOffseason, status]);
+
+  // Auto-show offseason alerts modal when alerts are freshly generated
+  useEffect(() => {
+    if (league?.offseasonAlerts && league.offseasonAlerts.some(a => !a.dismissed)) {
+      setShowOffseasonAlerts(true);
+    }
+  }, [league?.offseasonAlerts]);
 
   const recordTransaction = (state: LeagueState, type: TransactionType, teamIds: string[], description: string, playerIds?: string[], value?: number): Transaction[] => {
     const newTransaction: Transaction = {
@@ -194,6 +206,32 @@ const App: React.FC = () => {
     };
     return [newTransaction, ...(state.transactions || [])].slice(0, 1000);
   };
+
+  // ── Offseason alert handlers ───────────────────────────────────────────────
+  const handleDismissAlert = (alertId: string) => {
+    setLeague(prev => {
+      if (!prev?.offseasonAlerts) return prev;
+      const updated = prev.offseasonAlerts.map(a => a.id === alertId ? { ...a, dismissed: true } : a);
+      const anyLeft = updated.some(a => !a.dismissed);
+      if (!anyLeft) setShowOffseasonAlerts(false);
+      return { ...prev, offseasonAlerts: updated };
+    });
+  };
+
+  const handleDismissAllAlerts = () => {
+    setLeague(prev => {
+      if (!prev?.offseasonAlerts) return prev;
+      return { ...prev, offseasonAlerts: prev.offseasonAlerts.map(a => ({ ...a, dismissed: true })) };
+    });
+    setShowOffseasonAlerts(false);
+  };
+
+  const handleAlertOfferContract = (alertId: string) => {
+    handleDismissAlert(alertId);
+    setShowOffseasonAlerts(false);
+    setActiveTab('free_agency');
+  };
+
 
   /** Accept an incoming AI trade proposal: execute the trade and remove the proposal. */
   const handleAcceptProposal = (proposal: TradeProposal) => {
@@ -3429,7 +3467,7 @@ const App: React.FC = () => {
       <Sidebar activeTab={activeTab} setActiveTab={setActiveTab} team={userTeam} onQuit={() => setStatus('title')} league={league} isExpansionActive={league.expansionDraft?.active} />
       <main className="flex-1 overflow-y-auto p-6 md:p-10 space-y-8 pb-32 transition-all duration-300 ease-in-out">
         <div key={activeTab} className="animate-in fade-in slide-in-from-bottom-2 duration-500">
-          {activeTab === 'dashboard' && <Dashboard league={league} news={news} onSimulate={handleSimulate} onScout={handleViewPlayer} scoutingReport={scoutingReport} setActiveTab={setActiveTab} onViewRoster={handleViewRoster} onManageTeam={handleManageTeam} onAdvanceToRegularSeason={handleAdvanceToRegularSeason} />}
+          {activeTab === 'dashboard' && <Dashboard league={league} news={news} onSimulate={handleSimulate} onScout={handleViewPlayer} scoutingReport={scoutingReport} setActiveTab={setActiveTab} onViewRoster={handleViewRoster} onManageTeam={handleManageTeam} onAdvanceToRegularSeason={handleAdvanceToRegularSeason} onOpenOffseasonAlerts={() => setShowOffseasonAlerts(true)} />}
           {activeTab === 'gm_profile' && <GMProfileView league={league} updateLeague={updateLeagueState} />}
           {activeTab === 'team_management' && (
             <TeamManagement 
@@ -3710,6 +3748,16 @@ const App: React.FC = () => {
         />
       )}
 
+      {showOffseasonAlerts && league.offseasonAlerts && league.offseasonAlerts.some(a => !a.dismissed) && (
+        <OffseasonAlertsModal
+          alerts={league.offseasonAlerts}
+          isWomensLeague={(league.settings.playerGenderRatio ?? 0) === 100}
+          onDismiss={handleDismissAlert}
+          onDismissAll={handleDismissAllAlerts}
+          onOfferContract={handleAlertOfferContract}
+          onClose={() => setShowOffseasonAlerts(false)}
+        />
+      )}
       {viewingBoxScore && <BoxScoreModal result={viewingBoxScore.result} homeTeam={viewingBoxScore.home} awayTeam={viewingBoxScore.away} onClose={() => setViewingBoxScore(null)} />}
       {watchingGame && (
         <LiveGameModal 

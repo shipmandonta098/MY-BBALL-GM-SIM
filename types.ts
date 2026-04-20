@@ -790,6 +790,23 @@ export interface PreviousSeasonStanding {
   madePlayoffs: boolean;
 }
 
+export interface OffseasonAlert {
+  id: string;
+  /** own_fa = user's player is a FA; notable_fa = star from another team; summary = team summary card */
+  type: 'own_fa' | 'notable_fa' | 'summary';
+  playerId?: string;
+  playerName: string;
+  playerRating?: number;
+  playerPosition?: string;
+  playerAge?: number;
+  faType?: 'UFA' | 'RFA';
+  message: string;
+  /** Desired annual salary */
+  salary?: number;
+  contractYears?: number;
+  dismissed: boolean;
+}
+
 export interface LeagueState {
   id: string;
   lastUpdated: number;
@@ -873,6 +890,8 @@ export interface LeagueState {
     homeQScore: number[];
     awayQScore: number[];
   };
+  /** Offseason alert queue shown after draft lottery / draft completion. Undefined = not yet generated. */
+  offseasonAlerts?: OffseasonAlert[];
 }
 
 export type TransactionType = 'trade' | 'signing' | 'release' | 'hiring' | 'firing' | 'injury' | 'waiver' | 'draft';
