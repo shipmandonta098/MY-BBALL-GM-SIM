@@ -1331,6 +1331,37 @@ const applyPhysical = (attrs: AttrMap, pos: string, gender: 'Male'|'Female', hei
   return a;
 };
 
+/** WNBA-realistic salary for a given player rating and league year. */
+const calcWNBASalary = (rating: number, year: number): number => {
+  let supermax: number, star: number, starter: number, role: number, bench: number, min: number;
+  if (year >= 2026) {
+    supermax = 1_400_000; star = 900_000; starter = 550_000; role = 300_000; bench = 150_000; min = 100_000;
+  } else if (year >= 2025) {
+    supermax = 700_000; star = 440_000; starter = 250_000; role = 130_000; bench = 65_000; min = 45_000;
+  } else if (year >= 2020) {
+    supermax = 250_000; star = 175_000; starter = 120_000; role = 72_000; bench = 38_000; min = 26_000;
+  } else if (year >= 2013) {
+    supermax = 110_000; star = 78_000; starter = 52_000; role = 32_000; bench = 18_000; min = 13_000;
+  } else if (year >= 2008) {
+    supermax = 82_000; star = 58_000; starter = 38_000; role = 22_000; bench = 12_000; min = 9_000;
+  } else if (year >= 2003) {
+    supermax = 60_000; star = 42_000; starter = 28_000; role = 16_000; bench = 8_500; min = 6_500;
+  } else if (year >= 2000) {
+    supermax = 45_000; star = 32_000; starter = 20_000; role = 12_000; bench = 6_500; min = 4_500;
+  } else {
+    supermax = 35_000; star = 24_000; starter = 15_000; role = 9_000; bench = 4_500; min = 3_000;
+  }
+  const base =
+    rating >= 95 ? supermax :
+    rating >= 88 ? star    + (rating - 88) * ((supermax - star)    / 7) :
+    rating >= 80 ? starter + (rating - 80) * ((star    - starter)  / 8) :
+    rating >= 70 ? role    + (rating - 70) * ((starter - role)     / 10) :
+    rating >= 60 ? bench   + (rating - 60) * ((role    - bench)    / 10) :
+    min;
+  const unit = supermax >= 500_000 ? 25_000 : supermax >= 100_000 ? 5_000 : 1_000;
+  return Math.round((base * (0.85 + Math.random() * 0.30)) / unit) * unit;
+};
+
 export const generatePlayer = (id: string, ageRange: [number, number] = [19, 38], genderRatio: number = 0, draftCtx?: DraftContext, leagueYear?: number, minRating = 58): Player => {
   const gender = getRandomGender(genderRatio);
   
@@ -1411,14 +1442,16 @@ export const generatePlayer = (id: string, ageRange: [number, number] = [19, 38]
     rating,
     potential,
     attributes: pAttrs as Player['attributes'],
-    salary: Math.round((
-      rating >= 95 ? 35_000_000 + (rating - 95) * 1_750_000 :  // $35M–$42M (supermax tier)
-      rating >= 88 ? 18_000_000 + (rating - 88) * 2_428_571 :  // $18M–$33M (star tier)
-      rating >= 80 ? 8_500_000  + (rating - 80) * 1_187_500 :  // $8.5M–$17.5M (starter tier)
-      rating >= 70 ? 3_500_000  + (rating - 70) * 500_000   :  // $3.5M–$8.5M (role player)
-      rating >= 60 ? 1_500_000  + (rating - 60) * 200_000   :  // $1.5M–$3.5M (bench)
-                     1_100_000                                  // league minimum
-    ) * (0.85 + Math.random() * 0.30) / 250_000) * 250_000,
+    salary: gender === 'Female'
+      ? calcWNBASalary(rating, _leagueYear)
+      : Math.round((
+          rating >= 95 ? 35_000_000 + (rating - 95) * 1_750_000 :  // $35M–$42M (supermax tier)
+          rating >= 88 ? 18_000_000 + (rating - 88) * 2_428_571 :  // $18M–$33M (star tier)
+          rating >= 80 ? 8_500_000  + (rating - 80) * 1_187_500 :  // $8.5M–$17.5M (starter tier)
+          rating >= 70 ? 3_500_000  + (rating - 70) * 500_000   :  // $3.5M–$8.5M (role player)
+          rating >= 60 ? 1_500_000  + (rating - 60) * 200_000   :  // $1.5M–$3.5M (bench)
+                         1_100_000                                  // league minimum
+        ) * (0.85 + Math.random() * 0.30) / 250_000) * 250_000,
     contractYears: Math.floor(Math.random() * 5) + 1,
     stats: { 
       points: 0, rebounds: 0, offReb: 0, defReb: 0, assists: 0, steals: 0, blocks: 0, gamesPlayed: 0, gamesStarted: 0,
@@ -1472,13 +1505,15 @@ export const generateFreeAgentPool = (count: number, season: number, genderRatio
       contractYears: 0,
       desiredContract: {
         years: Math.floor(Math.random() * 3) + 1,
-        salary: Math.round((
-          skewedRating >= 95 ? 35_000_000 + (skewedRating - 95) * 1_750_000 :
-          skewedRating >= 88 ? 18_000_000 + (skewedRating - 88) * 2_428_571 :
-          skewedRating >= 80 ? 8_500_000  + (skewedRating - 80) * 1_187_500 :
-          skewedRating >= 70 ? 3_500_000  + (skewedRating - 70) * 500_000   :
-          skewedRating >= 60 ? 1_500_000  + (skewedRating - 60) * 200_000   : 1_100_000
-        ) * (0.90 + Math.random() * 0.20) / 250_000) * 250_000
+        salary: p.gender === 'Female'
+          ? calcWNBASalary(skewedRating, season)
+          : Math.round((
+              skewedRating >= 95 ? 35_000_000 + (skewedRating - 95) * 1_750_000 :
+              skewedRating >= 88 ? 18_000_000 + (skewedRating - 88) * 2_428_571 :
+              skewedRating >= 80 ? 8_500_000  + (skewedRating - 80) * 1_187_500 :
+              skewedRating >= 70 ? 3_500_000  + (skewedRating - 70) * 500_000   :
+              skewedRating >= 60 ? 1_500_000  + (skewedRating - 60) * 200_000   : 1_100_000
+            ) * (0.90 + Math.random() * 0.20) / 250_000) * 250_000
       },
       interestScore: 30 + Math.floor(Math.random() * 50)
     };
