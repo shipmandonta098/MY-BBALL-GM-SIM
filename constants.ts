@@ -2141,6 +2141,13 @@ export interface HistoricalFinancials {
   luxuryTaxMultiplier: number;
   /** Descriptive note shown in UI */
   note: string;
+  // ── Optional WNBA / Women's league extensions ──
+  maxContractYears?: 2 | 3 | 4 | 5;
+  maxPlayerSalaryPct?: 25 | 30 | 35;
+  birdRights?: boolean;
+  draftRounds?: number;
+  draftClassSize?: 'Small' | 'Normal' | 'Large';
+  tradableDraftPickSeasons?: number;
 }
 
 interface EraEntry {
@@ -2339,95 +2346,102 @@ export const getHistoricalFinancials = (year: number): HistoricalFinancials => {
 };
 
 // ── WNBA / Women's League Historical Financials ──────────────────────────────
+// Years 1947–1996 intentionally omitted: dropdown is restricted to 1997+ for Women's leagues.
 
 const WNBA_ERA_TABLE: EraEntry[] = [
   {
-    from: 1947, to: 1977,
-    f: {
-      era: 'Pre-Women\'s League Era', salaryCap: 0, luxuryTaxLine: 0, luxuryTaxThreshold: 0,
-      rookieScaleContracts: false, tradeSalaryMatchPct: 100, minPayroll: 0,
-      luxuryTaxMultiplier: 1.0,
-      note: 'No formal women\'s professional basketball league. Barnstorming and amateur play only.',
-    },
-  },
-  {
-    from: 1978, to: 1996,
-    f: {
-      era: 'Early Women\'s Leagues (WBL/ABL)', salaryCap: 100_000, luxuryTaxLine: 0, luxuryTaxThreshold: 0,
-      rookieScaleContracts: false, tradeSalaryMatchPct: 100, minPayroll: 0,
-      luxuryTaxMultiplier: 1.0,
-      note: 'WBL (1978–81) and ABL (1996–98) — tiny budgets, no formal cap structure.',
-    },
-  },
-  {
     from: 1997, to: 1999,
     f: {
-      era: 'WNBA Inaugural Era', salaryCap: 400_000, luxuryTaxLine: 0, luxuryTaxThreshold: 0,
+      era: 'WNBA Inaugural Era',
+      salaryCap: 400_000, luxuryTaxLine: 0, luxuryTaxThreshold: 0,
       rookieScaleContracts: false, tradeSalaryMatchPct: 100, minPayroll: 0,
       luxuryTaxMultiplier: 1.0,
-      note: 'WNBA founded 1997. NBA-subsidized model. Team cap ~$350K–$450K.',
+      maxContractYears: 2, maxPlayerSalaryPct: 25, birdRights: false,
+      draftRounds: 3, draftClassSize: 'Small', tradableDraftPickSeasons: 1,
+      note: 'WNBA founded 1997. NBA-subsidized, minimal salaries. Max $50K/yr. 3-round draft.',
     },
   },
   {
     from: 2000, to: 2002,
     f: {
-      era: 'Early WNBA', salaryCap: 550_000, luxuryTaxLine: 0, luxuryTaxThreshold: 0,
+      era: 'Early WNBA',
+      salaryCap: 550_000, luxuryTaxLine: 0, luxuryTaxThreshold: 0,
       rookieScaleContracts: false, tradeSalaryMatchPct: 100, minPayroll: 0,
       luxuryTaxMultiplier: 1.0,
-      note: 'WNBA stabilizes. Cap grows slowly to ~$550K. No luxury tax.',
+      maxContractYears: 2, maxPlayerSalaryPct: 25, birdRights: false,
+      draftRounds: 3, draftClassSize: 'Small', tradableDraftPickSeasons: 1,
+      note: 'Early WNBA era — minimal salaries. Team cap grows slowly to ~$550K.',
     },
   },
   {
     from: 2003, to: 2007,
     f: {
-      era: 'WNBA 2003 CBA', salaryCap: 740_000, luxuryTaxLine: 0, luxuryTaxThreshold: 0,
+      era: 'WNBA 2003 CBA',
+      salaryCap: 740_000, luxuryTaxLine: 0, luxuryTaxThreshold: 0,
       rookieScaleContracts: true, tradeSalaryMatchPct: 100, minPayroll: 0,
       luxuryTaxMultiplier: 1.0,
-      note: '2003 CBA introduced rookie salary scale. Cap ~$700K–$800K.',
+      maxContractYears: 3, maxPlayerSalaryPct: 25, birdRights: false,
+      draftRounds: 3, draftClassSize: 'Small', tradableDraftPickSeasons: 2,
+      note: '2003 CBA: rookie salary scale introduced. Cap ~$700K–$800K. Max contracts now 3 years.',
     },
   },
   {
     from: 2008, to: 2012,
     f: {
-      era: 'Mid WNBA Era', salaryCap: 878_000, luxuryTaxLine: 0, luxuryTaxThreshold: 0,
+      era: 'Mid WNBA Era',
+      salaryCap: 878_000, luxuryTaxLine: 0, luxuryTaxThreshold: 0,
       rookieScaleContracts: true, tradeSalaryMatchPct: 100, minPayroll: 0,
       luxuryTaxMultiplier: 1.0,
+      maxContractYears: 3, maxPlayerSalaryPct: 25, birdRights: false,
+      draftRounds: 3, draftClassSize: 'Small', tradableDraftPickSeasons: 2,
       note: 'Cap inches toward $900K. Growth largely flat. No luxury tax system.',
     },
   },
   {
     from: 2013, to: 2019,
     f: {
-      era: 'Modern WNBA', salaryCap: 1_000_000, luxuryTaxLine: 0, luxuryTaxThreshold: 0,
+      era: 'Modern WNBA',
+      salaryCap: 1_000_000, luxuryTaxLine: 0, luxuryTaxThreshold: 0,
       rookieScaleContracts: true, tradeSalaryMatchPct: 100, minPayroll: 0,
       luxuryTaxMultiplier: 1.0,
-      note: 'Cap crosses $1M for the first time. Salaries remain historically low relative to NBA.',
+      maxContractYears: 4, maxPlayerSalaryPct: 30, birdRights: false,
+      draftRounds: 3, draftClassSize: 'Normal', tradableDraftPickSeasons: 2,
+      note: 'Cap crosses $1M. Player activism pushes for better conditions. Max contracts now 4 years.',
     },
   },
   {
     from: 2020, to: 2024,
     f: {
-      era: '2020 Landmark CBA', salaryCap: 1_800_000, luxuryTaxLine: 0, luxuryTaxThreshold: 0,
+      era: '2020 Landmark CBA',
+      salaryCap: 1_800_000, luxuryTaxLine: 0, luxuryTaxThreshold: 0,
       rookieScaleContracts: true, tradeSalaryMatchPct: 100, minPayroll: 500_000,
       luxuryTaxMultiplier: 1.0,
-      note: '2020 CBA: biggest pay increase in WNBA history at the time. Cap grows to ~$1.8M.',
+      maxContractYears: 4, maxPlayerSalaryPct: 30, birdRights: true,
+      draftRounds: 3, draftClassSize: 'Normal', tradableDraftPickSeasons: 3,
+      note: '2020 CBA: biggest pay jump in WNBA history at the time. Bird Rights introduced. Cap ~$1.8M.',
     },
   },
   {
     from: 2025, to: 2025,
     f: {
-      era: '2025 Historic CBA', salaryCap: 2_200_000, luxuryTaxLine: 0, luxuryTaxThreshold: 0,
+      era: '2025 Historic CBA',
+      salaryCap: 2_200_000, luxuryTaxLine: 0, luxuryTaxThreshold: 0,
       rookieScaleContracts: true, tradeSalaryMatchPct: 100, minPayroll: 800_000,
       luxuryTaxMultiplier: 1.0,
-      note: 'January 2025 CBA: historic salary jump. Max salaries and team cap surge to ~$2.2M.',
+      maxContractYears: 5, maxPlayerSalaryPct: 30, birdRights: true,
+      draftRounds: 3, draftClassSize: 'Normal', tradableDraftPickSeasons: 3,
+      note: 'January 2025 CBA: historic salary jump. Max 5-year deals. Team cap surges to ~$2.2M.',
     },
   },
   {
     from: 2026, to: 2099,
     f: {
-      era: 'Future WNBA Projection', salaryCap: 7_000_000, luxuryTaxLine: 8_500_000, luxuryTaxThreshold: 0,
+      era: 'Future WNBA Projection',
+      salaryCap: 7_000_000, luxuryTaxLine: 8_500_000, luxuryTaxThreshold: 0,
       rookieScaleContracts: true, tradeSalaryMatchPct: 110, minPayroll: 3_000_000,
       luxuryTaxMultiplier: 1.5,
+      maxContractYears: 5, maxPlayerSalaryPct: 35, birdRights: true,
+      draftRounds: 3, draftClassSize: 'Normal', tradableDraftPickSeasons: 4,
       note: 'Projected from 2026 CBA negotiations. Major growth expected as WNBA viewership surges.',
     },
   },
