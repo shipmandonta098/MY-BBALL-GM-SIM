@@ -2337,3 +2337,103 @@ export const getHistoricalFinancials = (year: number): HistoricalFinancials => {
   const entry = ERA_TABLE.find(e => year >= e.from && year <= e.to);
   return entry ? entry.f : ERA_TABLE[ERA_TABLE.length - 1].f;
 };
+
+// ── WNBA / Women's League Historical Financials ──────────────────────────────
+
+const WNBA_ERA_TABLE: EraEntry[] = [
+  {
+    from: 1947, to: 1977,
+    f: {
+      era: 'Pre-Women\'s League Era', salaryCap: 0, luxuryTaxLine: 0, luxuryTaxThreshold: 0,
+      rookieScaleContracts: false, tradeSalaryMatchPct: 100, minPayroll: 0,
+      luxuryTaxMultiplier: 1.0,
+      note: 'No formal women\'s professional basketball league. Barnstorming and amateur play only.',
+    },
+  },
+  {
+    from: 1978, to: 1996,
+    f: {
+      era: 'Early Women\'s Leagues (WBL/ABL)', salaryCap: 100_000, luxuryTaxLine: 0, luxuryTaxThreshold: 0,
+      rookieScaleContracts: false, tradeSalaryMatchPct: 100, minPayroll: 0,
+      luxuryTaxMultiplier: 1.0,
+      note: 'WBL (1978–81) and ABL (1996–98) — tiny budgets, no formal cap structure.',
+    },
+  },
+  {
+    from: 1997, to: 1999,
+    f: {
+      era: 'WNBA Inaugural Era', salaryCap: 400_000, luxuryTaxLine: 0, luxuryTaxThreshold: 0,
+      rookieScaleContracts: false, tradeSalaryMatchPct: 100, minPayroll: 0,
+      luxuryTaxMultiplier: 1.0,
+      note: 'WNBA founded 1997. NBA-subsidized model. Team cap ~$350K–$450K.',
+    },
+  },
+  {
+    from: 2000, to: 2002,
+    f: {
+      era: 'Early WNBA', salaryCap: 550_000, luxuryTaxLine: 0, luxuryTaxThreshold: 0,
+      rookieScaleContracts: false, tradeSalaryMatchPct: 100, minPayroll: 0,
+      luxuryTaxMultiplier: 1.0,
+      note: 'WNBA stabilizes. Cap grows slowly to ~$550K. No luxury tax.',
+    },
+  },
+  {
+    from: 2003, to: 2007,
+    f: {
+      era: 'WNBA 2003 CBA', salaryCap: 740_000, luxuryTaxLine: 0, luxuryTaxThreshold: 0,
+      rookieScaleContracts: true, tradeSalaryMatchPct: 100, minPayroll: 0,
+      luxuryTaxMultiplier: 1.0,
+      note: '2003 CBA introduced rookie salary scale. Cap ~$700K–$800K.',
+    },
+  },
+  {
+    from: 2008, to: 2012,
+    f: {
+      era: 'Mid WNBA Era', salaryCap: 878_000, luxuryTaxLine: 0, luxuryTaxThreshold: 0,
+      rookieScaleContracts: true, tradeSalaryMatchPct: 100, minPayroll: 0,
+      luxuryTaxMultiplier: 1.0,
+      note: 'Cap inches toward $900K. Growth largely flat. No luxury tax system.',
+    },
+  },
+  {
+    from: 2013, to: 2019,
+    f: {
+      era: 'Modern WNBA', salaryCap: 1_000_000, luxuryTaxLine: 0, luxuryTaxThreshold: 0,
+      rookieScaleContracts: true, tradeSalaryMatchPct: 100, minPayroll: 0,
+      luxuryTaxMultiplier: 1.0,
+      note: 'Cap crosses $1M for the first time. Salaries remain historically low relative to NBA.',
+    },
+  },
+  {
+    from: 2020, to: 2024,
+    f: {
+      era: '2020 Landmark CBA', salaryCap: 1_800_000, luxuryTaxLine: 0, luxuryTaxThreshold: 0,
+      rookieScaleContracts: true, tradeSalaryMatchPct: 100, minPayroll: 500_000,
+      luxuryTaxMultiplier: 1.0,
+      note: '2020 CBA: biggest pay increase in WNBA history at the time. Cap grows to ~$1.8M.',
+    },
+  },
+  {
+    from: 2025, to: 2025,
+    f: {
+      era: '2025 Historic CBA', salaryCap: 2_200_000, luxuryTaxLine: 0, luxuryTaxThreshold: 0,
+      rookieScaleContracts: true, tradeSalaryMatchPct: 100, minPayroll: 800_000,
+      luxuryTaxMultiplier: 1.0,
+      note: 'January 2025 CBA: historic salary jump. Max salaries and team cap surge to ~$2.2M.',
+    },
+  },
+  {
+    from: 2026, to: 2099,
+    f: {
+      era: 'Future WNBA Projection', salaryCap: 7_000_000, luxuryTaxLine: 8_500_000, luxuryTaxThreshold: 0,
+      rookieScaleContracts: true, tradeSalaryMatchPct: 110, minPayroll: 3_000_000,
+      luxuryTaxMultiplier: 1.5,
+      note: 'Projected from 2026 CBA negotiations. Major growth expected as WNBA viewership surges.',
+    },
+  },
+];
+
+export const getWNBAHistoricalFinancials = (year: number): HistoricalFinancials => {
+  const entry = WNBA_ERA_TABLE.find(e => year >= e.from && year <= e.to);
+  return entry ? entry.f : WNBA_ERA_TABLE[WNBA_ERA_TABLE.length - 1].f;
+};
