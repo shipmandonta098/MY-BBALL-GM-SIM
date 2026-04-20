@@ -2,6 +2,7 @@
 import React, { useState, useMemo } from 'react';
 import { LeagueState, LeagueSettings } from '../types';
 import { getHistoricalFinancials } from '../constants';
+import NumericInput from './NumericInput';
 
 interface SettingsProps {
   league: LeagueState;
@@ -372,7 +373,7 @@ const Settings: React.FC<SettingsProps> = ({ league, updateLeague, onRegenerateS
     </div>
   );
 
-  const NumberInputField = ({ label, value, min, max, step = 1, onChange, unit = '', placeholder = '' }: {
+  const NumberInputField = ({ label, value, min, max, onChange, unit = '', placeholder = '' }: {
     label: string; value: number; min: number; max: number; step?: number;
     onChange: (v: number) => void; unit?: string; placeholder?: string;
   }) => (
@@ -381,10 +382,12 @@ const Settings: React.FC<SettingsProps> = ({ league, updateLeague, onRegenerateS
         <label className="text-[10px] font-black uppercase text-slate-500 tracking-widest">{label}</label>
         {unit && <span className="text-xs text-slate-500 font-bold">{unit}</span>}
       </div>
-      <input
-        type="number" min={min} max={max} step={step} value={value || ''}
+      <NumericInput
+        value={value}
+        min={min}
+        max={max}
+        onChange={onChange}
         placeholder={placeholder}
-        onChange={e => { const n = parseFloat(e.target.value); if (!isNaN(n)) onChange(Math.min(max, Math.max(min, n))); }}
         className="w-full bg-slate-900 border border-slate-700 rounded-xl px-4 py-3 text-amber-400 font-display font-bold text-xl focus:outline-none focus:border-amber-500/50"
       />
     </div>
