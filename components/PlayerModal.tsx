@@ -945,27 +945,28 @@ const PlayerModal: React.FC<PlayerModalProps> = ({
         <div
           className="relative h-64 shrink-0 overflow-hidden"
           style={leagueContext?.teamPrimaryColor
-            ? { background: `linear-gradient(135deg, #0f172a 0%, ${leagueContext.teamPrimaryColor}26 100%)` }
-            : { backgroundColor: '#1e293b' }}
+            ? { background: `linear-gradient(135deg, #0f172a 0%, ${leagueContext.teamPrimaryColor}30 100%)` }
+            : { backgroundColor: '#0f172a' }}
         >
           {/* Team logo — faded background element */}
           {leagueContext?.teamLogo ? (
             <img
               src={leagueContext.teamLogo}
               alt=""
-              className="absolute right-0 top-1/2 -translate-y-1/2 w-72 h-72 object-contain pointer-events-none select-none"
-              style={{ opacity: 0.07 }}
+              className="absolute right-2 top-1/2 -translate-y-1/2 w-80 h-80 object-contain pointer-events-none select-none"
+              style={{ opacity: 0.13 }}
               referrerPolicy="no-referrer"
               onError={e => { (e.currentTarget as HTMLImageElement).style.display = 'none'; }}
             />
           ) : (
-            <div className="text-[12rem] md:text-[14rem] font-display font-black text-white/[0.03] absolute -top-10 md:-top-20 right-4 pointer-events-none select-none">
+            <div className="absolute right-4 top-1/2 -translate-y-1/2 font-display font-black text-white/[0.04] pointer-events-none select-none leading-none"
+              style={{ fontSize: '18rem' }}>
               #{player.jerseyNumber}
             </div>
           )}
-          {/* Gradient overlay — sits above logo, keeps text readable */}
-          <div className="absolute inset-0 bg-gradient-to-r from-slate-950/95 via-slate-950/60 to-transparent" />
-          <div className="absolute inset-0 bg-gradient-to-t from-slate-950 via-transparent to-slate-950/30" />
+          {/* Gradient overlays — keep left-side text crisp */}
+          <div className="absolute inset-0 bg-gradient-to-r from-slate-950 via-slate-950/70 to-transparent" />
+          <div className="absolute inset-0 bg-gradient-to-t from-slate-950 via-transparent to-slate-950/20" />
           <div className="absolute bottom-8 left-10 md:bottom-10 md:left-12 flex items-end gap-8">
 
             <div className="relative z-10 flex flex-col">

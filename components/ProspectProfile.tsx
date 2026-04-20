@@ -89,11 +89,34 @@ const ProspectProfile: React.FC<ProspectProfileProps> = ({
     >
       <div className="relative bg-slate-900 border border-slate-700 rounded-3xl w-full max-w-3xl max-h-[92vh] overflow-y-auto shadow-2xl animate-in zoom-in-95 duration-300 scrollbar-thin scrollbar-thumb-slate-700">
 
-        {/* ── Sticky Header ── */}
-        <div className="sticky top-0 z-10 bg-slate-900/95 backdrop-blur-sm border-b border-slate-800 p-6 flex items-start justify-between gap-4 rounded-t-3xl">
-          <div className="min-w-0">
-            <div className="flex items-center flex-wrap gap-2 mb-1">
-              <span className="text-[10px] font-black uppercase tracking-[0.4em] text-slate-500">
+        {/* ── Sticky close bar ── */}
+        <div className="sticky top-0 z-20 flex justify-end px-5 py-3 bg-transparent pointer-events-none rounded-t-3xl">
+          <button
+            onClick={onClose}
+            className="pointer-events-auto w-10 h-10 rounded-full bg-slate-800/80 backdrop-blur-sm hover:bg-slate-700 border border-slate-700 flex items-center justify-center text-slate-400 hover:text-white transition-all shadow-lg"
+            aria-label="Close"
+          >
+            ✕
+          </button>
+        </div>
+
+        {/* ── Hero header ── */}
+        <div className="relative h-56 -mt-16 shrink-0 overflow-hidden rounded-t-3xl">
+          {/* Faded rank number — background element */}
+          <div
+            className="absolute right-0 top-1/2 -translate-y-1/2 font-display font-black text-white pointer-events-none select-none leading-none"
+            style={{ fontSize: '20rem', opacity: 0.04 }}
+          >
+            {prospect.mockRank}
+          </div>
+          {/* Draft-themed gradient */}
+          <div className="absolute inset-0" style={{ background: 'linear-gradient(135deg, #0f172a 0%, #1e1a0a 100%)' }} />
+          <div className="absolute inset-0 bg-gradient-to-r from-slate-950 via-slate-950/70 to-transparent" />
+          <div className="absolute inset-0 bg-gradient-to-t from-slate-950 via-transparent to-slate-950/20" />
+          {/* Content */}
+          <div className="absolute bottom-6 left-8 md:left-10 z-10">
+            <div className="flex items-center flex-wrap gap-2 mb-2">
+              <span className="text-[10px] font-black uppercase tracking-[0.4em] text-amber-500/70">
                 #{prospect.mockRank} Big Board
               </span>
               {prospect.archetype && (
@@ -102,10 +125,10 @@ const ProspectProfile: React.FC<ProspectProfileProps> = ({
                 </span>
               )}
             </div>
-            <h2 className="text-2xl md:text-3xl font-display font-black uppercase tracking-tight text-white truncate">
+            <h2 className="text-4xl md:text-6xl font-display font-black uppercase tracking-tighter text-white drop-shadow-lg leading-tight">
               {prospect.name}
             </h2>
-            <p className="text-sm text-slate-400 mt-1 flex flex-wrap gap-x-2">
+            <p className="text-sm text-slate-400 mt-1.5 flex flex-wrap gap-x-2">
               <span className="text-amber-500 font-bold">{prospect.position}</span>
               <span>·</span>
               <span>{prospect.height}, {prospect.weight} lbs</span>
@@ -115,13 +138,6 @@ const ProspectProfile: React.FC<ProspectProfileProps> = ({
               <span className="italic">{prospect.school}</span>
             </p>
           </div>
-          <button
-            onClick={onClose}
-            className="shrink-0 w-10 h-10 rounded-full bg-slate-800 hover:bg-slate-700 flex items-center justify-center text-slate-400 hover:text-white transition-all"
-            aria-label="Close"
-          >
-            ✕
-          </button>
         </div>
 
         <div className="p-6 space-y-6">
