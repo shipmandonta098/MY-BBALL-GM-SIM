@@ -434,7 +434,7 @@ const LeagueConfiguration: React.FC<LeagueConfigurationProps> = ({ onConfirm, on
           <Field label="Starting Year" error={errors.year}>
             <select value={year} onChange={e => setYear(parseInt(e.target.value))}
               className={`w-full bg-slate-950 border rounded-xl px-4 py-3 text-white font-display text-lg focus:outline-none appearance-none cursor-pointer ${errors.year ? 'border-rose-500' : 'border-slate-800'}`}>
-              {Array.from({ length: 126 }, (_, i) => 1980 + i).map(y => (
+              {Array.from({ length: 80 }, (_, i) => 1947 + i).map(y => (
                 <option key={y} value={y}>{y}</option>
               ))}
             </select>
