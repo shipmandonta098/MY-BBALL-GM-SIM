@@ -3231,6 +3231,8 @@ const App: React.FC = () => {
               teamWins: playerTeam?.wins,
               teamLosses: playerTeam?.losses,
               teamRotation: playerTeam?.rotation,
+              teamLogo: playerTeam?.logo,
+              teamPrimaryColor: playerTeam?.primaryColor,
             }}
             teams={league.teams.map(t => t.name)}
           />
