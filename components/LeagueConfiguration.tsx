@@ -250,6 +250,12 @@ const LeagueConfiguration: React.FC<LeagueConfigurationProps> = ({ onConfirm, on
 
   // ── Auto-load historical financials when year or gender changes ──────────
   const isWomensLeague = playerGenderRatio === 100;
+
+  // Clamp year to WNBA minimum when switching to Women's league
+  useEffect(() => {
+    if (isWomensLeague && year < 1997) setYear(1997);
+  }, [isWomensLeague]);
+
   useEffect(() => {
     if (historicalOverride) return;
     const h = isWomensLeague ? getWNBAHistoricalFinancials(year) : getHistoricalFinancials(year);
@@ -260,6 +266,14 @@ const LeagueConfiguration: React.FC<LeagueConfigurationProps> = ({ onConfirm, on
     setMinPayroll(h.minPayroll > 0 ? h.minPayroll : payrollDefault);
     setLuxuryTaxThreshold(h.luxuryTaxThreshold > 0 ? h.luxuryTaxThreshold : taxDefault);
     setRookieScaleContracts(h.rookieScaleContracts);
+    if (isWomensLeague) {
+      if (h.maxContractYears)       setMaxContractYears(h.maxContractYears);
+      if (h.maxPlayerSalaryPct)     setMaxPlayerSalaryPct(h.maxPlayerSalaryPct);
+      if (h.birdRights !== undefined) setBirdRights(h.birdRights);
+      if (h.draftRounds)            setDraftRounds(h.draftRounds);
+      if (h.draftClassSize)         setDraftClassSize(h.draftClassSize);
+      if (h.tradableDraftPickSeasons !== undefined) setTradableDraftPickSeasons(h.tradableDraftPickSeasons);
+    }
   }, [year, historicalOverride, isWomensLeague]);
 
   const handleGodModeToggle = (checked: boolean) => {
@@ -272,10 +286,10 @@ const LeagueConfiguration: React.FC<LeagueConfigurationProps> = ({ onConfirm, on
     if (!name.trim())          errs.name = 'League name is required.';
     else if (name.length > 30) errs.name = 'League name must be 30 characters or fewer.';
     if (!year || year < 1900 || year > 2200) errs.year = 'Starting year must be between 1900 and 2200.';
+    if (isWomensLeague && year < 1997) errs.year = 'WNBA era starts in 1997.';
     if (seasonLength < 20 || seasonLength > 82) errs.seasonLength = 'Season length must be between 20 and 82 games.';
-    const h = getHistoricalFinancials(year);
-    const effectiveCap = h.salaryCap > 0 ? salaryCap : salaryCap; // always present
-    if (effectiveCap < 1_000_000 || effectiveCap > 300_000_000) errs.salaryCap = 'Salary cap must be $1M – $300M.';
+    const capMin = isWomensLeague ? 50_000 : 1_000_000;
+    if (salaryCap < capMin || salaryCap > 300_000_000) errs.salaryCap = isWomensLeague ? 'Salary cap must be $50K – $300M.' : 'Salary cap must be $1M – $300M.';
     setErrors(errs);
     return Object.keys(errs).length === 0;
   };
@@ -438,10 +452,18 @@ const LeagueConfiguration: React.FC<LeagueConfigurationProps> = ({ onConfirm, on
           <Field label="Starting Year" error={errors.year}>
             <select value={year} onChange={e => setYear(parseInt(e.target.value))}
               className={`w-full bg-slate-950 border rounded-xl px-4 py-3 text-white font-display text-lg focus:outline-none appearance-none cursor-pointer ${errors.year ? 'border-rose-500' : 'border-slate-800'}`}>
-              {Array.from({ length: 80 }, (_, i) => 1947 + i).map(y => (
-                <option key={y} value={y}>{y}</option>
-              ))}
+              {isWomensLeague
+                ? Array.from({ length: 30 }, (_, i) => 1997 + i).map(y => (
+                    <option key={y} value={y}>{y}</option>
+                  ))
+                : Array.from({ length: 80 }, (_, i) => 1947 + i).map(y => (
+                    <option key={y} value={y}>{y}</option>
+                  ))
+              }
             </select>
+            {isWomensLeague && (
+              <p className="text-[9px] text-violet-400/70 font-bold mt-1 uppercase tracking-widest">WNBA era: 1997–2026</p>
+            )}
           </Field>
         </div>
 
@@ -484,7 +506,7 @@ const LeagueConfiguration: React.FC<LeagueConfigurationProps> = ({ onConfirm, on
                   {historicalOverride ? 'Restore Historical' : 'Override (Alt History)'}
                 </button>
               </div>
-              <div className="flex flex-wrap gap-3 text-[10px] font-bold text-slate-400">
+              <div className="flex flex-wrap gap-x-3 gap-y-1 text-[10px] font-bold text-slate-400">
                 <span className={noCap ? 'text-rose-400' : 'text-slate-300'}>
                   Cap: {noCap ? 'None' : h.salaryCap < 1_000_000
                     ? `$${(h.salaryCap / 1_000).toFixed(0)}K`
@@ -500,6 +522,11 @@ const LeagueConfiguration: React.FC<LeagueConfigurationProps> = ({ onConfirm, on
                 <span>Rookie Scale: {h.rookieScaleContracts ? 'Yes' : 'No'}</span>
                 <span>·</span>
                 <span>Trade Match: {h.tradeSalaryMatchPct === 100 ? 'Unrestricted' : `${h.tradeSalaryMatchPct}%`}</span>
+                {isWomensLeague && h.maxContractYears && (<><span>·</span><span>Max Contract: {h.maxContractYears}yr</span></>)}
+                {isWomensLeague && h.maxPlayerSalaryPct && (<><span>·</span><span>Max Salary: {h.maxPlayerSalaryPct}% of cap</span></>)}
+                {isWomensLeague && h.birdRights !== undefined && (<><span>·</span><span>Bird Rights: {h.birdRights ? 'Yes' : 'No'}</span></>)}
+                {isWomensLeague && h.draftRounds && (<><span>·</span><span>Draft: {h.draftRounds} rounds</span></>)}
+                {isWomensLeague && h.draftClassSize && (<><span>·</span><span>Class Size: {h.draftClassSize}</span></>)}
               </div>
               {!historicalOverride && (
                 <p className="text-[9px] text-slate-600 italic">{h.note}</p>
