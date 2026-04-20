@@ -2896,16 +2896,19 @@ const generateQuarterPBP = (
   isGarbageTime = false,
   /** How many consecutive possessions this team has scored (momentum counter) */
   momentumStreak = 0,
+  /** Minutes per quarter (default 12) — must match league settings */
+  quarterLength = 12,
 ): { events: PlayByPlayEvent[]; teamStreak: number } => {
   const events: PlayByPlayEvent[] = [];
   let teamStreak = momentumStreak; // consecutive scoring possessions
   let emergencyBoostPoss = 0;      // possessions remaining with emergency +10% boost
 
   // ── Running quarter clock ─────────────────────────────────────────────────
-  // Counts DOWN from 720 s (12:00) to 0 (0:00). Every possession consumes a
-  // slice of the 720-second quarter. Sub-events within a single possession each
+  // Counts DOWN from (quarterLength * 60) s to 0. Every possession consumes a
+  // slice of the quarter. Sub-events within a single possession each
   // tick the clock by 1–3 s so no two events share the same timestamp.
-  let clockSecs = 12 * 60;
+  const quarterSecs = quarterLength * 60;
+  let clockSecs = quarterSecs;
   const fmtClock = (s: number): string => {
     const clamped = Math.max(0, s);
     return `${Math.floor(clamped / 60)}:${String(clamped % 60).padStart(2, '0')}`;
@@ -2927,7 +2930,7 @@ const generateQuarterPBP = (
     // Each PBP possession represents ~3 real possessions; spread 720 s evenly
     // with ±4 s jitter so the clock feels organic. Sub-events tick down 1–3 s
     // from the possession's start time so every line has a unique timestamp.
-    const possClockUsed = Math.max(12, Math.round(720 / Math.max(1, sample)) + Math.floor(Math.random() * 9) - 4);
+    const possClockUsed = Math.max(12, Math.round(quarterSecs / Math.max(1, sample)) + Math.floor(Math.random() * 9) - 4);
     let subSec = clockSecs;                       // start of this possession's time window
     clockSecs  = Math.max(1, clockSecs - possClockUsed); // advance main clock FIRST
     const subFloor = clockSecs;                   // sub-events stay within this possession's window
@@ -3703,18 +3706,19 @@ export const simulateGame = (
     // In the NBA, starters always open the 1st and 3rd quarters regardless of
     // foul trouble or fatigue (unless 5 fouls / injured, handled by rotation setup).
     // Sub logic does not fire for the first 2 minutes of Q3.
+    const qStartTime = `${quarterLength}:00`;
     if (q === 1) {
-      pbp.push({ time: '12:00', text: `${home.name} and ${away.name} are set — starting lineups on the floor for tip-off.`, type: 'info', quarter: 1 });
+      pbp.push({ time: qStartTime, text: `${home.name} and ${away.name} are set — starting lineups on the floor for tip-off.`, type: 'info', quarter: 1 });
     }
     if (q === 3) {
-      pbp.push({ time: '12:00', text: `${home.name} opens the second half with their starting lineup.`, type: 'info', quarter: 3 });
-      pbp.push({ time: '12:00', text: `${away.name} opens the second half with their starting lineup.`, type: 'info', quarter: 3 });
+      pbp.push({ time: qStartTime, text: `${home.name} opens the second half with their starting lineup.`, type: 'info', quarter: 3 });
+      pbp.push({ time: qStartTime, text: `${away.name} opens the second half with their starting lineup.`, type: 'info', quarter: 3 });
     }
 
     const homePBPBoost = homeOff * 0.5;
     const awayPBPBoost = awayOff * 0.5;
-    const hResult = generateQuarterPBP(home, away, q, homeQPoss, homeScheme, homeStreaks, homePBPBoost, garbageTime, homeQStreak);
-    const aResult = generateQuarterPBP(away, home, q, awayQPoss, awayScheme, awayStreaks, awayPBPBoost, garbageTime, awayQStreak);
+    const hResult = generateQuarterPBP(home, away, q, homeQPoss, homeScheme, homeStreaks, homePBPBoost, garbageTime, homeQStreak, quarterLength);
+    const aResult = generateQuarterPBP(away, home, q, awayQPoss, awayScheme, awayStreaks, awayPBPBoost, garbageTime, awayQStreak, quarterLength);
     homeQStreak = hResult.teamStreak;
     awayQStreak = aResult.teamStreak;
 

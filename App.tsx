@@ -1958,17 +1958,22 @@ const App: React.FC = () => {
         : (Math.random() < 0.3 && aiTeamsNeedingHelp.length > 0
             ? [aiTeamsNeedingHelp[Math.floor(Math.random() * aiTeamsNeedingHelp.length)]]
             : []);
+      const isWomensLeague = (newState.settings.playerGenderRatio ?? 0) === 100;
+      const leagueMin = isWomensLeague ? Math.round(cap * 0.012) : 600_000;
       for (const team of teamsToProcess) {
         const teamSalary = team.roster.reduce((s, p) => s + (p.salary || 0), 0);
         const teamCapSpace = cap - teamSalary;
-        if (teamCapSpace < 600_000) continue;
+        if (teamCapSpace < leagueMin) continue;
         const eligible = [...newState.freeAgents]
-          .filter(fa => (fa.desiredContract?.salary || 600_000) <= teamCapSpace * 1.2)
+          .filter(fa => (fa.desiredContract?.salary || leagueMin) <= teamCapSpace * 1.2)
           .sort((a, b) => b.rating - a.rating);
         if (eligible.length === 0) continue;
         const fa = eligible[Math.floor(Math.random() * Math.min(3, eligible.length))];
-        const rawSalary = Math.round((fa.desiredContract?.salary || 1_500_000) * (0.8 + Math.random() * 0.3) / 250_000) * 250_000;
-        const salary = Math.max(600_000, Math.min(rawSalary, teamCapSpace));
+        const faDesired = fa.desiredContract?.salary || leagueMin;
+        const rawSalary = isWomensLeague
+          ? Math.round(faDesired * (0.8 + Math.random() * 0.3))
+          : Math.round(faDesired * (0.8 + Math.random() * 0.3) / 250_000) * 250_000;
+        const salary = Math.max(leagueMin, Math.min(rawSalary, teamCapSpace));
         const signingType = isPreseasonPhaseSign ? 'training camp contract' : (salary <= 700_000 ? '10-day' : 'rest-of-season minimum');
         const signedPlayer = { ...fa, isFreeAgent: false, inSeasonFA: false, salary, contractYears: 1, morale: Math.min(100, (fa.morale || 70) + 5) };
         newState = {
