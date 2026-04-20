@@ -1500,6 +1500,147 @@ const App: React.FC = () => {
     const gameAttendance = computeGameAttendance(homeTeam, awayTeam);
     newState = { ...state, teams: updatedTeams, history: [result, ...state.history], schedule: state.schedule.map(sg => sg.id === gameId ? { ...sg, played: true, resultId: result.id, attendance: gameAttendance } : sg), rivalryHistory };
 
+    // ── Game Result News ──────────────────────────────────────────────────────
+    {
+      const margin = Math.abs(result.homeScore - result.awayScore);
+      const winnerTeam = newState.teams.find(t => t.id === (homeWon ? homeTeam.id : awayTeam.id))!;
+      const loserTeam  = newState.teams.find(t => t.id === (homeWon ? awayTeam.id : homeTeam.id))!;
+      const winScore   = homeWon ? result.homeScore : result.awayScore;
+      const loseScore  = homeWon ? result.awayScore : result.homeScore;
+      const score      = `${winScore}-${loseScore}`;
+
+      // Top performer string
+      const topPerf = result.topPerformers[0];
+      let topPerfStr = '';
+      if (topPerf) {
+        for (const t of newState.teams) {
+          const p = t.roster.find(pl => pl.id === topPerf.playerId);
+          if (p) {
+            const parts = [`${topPerf.points} pts`];
+            if (topPerf.rebounds >= 10) parts.push(`${topPerf.rebounds} reb`);
+            if (topPerf.assists >= 8)   parts.push(`${topPerf.assists} ast`);
+            topPerfStr = `${p.name}: ${parts.join('/')}`;
+            break;
+          }
+        }
+      }
+
+      const isUserInvolved = winnerTeam.id === newState.userTeamId || loserTeam.id === newState.userTeamId;
+      const isNotable = result.isOvertime || result.isBuzzerBeater || result.isComeback || margin >= 20
+        || winnerTeam.streak >= 5 || loserTeam.streak <= -5;
+
+      if (isNotable || isUserInvolved || Math.random() < 0.28) {
+        const pick = <T,>(arr: T[]): T => arr[Math.floor(Math.random() * arr.length)];
+        const wCity = winnerTeam.city; const wName = winnerTeam.name;
+        const lCity = loserTeam.city;  const lName = loserTeam.name;
+        const tp    = topPerfStr ? ` ${topPerfStr}.` : '';
+
+        let headline: string;
+        let content: string;
+        let isBreaking = false;
+
+        if (result.isBuzzerBeater) {
+          isBreaking = true;
+          headline = 'BUZZER BEATER';
+          content = pick([
+            `${wCity} stuns ${lCity} at the buzzer, ${score}!${tp}`,
+            `UNBELIEVABLE! ${wName} win it at the horn, ${score}. ${lCity} thought they had it.${tp}`,
+            `The final shot drops as time expires — ${wCity} wins ${score} over ${lCity}.${tp}`,
+            `${wCity} heart-stopper! ${score} final over ${lCity} on a walk-off shot.${tp}`,
+          ]);
+        } else if (result.isOvertime) {
+          isBreaking = true;
+          headline = 'OVERTIME THRILLER';
+          content = pick([
+            `${wCity} survives overtime to edge ${lCity}, ${score}.${tp}`,
+            `It took extra time, but ${wName} come out on top ${score} over ${lCity}.${tp}`,
+            `OT drama! ${wCity} outlasts ${lCity} ${score}.${tp}`,
+            `${lCity} couldn't close it out — ${wCity} wins in OT, ${score}.${tp}`,
+          ]);
+        } else if (result.isComeback) {
+          isBreaking = true;
+          headline = 'STUNNING COMEBACK';
+          content = pick([
+            `${wCity} overcomes a double-digit deficit to beat ${lCity} ${score}.${tp}`,
+            `Down big, ${wName} rally for the ${score} victory over ${lCity}.${tp}`,
+            `${lCity} had it. ${wCity} took it back. Final: ${score}.${tp}`,
+            `Never count out ${wCity} — they erase a huge lead to win ${score}.${tp}`,
+          ]);
+        } else if (margin >= 25) {
+          headline = 'BLOWOUT';
+          content = pick([
+            `${wCity} destroys ${lCity} by ${margin} points, ${score}. No contest.${tp}`,
+            `Mercy rule needed — ${wName} rout ${lName} ${score}.${tp}`,
+            `${lCity} had no answers. ${wCity} wins going away, ${score}.${tp}`,
+            `${wCity} makes a statement, crushing ${lCity} ${score}.${tp}`,
+          ]);
+        } else if (margin >= 20) {
+          headline = 'DOMINANT WIN';
+          content = pick([
+            `${wCity} dominates ${lCity} ${score} in a lopsided affair.${tp}`,
+            `${wName} roll over ${lName} by ${margin}, ${score}.${tp}`,
+            `${lCity} had no answers tonight — ${wCity} wins ${score}.${tp}`,
+          ]);
+        } else if (winnerTeam.streak >= 8) {
+          isBreaking = true;
+          headline = `${winnerTeam.streak}-GAME WIN STREAK`;
+          content = pick([
+            `${wCity} are on FIRE — ${winnerTeam.streak} straight wins after a ${score} victory over ${lCity}.${tp}`,
+            `Is anyone stopping ${wName}? Win ${winnerTeam.streak} in a row, ${score} over ${lCity}.${tp}`,
+          ]);
+        } else if (winnerTeam.streak >= 5) {
+          headline = `${winnerTeam.streak}-GAME WIN STREAK`;
+          content = pick([
+            `${wCity} make it ${winnerTeam.streak} in a row with a ${score} win over ${lCity}.${tp}`,
+            `The ${wName} roll on — ${winnerTeam.streak} straight after beating ${lCity} ${score}.${tp}`,
+            `Can anyone stop ${wCity}? Streak hits ${winnerTeam.streak} after ${score}.${tp}`,
+          ]);
+        } else if (loserTeam.streak <= -5) {
+          headline = 'LOSING SKID CONTINUES';
+          content = pick([
+            `${lCity} drop their ${Math.abs(loserTeam.streak)}th straight, falling ${score} to ${wCity}.${tp}`,
+            `${lName} can't find a win — now ${Math.abs(loserTeam.streak)} losses in a row after ${score} defeat.${tp}`,
+            `The skid hits ${Math.abs(loserTeam.streak)} for ${lCity}, losing to ${wCity} ${score}.${tp}`,
+          ]);
+        } else if (margin <= 4 && result.hasClutchSituation) {
+          headline = 'CLUTCH WIN';
+          content = pick([
+            `${wCity} survives a clutch battle, edging ${lCity} ${score}.${tp}`,
+            `Down to the wire — ${wName} hold off ${lName} ${score}.${tp}`,
+            `${lCity} pushed hard but ${wCity} takes the nail-biter, ${score}.${tp}`,
+            `Clutch time belonged to ${wCity}: ${score} final over ${lCity}.${tp}`,
+          ]);
+        } else {
+          headline = 'FINAL';
+          content = pick([
+            `${wCity} ${score} over ${lCity}.${tp}`,
+            `${wName} beat ${lName} ${score}.${tp}`,
+            `${wCity} picks up the win over ${lCity}, ${score}.${tp}`,
+            `${score}: ${wCity} gets it done against ${lCity}.${tp}`,
+          ]);
+        }
+
+        const newsId = `gameresult-${result.id}`;
+        if (!(newState.newsFeed ?? []).some(n => n.id === newsId)) {
+          const involvedTeamId = winnerTeam.id === newState.userTeamId ? winnerTeam.id
+            : loserTeam.id === newState.userTeamId ? loserTeam.id : winnerTeam.id;
+          newState = {
+            ...newState,
+            newsFeed: [{
+              id: newsId,
+              category: 'milestone' as NewsCategory,
+              headline,
+              content: content.trim(),
+              timestamp: newState.currentDay,
+              realTimestamp: Date.now(),
+              teamId: involvedTeamId,
+              isBreaking,
+            }, ...(newState.newsFeed ?? [])].slice(0, 150),
+          };
+        }
+      }
+    }
+
     // Generate morale-based news (only for user team, deduplicated per player per cooldown window)
     const userTeamUpdated = newState.teams.find(t => t.id === newState.userTeamId);
     if (userTeamUpdated) {
@@ -1907,30 +2048,92 @@ const App: React.FC = () => {
           for (const t of newState.teams) { const p = t.roster.find(pl => pl.id === id); if (p) return p.name; }
           return id;
         });
-        newState = {
-          ...newState,
-          newsFeed: [
-            ...(mvp ? [{
+        {
+          const pickAS = <T,>(arr: T[]): T => arr[Math.floor(Math.random() * arr.length)];
+          const asdResult = completedAsd;
+          const dunkWinner    = asdResult.dunkContest?.winner.playerName;
+          const threePtWinner = asdResult.threePtContest?.winner.playerName;
+          const skillsWinner  = asdResult.skillsChallenge?.winner.playerName;
+
+          const mvpTemplates = mvp ? [
+            `${confWon} defeats ${confWon === 'East' ? 'West' : 'East'} ${gameScore}! ${mvp.playerName} (${mvp.statLine}) named All-Star Game MVP!`,
+            `ALL-STAR GAME FINAL: ${confWon} ${gameScore}. ${mvp.playerName} was simply unstoppable — ${mvp.statLine} earns him MVP honors.`,
+            `${confWon} wins the All-Star Game ${gameScore}. The MVP trophy goes to ${mvp.playerName} (${mvp.statLine}) — a dominant performance.`,
+            `It's ${confWon} over ${confWon === 'East' ? 'West' : 'East'}, ${gameScore}. ${mvp.playerName} steals the show with ${mvp.statLine} to claim MVP.`,
+          ] : [];
+
+          const contestHighlights: string[] = [];
+          if (dunkWinner)    contestHighlights.push(`${dunkWinner} wins the Dunk Contest`);
+          if (threePtWinner) contestHighlights.push(`${threePtWinner} takes home the 3-Point Crown`);
+          if (skillsWinner)  contestHighlights.push(`${skillsWinner} wins the Skills Challenge`);
+
+          const revealTemplates = [
+            `All-Star Weekend is in the books! East starters: ${eastStarters.join(', ')}. West starters: ${westStarters.join(', ')}.${contestHighlights.length ? ` Weekend highlights: ${contestHighlights.join('; ')}.` : ''}`,
+            `The ${newState.season} All-Star Weekend wraps up! Representing the East: ${eastStarters.join(', ')}. West stars: ${westStarters.join(', ')}.${contestHighlights.length ? ` ${contestHighlights.join('. ')}.` : ''}`,
+            `All-Star festivities complete for ${newState.season}. East: ${eastStarters.join(', ')} | West: ${westStarters.join(', ')}.${contestHighlights.length ? ` Contests: ${contestHighlights.join(', ')}.` : ''}`,
+          ];
+
+          const newsItems: typeof newState.newsFeed = [];
+
+          if (mvp && mvpTemplates.length) {
+            newsItems.push({
               id: `allstar-game-${newState.season}`,
               category: 'milestone' as NewsCategory,
               headline: 'ALL-STAR GAME FINAL',
-              content: `${confWon} defeats ${confWon === 'East' ? 'West' : 'East'} ${gameScore}! ${mvp.playerName} (${mvp.statLine}) named All-Star Game MVP!`,
+              content: pickAS(mvpTemplates),
               timestamp: newState.currentDay,
               realTimestamp: Date.now(),
               isBreaking: true,
-            }] : []),
-            {
-              id: `allstar-reveal-${newState.season}`,
+            });
+          }
+
+          if (dunkWinner) {
+            newsItems.push({
+              id: `allstar-dunk-${newState.season}`,
               category: 'milestone' as NewsCategory,
-              headline: 'ALL-STAR WEEKEND COMPLETE',
-              content: `All-Star Weekend is in the books! East starters: ${eastStarters.join(', ')}. West starters: ${westStarters.join(', ')}.`,
+              headline: 'DUNK CONTEST CHAMPION',
+              content: pickAS([
+                `${dunkWinner} puts on a jaw-dropping show to win the Dunk Contest! The crowd goes wild.`,
+                `The Dunk Contest crown belongs to ${dunkWinner}! An unforgettable performance on the big stage.`,
+                `${dunkWinner} earns the title of best dunker in the league after an electrifying Dunk Contest performance.`,
+              ]),
               timestamp: newState.currentDay,
               realTimestamp: Date.now(),
               isBreaking: false,
-            },
-            ...(newState.newsFeed || []),
-          ],
-        };
+            });
+          }
+
+          if (threePtWinner) {
+            newsItems.push({
+              id: `allstar-3pt-${newState.season}`,
+              category: 'milestone' as NewsCategory,
+              headline: '3-POINT CONTEST WINNER',
+              content: pickAS([
+                `${threePtWinner} catches fire and wins the 3-Point Contest! A spectacular shooting display.`,
+                `Hot hand alert — ${threePtWinner} takes the 3-Point Crown with an incredible performance.`,
+                `${threePtWinner} proves they're the league's best shooter, winning the 3-Point Contest in style.`,
+              ]),
+              timestamp: newState.currentDay,
+              realTimestamp: Date.now(),
+              isBreaking: false,
+            });
+          }
+
+          newsItems.push({
+            id: `allstar-reveal-${newState.season}`,
+            category: 'milestone' as NewsCategory,
+            headline: 'ALL-STAR WEEKEND COMPLETE',
+            content: pickAS(revealTemplates),
+            timestamp: newState.currentDay,
+            realTimestamp: Date.now(),
+            isBreaking: false,
+          });
+
+          newState = {
+            ...newState,
+            newsFeed: [...newsItems, ...(newState.newsFeed || [])],
+          };
+        }
         setActiveTab('allstar');
       }
 
