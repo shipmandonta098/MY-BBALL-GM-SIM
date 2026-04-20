@@ -2,6 +2,7 @@
 import React, { useState, useEffect } from 'react';
 import { LeagueSettings } from '../types';
 import { getHistoricalFinancials } from '../constants';
+import NumericInput from './NumericInput';
 
 interface LeagueConfigurationProps {
   onConfirm: (name: string, year: number, settings: Partial<LeagueSettings>) => void;
@@ -431,7 +432,7 @@ const LeagueConfiguration: React.FC<LeagueConfigurationProps> = ({ onConfirm, on
               className={`w-full bg-slate-950 border rounded-xl px-4 py-3 text-white font-display text-lg focus:outline-none focus:border-amber-500/50 transition-colors ${errors.name ? 'border-rose-500' : 'border-slate-800'}`} />
           </Field>
           <Field label="Starting Year" error={errors.year}>
-            <input type="number" value={year} min={1900} max={2200} onChange={e => setYear(parseInt(e.target.value) || 2025)}
+            <NumericInput value={year} min={1900} max={2200} onChange={setYear}
               className={`w-full bg-slate-950 border rounded-xl px-4 py-3 text-white font-display text-lg focus:outline-none ${errors.year ? 'border-rose-500' : 'border-slate-800'}`} />
           </Field>
         </div>
@@ -610,8 +611,8 @@ const LeagueConfiguration: React.FC<LeagueConfigurationProps> = ({ onConfirm, on
 
                   <Field label="Salary Cap (Soft Limit)" hint={FIELD_HINTS.salaryCap} error={errors.salaryCap}>
                     <div className="space-y-2">
-                      <input type="number" value={salaryCap} step={1_000_000} min={80_000_000} max={300_000_000}
-                        onChange={e => setSalaryCap(parseInt(e.target.value) || 140_000_000)}
+                      <NumericInput value={salaryCap} min={80_000_000} max={300_000_000}
+                        onChange={setSalaryCap}
                         className={`w-full bg-slate-950 border rounded-xl px-4 py-3 text-white font-mono text-sm focus:outline-none ${errors.salaryCap ? 'border-rose-500' : 'border-slate-800'}`} />
                       <div className="flex gap-4 text-[9px] font-black text-slate-600 uppercase">
                         <span>Cap: {fmtM(salaryCap)}</span>
@@ -675,8 +676,8 @@ const LeagueConfiguration: React.FC<LeagueConfigurationProps> = ({ onConfirm, on
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
 
                   <Field label="Games Per Season" hint="Between 20–82 games. Affects schedule, playoff timing, and per-game stat calcs." error={errors.seasonLength}>
-                    <input type="number" value={seasonLength} min={20} max={82}
-                      onChange={e => setSeasonLength(parseInt(e.target.value) || 82)}
+                    <NumericInput value={seasonLength} min={20} max={82}
+                      onChange={setSeasonLength}
                       className={`w-full bg-slate-950 border rounded-xl px-4 py-3 text-white font-mono focus:outline-none ${errors.seasonLength ? 'border-rose-500' : 'border-slate-800'}`} />
                   </Field>
 
@@ -712,14 +713,14 @@ const LeagueConfiguration: React.FC<LeagueConfigurationProps> = ({ onConfirm, on
                   </Field>
 
                   <Field label="Division Games" hint="Games played vs. each team in own division. Leave 0 to treat like any conference game.">
-                    <input type="number" value={divisionGames} min={0} max={82}
-                      onChange={e => setDivisionGames(Math.max(0, parseInt(e.target.value) || 0))}
+                    <NumericInput value={divisionGames} min={0} max={82}
+                      onChange={setDivisionGames}
                       className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-3 text-white font-mono focus:outline-none" />
                   </Field>
 
                   <Field label="Conference Games" hint="Total games played within own conference. Leave 0 for no special treatment.">
-                    <input type="number" value={conferenceGames} min={0} max={82}
-                      onChange={e => setConferenceGames(Math.max(0, parseInt(e.target.value) || 0))}
+                    <NumericInput value={conferenceGames} min={0} max={82}
+                      onChange={setConferenceGames}
                       className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-3 text-white font-mono focus:outline-none" />
                   </Field>
 
@@ -776,8 +777,8 @@ const LeagueConfiguration: React.FC<LeagueConfigurationProps> = ({ onConfirm, on
                   </Field>
                   <Field label="Salary Cap (Soft Limit)" hint={FIELD_HINTS.salaryCap} error={errors.salaryCap}>
                     <div className="space-y-2">
-                      <input type="number" value={salaryCap} step={1_000_000} min={80_000_000} max={300_000_000}
-                        onChange={e => setSalaryCap(parseInt(e.target.value) || 140_000_000)}
+                      <NumericInput value={salaryCap} min={80_000_000} max={300_000_000}
+                        onChange={setSalaryCap}
                         className={`w-full bg-slate-950 border rounded-xl px-4 py-3 text-white font-mono text-sm focus:outline-none ${errors.salaryCap ? 'border-rose-500' : 'border-slate-800'}`} />
                       <div className="flex gap-4 text-[9px] font-black text-slate-600 uppercase">
                         <span>Cap: {fmtM(salaryCap)}</span>
@@ -787,14 +788,14 @@ const LeagueConfiguration: React.FC<LeagueConfigurationProps> = ({ onConfirm, on
                     </div>
                   </Field>
                   <Field label="Minimum Payroll" hint="Payroll floor — every team must spend at least this much.">
-                    <input type="number" value={minPayroll} step={250_000} min={20_000_000} max={120_000_000}
-                      onChange={e => setMinPayroll(parseInt(e.target.value) || 46_650_000)}
+                    <NumericInput value={minPayroll} min={20_000_000} max={120_000_000}
+                      onChange={setMinPayroll}
                       className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-3 text-white font-mono text-sm focus:outline-none" />
                     <p className="text-[9px] text-slate-600 mt-1">Default: {fmtM(46_650_000)}</p>
                   </Field>
                   <Field label="Luxury Tax Threshold" hint="Second apron / tax line — triggers enhanced penalties.">
-                    <input type="number" value={luxuryTaxThreshold} step={250_000} min={30_000_000} max={200_000_000}
-                      onChange={e => setLuxuryTaxThreshold(parseInt(e.target.value) || 84_750_000)}
+                    <NumericInput value={luxuryTaxThreshold} min={30_000_000} max={200_000_000}
+                      onChange={setLuxuryTaxThreshold}
                       className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-3 text-white font-mono text-sm focus:outline-none" />
                     <p className="text-[9px] text-slate-600 mt-1">Default: {fmtM(84_750_000)}</p>
                   </Field>
@@ -867,14 +868,14 @@ const LeagueConfiguration: React.FC<LeagueConfigurationProps> = ({ onConfirm, on
                 <h4 className="text-xs font-black text-amber-500 uppercase tracking-[0.3em] border-b border-slate-800 pb-3">Roster Rules</h4>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                   <Field label="Min Roster Size" hint="Minimum players required on an active roster.">
-                    <input type="number" value={minRosterSize} min={5} max={20}
-                      onChange={e => { const v = parseInt(e.target.value); if (!isNaN(v)) setMinRosterSize(v); }}
+                    <NumericInput value={minRosterSize} min={5} max={20}
+                      onChange={setMinRosterSize}
                       onBlur={() => setMinRosterSize(v => Math.max(5, Math.min(v, maxRosterSize)))}
                       className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-3 text-white font-mono focus:outline-none" />
                   </Field>
                   <Field label="Max Roster Size" hint="Maximum players allowed on an active roster.">
-                    <input type="number" value={maxRosterSize} min={10} max={30}
-                      onChange={e => { const v = parseInt(e.target.value); if (!isNaN(v)) setMaxRosterSize(v); }}
+                    <NumericInput value={maxRosterSize} min={10} max={30}
+                      onChange={setMaxRosterSize}
                       onBlur={() => setMaxRosterSize(v => Math.max(v, minRosterSize, 10))}
                       className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-3 text-white font-mono focus:outline-none" />
                   </Field>
@@ -887,8 +888,8 @@ const LeagueConfiguration: React.FC<LeagueConfigurationProps> = ({ onConfirm, on
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
 
                   <Field label="# Draft Rounds" hint={FIELD_HINTS.draftRounds}>
-                    <input type="number" value={draftRounds} min={1} max={10}
-                      onChange={e => setDraftRounds(Math.max(1, parseInt(e.target.value)||2))}
+                    <NumericInput value={draftRounds} min={1} max={10}
+                      onChange={setDraftRounds}
                       className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-3 text-white font-mono focus:outline-none" />
                   </Field>
                   <Field label="Draft Type" hint="Lottery format used to assign draft order.">
@@ -904,8 +905,8 @@ const LeagueConfiguration: React.FC<LeagueConfigurationProps> = ({ onConfirm, on
                   {(draftType === 'Custom Lottery' || draftType === 'Carry-Over (COLA)') && (
                     <>
                       <Field label="Custom # Lottery Selections" hint="How many picks are decided by lottery (rest go in order).">
-                        <input type="number" value={customLotterySelections} min={1} max={14}
-                          onChange={e => setCustomLotterySelections(Math.max(1, parseInt(e.target.value)||4))}
+                        <NumericInput value={customLotterySelections} min={1} max={14}
+                          onChange={setCustomLotterySelections}
                           className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-3 text-white font-mono focus:outline-none" />
                       </Field>
                       <Field label="Custom Lottery Chances" hint="JSON array of weights per team slot (worst → best). Must sum to 1000.">
@@ -925,15 +926,17 @@ const LeagueConfiguration: React.FC<LeagueConfigurationProps> = ({ onConfirm, on
                     <div className="flex gap-3 items-center">
                       <div className="flex-1 space-y-1">
                         <label className="text-[9px] font-black text-slate-600 uppercase tracking-widest">Min Age</label>
-                        <input type="number" value={prospectAgeMin} min={16} max={prospectAgeMax}
-                          onChange={e => setProspectAgeMin(Math.min(parseInt(e.target.value)||19, prospectAgeMax))}
+                        <NumericInput value={prospectAgeMin} min={16} max={prospectAgeMax}
+                          onChange={v => setProspectAgeMin(Math.min(v, prospectAgeMax))}
+                          onBlur={() => setProspectAgeMin(v => Math.min(v, prospectAgeMax))}
                           className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2.5 text-white font-mono focus:outline-none" />
                       </div>
                       <span className="text-slate-600 font-bold mt-5">–</span>
                       <div className="flex-1 space-y-1">
                         <label className="text-[9px] font-black text-slate-600 uppercase tracking-widest">Max Age</label>
-                        <input type="number" value={prospectAgeMax} min={prospectAgeMin} max={35}
-                          onChange={e => setProspectAgeMax(Math.max(parseInt(e.target.value)||22, prospectAgeMin))}
+                        <NumericInput value={prospectAgeMax} min={prospectAgeMin} max={35}
+                          onChange={v => setProspectAgeMax(Math.max(v, prospectAgeMin))}
+                          onBlur={() => setProspectAgeMax(v => Math.max(v, prospectAgeMin))}
                           className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2.5 text-white font-mono focus:outline-none" />
                       </div>
                     </div>
