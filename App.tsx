@@ -14,6 +14,8 @@ import { db } from './db';
 import { NavigationProvider } from './context/NavigationContext';
 import { generateOffseasonAlerts } from './utils/offseasonAlerts';
 import OffseasonAlertsModal from './components/OffseasonAlertsModal';
+import OwnerReactionModal from './components/OwnerReactionModal';
+import { calcReleaseReaction, OwnerReaction } from './utils/ownerReactionEngine';
 
 // Components
 import Sidebar from './components/Sidebar';
@@ -128,6 +130,7 @@ const App: React.FC = () => {
   
   const [viewingBoxScore, setViewingBoxScore] = useState<{result: GameResult, home: Team, away: Team} | null>(null);
   const [showOffseasonAlerts, setShowOffseasonAlerts] = useState(false);
+  const [pendingRelease, setPendingRelease] = useState<{ playerId: string; reaction: OwnerReaction } | null>(null);
   const [viewingFranchiseId, setViewingFranchiseId] = useState<string | null>(null);
   const [bulkSummary, setBulkSummary] = useState<BulkSimSummary | null>(null);
   const leagueRef = React.useRef<LeagueState | null>(null);
@@ -3237,10 +3240,45 @@ const App: React.FC = () => {
     if (selectedPlayer && selectedPlayer.id === playerId) setSelectedPlayer({ ...selectedPlayer, status }); 
   };
   
+  const executeRelease = (playerId: string) => {
+    if (!league || !league.userTeamId) return;
+    const userTeam = league.teams.find(t => t.id === league.userTeamId)!;
+    const p = userTeam.roster.find(pl => pl.id === playerId);
+    const updatedRoster = userTeam.roster.filter(pl => pl.id !== playerId);
+    const updatedTransactions = recordTransaction(league, 'release', [userTeam.id], `${userTeam.name} waived ${p?.name || 'player'}.`, [playerId]);
+    let updatedFAs = league.freeAgents;
+    let extraNews: typeof league.newsFeed = [];
+    if (!league.isOffseason && p) {
+      const waivedFA = {
+        ...p, isFreeAgent: true, inSeasonFA: true, lastTeamId: userTeam.id,
+        salary: 0, contractYears: 0,
+        interestScore: Math.round(Math.min(90, Math.max(15, 40 + Math.random() * 30))),
+        desiredContract: { years: 1, salary: p.rating >= 80 ? 3_000_000 : p.rating >= 70 ? 1_500_000 : 600_000 },
+      };
+      updatedFAs = [waivedFA, ...league.freeAgents];
+      extraNews = [{ id: `waive-${Date.now()}`, category: 'transaction' as const, headline: `${p.name} waived by ${userTeam.name}`, content: `${p.name} (${p.position}, ${p.rating} OVR) placed on waivers.`, timestamp: league.currentDay, realTimestamp: Date.now(), isBreaking: false }];
+    }
+    // Pending reaction already applied approval — no recalc needed here
+    const pendingDelta = pendingRelease?.playerId === playerId ? pendingRelease.reaction : null;
+    const newOwner = pendingDelta ? Math.max(0, Math.min(100, (league.ownerApproval ?? 55) + pendingDelta.ownerDelta)) : (league.ownerApproval ?? 55);
+    const newFan   = pendingDelta ? Math.max(0, Math.min(100, (league.fanApproval   ?? 60) + pendingDelta.fanDelta))  : (league.fanApproval ?? 60);
+    setLeague({ ...league, teams: league.teams.map(t => t.id === userTeam.id ? { ...t, roster: updatedRoster } : t), freeAgents: updatedFAs, transactions: updatedTransactions, newsFeed: [...extraNews, ...league.newsFeed], ownerApproval: newOwner, fanApproval: newFan });
+    setPendingRelease(null);
+    setSelectedPlayer(null);
+  };
+
   const handleReleasePlayer = (playerId: string) => {
     if (!league || !league.userTeamId) return;
     const userTeam = league.teams.find(t => t.id === league.userTeamId)!;
     const p = userTeam.roster.find(pl => pl.id === playerId);
+    const isStarter = !!(userTeam.rotation && Object.values(userTeam.rotation.starters).includes(playerId));
+    // Show owner modal for significant releases (OVR >= 74 or starter)
+    if (p && (p.rating >= 74 || isStarter)) {
+      const reaction = calcReleaseReaction(p, isStarter, league);
+      setPendingRelease({ playerId, reaction });
+      return;
+    }
+    // Low-impact releases execute immediately
     const updatedRoster = userTeam.roster.filter(pl => pl.id !== playerId);
     const updatedTransactions = recordTransaction(league, 'release', [userTeam.id], `${userTeam.name} waived ${p?.name || 'player'}.`, [playerId]);
 
@@ -3748,6 +3786,14 @@ const App: React.FC = () => {
         />
       )}
 
+      {pendingRelease && (
+        <OwnerReactionModal
+          reaction={pendingRelease.reaction}
+          moveType="release"
+          onProceed={() => executeRelease(pendingRelease.playerId)}
+          onCancel={() => setPendingRelease(null)}
+        />
+      )}
       {showOffseasonAlerts && league.offseasonAlerts && league.offseasonAlerts.some(a => !a.dismissed) && (
         <OffseasonAlertsModal
           alerts={league.offseasonAlerts}

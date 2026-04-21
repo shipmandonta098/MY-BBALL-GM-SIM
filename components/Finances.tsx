@@ -181,6 +181,45 @@ const Finances: React.FC<FinancesProps> = ({ league, updateLeague }) => {
                    {userTeam.finances.ownerPatience < 25 && <span className="text-rose-500 text-[10px] font-black uppercase animate-bounce">⚠️ AT RISK OF TERMINATION</span>}
                 </div>
               </div>
+
+              {/* ── Owner Approval meter ── */}
+              {(() => {
+                const approval = league.ownerApproval ?? 55;
+                const approvalColor =
+                  approval >= 75 ? 'bg-emerald-500 shadow-[0_0_15px_rgba(16,185,129,0.4)]' :
+                  approval >= 50 ? 'bg-amber-500 shadow-[0_0_15px_rgba(245,158,11,0.4)]' :
+                  approval >= 30 ? 'bg-orange-500 shadow-[0_0_15px_rgba(249,115,22,0.4)]' :
+                                   'bg-rose-500 shadow-[0_0_15px_rgba(244,63,94,0.4)] animate-pulse';
+                const approvalLabel =
+                  approval >= 80 ? 'Thrilled' : approval >= 65 ? 'Satisfied' :
+                  approval >= 50 ? 'Content'  : approval >= 35 ? 'Concerned' :
+                  approval >= 20 ? 'Unhappy'  : 'Furious';
+                const approvalEmoji =
+                  approval >= 80 ? '🤩' : approval >= 65 ? '😊' :
+                  approval >= 50 ? '🤔' : approval >= 35 ? '😟' : '😤';
+                return (
+                  <div className="space-y-2 pt-2 border-t border-slate-800/60">
+                    <div className="flex justify-between items-end">
+                      <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Owner Approval</span>
+                      <span className="flex items-center gap-1.5">
+                        <span className="text-base">{approvalEmoji}</span>
+                        <span className={`text-lg font-display font-bold ${approval >= 50 ? 'text-emerald-400' : approval >= 30 ? 'text-orange-400' : 'text-rose-500'}`}>
+                          {approval}
+                        </span>
+                        <span className="text-[10px] font-black text-slate-500 uppercase">{approvalLabel}</span>
+                      </span>
+                    </div>
+                    <div className="h-3 bg-slate-950 rounded-full border border-slate-800 p-0.5 overflow-hidden">
+                      <div className={`h-full rounded-full transition-all duration-1000 ${approvalColor}`} style={{ width: `${approval}%` }} />
+                    </div>
+                    {approval < 30 && (
+                      <p className="text-xs text-rose-400 font-bold animate-pulse">
+                        ⚠️ Owner approval critical — major moves or a strong season required to recover.
+                      </p>
+                    )}
+                  </div>
+                );
+              })()}
             </div>
             <div className="w-full md:w-64 bg-slate-950/50 rounded-3xl p-6 border border-slate-800/60 text-center">
                 <p className="text-[10px] text-slate-500 font-black uppercase mb-1">Projected Net</p>
