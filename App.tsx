@@ -16,6 +16,9 @@ import { generateOffseasonAlerts } from './utils/offseasonAlerts';
 import OffseasonAlertsModal from './components/OffseasonAlertsModal';
 import OwnerReactionModal from './components/OwnerReactionModal';
 import { calcReleaseReaction, OwnerReaction } from './utils/ownerReactionEngine';
+import { computeOffseasonGrade, computeDraftGrade, OffseasonGradeData, DraftGradeData } from './utils/offseasonGradeEngine';
+import OffseasonGradeModal from './components/OffseasonGradeModal';
+import DraftGradeModal from './components/DraftGradeModal';
 
 // Components
 import Sidebar from './components/Sidebar';
@@ -136,6 +139,14 @@ const App: React.FC = () => {
   const leagueRef = React.useRef<LeagueState | null>(null);
   leagueRef.current = league;
 
+  // Offseason grade modal state
+  const [offseasonGradeData, setOffseasonGradeData] = useState<OffseasonGradeData | null>(null);
+  const offseasonGradeShownForSeason = React.useRef<number>(-1);
+
+  // Draft grade modal state
+  const [draftGradeData, setDraftGradeData] = useState<DraftGradeData | null>(null);
+  const draftGradeShownForSeason = React.useRef<number>(-1);
+
   const refreshSaves = useCallback(async () => {
     const saves = await db.leagues.toArray();
     setAllSaves(saves);
@@ -195,6 +206,19 @@ const App: React.FC = () => {
       setShowOffseasonAlerts(true);
     }
   }, [league?.offseasonAlerts]);
+
+  // Draft grade — trigger once when draft completes
+  useEffect(() => {
+    if (!league || league.draftPhase !== 'completed' || !league.isOffseason) return;
+    if (draftGradeShownForSeason.current === league.season) return;
+    draftGradeShownForSeason.current = league.season;
+    const grade = computeDraftGrade(league);
+    const before = league.ownerApproval ?? 55;
+    const after = Math.max(0, Math.min(100, before + grade.ownerApprovalChange));
+    setLeague(prev => prev ? { ...prev, ownerApproval: after } : null);
+    setDraftGradeData(grade);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [league?.draftPhase, league?.isOffseason, league?.season]);
 
   const recordTransaction = (state: LeagueState, type: TransactionType, teamIds: string[], description: string, playerIds?: string[], value?: number): Transaction[] => {
     const newTransaction: Transaction = {
@@ -3065,6 +3089,17 @@ const App: React.FC = () => {
   const handleAdvanceToRegularSeason = () => {
     if (!league) return;
 
+    // ── Offseason grade gate: show grade modal before leaving the offseason ─
+    if (league.isOffseason && offseasonGradeShownForSeason.current !== league.season) {
+      offseasonGradeShownForSeason.current = league.season;
+      const grade = computeOffseasonGrade(league);
+      const before = league.ownerApproval ?? 55;
+      const after = Math.max(0, Math.min(100, before + grade.ownerApprovalChange));
+      setLeague(prev => prev ? { ...prev, ownerApproval: after } : null);
+      setOffseasonGradeData(grade);
+      return; // Resume when user clicks "Begin Preseason" in the modal
+    }
+
     // ── Case 1: Skip preseason → jump straight to Regular Season ─────────
     if (league.seasonPhase === 'Preseason' && !league.isOffseason) {
       setLeague(prev => {
@@ -3783,6 +3818,33 @@ const App: React.FC = () => {
           data={league.ownerReviewData}
           teamName={userTeam?.name ?? 'Your Team'}
           onDismiss={() => updateLeagueState({ showOwnerReview: false })}
+        />
+      )}
+
+      {/* ── Offseason Grade modal ── */}
+      {offseasonGradeData && (
+        <OffseasonGradeModal
+          data={offseasonGradeData}
+          teamName={userTeam?.name ?? 'Your Team'}
+          onBeginPreseason={() => {
+            setOffseasonGradeData(null);
+            handleAdvanceToRegularSeason();
+          }}
+          onViewTransactions={() => {
+            setOffseasonGradeData(null);
+            setActiveTab('transactions');
+          }}
+          onDismiss={() => setOffseasonGradeData(null)}
+        />
+      )}
+
+      {/* ── Draft Grade modal ── */}
+      {draftGradeData && !offseasonGradeData && (
+        <DraftGradeModal
+          data={draftGradeData}
+          teamName={userTeam?.name ?? 'Your Team'}
+          onDismiss={() => setDraftGradeData(null)}
+          onViewDraft={() => { setDraftGradeData(null); setActiveTab('draft'); }}
         />
       )}
 
