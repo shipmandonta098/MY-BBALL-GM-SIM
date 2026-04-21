@@ -13,6 +13,7 @@ interface DashboardProps {
   onViewRoster: (teamId: string) => void;
   onManageTeam: (teamId: string) => void;
   onAdvanceToRegularSeason?: () => void;
+  onOpenOffseasonAlerts?: () => void;
 }
 
 const CircularGauge = ({ value, label, color, size = 80 }: { value: number, label: string, color: string, size?: number }) => {
@@ -55,7 +56,7 @@ const CircularGauge = ({ value, label, color, size = 80 }: { value: number, labe
   );
 };
 
-const Dashboard: React.FC<DashboardProps> = ({ league, news, onSimulate, onScout, scoutingReport, setActiveTab, onViewRoster, onManageTeam, onAdvanceToRegularSeason }) => {
+const Dashboard: React.FC<DashboardProps> = ({ league, news, onSimulate, onScout, scoutingReport, setActiveTab, onViewRoster, onManageTeam, onAdvanceToRegularSeason, onOpenOffseasonAlerts }) => {
   const userTeam = league.teams.find(t => t.id === league.userTeamId)!;
   const opponents = league.teams.filter(t => t.id !== userTeam.id);
   const nextOpponent = opponents[league.currentDay % opponents.length];
@@ -541,6 +542,23 @@ const Dashboard: React.FC<DashboardProps> = ({ league, news, onSimulate, onScout
 
         {/* Right Panel: Quick Actions & News */}
         <div className="space-y-8">
+
+          {/* ── Offseason Alerts Re-open Banner ── */}
+          {league.isOffseason && onOpenOffseasonAlerts && (league.offseasonAlerts ?? []).some(a => !a.dismissed) && (
+            <button
+              onClick={onOpenOffseasonAlerts}
+              className="w-full flex items-center gap-3 bg-amber-500/10 hover:bg-amber-500/20 border border-amber-500/30 hover:border-amber-500/60 rounded-2xl px-5 py-4 transition-all text-left group"
+            >
+              <span className="text-2xl">🔔</span>
+              <div className="flex-1 min-w-0">
+                <p className="text-[10px] font-black uppercase tracking-[0.3em] text-amber-400">Offseason Alerts</p>
+                <p className="text-sm font-bold text-white truncate">
+                  {(league.offseasonAlerts ?? []).filter(a => !a.dismissed).length} pending alert{(league.offseasonAlerts ?? []).filter(a => !a.dismissed).length > 1 ? 's' : ''} — tap to review
+                </p>
+              </div>
+              <span className="text-amber-500 group-hover:translate-x-1 transition-transform text-lg">›</span>
+            </button>
+          )}
 
           {/* ── Preseason / Offseason Banner ── */}
           {(league.isOffseason && league.draftPhase === 'completed') && onAdvanceToRegularSeason && (

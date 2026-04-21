@@ -1,7 +1,9 @@
 import React, { useState, useMemo, useCallback, useEffect, useRef } from 'react';
-import { LeagueState, Player, ContractOffer, Transaction, Position } from '../types';
+import { LeagueState, Player, ContractOffer, Transaction, Position, NewsItem, Team } from '../types';
 import { getFlag } from '../constants';
 import WatchToggle from './WatchToggle';
+import OwnerReactionModal from './OwnerReactionModal';
+import { calcSigningReaction, OwnerReaction } from '../utils/ownerReactionEngine';
 
 // ── Constants ──────────────────────────────────────────────────────────────
 const MORATORIUM_DAYS = 5; // signing window opens after day 5
@@ -122,6 +124,17 @@ const FreeAgency: React.FC<FreeAgencyProps> = ({
   const [agentMessage, setAgentMessage] = useState('');
   const [counterOffer, setCounterOffer] = useState<{ years: number; salary: number } | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
+
+  // ── Owner reaction (pending signing) ──
+  const [pendingSign, setPendingSign] = useState<{
+    signedPlayer: Player;
+    updatedTeams: Team[];
+    updatedFAs: Player[];
+    updatedTxs: Transaction[];
+    newsItem: NewsItem;
+    acceptedMsg: string;
+    reaction: OwnerReaction;
+  } | null>(null);
 
   // ── RFA offer-sheet state ──
   /** Tracks which player IDs have already had offer-sheet generation attempted */
@@ -444,15 +457,16 @@ const FreeAgency: React.FC<FreeAgencyProps> = ({
         isBreaking: false,
       };
 
-      updateLeague({
-        teams: updatedTeams,
-        freeAgents: updatedFAs,
-        transactions: updatedTxs,
-        newsFeed: [newsItem, ...league.newsFeed],
+      const reaction = calcSigningReaction(negotiatingPlayer, offer.salary, offer.years, league);
+      setPendingSign({
+        signedPlayer,
+        updatedTeams,
+        updatedFAs,
+        updatedTxs,
+        newsItem,
+        acceptedMsg: `We're thrilled to join the ${userTeam.name}. This is the right fit for us.`,
+        reaction,
       });
-
-      setNegotiationResult('accepted');
-      setAgentMessage(`We're thrilled to join the ${userTeam.name}. This is the right fit for us.`);
     } else if (salaryRatio < 0.75 || (salaryRatio < 0.9 && interest < 45)) {
       // Flat decline
       setNegotiationResult('declined');
@@ -515,16 +529,35 @@ const FreeAgency: React.FC<FreeAgencyProps> = ({
       isBreaking: false,
     };
 
-    updateLeague({
-      teams: updatedTeams,
-      freeAgents: updatedFAs,
-      transactions: updatedTxs,
-      newsFeed: [newsItem, ...league.newsFeed],
+    const reaction = calcSigningReaction(negotiatingPlayer, acceptedOffer.salary, acceptedOffer.years, league);
+    setPendingSign({
+      signedPlayer,
+      updatedTeams,
+      updatedFAs,
+      updatedTxs,
+      newsItem,
+      acceptedMsg: `Deal done. We look forward to winning with the ${userTeam.name}.`,
+      reaction,
     });
-
-    setNegotiationResult('accepted');
-    setAgentMessage(`Deal done. We look forward to winning with the ${userTeam.name}.`);
     setCounterOffer(null);
+  };
+
+  // ── Finalize pending signing after owner approves ──
+  const finalizeSigning = () => {
+    if (!pendingSign) return;
+    const newOwner = Math.max(0, Math.min(100, (league.ownerApproval ?? 55) + pendingSign.reaction.ownerDelta));
+    const newFan   = Math.max(0, Math.min(100, (league.fanApproval   ?? 60) + pendingSign.reaction.fanDelta));
+    updateLeague({
+      teams: pendingSign.updatedTeams,
+      freeAgents: pendingSign.updatedFAs,
+      transactions: pendingSign.updatedTxs,
+      newsFeed: [pendingSign.newsItem, ...league.newsFeed],
+      ownerApproval: newOwner,
+      fanApproval: newFan,
+    });
+    setNegotiationResult('accepted');
+    setAgentMessage(pendingSign.acceptedMsg);
+    setPendingSign(null);
   };
 
   // ── Advance Day / AI signings ──
@@ -638,6 +671,16 @@ const FreeAgency: React.FC<FreeAgencyProps> = ({
   // ── Render ──────────────────────────────────────────────────────────────────
   return (
     <div className="space-y-6 animate-in fade-in duration-500 pb-40">
+
+      {/* ── Owner Reaction Modal ── */}
+      {pendingSign && (
+        <OwnerReactionModal
+          reaction={pendingSign.reaction}
+          moveType="signing"
+          onProceed={finalizeSigning}
+          onCancel={() => { setPendingSign(null); setIsSubmitting(false); setNegotiationResult(null); }}
+        />
+      )}
 
       {/* ── In-Season / Preseason Signing Banner ── */}
       {isInSeason && !isPreseason && (

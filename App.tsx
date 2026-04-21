@@ -12,6 +12,10 @@ import { generateAwards } from './utils/awardEngine';
 import { assignAIPersonalities, runAIGMOffseason, aiGMTradeDeadlineAction, aiGMInSeasonTrades, aiGMPreOffseasonAgreements, generateAITradeProposalsForUser } from './utils/aiGMEngine';
 import { db } from './db';
 import { NavigationProvider } from './context/NavigationContext';
+import { generateOffseasonAlerts } from './utils/offseasonAlerts';
+import OffseasonAlertsModal from './components/OffseasonAlertsModal';
+import OwnerReactionModal from './components/OwnerReactionModal';
+import { calcReleaseReaction, OwnerReaction } from './utils/ownerReactionEngine';
 
 // Components
 import Sidebar from './components/Sidebar';
@@ -125,6 +129,8 @@ const App: React.FC = () => {
   const [selectedCoach, setSelectedCoach] = useState<Coach | null>(null);
   
   const [viewingBoxScore, setViewingBoxScore] = useState<{result: GameResult, home: Team, away: Team} | null>(null);
+  const [showOffseasonAlerts, setShowOffseasonAlerts] = useState(false);
+  const [pendingRelease, setPendingRelease] = useState<{ playerId: string; reaction: OwnerReaction } | null>(null);
   const [viewingFranchiseId, setViewingFranchiseId] = useState<string | null>(null);
   const [bulkSummary, setBulkSummary] = useState<BulkSimSummary | null>(null);
   const leagueRef = React.useRef<LeagueState | null>(null);
@@ -173,13 +179,22 @@ const App: React.FC = () => {
         realTimestamp: Date.now(),
         isBreaking: true,
       };
+      const freshAlerts = generateOffseasonAlerts(aiResult.updatedState);
       return {
         ...aiResult.updatedState,
         newsFeed: [sentinel, ...aiResult.updatedState.newsFeed].slice(0, 200),
         transactions: [...aiResult.transactions, ...(afterPre.transactions || [])].slice(0, 1000),
+        offseasonAlerts: freshAlerts,
       };
     });
   }, [league?.draftPhase, league?.isOffseason, status]);
+
+  // Auto-show offseason alerts modal when alerts are freshly generated
+  useEffect(() => {
+    if (league?.offseasonAlerts && league.offseasonAlerts.some(a => !a.dismissed)) {
+      setShowOffseasonAlerts(true);
+    }
+  }, [league?.offseasonAlerts]);
 
   const recordTransaction = (state: LeagueState, type: TransactionType, teamIds: string[], description: string, playerIds?: string[], value?: number): Transaction[] => {
     const newTransaction: Transaction = {
@@ -194,6 +209,32 @@ const App: React.FC = () => {
     };
     return [newTransaction, ...(state.transactions || [])].slice(0, 1000);
   };
+
+  // ── Offseason alert handlers ───────────────────────────────────────────────
+  const handleDismissAlert = (alertId: string) => {
+    setLeague(prev => {
+      if (!prev?.offseasonAlerts) return prev;
+      const updated = prev.offseasonAlerts.map(a => a.id === alertId ? { ...a, dismissed: true } : a);
+      const anyLeft = updated.some(a => !a.dismissed);
+      if (!anyLeft) setShowOffseasonAlerts(false);
+      return { ...prev, offseasonAlerts: updated };
+    });
+  };
+
+  const handleDismissAllAlerts = () => {
+    setLeague(prev => {
+      if (!prev?.offseasonAlerts) return prev;
+      return { ...prev, offseasonAlerts: prev.offseasonAlerts.map(a => ({ ...a, dismissed: true })) };
+    });
+    setShowOffseasonAlerts(false);
+  };
+
+  const handleAlertOfferContract = (alertId: string) => {
+    handleDismissAlert(alertId);
+    setShowOffseasonAlerts(false);
+    setActiveTab('free_agency');
+  };
+
 
   /** Accept an incoming AI trade proposal: execute the trade and remove the proposal. */
   const handleAcceptProposal = (proposal: TradeProposal) => {
@@ -3199,10 +3240,45 @@ const App: React.FC = () => {
     if (selectedPlayer && selectedPlayer.id === playerId) setSelectedPlayer({ ...selectedPlayer, status }); 
   };
   
+  const executeRelease = (playerId: string) => {
+    if (!league || !league.userTeamId) return;
+    const userTeam = league.teams.find(t => t.id === league.userTeamId)!;
+    const p = userTeam.roster.find(pl => pl.id === playerId);
+    const updatedRoster = userTeam.roster.filter(pl => pl.id !== playerId);
+    const updatedTransactions = recordTransaction(league, 'release', [userTeam.id], `${userTeam.name} waived ${p?.name || 'player'}.`, [playerId]);
+    let updatedFAs = league.freeAgents;
+    let extraNews: typeof league.newsFeed = [];
+    if (!league.isOffseason && p) {
+      const waivedFA = {
+        ...p, isFreeAgent: true, inSeasonFA: true, lastTeamId: userTeam.id,
+        salary: 0, contractYears: 0,
+        interestScore: Math.round(Math.min(90, Math.max(15, 40 + Math.random() * 30))),
+        desiredContract: { years: 1, salary: p.rating >= 80 ? 3_000_000 : p.rating >= 70 ? 1_500_000 : 600_000 },
+      };
+      updatedFAs = [waivedFA, ...league.freeAgents];
+      extraNews = [{ id: `waive-${Date.now()}`, category: 'transaction' as const, headline: `${p.name} waived by ${userTeam.name}`, content: `${p.name} (${p.position}, ${p.rating} OVR) placed on waivers.`, timestamp: league.currentDay, realTimestamp: Date.now(), isBreaking: false }];
+    }
+    // Pending reaction already applied approval — no recalc needed here
+    const pendingDelta = pendingRelease?.playerId === playerId ? pendingRelease.reaction : null;
+    const newOwner = pendingDelta ? Math.max(0, Math.min(100, (league.ownerApproval ?? 55) + pendingDelta.ownerDelta)) : (league.ownerApproval ?? 55);
+    const newFan   = pendingDelta ? Math.max(0, Math.min(100, (league.fanApproval   ?? 60) + pendingDelta.fanDelta))  : (league.fanApproval ?? 60);
+    setLeague({ ...league, teams: league.teams.map(t => t.id === userTeam.id ? { ...t, roster: updatedRoster } : t), freeAgents: updatedFAs, transactions: updatedTransactions, newsFeed: [...extraNews, ...league.newsFeed], ownerApproval: newOwner, fanApproval: newFan });
+    setPendingRelease(null);
+    setSelectedPlayer(null);
+  };
+
   const handleReleasePlayer = (playerId: string) => {
     if (!league || !league.userTeamId) return;
     const userTeam = league.teams.find(t => t.id === league.userTeamId)!;
     const p = userTeam.roster.find(pl => pl.id === playerId);
+    const isStarter = !!(userTeam.rotation && Object.values(userTeam.rotation.starters).includes(playerId));
+    // Show owner modal for significant releases (OVR >= 74 or starter)
+    if (p && (p.rating >= 74 || isStarter)) {
+      const reaction = calcReleaseReaction(p, isStarter, league);
+      setPendingRelease({ playerId, reaction });
+      return;
+    }
+    // Low-impact releases execute immediately
     const updatedRoster = userTeam.roster.filter(pl => pl.id !== playerId);
     const updatedTransactions = recordTransaction(league, 'release', [userTeam.id], `${userTeam.name} waived ${p?.name || 'player'}.`, [playerId]);
 
@@ -3429,7 +3505,7 @@ const App: React.FC = () => {
       <Sidebar activeTab={activeTab} setActiveTab={setActiveTab} team={userTeam} onQuit={() => setStatus('title')} league={league} isExpansionActive={league.expansionDraft?.active} />
       <main className="flex-1 overflow-y-auto p-6 md:p-10 space-y-8 pb-32 transition-all duration-300 ease-in-out">
         <div key={activeTab} className="animate-in fade-in slide-in-from-bottom-2 duration-500">
-          {activeTab === 'dashboard' && <Dashboard league={league} news={news} onSimulate={handleSimulate} onScout={handleViewPlayer} scoutingReport={scoutingReport} setActiveTab={setActiveTab} onViewRoster={handleViewRoster} onManageTeam={handleManageTeam} onAdvanceToRegularSeason={handleAdvanceToRegularSeason} />}
+          {activeTab === 'dashboard' && <Dashboard league={league} news={news} onSimulate={handleSimulate} onScout={handleViewPlayer} scoutingReport={scoutingReport} setActiveTab={setActiveTab} onViewRoster={handleViewRoster} onManageTeam={handleManageTeam} onAdvanceToRegularSeason={handleAdvanceToRegularSeason} onOpenOffseasonAlerts={() => setShowOffseasonAlerts(true)} />}
           {activeTab === 'gm_profile' && <GMProfileView league={league} updateLeague={updateLeagueState} />}
           {activeTab === 'team_management' && (
             <TeamManagement 
@@ -3710,6 +3786,24 @@ const App: React.FC = () => {
         />
       )}
 
+      {pendingRelease && (
+        <OwnerReactionModal
+          reaction={pendingRelease.reaction}
+          moveType="release"
+          onProceed={() => executeRelease(pendingRelease.playerId)}
+          onCancel={() => setPendingRelease(null)}
+        />
+      )}
+      {showOffseasonAlerts && league.offseasonAlerts && league.offseasonAlerts.some(a => !a.dismissed) && (
+        <OffseasonAlertsModal
+          alerts={league.offseasonAlerts}
+          isWomensLeague={(league.settings.playerGenderRatio ?? 0) === 100}
+          onDismiss={handleDismissAlert}
+          onDismissAll={handleDismissAllAlerts}
+          onOfferContract={handleAlertOfferContract}
+          onClose={() => setShowOffseasonAlerts(false)}
+        />
+      )}
       {viewingBoxScore && <BoxScoreModal result={viewingBoxScore.result} homeTeam={viewingBoxScore.home} awayTeam={viewingBoxScore.away} onClose={() => setViewingBoxScore(null)} />}
       {watchingGame && (
         <LiveGameModal 
