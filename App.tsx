@@ -18,6 +18,7 @@ import OwnerReactionModal from './components/OwnerReactionModal';
 import { calcReleaseReaction, OwnerReaction } from './utils/ownerReactionEngine';
 import { computeOffseasonGrade, computeDraftGrade, OffseasonGradeData, DraftGradeData } from './utils/offseasonGradeEngine';
 import { fmtSalary } from './utils/formatters';
+import { getContractRules } from './utils/contractRules';
 import OffseasonGradeModal from './components/OffseasonGradeModal';
 import DraftGradeModal from './components/DraftGradeModal';
 
@@ -2024,8 +2025,10 @@ const App: React.FC = () => {
         : (Math.random() < 0.3 && aiTeamsNeedingHelp.length > 0
             ? [aiTeamsNeedingHelp[Math.floor(Math.random() * aiTeamsNeedingHelp.length)]]
             : []);
-      const isWomensLeague = (newState.settings.playerGenderRatio ?? 0) === 100;
-      const leagueMin = isWomensLeague ? Math.round(cap * 0.012) : 600_000;
+      const inSeasonRules = getContractRules(newState);
+      const leagueMin = inSeasonRules.minPlayerSalary;
+      const leagueMax = inSeasonRules.maxPlayerSalary;
+      const increment = inSeasonRules.isWomens ? 5_000 : 250_000;
       for (const team of teamsToProcess) {
         const teamSalary = team.roster.reduce((s, p) => s + (p.salary || 0), 0);
         const teamCapSpace = cap - teamSalary;
@@ -2036,10 +2039,9 @@ const App: React.FC = () => {
         if (eligible.length === 0) continue;
         const fa = eligible[Math.floor(Math.random() * Math.min(3, eligible.length))];
         const faDesired = fa.desiredContract?.salary || leagueMin;
-        const rawSalary = isWomensLeague
-          ? Math.round(faDesired * (0.8 + Math.random() * 0.3))
-          : Math.round(faDesired * (0.8 + Math.random() * 0.3) / 250_000) * 250_000;
-        const salary = Math.max(leagueMin, Math.min(rawSalary, teamCapSpace));
+        const rawSalary = Math.round(faDesired * (0.8 + Math.random() * 0.3) / increment) * increment;
+        const cappedSalary = Math.min(rawSalary, leagueMax);
+        const salary = Math.max(leagueMin, Math.min(cappedSalary, teamCapSpace));
         const signingType = isPreseasonPhaseSign ? 'training camp contract' : (salary <= 700_000 ? '10-day' : 'rest-of-season minimum');
         const signedPlayer = { ...fa, isFreeAgent: false, inSeasonFA: false, salary, contractYears: 1, morale: Math.min(100, (fa.morale || 70) + 5) };
         newState = {
@@ -3749,6 +3751,7 @@ const App: React.FC = () => {
             draftLocked={!!(league.isOffseason && league.draftPhase !== 'completed')}
             godMode={league.settings.godMode}
             onUpdatePlayer={handleUpdatePlayer}
+            maxPlayerSalary={getContractRules(league).maxPlayerSalary}
             isCurrentAllStar={isCurrentAllStar}
             currentAllStarRole={currentAllStarRole}
             careerAwards={careerAwards}

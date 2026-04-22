@@ -5,6 +5,7 @@ import WatchToggle from './WatchToggle';
 import OwnerReactionModal from './OwnerReactionModal';
 import { calcSigningReaction, OwnerReaction } from '../utils/ownerReactionEngine';
 import { fmtSalary } from '../utils/formatters';
+import { getContractRules, computeDesiredSalaryWithRules } from '../utils/contractRules';
 
 // ── Constants ──────────────────────────────────────────────────────────────
 const MORATORIUM_DAYS = 5; // signing window opens after day 5
@@ -154,9 +155,17 @@ const FreeAgency: React.FC<FreeAgencyProps> = ({
   const isOverLux   = currentSalary > luxuryTax;
   const isOverFirst  = currentSalary > firstApron;
   const isOverSecond = currentSalary > secondApron;
-  // Veteran minimum exception: always signable under NBA soft cap unless at/over the 2nd apron hard cap
-  const VET_MIN = 1_100_000;
+
+  // ── Contract rules (gender + era aware) ──
+  const rules = useMemo(() => getContractRules(league), [league.settings]);
+  const VET_MIN = rules.minPlayerSalary;
   const canSignMin = !isOverSecond;
+
+  // ── Gender-aware desired salary (shadows module-level getDesired) ──
+  const getDesired = (p: Player) => ({
+    salary: computeDesiredSalaryWithRules(p.rating, rules),
+    years: computeDesiredYears(p.age, p.rating),
+  });
 
   const moratoriumActive = league.isOffseason && league.offseasonDay < MORATORIUM_DAYS;
   const daysUntilOpen = league.isOffseason ? Math.max(0, MORATORIUM_DAYS - league.offseasonDay) : 0;
@@ -401,6 +410,10 @@ const FreeAgency: React.FC<FreeAgencyProps> = ({
   // ── Submit offer logic ──
   const submitOffer = useCallback(async () => {
     if (!negotiatingPlayer) return;
+    if (offer.salary > rules.maxPlayerSalary) {
+      alert(`Offer exceeds the league max contract (${rules.maxSalaryLabel}). Reduce the salary.`);
+      return;
+    }
     setIsSubmitting(true);
     setNegotiationResult(null);
 
@@ -608,13 +621,15 @@ const FreeAgency: React.FC<FreeAgencyProps> = ({
       const aiSecondApron = aiCapLine + 68_000_000;
       // Hard cap check: teams at/over second apron cannot sign anyone
       if (teamSalary >= aiSecondApron) continue;
-      const rawSalary = Math.round((desired.salary * salaryMult) / 250_000) * 250_000;
+      const increment = rules.isWomens ? 5_000 : 250_000;
+      const rawSalary = Math.round((desired.salary * salaryMult) / increment) * increment;
+      const cappedSalary = Math.min(rawSalary, rules.maxPlayerSalary);
       // Soft cap: over cap but under 2nd apron → minimum only; otherwise use cap space
-      const salary = teamCapSpace >= rawSalary
-        ? rawSalary                                          // has full space
+      const salary = teamCapSpace >= cappedSalary
+        ? cappedSalary                                       // has full space
         : teamCapSpace > 0
-          ? Math.max(1_100_000, teamCapSpace)               // partial space: use what's available
-          : 1_100_000;                                       // over soft cap: veteran minimum only
+          ? Math.max(rules.minPlayerSalary, teamCapSpace)   // partial space: use what's available
+          : rules.minPlayerSalary;                          // over soft cap: veteran minimum only
 
       const totalValue = salary * years;
       const tx: Transaction = {
@@ -1017,7 +1032,7 @@ const FreeAgency: React.FC<FreeAgencyProps> = ({
                 <tbody className="divide-y divide-slate-800/40">
                   {upcomingFAs.map(p => {
                     const isUserTeamPlayer = p.teamAbbr === userTeam.abbreviation;
-                    const estAsk = computeDesiredSalary(p.rating);
+                    const estAsk = computeDesiredSalaryWithRules(p.rating, rules);
                     const estYrs = computeDesiredYears(p.age, p.rating);
                     const canAfford = estAsk <= capSpace + (p.salary || 0);
                     return (
@@ -1545,13 +1560,15 @@ const FreeAgency: React.FC<FreeAgencyProps> = ({
                     <div>
                       <label className="text-[10px] font-black uppercase text-slate-500 block mb-2">
                         Annual Salary
+                        <span className="ml-2 text-emerald-500 normal-case font-bold">{rules.maxSalaryLabel}</span>
                       </label>
-                      <div className="flex items-center bg-slate-950 border border-slate-800 rounded-xl px-4 py-3 focus-within:border-amber-500 transition-colors">
+                      <div className={`flex items-center bg-slate-950 border rounded-xl px-4 py-3 focus-within:border-amber-500 transition-colors ${offer.salary > rules.maxPlayerSalary ? 'border-rose-500/60' : 'border-slate-800'}`}>
                         <span className="text-slate-500 font-bold mr-2 text-sm">$</span>
                         <input
                           type="number"
-                          min={500_000}
-                          step={250_000}
+                          min={VET_MIN}
+                          max={rules.maxPlayerSalary}
+                          step={rules.isWomens ? 5_000 : 250_000}
                           value={offer.salary}
                           onChange={e => setOffer({ ...offer, salary: Math.max(0, parseInt(e.target.value) || 0) })}
                           className="bg-transparent text-white w-full focus:outline-none font-mono text-sm"
@@ -1607,6 +1624,16 @@ const FreeAgency: React.FC<FreeAgencyProps> = ({
                     </button>
                   </div>
 
+                  {/* Max contract warning */}
+                  {offer.salary > rules.maxPlayerSalary && (
+                    <div className="flex items-center gap-2 bg-rose-500/10 border border-rose-500/30 rounded-xl p-3">
+                      <span className="text-rose-400">🚫</span>
+                      <p className="text-[11px] text-rose-400 font-bold">
+                        Exceeds {rules.maxSalaryLabel} — the league maximum. This offer cannot be submitted.
+                      </p>
+                    </div>
+                  )}
+
                   {/* Cap warning — tiered by cap position */}
                   {offer.salary > capSpace && !isOverCap && (
                     <div className="flex items-center gap-2 bg-amber-500/10 border border-amber-500/20 rounded-xl p-3">
@@ -1649,8 +1676,8 @@ const FreeAgency: React.FC<FreeAgencyProps> = ({
                 {negotiationResult !== 'declined' && (
                   <button
                     onClick={submitOffer}
-                    disabled={isSubmitting || offer.salary <= 0 || isOverSecond || (isOverCap && offer.salary > VET_MIN * 2)}
-                    title={isOverSecond ? 'Hard cap — no signings' : (isOverCap && offer.salary > VET_MIN * 2) ? `Over cap — max offer is ${fmt(VET_MIN * 2)} (minimum exception)` : undefined}
+                    disabled={isSubmitting || offer.salary <= 0 || isOverSecond || offer.salary > rules.maxPlayerSalary || (isOverCap && offer.salary > VET_MIN * 2)}
+                    title={isOverSecond ? 'Hard cap — no signings' : offer.salary > rules.maxPlayerSalary ? `Exceeds ${rules.maxSalaryLabel}` : (isOverCap && offer.salary > VET_MIN * 2) ? `Over cap — max offer is ${fmt(VET_MIN * 2)} (minimum exception)` : undefined}
                     className="flex-1 py-3 bg-emerald-500 hover:bg-emerald-400 disabled:opacity-50 disabled:cursor-not-allowed text-slate-950 font-display font-black uppercase text-sm rounded-xl transition-all active:scale-95 shadow-lg shadow-emerald-500/20"
                   >
                     {isSubmitting ? (
@@ -1661,7 +1688,7 @@ const FreeAgency: React.FC<FreeAgencyProps> = ({
                         </svg>
                         Consulting Agent…
                       </span>
-                    ) : isOverCap && offer.salary > VET_MIN * 2 ? 'Reduce to Min Contract' : 'Send Offer'}
+                    ) : offer.salary > rules.maxPlayerSalary ? `Over Max (${rules.maxSalaryLabel})` : isOverCap && offer.salary > VET_MIN * 2 ? 'Reduce to Min Contract' : 'Send Offer'}
                   </button>
                 )}
                 {negotiationResult === 'declined' && (
