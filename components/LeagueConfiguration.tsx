@@ -402,7 +402,6 @@ const LeagueConfiguration: React.FC<LeagueConfigurationProps> = ({ onConfirm, on
   const fmtM = fmtSalary;
 
   // ── contract salary auto-values (used when override is 0) ─────────────────
-  const isWomensLeague = playerGenderRatio === 100;
   const autoMinContract = isWomensLeague
     ? Math.max(25_000, Math.round(salaryCap * 0.012))
     : 1_100_000;
