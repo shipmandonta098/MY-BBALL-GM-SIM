@@ -116,7 +116,11 @@ function pickInterimCoach(
   };
 }
 
-const App: React.FC<{ onReady: () => void }> = ({ onReady }) => {
+const App: React.FC<{
+  onReady: () => void;
+  onShowLoading?: (msg: string) => void;
+  onHideLoading?: () => void;
+}> = ({ onReady, onShowLoading, onHideLoading }) => {
   const [status, setStatus] = useState<AppStatus>('title');
   const [league, setLeague] = useState<LeagueState | null>(null);
   const [pendingTeamId, setPendingTeamId] = useState<string | null>(null);
@@ -576,6 +580,10 @@ const App: React.FC<{ onReady: () => void }> = ({ onReady }) => {
   const handleNewLeague = () => setStatus('config');
 
   const handleConfigLeague = async (name: string, year: number, partialSettings: Partial<LeagueSettings>) => {
+    onShowLoading?.('Creating New League...');
+    // Yield two frames so the loading screen paints before synchronous generation blocks the thread
+    await new Promise<void>(r => setTimeout(r, 50));
+
     const genderRatio = partialSettings.playerGenderRatio || 0;
     
     const finalSettings: LeagueSettings = {
@@ -626,6 +634,8 @@ const App: React.FC<{ onReady: () => void }> = ({ onReady }) => {
     setLeague(newLeague);
     await db.leagues.add(newLeague);
     setStatus('setup');
+    // Wait for TeamSelection to paint before hiding the loader
+    requestAnimationFrame(() => requestAnimationFrame(() => onHideLoading?.()));
   };
 
   const handleLoadSave = (savedLeague: LeagueState) => {
@@ -685,6 +695,11 @@ const App: React.FC<{ onReady: () => void }> = ({ onReady }) => {
   const handleOwnerWelcomeContinue = async () => {
     if (!league || !pendingTeamId) return;
     const teamId = pendingTeamId;
+
+    // Show loader before any heavy work so there is no blank flash on game entry
+    onShowLoading?.('Loading Hoops Dynasty...');
+    await new Promise<void>(r => setTimeout(r, 50));
+
     const team   = league.teams.find(t => t.id === teamId)!;
     const updatedMilestones = [...league.gmProfile.milestones, {
       id: `hired-${Date.now()}`, year: league.season, day: league.currentDay,
@@ -696,15 +711,14 @@ const App: React.FC<{ onReady: () => void }> = ({ onReady }) => {
       lastUpdated: Date.now(),
     };
     const updatedWithAI = { ...updated, teams: assignAIPersonalities(updated.teams, teamId) };
-    // Set all UI state together before the async DB write so React batches them
-    // into one render with status='game', preventing a blank intermediate state
     setLeague(updatedWithAI);
     setRosterTeamId(teamId);
     setPendingTeamId(null);
     setStatus('game');
     setActiveTab('dashboard');
-    // DB write is fire-and-forget so it doesn't delay the UI transition
     db.leagues.put(updatedWithAI).catch(err => console.error('Save error after career start:', err));
+    // Wait for Dashboard to paint before hiding the loader
+    requestAnimationFrame(() => requestAnimationFrame(() => onHideLoading?.()));
   };
 
   const addNewsItem = async (state: LeagueState, category: NewsCategory, data: { player?: Player, team?: Team, coach?: Coach, detail?: string }, isBreaking: boolean = false) => {
@@ -3097,7 +3111,7 @@ const App: React.FC<{ onReady: () => void }> = ({ onReady }) => {
     }
   };
 
-  const handleAdvanceToRegularSeason = () => {
+  const handleAdvanceToRegularSeason = async () => {
     if (!league) return;
 
     // ── Offseason grade gate: show grade modal before leaving the offseason ─
@@ -3134,6 +3148,10 @@ const App: React.FC<{ onReady: () => void }> = ({ onReady }) => {
     }
 
     // ── Case 2: After offseason (or first season init) → enter Preseason ─
+    // Schedule generation is synchronous and heavy; show loader so the UI doesn't flash
+    onShowLoading?.('Tipping Off New Season...');
+    await new Promise<void>(r => setTimeout(r, 50));
+
     const numPreseasonGames = league.settings.preseasonGames ?? 6;
     const freshPreseasonSchedule = generatePreseasonSchedule(league.teams, numPreseasonGames);
     const needsFreshSchedule = league.isOffseason || league.schedule.every(g => g.played);
@@ -3201,6 +3219,8 @@ const App: React.FC<{ onReady: () => void }> = ({ onReady }) => {
         allStarWeekend: undefined,
       };
     });
+    // Wait for the new preseason view to paint before hiding the loader
+    requestAnimationFrame(() => requestAnimationFrame(() => onHideLoading?.()));
   };
 
   const handleScoutPlayer = async (player: Player | Prospect) => { setLoading(true); const report = await generateScoutingReport(player); setScoutingReport({ playerId: player.id, report }); setLoading(false); };
