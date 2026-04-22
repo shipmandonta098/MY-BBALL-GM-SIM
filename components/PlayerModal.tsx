@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { Player, PlayerStatus, PersonalityTrait, Position, PlayerTendencies, TeamRotation } from '../types';
 import { getFlag, countryFromHometown, POS_ATTR_RANGES, PosAttrRangeKey, enforcePositionalBounds, FEMALE_ATTR_CAPS, NAMES_MALE, NAMES_FEMALE, COLLEGES_HIGH_MAJOR, COLLEGES_MID_MAJOR, ALL_HOMETOWNS, deriveComposites, deriveArchetype } from '../constants';
+import { fmtSalary } from '../utils/formatters';
 
 const POS_RANGE_KEYS: PosAttrRangeKey[] = ['shooting', 'playmaking', 'defense', 'rebounding', 'athleticism'];
 
@@ -42,6 +43,8 @@ interface PlayerModalProps {
   };
   /** All team names for the draft-team dropdown in god mode */
   teams?: string[];
+  /** League max player salary for God Mode validation */
+  maxPlayerSalary?: number;
 }
 
 const traitIcons: Record<PersonalityTrait, string> = {
@@ -78,6 +81,7 @@ const PlayerModal: React.FC<PlayerModalProps> = ({
   currentSeason,
   leagueContext,
   teams = [],
+  maxPlayerSalary,
 }) => {
   const [isEditing, setIsEditing] = React.useState(false);
   const [statsTab, setStatsTab] = useState<'season' | 'career' | 'advanced' | 'playoffs'>('season');
@@ -639,14 +643,22 @@ const PlayerModal: React.FC<PlayerModalProps> = ({
                     <div className="h-px w-full bg-slate-800/50 my-4"></div>
                     
                     <h3 className="text-[10px] font-black text-amber-500 uppercase tracking-[0.5em]">Contract & Draft</h3>
+                    {maxPlayerSalary && editedPlayer.salary > maxPlayerSalary && (
+                      <div className="flex items-center gap-2 bg-rose-500/10 border border-rose-500/30 rounded-xl px-3 py-2">
+                        <span className="text-rose-400 text-[11px]">⚠ Salary exceeds league max ({fmtSalary(maxPlayerSalary)})</span>
+                      </div>
+                    )}
                     <div className="grid grid-cols-2 gap-4">
                       <div className="space-y-2">
-                        <label className="text-[10px] font-black uppercase text-slate-500 tracking-widest">Salary ($)</label>
-                        <input 
-                          type="number" 
+                        <label className="text-[10px] font-black uppercase text-slate-500 tracking-widest">
+                          Salary ($)
+                          {maxPlayerSalary && <span className="ml-2 text-emerald-600 normal-case font-bold">max {fmtSalary(maxPlayerSalary)}</span>}
+                        </label>
+                        <input
+                          type="number"
                           value={editedPlayer.salary}
                           onChange={e => handleContractChange('salary', parseInt(e.target.value))}
-                          className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-3 text-white font-bold focus:outline-none focus:border-amber-500/50"
+                          className={`w-full bg-slate-950 border rounded-xl px-4 py-3 text-white font-bold focus:outline-none focus:border-amber-500/50 ${maxPlayerSalary && editedPlayer.salary > maxPlayerSalary ? 'border-rose-500/50' : 'border-slate-800'}`}
                         />
                       </div>
                       <div className="space-y-2">

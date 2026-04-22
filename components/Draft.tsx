@@ -1,6 +1,7 @@
 import React, { useState, useMemo, useEffect, useRef } from 'react';
 import { LeagueState, Team, Prospect, DraftPick, Player } from '../types';
 import { getFlag } from '../constants';
+import { getContractRules, computeRookieSalary } from '../utils/contractRules';
 import WatchToggle from './WatchToggle';
 import { aiGMDraftPick, computeTeamNeeds, prospectNeedFit, TeamNeedItem } from '../utils/aiGMEngine';
 import DraftLottery from './DraftLottery';
@@ -63,10 +64,13 @@ const Draft: React.FC<DraftProps> = ({ league, updateLeague, onScout, scoutingRe
 
   const makePick = (teamId: string, prospect: Prospect) => {
     const team = league.teams.find(t => t.id === teamId)!;
+    const draftRules = getContractRules(league);
+    const pickRound = (league.draftPicks?.[league.currentDraftPickIndex || 0]?.round) ?? 1;
+    const rookieSalary = computeRookieSalary(prospect.rating, pickRound, draftRules);
     const newPlayer: Player = {
       ...prospect,
-      salary: Math.floor((prospect.rating / 100) * 8_000_000),
-      contractYears: Math.min(4, league.settings.maxContractYears ?? 4),
+      salary: rookieSalary,
+      contractYears: Math.min(draftRules.maxContractYears, league.settings.maxContractYears ?? 4),
       status: 'Rotation',
       morale: 85,
       stats: {

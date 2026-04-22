@@ -865,6 +865,9 @@ const LeagueConfiguration: React.FC<LeagueConfigurationProps> = ({ onConfirm, on
                   <Field label="Max Player Salary %" hint="Max % of cap any single player can earn.">
                     <BtnGroup options={['25%','30%','35%']} value={`${maxPlayerSalaryPct}%`}
                       onChange={v => setMaxPlayerSalaryPct(parseInt(v) as 25|30|35)} />
+                    <p className="text-[10px] text-emerald-500/80 font-bold mt-1.5 uppercase tracking-widest">
+                      Max Contract: {fmtSalary(Math.round(salaryCap * maxPlayerSalaryPct / 100))}/yr
+                    </p>
                   </Field>
                   <Field label="Bird Rights">
                     <Toggle label={birdRights ? 'Enabled — re-sign own players over cap' : 'Disabled — hard cap applies to re-signings'}
