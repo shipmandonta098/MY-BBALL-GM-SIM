@@ -116,7 +116,7 @@ function pickInterimCoach(
   };
 }
 
-const App: React.FC = () => {
+const App: React.FC<{ onReady: () => void }> = ({ onReady }) => {
   const [status, setStatus] = useState<AppStatus>('title');
   const [league, setLeague] = useState<LeagueState | null>(null);
   const [pendingTeamId, setPendingTeamId] = useState<string | null>(null);
@@ -149,9 +149,13 @@ const App: React.FC = () => {
   const [draftGradeData, setDraftGradeData] = useState<DraftGradeData | null>(null);
   const draftGradeShownForSeason = React.useRef<number>(-1);
 
+  const onReadyRef = React.useRef(onReady);
+  onReadyRef.current = onReady;
+
   const refreshSaves = useCallback(async () => {
     const saves = await db.leagues.toArray();
     setAllSaves(saves);
+    onReadyRef.current();
   }, []);
 
   useEffect(() => {
