@@ -2,6 +2,7 @@
 import React, { useState, useEffect } from 'react';
 import { LeagueSettings } from '../types';
 import { getHistoricalFinancials, getWNBAHistoricalFinancials } from '../constants';
+import { fmtSalary } from '../utils/formatters';
 import NumericInput from './NumericInput';
 
 interface LeagueConfigurationProps {
@@ -391,7 +392,7 @@ const LeagueConfiguration: React.FC<LeagueConfigurationProps> = ({ onConfirm, on
     playerGenderRatio === 100 ? 'All Female'  :
     playerGenderRatio === 50  ? 'Mixed 50/50' : 'Custom';
 
-  const fmtM = (v: number) => '$' + (v / 1_000_000).toFixed(0) + 'M';
+  const fmtM = fmtSalary;
 
   const normDiff = (d: LeagueSettings['difficulty']): string =>
     d === 'Easy' ? 'Rookie' : d === 'Medium' ? 'Pro' : d === 'Hard' ? 'All-Star' : d === 'Extreme' ? 'Legend' : d;
@@ -508,15 +509,11 @@ const LeagueConfiguration: React.FC<LeagueConfigurationProps> = ({ onConfirm, on
               </div>
               <div className="flex flex-wrap gap-x-3 gap-y-1 text-[10px] font-bold text-slate-400">
                 <span className={noCap ? 'text-rose-400' : 'text-slate-300'}>
-                  Cap: {noCap ? 'None' : h.salaryCap < 1_000_000
-                    ? `$${(h.salaryCap / 1_000).toFixed(0)}K`
-                    : `$${(h.salaryCap / 1_000_000).toFixed(2)}M`}
+                  Cap: {noCap ? 'None' : fmtSalary(h.salaryCap)}
                 </span>
                 <span>·</span>
                 <span>
-                  Luxury Tax: {h.luxuryTaxLine === 0 ? 'None' : h.luxuryTaxLine < 1_000_000
-                    ? `$${(h.luxuryTaxLine / 1_000).toFixed(0)}K`
-                    : `$${(h.luxuryTaxLine / 1_000_000).toFixed(1)}M`}
+                  Luxury Tax: {h.luxuryTaxLine === 0 ? 'None' : fmtSalary(h.luxuryTaxLine)}
                 </span>
                 <span>·</span>
                 <span>Rookie Scale: {h.rookieScaleContracts ? 'Yes' : 'No'}</span>

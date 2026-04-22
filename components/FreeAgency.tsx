@@ -4,6 +4,7 @@ import { getFlag } from '../constants';
 import WatchToggle from './WatchToggle';
 import OwnerReactionModal from './OwnerReactionModal';
 import { calcSigningReaction, OwnerReaction } from '../utils/ownerReactionEngine';
+import { fmtSalary } from '../utils/formatters';
 
 // ── Constants ──────────────────────────────────────────────────────────────
 const MORATORIUM_DAYS = 5; // signing window opens after day 5
@@ -24,8 +25,8 @@ interface FreeAgencyProps {
 }
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
-const fmt = (val: number) => `$${(val / 1_000_000).toFixed(1)}M`;
-const fmtFull = (val: number) => `$${(val / 1_000_000).toFixed(2)}M`;
+const fmt = fmtSalary;
+const fmtFull = fmtSalary;
 
 /** Compute a reasonable desired salary for a player if one isn't set.
  *  Piecewise curve: 70-79 OVR → $7-16M, 80-87 → $16-26M, 88+ → $26-45M. */
@@ -623,7 +624,7 @@ const FreeAgency: React.FC<FreeAgencyProps> = ({
         realTimestamp: Date.now() + i,
         teamIds: [team.id],
         playerIds: [player.id],
-        description: `${team.name} agree to terms with ${player.name} on a ${years}-year, $${(totalValue / 1_000_000).toFixed(1)}M deal.`,
+        description: `${team.name} agree to terms with ${player.name} on a ${years}-year, ${fmtSalary(totalValue)} deal.`,
         value: totalValue,
       };
       newTxs.push(tx);
@@ -632,7 +633,7 @@ const FreeAgency: React.FC<FreeAgencyProps> = ({
         id: `fa-ai-${Date.now()}-${i}`,
         category: 'transaction',
         headline: `${player.name} agrees to terms with ${team.name}`,
-        content: `The ${team.name} agree to terms with ${player.name} (${player.position}, ${player.rating} OVR) on a ${years}-year, $${(totalValue / 1_000_000).toFixed(1)}M deal (${fmt(salary)}/yr).`,
+        content: `The ${team.name} agree to terms with ${player.name} (${player.position}, ${player.rating} OVR) on a ${years}-year, ${fmtSalary(totalValue)} deal (${fmt(salary)}/yr).`,
         timestamp: league.currentDay,
         realTimestamp: Date.now() + i,
         teamId: team.id,

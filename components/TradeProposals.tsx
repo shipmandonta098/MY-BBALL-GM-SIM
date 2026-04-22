@@ -1,6 +1,7 @@
 import React, { useMemo, useState } from 'react';
 import { LeagueState, TradeProposal, TradePiece, Player, DraftPick } from '../types';
 import { playerTradeValue } from '../utils/aiGMEngine';
+import { fmtSalary } from '../utils/formatters';
 
 interface TradeProposalsProps {
   league: LeagueState;
@@ -43,7 +44,7 @@ const TradeProposals: React.FC<TradeProposalsProps> = ({
     : isOffseason   ? 'Trades resume once the regular season begins.'
     : null; // window is open
 
-  const fmtSalary = (n: number) => `$${(n / 1_000_000).toFixed(1)}M`;
+  // fmtSalary imported from utils/formatters
 
   const formatPiece = (piece: TradePiece) => {
     if (piece.type === 'player') {

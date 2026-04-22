@@ -2,6 +2,7 @@
 import React, { useState, useMemo } from 'react';
 import { LeagueState, LeagueSettings } from '../types';
 import { getHistoricalFinancials } from '../constants';
+import { fmtSalary } from '../utils/formatters';
 import NumericInput from './NumericInput';
 
 interface SettingsProps {
@@ -297,7 +298,7 @@ const Settings: React.FC<SettingsProps> = ({ league, updateLeague, onRegenerateS
     return SEARCH_INDEX.filter(item => item.label.toLowerCase().includes(q));
   }, [searchQuery]);
 
-  const formatMoney = (val: number) => `$${(val / 1_000_000).toFixed(0)}M`;
+  const formatMoney = fmtSalary;
 
   // ── Helper UI components ──────────────────────────────────────────────────
   const TabButton = ({ id, label }: { id: SettingsTab; label: string }) => (
@@ -703,11 +704,11 @@ const Settings: React.FC<SettingsProps> = ({ league, updateLeague, onRegenerateS
                   </div>
                   <div className="flex flex-wrap gap-3 text-[10px] font-bold text-slate-400">
                     <span className={noCap ? 'text-rose-400' : 'text-slate-200'}>
-                      Cap: {noCap ? 'No Salary Cap' : `$${(s.salaryCap / 1_000_000).toFixed(1)}M`}
+                      Cap: {noCap ? 'No Salary Cap' : fmtSalary(s.salaryCap)}
                     </span>
                     <span>·</span>
                     <span>
-                      Luxury Tax: {(!s.luxuryTaxLine || s.luxuryTaxLine === 0) ? 'None' : `$${(s.luxuryTaxLine / 1_000_000).toFixed(1)}M`}
+                      Luxury Tax: {(!s.luxuryTaxLine || s.luxuryTaxLine === 0) ? 'None' : fmtSalary(s.luxuryTaxLine)}
                     </span>
                     <span>·</span>
                     <span>Rookie Scale: {s.rookieScaleContracts !== false ? 'Yes' : 'No'}</span>

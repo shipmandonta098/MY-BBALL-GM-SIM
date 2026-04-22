@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { OffseasonAlert } from '../types';
 import { X, ChevronRight, ChevronLeft, UserCheck, Bell, Star, Users } from 'lucide-react';
+import { fmtSalary } from '../utils/formatters';
 
 interface OffseasonAlertsModalProps {
   alerts: OffseasonAlert[];
@@ -10,15 +11,6 @@ interface OffseasonAlertsModalProps {
   onOfferContract: (alertId: string) => void;
   onClose: () => void;
 }
-
-/** Format salary smartly: WNBA scale uses $Xk, NBA scale uses $X.XM */
-const fmtSalary = (salary: number, isWomens: boolean): string => {
-  if (isWomens || salary < 2_000_000) {
-    if (salary >= 1_000_000) return `$${(salary / 1_000_000).toFixed(2)}M`;
-    return `$${Math.round(salary / 1_000)}k`;
-  }
-  return `$${(salary / 1_000_000).toFixed(1)}M`;
-};
 
 const ratingColor = (r: number) =>
   r >= 90 ? 'text-amber-400'
@@ -175,7 +167,7 @@ const OffseasonAlertsModal: React.FC<OffseasonAlertsModalProps> = ({
                 <div className="mt-2 flex items-center gap-2">
                   <span className="text-xs font-bold text-slate-400">Seeking:</span>
                   <span className="text-xs font-black text-emerald-400">
-                    {fmtSalary(alert.salary, isWomensLeague)}/yr · {alert.contractYears} yr{alert.contractYears > 1 ? 's' : ''}
+                    {fmtSalary(alert.salary ?? 0)}/yr · {alert.contractYears} yr{alert.contractYears > 1 ? 's' : ''}
                   </span>
                 </div>
               )}

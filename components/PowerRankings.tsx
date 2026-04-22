@@ -2,6 +2,7 @@ import React, { useState, useMemo, useEffect } from 'react';
 import { LeagueState, Team, PowerRankingEntry, PowerRankingSnapshot } from '../types';
 import TeamBadge from './TeamBadge';
 import { generateTeamComparisonInsight } from '../services/geminiService';
+import { fmtSalary } from '../utils/formatters';
 import { PlayerLink } from '../context/NavigationContext';
 
 interface PowerRankingsProps {
@@ -96,7 +97,7 @@ const PowerRankings: React.FC<PowerRankingsProps> = ({ league, onViewRoster, onM
            </div>
            <div className="bg-slate-950 p-4 rounded-xl border border-slate-800">
               <p className="text-[10px] text-slate-500 font-black uppercase mb-1">Cap Space</p>
-              <p className={`text-xl font-mono font-bold ${cap > 0 ? 'text-emerald-400' : 'text-rose-500'}`}>${(cap/1000000).toFixed(1)}M</p>
+              <p className={`text-xl font-mono font-bold ${cap > 0 ? 'text-emerald-400' : 'text-rose-500'}`}>{fmtSalary(Math.abs(cap))}{cap < 0 ? ' over' : ''}</p>
            </div>
         </div>
 
