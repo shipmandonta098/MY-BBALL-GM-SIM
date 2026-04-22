@@ -4,7 +4,6 @@ import { LeagueState, LeagueSettings } from '../types';
 import { getHistoricalFinancials } from '../constants';
 import { fmtSalary } from '../utils/formatters';
 import NumericInput from './NumericInput';
-import { useTheme, Theme } from '../context/ThemeContext';
 
 interface SettingsProps {
   league: LeagueState;
@@ -12,7 +11,7 @@ interface SettingsProps {
   onRegenerateSchedule?: () => Promise<boolean>;
 }
 
-type SettingsTab = 'league' | 'gameplay' | 'sliders' | 'simulation' | 'godmode' | 'appearance';
+type SettingsTab = 'league' | 'gameplay' | 'sliders' | 'simulation' | 'godmode';
 
 interface ChangeEntry {
   field: string;
@@ -179,11 +178,10 @@ const SEARCH_INDEX: { tab: SettingsTab; label: string }[] = [
 
 const TAB_LABELS: Record<SettingsTab, string> = {
   league: 'League', gameplay: 'Gameplay', sliders: 'Sliders',
-  simulation: 'Simulation', godmode: 'God Mode', appearance: 'Appearance',
+  simulation: 'Simulation', godmode: 'God Mode',
 };
 
 const Settings: React.FC<SettingsProps> = ({ league, updateLeague, onRegenerateSchedule }) => {
-  const { theme, setTheme } = useTheme();
   const [activeTab, setActiveTab] = useState<SettingsTab>('league');
   const [searchQuery, setSearchQuery] = useState('');
   const [changeLog, setChangeLog]     = useState<ChangeEntry[]>([]);
@@ -255,7 +253,6 @@ const Settings: React.FC<SettingsProps> = ({ league, updateLeague, onRegenerateS
       sliders:    ['sliderLayup','sliderMidRange','slider3pt','sliderFreeThrow','sliderFastBreak','sliderPostUp','sliderPickRoll','sliderSteal','sliderBlock','sliderFoul','sliderHelpDefense','sliderPerimeterDefense','sliderTimeout','sliderSubstitution','sliderTechFoul','sliderFlagrantFoul','sliderInjuryMultiplier'],
       simulation: ['pbpDetailLevel','aiDecisionSpeed','blowoutFrequency','comebackFrequency','overtimeFrequency','globalPaceOverride','shotClockLength','scoringEra','threePtFrequency','simBlockFrequency','turnoverFrequency'],
       godmode:    ['editAnyPlayer','editAnyTeam','forceGameOutcomes','manipulateStandings','freeAgentMarketControl','draftClassEditor'],
-      appearance: [],
     };
     for (const k of tabMap[activeTab]) {
       (tabDefaults as Record<string, unknown>)[k] = DEFAULT_SETTINGS[k];
@@ -443,7 +440,7 @@ const Settings: React.FC<SettingsProps> = ({ league, updateLeague, onRegenerateS
               League <span className="text-amber-500">Settings</span>
             </h2>
             <div className="flex flex-wrap gap-2">
-              {(['league','gameplay','sliders','simulation','godmode','appearance'] as SettingsTab[]).map(id => (
+              {(['league','gameplay','sliders','simulation','godmode'] as SettingsTab[]).map(id => (
                 <React.Fragment key={id}><TabButton id={id} label={TAB_LABELS[id]} /></React.Fragment>
               ))}
             </div>
@@ -1226,94 +1223,6 @@ const Settings: React.FC<SettingsProps> = ({ league, updateLeague, onRegenerateS
                   Rewind to Last Save Checkpoint
                 </button>
               </div>
-            </div>
-          </div>
-        )}
-
-        {/* ── Appearance Tab ─────────────────────────────────────────────── */}
-        {activeTab === 'appearance' && (
-          <div className="space-y-8">
-            <div className="bg-slate-900 border border-slate-800 rounded-3xl p-8 shadow-2xl">
-              <div className="flex items-center gap-3 mb-6">
-                <span className="text-2xl">🎨</span>
-                <div>
-                  <h3 className="text-xl font-display font-bold uppercase text-white tracking-tight">Theme</h3>
-                  <p className="text-[10px] text-slate-500 uppercase tracking-widest font-bold mt-0.5">
-                    Choose your visual style — applied instantly and saved automatically
-                  </p>
-                </div>
-              </div>
-
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-                {([
-                  {
-                    id: 'default' as Theme,
-                    label: 'Default',
-                    sub: 'Dark + Orange',
-                    preview: ['#0f172a', '#1e293b', '#f97316', '#f59e0b'],
-                    icon: '🏀',
-                    desc: 'The classic Hoops Dynasty look — dark panels with orange accents.',
-                  },
-                  {
-                    id: 'dark' as Theme,
-                    label: 'Pure Dark',
-                    sub: 'Dark + Blue',
-                    preview: ['#020617', '#0f172a', '#0ea5e9', '#38bdf8'],
-                    icon: '🌑',
-                    desc: 'Same dark foundation, cool blue accents replace orange.',
-                  },
-                  {
-                    id: 'light' as Theme,
-                    label: 'Light',
-                    sub: 'White + Orange',
-                    preview: ['#ffffff', '#f1f5f9', '#f97316', '#e2e8f0'],
-                    icon: '☀️',
-                    desc: 'Clean white backgrounds with dark text and orange highlights.',
-                  },
-                  {
-                    id: 'neon' as Theme,
-                    label: 'Neon',
-                    sub: 'Dark + Glow',
-                    preview: ['#02040e', '#06091a', '#ff7b00', '#00e5ff'],
-                    icon: '⚡',
-                    desc: 'Deep blue-black with glowing orange, cyan, and emerald accents.',
-                  },
-                ] as { id: Theme; label: string; sub: string; preview: string[]; icon: string; desc: string }[]).map(opt => (
-                  <button
-                    key={opt.id}
-                    onClick={() => setTheme(opt.id)}
-                    className={`relative text-left p-5 rounded-3xl border-2 transition-all group ${
-                      theme === opt.id
-                        ? 'border-amber-500 bg-amber-500/10 shadow-lg shadow-amber-500/20'
-                        : 'border-slate-700 bg-slate-950/50 hover:border-slate-500'
-                    }`}
-                  >
-                    {theme === opt.id && (
-                      <span className="absolute top-3 right-3 w-5 h-5 bg-amber-500 rounded-full flex items-center justify-center text-slate-950 text-[10px] font-black">✓</span>
-                    )}
-                    {/* Color preview swatches */}
-                    <div className="flex gap-1.5 mb-4">
-                      {opt.preview.map((c, i) => (
-                        <div
-                          key={i}
-                          className="w-8 h-8 rounded-xl border border-white/10 shadow-inner"
-                          style={{ backgroundColor: c }}
-                        />
-                      ))}
-                    </div>
-                    <div className="flex items-center gap-2 mb-1">
-                      <span className="text-lg">{opt.icon}</span>
-                      <span className="text-sm font-display font-black uppercase tracking-wider text-white">{opt.label}</span>
-                    </div>
-                    <p className="text-[10px] font-black uppercase tracking-widest text-amber-500 mb-2">{opt.sub}</p>
-                    <p className="text-[11px] text-slate-400 leading-relaxed">{opt.desc}</p>
-                  </button>
-                ))}
-              </div>
-
-              <p className="mt-6 text-[10px] text-slate-600 font-bold uppercase tracking-widest text-center">
-                Theme preference is saved in your browser and persists across sessions.
-              </p>
             </div>
           </div>
         )}
