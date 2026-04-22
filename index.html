@@ -16,6 +16,62 @@
         .font-display {
             font-family: 'Oswald', sans-serif;
         }
+        #hd-splash {
+            position: fixed;
+            inset: 0;
+            z-index: 9999;
+            background-color: #0f172a;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            transition: opacity 0.3s ease;
+        }
+        .hd-s-ball {
+            animation: hd-s-bounce 0.72s ease-in-out infinite alternate;
+            margin-bottom: 28px;
+        }
+        @keyframes hd-s-bounce {
+            from { transform: translateY(0); }
+            to   { transform: translateY(-20px); }
+        }
+        .hd-s-title {
+            font-family: 'Oswald', 'Impact', sans-serif;
+            font-size: 2rem;
+            font-weight: 700;
+            color: #f8fafc;
+            letter-spacing: 0.06em;
+            text-transform: uppercase;
+        }
+        .hd-s-sub {
+            font-family: 'Inter', sans-serif;
+            font-size: 0.8125rem;
+            color: #475569;
+            margin-top: 6px;
+            letter-spacing: 0.03em;
+        }
+        .hd-s-bar-wrap {
+            width: 128px;
+            height: 3px;
+            background: #1e293b;
+            border-radius: 4px;
+            margin-top: 28px;
+            overflow: hidden;
+            position: relative;
+        }
+        .hd-s-bar {
+            position: absolute;
+            top: 0; left: 0;
+            width: 45%;
+            height: 100%;
+            background: linear-gradient(90deg, transparent, #f97316, transparent);
+            border-radius: 4px;
+            animation: hd-s-shimmer 1.3s ease-in-out infinite;
+        }
+        @keyframes hd-s-shimmer {
+            0%   { transform: translateX(-100%); }
+            100% { transform: translateX(300%); }
+        }
     </style>
     <script>
         // Apply saved theme before React renders to avoid flash
@@ -37,6 +93,26 @@
 </script>
 </head>
 <body>
+    <div id="hd-splash" aria-hidden="true">
+        <div class="hd-s-ball">
+            <svg width="60" height="60" viewBox="0 0 60 60" fill="none" xmlns="http://www.w3.org/2000/svg">
+                <circle cx="30" cy="30" r="28" fill="url(#hd-s-grad)" stroke="#7c2d12" stroke-width="2.5"/>
+                <path d="M30 2 C30 2 30 58 30 58" stroke="#7c2d12" stroke-width="1.8" fill="none"/>
+                <path d="M2 30 C2 30 58 30 58 30" stroke="#7c2d12" stroke-width="1.8" fill="none"/>
+                <path d="M7 13 Q30 24 53 13" stroke="#7c2d12" stroke-width="1.6" fill="none"/>
+                <path d="M7 47 Q30 36 53 47" stroke="#7c2d12" stroke-width="1.6" fill="none"/>
+                <defs>
+                    <radialGradient id="hd-s-grad" cx="38%" cy="35%" r="62%">
+                        <stop offset="0%" stop-color="#fb923c"/>
+                        <stop offset="100%" stop-color="#c2410c"/>
+                    </radialGradient>
+                </defs>
+            </svg>
+        </div>
+        <div class="hd-s-title">Hoops Dynasty</div>
+        <div class="hd-s-sub">Loading your franchise…</div>
+        <div class="hd-s-bar-wrap"><div class="hd-s-bar"></div></div>
+    </div>
     <div id="root"></div>
 <script type="module" src="/index.tsx"></script>
 </body>
