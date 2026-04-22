@@ -65,13 +65,32 @@ class ErrorBoundary extends Component<{ children: React.ReactNode }, ErrorBounda
 
 const Root: React.FC = () => {
   const [appReady, setAppReady] = useState(false);
+  const [isGlobalLoading, setIsGlobalLoading] = useState(false);
+  const [loadingMsg, setLoadingMsg] = useState('Loading Hoops Dynasty...');
+
   const handleReady = useCallback(() => setAppReady(true), []);
+
+  const showLoading = useCallback((msg: string = 'Loading Hoops Dynasty...') => {
+    setLoadingMsg(msg);
+    setIsGlobalLoading(true);
+  }, []);
+
+  const hideLoading = useCallback(() => {
+    setIsGlobalLoading(false);
+  }, []);
+
+  // Loading screen stays visible until initial DB load is done AND no explicit loading in progress
+  const isReady = appReady && !isGlobalLoading;
 
   return (
     <ErrorBoundary>
       <ThemeProvider>
-        <LoadingScreen ready={appReady} />
-        <App onReady={handleReady} />
+        <LoadingScreen ready={isReady} message={loadingMsg} />
+        <App
+          onReady={handleReady}
+          onShowLoading={showLoading}
+          onHideLoading={hideLoading}
+        />
       </ThemeProvider>
     </ErrorBoundary>
   );
