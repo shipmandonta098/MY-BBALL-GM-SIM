@@ -6,6 +6,7 @@
     <title>Hoops Dynasty GM</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Oswald:wght@500;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/themes.css">
     <style>
         body {
             font-family: 'Inter', sans-serif;
@@ -16,6 +17,13 @@
             font-family: 'Oswald', sans-serif;
         }
     </style>
+    <script>
+        // Apply saved theme before React renders to avoid flash
+        (function() {
+            var t = localStorage.getItem('hd-theme');
+            if (t && t !== 'default') document.documentElement.setAttribute('data-theme', t);
+        })();
+    </script>
 <script type="importmap">
 {
   "imports": {
