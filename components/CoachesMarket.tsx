@@ -1,6 +1,7 @@
 import React, { useState, useMemo } from 'react';
 import { LeagueState, Team, Coach, ContractOffer, CoachRole, CoachScheme } from '../types';
 import { COACH_ROLES, SCHEMES } from '../constants';
+import { fmtSalary } from '../utils/formatters';
 
 interface CoachesMarketProps {
   league: LeagueState;
@@ -85,7 +86,7 @@ const CoachesMarket: React.FC<CoachesMarketProps> = ({ league, updateLeague, onS
     }, 1500);
   };
 
-  const formatMoney = (val: number) => `$${(val / 1000000).toFixed(1)}M`;
+  const formatMoney = fmtSalary;
 
   return (
     <div className="space-y-8 animate-in fade-in duration-500 pb-40">

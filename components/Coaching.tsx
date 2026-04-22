@@ -2,6 +2,7 @@
 import React, { useState, useRef } from 'react';
 import { LeagueState, Team, Coach, CoachScheme } from '../types';
 import { getCoachPreferredScheme } from '../constants';
+import { fmtSalary } from '../utils/formatters';
 
 interface CoachingProps {
   league: LeagueState;
@@ -175,7 +176,7 @@ const Coaching: React.FC<CoachingProps> = ({ league, updateLeague, godMode = fal
                   <span className="text-slate-500 uppercase">DEV:</span> <span className="text-emerald-400">{coach.ratingDevelopment}</span>
                </div>
                <div className="bg-slate-950/50 p-2 rounded">
-                  <span className="text-slate-500 uppercase">SAL:</span> <span className="text-slate-300">${(coach.salary/1000000).toFixed(1)}M</span>
+                  <span className="text-slate-500 uppercase">SAL:</span> <span className="text-slate-300">{fmtSalary(coach.salary)}</span>
                </div>
             </div>
             <button 
@@ -204,10 +205,9 @@ const Coaching: React.FC<CoachingProps> = ({ league, updateLeague, godMode = fal
           <div>
             <h2 className="text-4xl font-display font-bold uppercase tracking-tight text-white mb-2">Strategy & Staff</h2>
             <p className="text-slate-500 text-sm font-bold uppercase tracking-widest flex items-center gap-2">
-              Staff Budget: <span className="text-emerald-400">${(userTeam.staffBudget/1000000).toFixed(1)}M</span>
+              Staff Budget: <span className="text-emerald-400">{fmtSalary(userTeam.staffBudget)}</span>
               <span className="w-1 h-1 rounded-full bg-slate-700"></span>
-              {/* Fix: Use currentStaffCost instead of non-existent currentSalary */}
-              Allocated: <span className="text-amber-500">${(currentStaffCost / 1000000).toFixed(1)}M</span>
+              Allocated: <span className="text-amber-500">{fmtSalary(currentStaffCost)}</span>
             </p>
           </div>
           
@@ -452,7 +452,7 @@ const Coaching: React.FC<CoachingProps> = ({ league, updateLeague, godMode = fal
                                 <div><span className="text-slate-600 block">EXP (YRS)</span> {coach.experience}</div>
                              </div>
                              <div className="pt-4 border-t border-slate-800 flex justify-between items-center">
-                                <span className="font-mono text-emerald-400 font-bold">${(coach.salary/1000000).toFixed(1)}M /yr</span>
+                                <span className="font-mono text-emerald-400 font-bold">{fmtSalary(coach.salary)} /yr</span>
                                 <button 
                                    onClick={() => handleHire(coach)}
                                    className="px-4 py-2 bg-amber-500 hover:bg-amber-400 text-slate-950 text-[10px] font-black uppercase rounded-lg transition-all"

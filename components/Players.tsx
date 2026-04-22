@@ -2,6 +2,7 @@ import React, { useState, useMemo } from 'react';
 import { LeagueState, Player, Position, PersonalityTrait } from '../types';
 import TeamBadge from './TeamBadge';
 import WatchToggle from './WatchToggle';
+import { fmtSalary } from '../utils/formatters';
 
 interface PlayersProps {
   league: LeagueState;
@@ -296,7 +297,7 @@ const Players: React.FC<PlayersProps> = ({ league, onViewPlayer, watchList, onTo
             <p className="text-slate-700 text-xs mt-2">Click the eye icon next to any player name to add them.</p>
           </div>
         );
-        const fmtSal = (s: number) => s > 0 ? `$${(s / 1_000_000).toFixed(1)}M` : '—';
+        const fmtSal = (s: number) => s > 0 ? fmtSalary(s) : '—';
         const ovr = (v: number) => v >= 90 ? 'text-amber-400' : v >= 80 ? 'text-emerald-400' : v >= 70 ? 'text-sky-400' : 'text-slate-400';
         const potGrade = (v: number) => v >= 90 ? { l: 'A', c: 'text-amber-400' } : v >= 80 ? { l: 'B', c: 'text-emerald-400' } : v >= 70 ? { l: 'C', c: 'text-slate-300' } : { l: 'D', c: 'text-slate-500' };
         return (
@@ -666,7 +667,7 @@ const Players: React.FC<PlayersProps> = ({ league, onViewPlayer, watchList, onTo
                         {/* Contract */}
                         <td className="px-2 py-2.5 text-center whitespace-nowrap">
                           <span className="text-[10px] font-black text-slate-300">
-                            ${(p.salary / 1_000_000).toFixed(1)}M
+                            {fmtSalary(p.salary)}
                           </span>
                           <span className="text-[9px] text-slate-600 ml-1">/{p.contractYears}yr</span>
                         </td>

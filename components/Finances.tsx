@@ -2,6 +2,7 @@
 import React, { useState, useMemo } from 'react';
 import { LeagueState, Team, Player, Coach } from '../types';
 import { STAFF_CONFIG, getStaffTierIndex, StaffType } from '../constants';
+import { fmtSalary } from '../utils/formatters';
 
 interface FinancesProps {
   league: LeagueState;
@@ -31,7 +32,7 @@ const Finances: React.FC<FinancesProps> = ({ league, updateLeague }) => {
   const estimatedGateReceipts = userTeam.wins * 500000 + (userTeam.finances.ticketPrice * 20000);
   const totalRevenue = estimatedGateReceipts + 30000000; // Media rights + sponsorship
 
-  const formatMoney = (val: number) => `$${(val / 1000000).toFixed(1)}M`;
+  const formatMoney = fmtSalary;
 
   const handleUpgrade = (type: StaffType) => {
     const cfg = STAFF_CONFIG[type];
@@ -134,8 +135,8 @@ const Finances: React.FC<FinancesProps> = ({ league, updateLeague }) => {
             }`}
           >
             {canAfford
-              ? `Upgrade to ${nextTier.name} — $${(nextTier.upgradeCost / 1_000_000).toFixed(0)}M`
-              : `Need $${(nextTier.upgradeCost / 1_000_000).toFixed(0)}M to upgrade`}
+              ? `Upgrade to ${nextTier.name} — ${fmtSalary(nextTier.upgradeCost)}`
+              : `Need ${fmtSalary(nextTier.upgradeCost)} to upgrade`}
           </button>
         ) : (
           <div className="w-full py-2.5 rounded-xl text-[10px] font-black uppercase tracking-widest text-center bg-rose-500/10 border border-rose-500/20 text-rose-400">
@@ -145,7 +146,7 @@ const Finances: React.FC<FinancesProps> = ({ league, updateLeague }) => {
 
         {/* Annual cost note */}
         <p className="text-[9px] text-slate-600 font-bold text-center">
-          Annual cost: ${(currentTier.annualCost / 1_000_000).toFixed(1)}M/yr
+          Annual cost: {fmtSalary(currentTier.annualCost)}/yr
         </p>
       </div>
     );

@@ -4,6 +4,7 @@ import TeamBadge from './TeamBadge';
 import { snapshotPlayerStats } from '../utils/playerUtils';
 import OwnerReactionModal from './OwnerReactionModal';
 import { calcTradeReaction, OwnerReaction } from '../utils/ownerReactionEngine';
+import { fmtSalary } from '../utils/formatters';
 
 interface TradeProps {
   league: LeagueState;
@@ -85,7 +86,7 @@ const Trade: React.FC<TradeProps> = ({ league, updateLeague, recordTransaction, 
   const userOutgoingSalary = userPieces.reduce((sum, p) => sum + (p.type === 'player' ? (p.data as Player).salary : 0), 0);
   const partnerOutgoingSalary = partnerPieces.reduce((sum, p) => sum + (p.type === 'player' ? (p.data as Player).salary : 0), 0);
 
-  const formatMoney = (val: number) => `$${(val / 1000000).toFixed(1)}M`;
+  const formatMoney = fmtSalary;
 
   // ── Pick helpers ──────────────────────────────────────────────────────────
   const pickLabel = (pick: DraftPick): string => {

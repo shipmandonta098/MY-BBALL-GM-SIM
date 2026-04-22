@@ -3,6 +3,7 @@ import { Team, Player, Position, PlayerStatus, PersonalityTrait, Coach, TeamRota
 import TeamBadge from './TeamBadge';
 import WatchToggle from './WatchToggle';
 import { getFlag } from '../constants';
+import { fmtSalary } from '../utils/formatters';
 
 export interface RosterProps {
   leagueTeams: Team[];
@@ -147,7 +148,7 @@ const Roster: React.FC<RosterProps> = ({ leagueTeams, userTeamId, initialTeamId,
     }));
   };
 
-  const formatMoney = (amount: number) => `$${(amount / 1000000).toFixed(1)}M`;
+  const formatMoney = fmtSalary;
 
   const hcRating = activeTeam.staff.headCoach ? Math.round((activeTeam.staff.headCoach.ratingOffense + activeTeam.staff.headCoach.ratingDefense)/2) : 0;
 

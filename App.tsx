@@ -17,6 +17,7 @@ import OffseasonAlertsModal from './components/OffseasonAlertsModal';
 import OwnerReactionModal from './components/OwnerReactionModal';
 import { calcReleaseReaction, OwnerReaction } from './utils/ownerReactionEngine';
 import { computeOffseasonGrade, computeDraftGrade, OffseasonGradeData, DraftGradeData } from './utils/offseasonGradeEngine';
+import { fmtSalary } from './utils/formatters';
 import OffseasonGradeModal from './components/OffseasonGradeModal';
 import DraftGradeModal from './components/DraftGradeModal';
 
@@ -2051,7 +2052,7 @@ const App: React.FC = () => {
                 id: `in-season-sign-${Date.now()}-${fa.id}`,
                 category: 'transaction' as const,
                 headline: `${fa.name} agrees to terms with ${team.name}`,
-                content: `The ${team.name} agree to terms with ${fa.name} (${fa.position}, ${fa.rating} OVR) on a ${signingType} deal worth $${(salary / 1_000_000).toFixed(1)}M.`,
+                content: `The ${team.name} agree to terms with ${fa.name} (${fa.position}, ${fa.rating} OVR) on a ${signingType} deal worth ${fmtSalary(salary)}.`,
                 timestamp: newState.currentDay,
                 realTimestamp: Date.now(),
                 isBreaking: false,

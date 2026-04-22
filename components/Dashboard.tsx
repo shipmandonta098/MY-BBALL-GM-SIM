@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { LeagueState, Team, Player, GameResult } from '../types';
 import TeamBadge from './TeamBadge';
 import { teamSeasonAttendance } from '../utils/attendanceEngine';
+import { fmtSalary } from '../utils/formatters';
 
 interface DashboardProps {
   league: LeagueState;
@@ -168,7 +169,7 @@ const Dashboard: React.FC<DashboardProps> = ({ league, news, onSimulate, onScout
     alerts.push({ text: `${p.name} — ${label}${days > 0 ? ` · ${days}d` : ''}`, type: 'danger' });
   });
 
-  const formatMoney = (amount: number) => `$${(amount / 1000000).toFixed(1)}M`;
+  const formatMoney = fmtSalary;
 
   return (
     <div className="space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-700">
