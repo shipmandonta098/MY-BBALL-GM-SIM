@@ -1,15 +1,13 @@
 
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useState } from 'react';
 
 interface Props {
   ready: boolean;
-  message?: string;
 }
 
-const LoadingScreen: React.FC<Props> = ({ ready, message = 'Loading your franchise…' }) => {
+const LoadingScreen: React.FC<Props> = ({ ready }) => {
+  const [visible, setVisible] = useState(true);
   const [fading, setFading] = useState(false);
-  const [hidden, setHidden] = useState(false);
-  const shownAtRef = useRef(Date.now());
 
   useEffect(() => {
     const splash = document.getElementById('hd-splash');
@@ -21,20 +19,13 @@ const LoadingScreen: React.FC<Props> = ({ ready, message = 'Loading your franchi
   }, []);
 
   useEffect(() => {
-    if (!ready) {
-      setFading(false);
-      setHidden(false);
-      shownAtRef.current = Date.now();
-      return;
-    }
-    const elapsed = Date.now() - shownAtRef.current;
-    const delay = Math.max(0, 400 - elapsed);
-    const t1 = setTimeout(() => setFading(true), delay);
-    const t2 = setTimeout(() => setHidden(true), delay + 480);
-    return () => { clearTimeout(t1); clearTimeout(t2); };
+    if (!ready) return;
+    setFading(true);
+    const t = setTimeout(() => setVisible(false), 480);
+    return () => clearTimeout(t);
   }, [ready]);
 
-  if (hidden) return null;
+  if (!visible) return null;
 
   return (
     <>
@@ -83,7 +74,7 @@ const LoadingScreen: React.FC<Props> = ({ ready, message = 'Loading your franchi
           fontFamily: "'Oswald', 'Impact', sans-serif",
           fontSize: '2rem',
           fontWeight: 700,
-          color: '#f97316',
+          color: '#f8fafc',
           letterSpacing: '0.06em',
           textTransform: 'uppercase',
         }}>
@@ -92,11 +83,11 @@ const LoadingScreen: React.FC<Props> = ({ ready, message = 'Loading your franchi
         <div style={{
           fontFamily: "'Inter', sans-serif",
           fontSize: '0.8125rem',
-          color: '#64748b',
+          color: '#475569',
           marginTop: 6,
           letterSpacing: '0.03em',
         }}>
-          {message}
+          Loading your franchise…
         </div>
 
         <div style={{
