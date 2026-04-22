@@ -15,10 +15,13 @@ export function getContractRules(league: LeagueState): ContractRules {
   const isWomens = (league.settings.playerGenderRatio ?? 0) === 100;
   const cap = league.settings.salaryCap || (isWomens ? 2_200_000 : 140_000_000);
   const maxPct = league.settings.maxPlayerSalaryPct ?? (isWomens ? 30 : 35);
-  const maxPlayerSalary = Math.round((cap * maxPct) / 100);
-  const minPlayerSalary = isWomens
+  const computedMax = Math.round((cap * maxPct) / 100);
+  const computedMin = isWomens
     ? Math.max(25_000, Math.round(cap * 0.012))
     : 1_100_000;
+  // Allow manual overrides from settings; 0 means "auto"
+  const maxPlayerSalary = league.settings.maxContractSalary || computedMax;
+  const minPlayerSalary = league.settings.minContractSalary || computedMin;
   const maxContractYears = league.settings.maxContractYears ?? (isWomens ? 4 : 5);
 
   return {

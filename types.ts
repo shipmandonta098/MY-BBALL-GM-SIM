@@ -625,6 +625,8 @@ export interface LeagueSettings {
   rookieScaleContracts?: boolean;
   maxPlayerSalaryPct?: 25 | 30 | 35;
   birdRights?: boolean;
+  minContractSalary?: number;
+  maxContractSalary?: number;
   draftRounds?: number;           // default 2 (any positive integer)
   draftClassSize?: 'Small' | 'Normal' | 'Large';
   internationalProspects?: boolean;

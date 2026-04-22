@@ -17,6 +17,8 @@ export interface RosterProps {
   godMode?: boolean;
   watchList?: string[];
   onToggleWatch?: (id: string) => void;
+  minRosterSize?: number;
+  maxRosterSize?: number;
 }
 
 const traitIcons: Record<PersonalityTrait, string> = {
@@ -69,7 +71,16 @@ const ARCHETYPE_COLORS: Record<string, string> = {
   'Two-Way Forward':    'bg-teal-500/20 text-teal-400 border-teal-500/30',
 };
 
-const Roster: React.FC<RosterProps> = ({ leagueTeams, userTeamId, initialTeamId, onScout, onScoutCoach, scoutingReport, onUpdateTeamRoster, onManageTeam, godMode, watchList = [], onToggleWatch }) => {
+const moraleInfo = (morale: number | undefined) => {
+  const m = morale ?? 70;
+  if (m >= 85) return { emoji: '😊', label: 'High',     color: 'text-emerald-400' };
+  if (m >= 70) return { emoji: '🙂', label: 'Good',     color: 'text-sky-400' };
+  if (m >= 55) return { emoji: '😐', label: 'Neutral',  color: 'text-slate-400' };
+  if (m >= 40) return { emoji: '😟', label: 'Low',      color: 'text-amber-400' };
+  return             { emoji: '😠', label: 'Very Low',  color: 'text-rose-400' };
+};
+
+const Roster: React.FC<RosterProps> = ({ leagueTeams, userTeamId, initialTeamId, onScout, onScoutCoach, scoutingReport, onUpdateTeamRoster, onManageTeam, godMode, watchList = [], onToggleWatch, minRosterSize = 10, maxRosterSize = 18 }) => {
   const [selectedTeamId, setSelectedTeamId] = useState(initialTeamId || userTeamId);
   const [searchTerm, setSearchTerm] = useState('');
   const [posFilter, setPosFilter] = useState<string>('ALL');
@@ -276,6 +287,29 @@ const Roster: React.FC<RosterProps> = ({ leagueTeams, userTeamId, initialTeamId,
             </div>
 
             <div className="flex flex-wrap gap-4">
+              {/* Roster spot counter */}
+              <div className={`p-6 rounded-2xl text-center min-w-[140px] border ${
+                activeTeam.roster.length < minRosterSize
+                  ? 'bg-rose-950/30 border-rose-500/40'
+                  : activeTeam.roster.length >= maxRosterSize
+                  ? 'bg-amber-950/20 border-amber-500/30'
+                  : 'bg-slate-950/50 border-slate-800'
+              }`}>
+                <p className="text-[10px] text-slate-500 font-black uppercase tracking-widest mb-1">Roster Spots</p>
+                <p className={`text-4xl font-display font-bold ${
+                  activeTeam.roster.length < minRosterSize ? 'text-rose-400' :
+                  activeTeam.roster.length >= maxRosterSize ? 'text-amber-400' : 'text-white'
+                }`}>
+                  {activeTeam.roster.length}<span className="text-slate-600 text-2xl">/{maxRosterSize}</span>
+                </p>
+                <p className={`text-[10px] font-bold uppercase mt-1 ${
+                  activeTeam.roster.length < minRosterSize ? 'text-rose-400' : 'text-slate-600'
+                }`}>
+                  {activeTeam.roster.length < minRosterSize
+                    ? `Min ${minRosterSize} required`
+                    : `Min ${minRosterSize}`}
+                </p>
+              </div>
               <div className="bg-slate-950/50 border border-slate-800 p-6 rounded-2xl text-center min-w-[140px]">
                 <p className="text-[10px] text-slate-500 font-black uppercase tracking-widest mb-1">Chemistry</p>
                 <p className={`text-4xl font-display font-bold ${chemistry > 75 ? 'text-emerald-400' : chemistry > 45 ? 'text-amber-500' : 'text-rose-500'}`}>
@@ -454,6 +488,17 @@ const Roster: React.FC<RosterProps> = ({ leagueTeams, userTeamId, initialTeamId,
                           }`}>
                             {player.name}
                           </span>
+                          {(() => {
+                            const m = moraleInfo(player.morale);
+                            return (
+                              <span
+                                title={`Morale: ${m.label} (${player.morale ?? 70})`}
+                                className={`text-xs font-bold ${m.color} opacity-80 group-hover:opacity-100 transition-opacity`}
+                              >
+                                {m.emoji}
+                              </span>
+                            );
+                          })()}
                         </div>
                         <div className="flex items-center gap-2 mt-1 flex-wrap">
                           {(() => {

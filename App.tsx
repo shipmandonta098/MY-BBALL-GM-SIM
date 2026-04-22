@@ -590,7 +590,7 @@ const App: React.FC = () => {
     }));
     const freshSchedule = generateSeasonSchedule(freshTeams, finalSettings.seasonLength, finalSettings.divisionGames, finalSettings.conferenceGames);
     const freshProspects = generateProspects(year, 100, genderRatio, finalSettings.prospectAgeMin ?? 19, finalSettings.prospectAgeMax ?? 21);
-    const initialFAs = generateFreeAgentPool(25, year, genderRatio);
+    const initialFAs = generateFreeAgentPool(70, year, genderRatio);
     const coachPool = generateCoachPool(30, finalSettings.coachGenderRatio, year);
     // Assign AI GM personalities to all non-user teams (userTeamId assigned at team selection)
     const teamsWithAI = freshTeams; // personalities applied after user picks team in handleSelectTeam
@@ -2969,7 +2969,7 @@ const App: React.FC = () => {
     });
 
     // Merge generated FA pool + expired-contract players (deduplicated by id)
-    const generatedFAs = generateFreeAgentPool(30, tempState.season, tempState.settings.playerGenderRatio);
+    const generatedFAs = generateFreeAgentPool(70, tempState.season, tempState.settings.playerGenderRatio);
     const expiredIds = new Set(expiredPlayers.map(p => p.id));
     const mergedFAs = [
       ...expiredPlayers,
@@ -3557,7 +3557,7 @@ const App: React.FC = () => {
           {activeTab === 'transactions' && <Transactions league={league} />}
           {activeTab === 'power_rankings' && <PowerRankings league={league} onViewRoster={handleViewRoster} onManageTeam={handleManageTeam} />}
           {activeTab === 'expansion' && <Expansion league={league} updateLeague={updateLeagueState} onScout={handleViewPlayer} />}
-          {activeTab === 'roster' && <Roster leagueTeams={league.teams} userTeamId={league.userTeamId} initialTeamId={rosterTeamId} onScout={handleViewPlayer} onScoutCoach={handleScoutCoach} scoutingReport={scoutingReport} onUpdateTeamRoster={handleUpdateTeamRoster} onManageTeam={handleManageTeam} godMode={league.settings.godMode} watchList={league.watchList ?? []} onToggleWatch={handleToggleWatch} />}
+          {activeTab === 'roster' && <Roster leagueTeams={league.teams} userTeamId={league.userTeamId} initialTeamId={rosterTeamId} onScout={handleViewPlayer} onScoutCoach={handleScoutCoach} scoutingReport={scoutingReport} onUpdateTeamRoster={handleUpdateTeamRoster} onManageTeam={handleManageTeam} godMode={league.settings.godMode} watchList={league.watchList ?? []} onToggleWatch={handleToggleWatch} minRosterSize={league.settings.minRosterSize ?? 10} maxRosterSize={league.settings.maxRosterSize ?? 18} />}
           {activeTab === 'rotations' && <Rotations league={league} updateLeague={updateLeagueState} />}
           {activeTab === 'free_agency' && <FreeAgency league={league} updateLeague={updateLeagueState} onScout={handleViewPlayer} recordTransaction={recordTransaction} />}
           {activeTab === 'coach_market' && <CoachesMarket league={league} updateLeague={updateLeagueState} onScout={handleScoutCoach} />}

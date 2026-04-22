@@ -1493,9 +1493,12 @@ export const generateFreeAgentPool = (count: number, season: number, genderRatio
   return Array.from({ length: count }).map((_, i) => {
     const draftCtx: DraftContext = { season, teamNames, usedPicks };
     const p = generatePlayer(`fa-${season}-${i}`, [21, 36], genderRatio, draftCtx, season);
-    // Skew OVR distribution: 90% → 70–82, 8% → 83–87, 2% → 88–92, none 93+
+    // Skew OVR: 30% → 60–69 (min/bench), 45% → 70–79 (role), 18% → 80–86 (starter), 7% → 87–92 (star+)
     const tierRoll = Math.random();
-    const [tierMin, tierMax] = tierRoll < 0.90 ? [70, 82] : tierRoll < 0.98 ? [83, 87] : [88, 92];
+    const [tierMin, tierMax] =
+      tierRoll < 0.30 ? [60, 69] :
+      tierRoll < 0.75 ? [70, 79] :
+      tierRoll < 0.93 ? [80, 86] : [87, 92];
     const skewedRating = Math.min(tierMax, Math.max(tierMin, p.rating));
     const skewedPlayer = skewedRating !== p.rating ? { ...p, rating: skewedRating } : p;
     return {

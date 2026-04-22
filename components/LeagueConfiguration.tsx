@@ -135,6 +135,9 @@ const LeagueConfiguration: React.FC<LeagueConfigurationProps> = ({ onConfirm, on
   const [rookieScaleContracts, setRookieScaleContracts] = useState(true);
   const [maxPlayerSalaryPct, setMaxPlayerSalaryPct]   = useState<25|30|35>(35);
   const [birdRights, setBirdRights]                   = useState(true);
+  // 0 = auto-calculate from cap; non-zero = manual override
+  const [minContractSalaryOverride, setMinContractSalaryOverride] = useState(0);
+  const [maxContractSalaryOverride, setMaxContractSalaryOverride] = useState(0);
 
   // ── Finances ──────────────────────────────────────────────────────────────
   const [minPayroll, setMinPayroll]               = useState(46_650_000);
@@ -218,6 +221,8 @@ const LeagueConfiguration: React.FC<LeagueConfigurationProps> = ({ onConfirm, on
       if (p.rookieScaleContracts !== undefined) setRookieScaleContracts(p.rookieScaleContracts);
       if (p.maxPlayerSalaryPct)            setMaxPlayerSalaryPct(p.maxPlayerSalaryPct);
       if (p.birdRights !== undefined)        setBirdRights(p.birdRights);
+      if (p.minContractSalary)             setMinContractSalaryOverride(p.minContractSalary);
+      if (p.maxContractSalary)             setMaxContractSalaryOverride(p.maxContractSalary);
       if (p.draftRounds)                   setDraftRounds(p.draftRounds);
       if (p.draftClassSize)                setDraftClassSize(p.draftClassSize);
       if (p.internationalProspects !== undefined) setInternationalProspects(p.internationalProspects);
@@ -348,6 +353,8 @@ const LeagueConfiguration: React.FC<LeagueConfigurationProps> = ({ onConfirm, on
       rookieScaleContracts,
       maxPlayerSalaryPct,
       birdRights,
+      minContractSalary: minContractSalaryOverride || undefined,
+      maxContractSalary: maxContractSalaryOverride || undefined,
       // Draft
       draftRounds,
       draftClassSize,
@@ -393,6 +400,15 @@ const LeagueConfiguration: React.FC<LeagueConfigurationProps> = ({ onConfirm, on
     playerGenderRatio === 50  ? 'Mixed 50/50' : 'Custom';
 
   const fmtM = fmtSalary;
+
+  // ── contract salary auto-values (used when override is 0) ─────────────────
+  const isWomensLeague = playerGenderRatio === 100;
+  const autoMinContract = isWomensLeague
+    ? Math.max(25_000, Math.round(salaryCap * 0.012))
+    : 1_100_000;
+  const autoMaxContract = Math.round(salaryCap * maxPlayerSalaryPct / 100);
+  const displayMinContract = minContractSalaryOverride || autoMinContract;
+  const displayMaxContract = maxContractSalaryOverride || autoMaxContract;
 
   const normDiff = (d: LeagueSettings['difficulty']): string =>
     d === 'Easy' ? 'Rookie' : d === 'Medium' ? 'Pro' : d === 'Hard' ? 'All-Star' : d === 'Extreme' ? 'Legend' : d;
@@ -864,10 +880,42 @@ const LeagueConfiguration: React.FC<LeagueConfigurationProps> = ({ onConfirm, on
                   </Field>
                   <Field label="Max Player Salary %" hint="Max % of cap any single player can earn.">
                     <BtnGroup options={['25%','30%','35%']} value={`${maxPlayerSalaryPct}%`}
-                      onChange={v => setMaxPlayerSalaryPct(parseInt(v) as 25|30|35)} />
+                      onChange={v => { setMaxPlayerSalaryPct(parseInt(v) as 25|30|35); setMaxContractSalaryOverride(0); }} />
                     <p className="text-[10px] text-emerald-500/80 font-bold mt-1.5 uppercase tracking-widest">
-                      Max Contract: {fmtSalary(Math.round(salaryCap * maxPlayerSalaryPct / 100))}/yr
+                      Auto: {fmtSalary(autoMaxContract)}/yr
                     </p>
+                  </Field>
+
+                  <Field label="Min Contract/yr" hint="Minimum annual salary a player can be signed for. Auto-calculated from cap; override if needed.">
+                    <NumericInput value={displayMinContract}
+                      min={1_000} max={displayMaxContract}
+                      onChange={v => setMinContractSalaryOverride(v)}
+                      onBlur={() => setMinContractSalaryOverride(v => Math.max(1_000, Math.min(v, displayMaxContract)))}
+                      className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-3 text-white font-mono text-sm focus:outline-none" />
+                    <div className="flex items-center justify-between mt-1.5">
+                      <p className="text-[10px] text-sky-400/80 font-bold uppercase tracking-widest">
+                        {fmtSalary(displayMinContract)}/yr
+                      </p>
+                      {minContractSalaryOverride > 0 && (
+                        <button onClick={() => setMinContractSalaryOverride(0)} className="text-[9px] text-slate-500 hover:text-slate-300 font-bold uppercase">↺ Reset Auto</button>
+                      )}
+                    </div>
+                  </Field>
+
+                  <Field label="Max Contract/yr" hint="Maximum annual salary any single player can earn. Auto-calculated from cap × max%; override if needed.">
+                    <NumericInput value={displayMaxContract}
+                      min={displayMinContract} max={salaryCap}
+                      onChange={v => setMaxContractSalaryOverride(v)}
+                      onBlur={() => setMaxContractSalaryOverride(v => Math.max(displayMinContract, Math.min(v, salaryCap)))}
+                      className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-3 text-white font-mono text-sm focus:outline-none" />
+                    <div className="flex items-center justify-between mt-1.5">
+                      <p className="text-[10px] text-amber-400/80 font-bold uppercase tracking-widest">
+                        MAX CONTRACT: {fmtSalary(displayMaxContract)}/yr
+                      </p>
+                      {maxContractSalaryOverride > 0 && (
+                        <button onClick={() => setMaxContractSalaryOverride(0)} className="text-[9px] text-slate-500 hover:text-slate-300 font-bold uppercase">↺ Reset Auto</button>
+                      )}
+                    </div>
                   </Field>
                   <Field label="Bird Rights">
                     <Toggle label={birdRights ? 'Enabled — re-sign own players over cap' : 'Disabled — hard cap applies to re-signings'}
