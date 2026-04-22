@@ -696,15 +696,11 @@ const App: React.FC<{ onReady: () => void }> = ({ onReady }) => {
       lastUpdated: Date.now(),
     };
     const updatedWithAI = { ...updated, teams: assignAIPersonalities(updated.teams, teamId) };
-    // Set all UI state together before the async DB write so React batches them
-    // into one render with status='game', preventing a blank intermediate state
     setLeague(updatedWithAI);
     setRosterTeamId(teamId);
     setPendingTeamId(null);
+    await db.leagues.put(updatedWithAI);
     setStatus('game');
-    setActiveTab('dashboard');
-    // DB write is fire-and-forget so it doesn't delay the UI transition
-    db.leagues.put(updatedWithAI).catch(err => console.error('Save error after career start:', err));
   };
 
   const addNewsItem = async (state: LeagueState, category: NewsCategory, data: { player?: Player, team?: Team, coach?: Coach, detail?: string }, isBreaking: boolean = false) => {
@@ -3520,24 +3516,9 @@ const App: React.FC<{ onReady: () => void }> = ({ onReady }) => {
       canAddTeam={!!nextExpansion}
     />;
   }
-  if (!league || !league.userTeamId) {
-    return (
-      <div className="fixed inset-0 bg-slate-950 flex flex-col items-center justify-center gap-6 z-[200]">
-        <div className="w-12 h-12 border-4 border-amber-500 border-t-transparent rounded-full animate-spin" />
-        <p className="text-slate-400 text-sm font-bold uppercase tracking-widest">Loading Franchise…</p>
-      </div>
-    );
-  }
+  if (!league || !league.userTeamId) return null;
 
-  const userTeam = league.teams.find(t => t.id === league.userTeamId);
-  if (!userTeam) {
-    return (
-      <div className="fixed inset-0 bg-slate-950 flex flex-col items-center justify-center gap-6 z-[200]">
-        <p className="text-rose-400 text-sm font-bold uppercase tracking-widest">Team data missing — please reload.</p>
-        <button onClick={() => window.location.reload()} className="px-8 py-3 bg-amber-500 text-slate-950 font-bold uppercase rounded-xl">Reload</button>
-      </div>
-    );
-  }
+  const userTeam = league.teams.find(t => t.id === league.userTeamId)!;
 
   if (userTeam.finances.ownerPatience <= 0 && league.settings.ownerMeterEnabled) {
      return (
