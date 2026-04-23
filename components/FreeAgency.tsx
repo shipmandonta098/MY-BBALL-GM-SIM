@@ -1044,10 +1044,13 @@ const FreeAgency: React.FC<FreeAgencyProps> = ({
                           <div className="flex items-center gap-2">
                             <WatchToggle playerId={p.id} watchList={watchList} onToggle={toggleWatch} />
                             <div>
-                              <p className="font-bold text-slate-200 uppercase tracking-tight group-hover:text-white">
+                              <p className="font-bold text-slate-200 uppercase tracking-tight group-hover:text-white flex items-center gap-1.5">
                                 {p.name}
+                                {(p.allStarSelections?.length ?? 0) > 0 && (
+                                  <span title={`${p.allStarSelections!.length}× All-Star`} className="text-amber-400 text-xs leading-none select-none">★</span>
+                                )}
                                 {isUserTeamPlayer && (
-                                  <span className="ml-2 text-[9px] bg-amber-500/20 text-amber-400 border border-amber-500/30 rounded px-1.5 py-0.5 font-black uppercase">Your Team</span>
+                                  <span className="ml-1 text-[9px] bg-amber-500/20 text-amber-400 border border-amber-500/30 rounded px-1.5 py-0.5 font-black uppercase">Your Team</span>
                                 )}
                               </p>
                               <p className="text-[10px] text-slate-500 mt-0.5">{p.archetype ?? p.position}</p>
@@ -1104,7 +1107,12 @@ const FreeAgency: React.FC<FreeAgencyProps> = ({
                   <div key={p.id} className="px-5 py-4 flex flex-col sm:flex-row sm:items-center gap-4">
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center gap-2 flex-wrap">
-                        <span className="font-black text-white uppercase tracking-tight">{p.name}</span>
+                        <span className="font-black text-white uppercase tracking-tight flex items-center gap-1">
+                          {p.name}
+                          {(p.allStarSelections?.length ?? 0) > 0 && (
+                            <span title={`${p.allStarSelections!.length}× All-Star`} className="text-amber-400 text-xs leading-none select-none">★</span>
+                          )}
+                        </span>
                         <span className={`text-[10px] font-black px-2 py-0.5 rounded-full border ${p.rating >= 88 ? 'text-amber-400 border-amber-500/30 bg-amber-500/10' : 'text-emerald-400 border-emerald-500/30 bg-emerald-500/10'}`}>
                           {p.rating} OVR
                         </span>

@@ -226,7 +226,12 @@ const Stats: React.FC<StatsProps> = ({ league, onViewRoster, onManageTeam, onVie
                   <tr key={p.id} className="hover:bg-slate-800/30 transition-all">
                     <td className="px-6 py-4 font-display font-bold text-slate-600">#{idx + 1}</td>
                     <td className="px-6 py-4 flex items-center gap-3">
-                       <PlayerLink playerId={p.id} name={p.name} className="font-bold text-slate-200 uppercase tracking-tight" />
+                       <span className="flex items-center gap-1">
+                         <PlayerLink playerId={p.id} name={p.name} className="font-bold text-slate-200 uppercase tracking-tight" />
+                         {(p.allStarSelections?.length ?? 0) > 0 && (
+                           <span title={`${p.allStarSelections!.length}× All-Star`} className="text-amber-400 text-xs leading-none select-none">★</span>
+                         )}
+                       </span>
                        <button onClick={() => toggleCompare(p.id)} className={`text-[10px] p-1 rounded ${compareList.includes(p.id) ? 'bg-amber-500 text-slate-950' : 'bg-slate-800 text-slate-500'} hover:scale-105 transition-all`}>Compare</button>
                     </td>
                     <td className="px-6 py-4">
