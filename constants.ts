@@ -1,4 +1,5 @@
 import { Team, Position, Player, Conference, Division, MarketSize, PersonalityTrait, PlayerTendencies, ScheduleGame, Prospect, DraftPick, Coach, CoachScheme, CoachBadge, OwnerGoal, Gender, CoachRole, TeamRotation } from './types';
+import { computeMensMarketSalary } from './utils/contractRules';
 
 export const POSITIONS: Position[] = ['PG', 'SG', 'SF', 'PF', 'C'];
 export const SCHEMES: CoachScheme[] = ['Balanced', 'Pace and Space', 'Grit and Grind', 'Triangle', 'Small Ball', 'Showtime'];
@@ -1453,7 +1454,13 @@ export const generatePlayer = (id: string, ageRange: [number, number] = [19, 38]
                          1_100_000                                  // league minimum
         ) * (0.85 + Math.random() * 0.30) / 250_000) * 250_000,
     contractYears: Math.floor(Math.random() * 5) + 1,
-    stats: { 
+    desiredContract: {
+      years: rating >= 80 ? 4 : rating >= 70 ? 3 : 2,
+      salary: gender === 'Female'
+        ? calcWNBASalary(rating, _leagueYear)
+        : computeMensMarketSalary(rating),
+    },
+    stats: {
       points: 0, rebounds: 0, offReb: 0, defReb: 0, assists: 0, steals: 0, blocks: 0, gamesPlayed: 0, gamesStarted: 0,
       minutes: 0, fgm: 0, fga: 0, threepm: 0, threepa: 0, ftm: 0, fta: 0, tov: 0, pf: 0,
       techs: 0, flagrants: 0, ejections: 0, plusMinus: 0
