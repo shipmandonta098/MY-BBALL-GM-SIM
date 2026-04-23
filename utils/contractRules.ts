@@ -35,6 +35,27 @@ export function getContractRules(league: LeagueState): ContractRules {
   };
 }
 
+/**
+ * Standalone men's market salary by rating — no league state needed.
+ * Use this as a floor whenever setting desiredContract on male players.
+ *   < 60 OVR  → $1.1M (league min)
+ *   60–69     → $1.5M – $3.5M  (bench / vet-min)
+ *   70–79     → $3.5M – $8.5M  (rotation)
+ *   80–87     → $8.5M – $18M   (solid starter)
+ *   88–94     → $18M  – $33M   (star)
+ *   95+       → $35M  – $45M   (supermax — rare)
+ */
+export function computeMensMarketSalary(rating: number): number {
+  const base =
+    rating >= 95 ? 35_000_000 + (rating - 95) * 1_750_000 :
+    rating >= 88 ? 18_000_000 + (rating - 88) * 2_428_571 :
+    rating >= 80 ?  8_500_000 + (rating - 80) * 1_187_500 :
+    rating >= 70 ?  3_500_000 + (rating - 70) *   500_000 :
+    rating >= 60 ?  1_500_000 + (rating - 60) *   200_000 :
+                    1_100_000;
+  return Math.round(base / 250_000) * 250_000;
+}
+
 export function computeDesiredSalaryWithRules(rating: number, rules: ContractRules): number {
   const { isWomens, salaryCap: cap, minPlayerSalary, maxPlayerSalary } = rules;
   let base: number;
@@ -47,13 +68,7 @@ export function computeDesiredSalaryWithRules(rating: number, rules: ContractRul
     else                   base = minPlayerSalary;
     base = Math.round(base / 5_000) * 5_000;
   } else {
-    if (rating >= 95)      base = 35_000_000 + (rating - 95) * 1_750_000;
-    else if (rating >= 88) base = 18_000_000 + (rating - 88) * 2_428_571;
-    else if (rating >= 80) base = 8_500_000  + (rating - 80) * 1_187_500;
-    else if (rating >= 70) base = 3_500_000  + (rating - 70) * 500_000;
-    else if (rating >= 60) base = 1_500_000  + (rating - 60) * 200_000;
-    else                   base = minPlayerSalary;
-    base = Math.round(base / 250_000) * 250_000;
+    base = computeMensMarketSalary(rating);
   }
   return Math.max(minPlayerSalary, Math.min(maxPlayerSalary, base));
 }
