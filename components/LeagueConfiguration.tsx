@@ -1,7 +1,7 @@
 
 import React, { useState, useEffect } from 'react';
 import { LeagueSettings } from '../types';
-import { getHistoricalFinancials, getWNBAHistoricalFinancials } from '../constants';
+import { getHistoricalFinancials, getWNBAHistoricalFinancials, getEraMaxPlayerSalary } from '../constants';
 import { fmtSalary } from '../utils/formatters';
 import NumericInput from './NumericInput';
 
@@ -534,8 +534,11 @@ const LeagueConfiguration: React.FC<LeagueConfigurationProps> = ({ onConfirm, on
                 <span>Rookie Scale: {h.rookieScaleContracts ? 'Yes' : 'No'}</span>
                 <span>·</span>
                 <span>Trade Match: {h.tradeSalaryMatchPct === 100 ? 'Unrestricted' : `${h.tradeSalaryMatchPct}%`}</span>
-                {isWomensLeague && h.maxContractYears && (<><span>·</span><span>Max Contract: {h.maxContractYears}yr</span></>)}
-                {isWomensLeague && h.maxPlayerSalaryPct && (<><span>·</span><span>Max Salary: {h.maxPlayerSalaryPct}% of cap</span></>)}
+                <span>·</span>
+                <span className={accentColor}>
+                  Max Contract: {fmtSalary(getEraMaxPlayerSalary(year, isWomensLeague, h.salaryCap))}/yr
+                </span>
+                {isWomensLeague && h.maxContractYears && (<><span>·</span><span>Max Yrs: {h.maxContractYears}yr</span></>)}
                 {isWomensLeague && h.birdRights !== undefined && (<><span>·</span><span>Bird Rights: {h.birdRights ? 'Yes' : 'No'}</span></>)}
                 {isWomensLeague && h.draftRounds && (<><span>·</span><span>Draft: {h.draftRounds} rounds</span></>)}
                 {isWomensLeague && h.draftClassSize && (<><span>·</span><span>Class Size: {h.draftClassSize}</span></>)}

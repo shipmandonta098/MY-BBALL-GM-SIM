@@ -5,7 +5,7 @@ import WatchToggle from './WatchToggle';
 import OwnerReactionModal from './OwnerReactionModal';
 import { calcSigningReaction, OwnerReaction } from '../utils/ownerReactionEngine';
 import { fmtSalary } from '../utils/formatters';
-import { getContractRules, computeDesiredSalaryWithRules } from '../utils/contractRules';
+import { getContractRules, computeDesiredSalaryWithRules, computeMensMarketSalary } from '../utils/contractRules';
 
 // ── Constants ──────────────────────────────────────────────────────────────
 const MORATORIUM_DAYS = 5; // signing window opens after day 5
@@ -29,19 +29,6 @@ interface FreeAgencyProps {
 const fmt = fmtSalary;
 const fmtFull = fmtSalary;
 
-/** Compute a reasonable desired salary for a player if one isn't set.
- *  Piecewise curve: 70-79 OVR → $7-16M, 80-87 → $16-26M, 88+ → $26-45M. */
-const computeDesiredSalary = (rating: number): number => {
-  let base: number;
-  if (rating >= 95)      base = 35_000_000 + (rating - 95) * 1_750_000;  // $35M–$42M supermax
-  else if (rating >= 88) base = 18_000_000 + (rating - 88) * 2_428_571;  // $18M–$33M star
-  else if (rating >= 80) base = 8_500_000  + (rating - 80) * 1_187_500;  // $8.5M–$17.5M starter
-  else if (rating >= 70) base = 3_500_000  + (rating - 70) * 500_000;    // $3.5M–$8.5M role
-  else if (rating >= 60) base = 1_500_000  + (rating - 60) * 200_000;    // $1.5M–$3.5M bench
-  else                   base = 1_100_000;
-  return Math.round(base / 250_000) * 250_000;
-};
-
 const computeDesiredYears = (age: number, rating: number): number => {
   if (rating >= 80) return 4;
   if (rating >= 70) return 3;
@@ -50,8 +37,8 @@ const computeDesiredYears = (age: number, rating: number): number => {
 };
 
 /** Get canonical desired contract, falling back to computed values */
-const getDesired = (p: Player) => ({
-  salary: p.desiredContract?.salary || computeDesiredSalary(p.rating),
+const getDesired = (p: Player, year: number = 2026, isWomens: boolean = false) => ({
+  salary: p.desiredContract?.salary || (isWomens ? (p.salary || 25_000) : computeMensMarketSalary(p.rating, year)),
   years: p.desiredContract?.years || computeDesiredYears(p.age, p.rating),
 });
 
@@ -72,14 +59,14 @@ type SortKey = 'rating' | 'age' | 'interest' | 'salary' | 'name';
 type NegotiationResult = 'accepted' | 'declined' | 'counter' | null;
 type InSeasonContractType = '10day' | 'rest-of-season' | 'minimum' | 'full';
 
-// Compute in-season contract offers for a player
-const getInSeasonContracts = (rating: number, gamesRemaining: number) => {
-  const restSalary = Math.round(Math.min(3_500_000, Math.max(600_000, gamesRemaining * 35_000)) / 250_000) * 250_000;
+// Compute in-season contract offers for a player (fullOfferSalary is era+gender-aware)
+const getInSeasonContracts = (rating: number, gamesRemaining: number, fullOfferSalary: number, leagueMin: number) => {
+  const restSalary = Math.round(Math.min(fullOfferSalary * 0.8, Math.max(leagueMin, gamesRemaining * (fullOfferSalary / 82))) / 50_000) * 50_000;
   return [
-    { type: '10day' as const,         label: '10-Day',              salary: 600_000,   years: 1, eligible: rating < 82 },
+    { type: '10day' as const,         label: '10-Day',              salary: Math.max(leagueMin, Math.round(leagueMin * 0.6 / 50_000) * 50_000), years: 1, eligible: rating < 82 },
     { type: 'rest-of-season' as const, label: 'Rest-of-Season Min', salary: restSalary, years: 1, eligible: rating < 88 },
-    { type: 'minimum' as const,       label: 'Season Minimum',      salary: 3_000_000, years: 1, eligible: true },
-    { type: 'full' as const,          label: 'Full Offer',          salary: computeDesiredSalary(rating), years: 1, eligible: true },
+    { type: 'minimum' as const,       label: 'Season Minimum',      salary: leagueMin, years: 1, eligible: true },
+    { type: 'full' as const,          label: 'Full Offer',          salary: fullOfferSalary, years: 1, eligible: true },
   ].filter(c => c.eligible);
 };
 
@@ -195,8 +182,8 @@ const FreeAgency: React.FC<FreeAgencyProps> = ({
       if (Math.random() >= 0.65) return { ...p, rfaOfferSheet: null };
       const offeringTeam = aiTeams[Math.floor(Math.random() * aiTeams.length)];
       const offerSalary = Math.round(
-        computeDesiredSalary(p.rating) * (1.05 + Math.random() * 0.30) / 250_000
-      ) * 250_000;
+        computeDesiredSalaryWithRules(p.rating, rules) * (1.05 + Math.random() * 0.25)
+      / (rules.isWomens ? 5_000 : 250_000)) * (rules.isWomens ? 5_000 : 250_000);
       const offerYears = 2 + Math.floor(Math.random() * 3);
       return {
         ...p,
@@ -281,7 +268,7 @@ const FreeAgency: React.FC<FreeAgencyProps> = ({
       return;
     }
     // Acceptance model: cheaper deals are accepted more readily by lower-rated players
-    const desired = computeDesiredSalary(player.rating);
+    const desired = computeDesiredSalaryWithRules(player.rating, rules);
     const ratio = salary / desired;
     let acceptBase = player.rating >= 85 ? 30 : player.rating >= 75 ? 55 : 75;
     if (contractType === 'full') acceptBase += 25;
@@ -358,7 +345,7 @@ const FreeAgency: React.FC<FreeAgencyProps> = ({
       if (sortKey === 'rating') { av = a.rating; bv = b.rating; }
       else if (sortKey === 'age') { av = a.age; bv = b.age; }
       else if (sortKey === 'interest') { av = a.interestScore ?? 50; bv = b.interestScore ?? 50; }
-      else if (sortKey === 'salary') { av = getDesired(a).salary; bv = getDesired(b).salary; }
+      else if (sortKey === 'salary') { av = getDesired(a, rules.year, rules.isWomens).salary; bv = getDesired(b, rules.year, rules.isWomens).salary; }
       else if (sortKey === 'name') { av = 0; bv = a.name < b.name ? 1 : -1; }
       return sortAsc ? av - bv : bv - av;
     });
@@ -394,7 +381,7 @@ const FreeAgency: React.FC<FreeAgencyProps> = ({
       alert(`Roster full (max ${maxRoster}). Release a player before signing.`);
       return;
     }
-    const desired = getDesired(player);
+    const desired = getDesired(player, rules.year, rules.isWomens);
     setNegotiatingPlayer(player);
     setOffer({
       years: desired.years,
@@ -417,7 +404,7 @@ const FreeAgency: React.FC<FreeAgencyProps> = ({
     setIsSubmitting(true);
     setNegotiationResult(null);
 
-    const desired = getDesired(negotiatingPlayer);
+    const desired = getDesired(negotiatingPlayer, rules.year, rules.isWomens);
     const interest = negotiatingPlayer.interestScore ?? 50;
     const salaryRatio = offer.salary / desired.salary;
     const yearDelta = offer.years - desired.years;
@@ -612,7 +599,7 @@ const FreeAgency: React.FC<FreeAgencyProps> = ({
       const team = aiTeams[Math.floor(Math.random() * aiTeams.length)];
       if (!team) continue;
 
-      const desired = getDesired(player);
+      const desired = getDesired(player, rules.year, rules.isWomens);
       const years = desired.years + (Math.random() < 0.3 ? 1 : 0);
       const salaryMult = 0.85 + Math.random() * 0.3;
       const aiCapLine = league.settings.salaryCap || 140_000_000;
@@ -1179,7 +1166,7 @@ const FreeAgency: React.FC<FreeAgencyProps> = ({
               <tbody className="divide-y divide-slate-800/40">
                 {filteredFAs.map(p => {
                   const interest = interestLabel(p.interestScore ?? 50);
-                  const desired = getDesired(p);
+                  const desired = getDesired(p, rules.year, rules.isWomens);
                   // Full deal: needs actual cap space. Min deal: always OK under soft cap (unless 2nd apron)
                   const canSignFull = isInSeason
                     ? capSpace >= desired.salary * 0.8
@@ -1391,7 +1378,7 @@ const FreeAgency: React.FC<FreeAgencyProps> = ({
 
                   <div className="space-y-2">
                     <p className="text-[10px] font-black uppercase text-slate-500 tracking-widest">Choose Contract Type</p>
-                    {getInSeasonContracts(inSeasonPlayer.rating, gamesRemaining).map(contract => {
+                    {getInSeasonContracts(inSeasonPlayer.rating, gamesRemaining, computeDesiredSalaryWithRules(inSeasonPlayer.rating, rules), rules.minPlayerSalary).map(contract => {
                       // 10-day, rest-of-season, and season-minimum are ALL minimum contracts.
                       // Under NBA soft cap rules, minimum contracts are ALWAYS signable unless
                       // the team is AT or ABOVE the 2nd apron hard cap.
@@ -1538,13 +1525,13 @@ const FreeAgency: React.FC<FreeAgencyProps> = ({
                     <div>
                       <p className="text-[10px] text-slate-500 uppercase font-bold">Player's Ask</p>
                       <p className="text-base font-bold text-slate-300 mt-0.5">
-                        {getDesired(negotiatingPlayer).years}yr · {fmt(getDesired(negotiatingPlayer).salary)}/yr
+                        {getDesired(negotiatingPlayer, rules.year, rules.isWomens).years}yr · {fmt(getDesired(negotiatingPlayer, rules.year, rules.isWomens).salary)}/yr
                       </p>
                     </div>
                     <div className="text-right">
                       <p className="text-[10px] text-slate-500 uppercase font-bold">Total Value</p>
                       <p className="text-base font-bold text-amber-500 mt-0.5">
-                        {fmt(getDesired(negotiatingPlayer).salary * getDesired(negotiatingPlayer).years)}
+                        {fmt(getDesired(negotiatingPlayer, rules.year, rules.isWomens).salary * getDesired(negotiatingPlayer, rules.year, rules.isWomens).years)}
                       </p>
                     </div>
                   </div>
@@ -1589,7 +1576,7 @@ const FreeAgency: React.FC<FreeAgencyProps> = ({
                   {/* Salary quick-set buttons */}
                   <div className="flex gap-2 flex-wrap">
                     {[0.8, 0.9, 1.0, 1.1, 1.2].map(mult => {
-                      const s = Math.round((getDesired(negotiatingPlayer).salary * mult) / 250_000) * 250_000;
+                      const s = Math.round((getDesired(negotiatingPlayer, rules.year, rules.isWomens).salary * mult) / 250_000) * 250_000;
                       return (
                         <button
                           key={mult}
