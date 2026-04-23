@@ -484,12 +484,14 @@ const Awards: React.FC<AwardsProps> = ({ league, onScout, onScoutCoach, onManage
                Honorary Teams
                <span className="h-px flex-1 bg-slate-800"></span>
             </h3>
-            <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-5 gap-6">
+            <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-7 gap-6">
               <TeamList title="All-NBA First" ids={viewAwards.allNbaFirst} label="1st" />
               <TeamList title="All-NBA Second" ids={viewAwards.allNbaSecond} label="2nd" />
               <TeamList title="All-NBA Third" ids={viewAwards.allNbaThird} label="3rd" />
-              <TeamList title="All-Defensive" ids={viewAwards.allDefensive} label="DEF" />
-              <TeamList title="All-Rookie" ids={viewAwards.allRookie} label="RCK" />
+              <TeamList title="All-Defensive 1st" ids={viewAwards.allDefensive} label="DEF" />
+              <TeamList title="All-Defensive 2nd" ids={viewAwards.allDefensiveSecond ?? []} label="DEF2" />
+              <TeamList title="All-Rookie 1st" ids={viewAwards.allRookie} label="RCK" />
+              <TeamList title="All-Rookie 2nd" ids={viewAwards.allRookieSecond ?? []} label="RCK2" />
             </div>
           </div>
         </div>
