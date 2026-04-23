@@ -113,7 +113,9 @@ export interface SeasonAwards {
   allNbaSecond: string[];
   allNbaThird: string[];
   allDefensive: string[];
+  allDefensiveSecond: string[];
   allRookie: string[];
+  allRookieSecond: string[];
 }
 
 export interface PlayoffSeries {

@@ -146,6 +146,16 @@ export const generateAwards = async (teams: Team[], year: number, playerGenderRa
     .slice(0, 15)
     .map(e => e.p.id);
 
+  const defSorted = [...allPlayers]
+    .sort((a, b) => b.p.attributes.defense - a.p.attributes.defense)
+    .slice(0, 10)
+    .map(e => e.p.id);
+
+  const rookieSorted = rookies
+    .sort((a, b) => getPlayerStatsValue(b.p, b.t) - getPlayerStatsValue(a.p, a.t))
+    .slice(0, 10)
+    .map(e => e.p.id);
+
   return {
     year,
     mvp,
@@ -158,7 +168,9 @@ export const generateAwards = async (teams: Team[], year: number, playerGenderRa
     allNbaFirst: top15.slice(0, 5),
     allNbaSecond: top15.slice(5, 10),
     allNbaThird: top15.slice(10, 15),
-    allDefensive: [...allPlayers].sort((a, b) => b.p.attributes.defense - a.p.attributes.defense).slice(0, 5).map(e => e.p.id),
-    allRookie: rookies.sort((a, b) => getPlayerStatsValue(b.p, b.t) - getPlayerStatsValue(a.p, a.t)).slice(0, 5).map(e => e.p.id)
+    allDefensive: defSorted.slice(0, 5),
+    allDefensiveSecond: defSorted.slice(5, 10),
+    allRookie: rookieSorted.slice(0, 5),
+    allRookieSecond: rookieSorted.slice(5, 10),
   };
 };

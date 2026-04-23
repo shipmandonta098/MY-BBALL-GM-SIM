@@ -2006,27 +2006,23 @@ const App: React.FC = () => {
     }
 
     // ── AI in-season / preseason signings ──────────────────────────────────
-    // Pass 1 – Fill short rosters (preseason: every team; regular season: any team under 14).
+    // Pass 1 – Fill short rosters every day for ALL teams under 15 active healthy players.
     // Pass 2 – Upgrade/waive-and-sign evaluation, staggered every 4-6 days per team.
     const isPreseasonPhaseSign = newState.seasonPhase === 'Preseason';
-    // Regular season target is 14 active healthy players; preseason fills up to 15 for camp competition.
-    const signingThreshold = isPreseasonPhaseSign ? 15 : 14;
+    // Always maintain at least 15 active healthy players; during preseason fill to maxRoster.
+    const maxRosterForSign = newState.settings.maxRosterSize ?? 15;
+    const signingThreshold = isPreseasonPhaseSign ? maxRosterForSign : 15;
     if (!newState.isOffseason && newState.freeAgents.length > 0) {
       const cap = newState.settings.salaryCap || 140_000_000;
-      const maxRoster = newState.settings.maxRosterSize ?? 15;
+      const maxRoster = maxRosterForSign;
 
-      // Pass 1: fill short-roster teams
+      // Pass 1: fill every AI team below the threshold — no random gating
       const aiTeamsNeedingHelp = newState.teams.filter(t => {
         if (t.id === newState.userTeamId) return false;
         const activeRoster = t.roster.filter(p => !p.injuryDaysLeft || p.injuryDaysLeft === 0);
         return activeRoster.length < signingThreshold;
       });
-      // In regular season process ALL teams that need help (not just 1 random one) with high probability.
-      const teamsToProcess = isPreseasonPhaseSign
-        ? aiTeamsNeedingHelp
-        : (aiTeamsNeedingHelp.length > 0 && Math.random() < 0.85
-            ? aiTeamsNeedingHelp
-            : []);
+      const teamsToProcess = aiTeamsNeedingHelp; // always process — no luck gate
       const inSeasonRules = getContractRules(newState);
       const leagueMin = inSeasonRules.minPlayerSalary;
       const leagueMax = inSeasonRules.maxPlayerSalary;
@@ -2068,7 +2064,7 @@ const App: React.FC = () => {
       if (!isPreseasonPhaseSign) {
         const pickArr = <T,>(arr: T[]): T => arr[Math.floor(Math.random() * arr.length)];
         const qualityFAs = [...newState.freeAgents]
-          .filter(fa => fa.rating >= 72)
+          .filter(fa => fa.rating >= 65)
           .sort((a, b) => b.rating - a.rating);
 
         for (const team of newState.teams) {
@@ -2466,6 +2462,77 @@ const App: React.FC = () => {
 
       tempState.awardHistory = [seasonAwards, ...(tempState.awardHistory || [])];
       tempState.currentSeasonAwards = seasonAwards;
+
+      // ── End-of-season award announcement news ──────────────────────────────
+      // Items are prepended so the LAST one added appears highest in the feed.
+      // Order: All-Rookie → All-Defensive → DPOY → MVP (MVP ends up at the top).
+      {
+        const allRosterPlayers = tempState.teams.flatMap(t => t.roster);
+        const pName = (id: string) => allRosterPlayers.find(p => p.id === id)?.name ?? id;
+        const pickAw = <T,>(arr: T[]): T => arr[Math.floor(Math.random() * arr.length)];
+        const awDay = tempState.currentDay;
+
+        // All-Rookie Teams
+        if ((seasonAwards.allRookie?.length ?? 0) > 0) {
+          const first  = seasonAwards.allRookie.map(pName).join(', ');
+          const second = (seasonAwards.allRookieSecond?.length ?? 0) > 0
+            ? ` Second Team: ${seasonAwards.allRookieSecond!.map(pName).join(', ')}.`
+            : '';
+          tempState = { ...tempState, newsFeed: [{
+            id: `award-allrookie-${tempState.season}`,
+            category: 'award' as NewsCategory,
+            headline: `ALL-ROOKIE TEAMS — ${tempState.season}`,
+            content: `${tempState.season} All-Rookie First Team: ${first}.${second} The next generation of stars has officially arrived.`,
+            timestamp: awDay, realTimestamp: Date.now(), isBreaking: false,
+          }, ...(tempState.newsFeed ?? [])].slice(0, 300) };
+        }
+
+        // All-Defensive Teams
+        if ((seasonAwards.allDefensive?.length ?? 0) > 0) {
+          const first  = seasonAwards.allDefensive.map(pName).join(', ');
+          const second = (seasonAwards.allDefensiveSecond?.length ?? 0) > 0
+            ? ` Second Team: ${seasonAwards.allDefensiveSecond!.map(pName).join(', ')}.`
+            : '';
+          tempState = { ...tempState, newsFeed: [{
+            id: `award-alldef-${tempState.season}`,
+            category: 'award' as NewsCategory,
+            headline: `ALL-DEFENSIVE TEAMS — ${tempState.season}`,
+            content: pickAw([
+              `${tempState.season} All-Defensive First Team: ${first}.${second} These players made life miserable for every opponent this season.`,
+              `Announcing the ${tempState.season} All-Defensive squads. First Team: ${first}.${second} Elite defenders who changed the game on the other end.`,
+            ]),
+            timestamp: awDay, realTimestamp: Date.now(), isBreaking: false,
+          }, ...(tempState.newsFeed ?? [])].slice(0, 300) };
+        }
+
+        // DPOY
+        tempState = { ...tempState, newsFeed: [{
+          id: `award-dpoy-${tempState.season}`,
+          category: 'award' as NewsCategory,
+          headline: `DEFENSIVE PLAYER OF THE YEAR — ${tempState.season}`,
+          content: pickAw([
+            `${seasonAwards.dpoy.name} (${seasonAwards.dpoy.teamName}) wins the ${tempState.season} Defensive Player of the Year! A season of elite lock-down play — ${seasonAwards.dpoy.statsLabel} — earns the highest defensive honour.`,
+            `It's official: ${seasonAwards.dpoy.name} is your ${tempState.season} DPOY. The ${seasonAwards.dpoy.teamName} anchor was a nightmare for opponents all year — ${seasonAwards.dpoy.statsLabel}.`,
+            `${seasonAwards.dpoy.name} takes home the ${tempState.season} Defensive Player of the Year award. ${seasonAwards.dpoy.statsLabel} — opponents feared every possession against this player.`,
+          ]),
+          teamId: seasonAwards.dpoy.teamId,
+          timestamp: awDay, realTimestamp: Date.now(), isBreaking: false,
+        }, ...(tempState.newsFeed ?? [])].slice(0, 300) };
+
+        // MVP — added last so it appears at the very top of the feed
+        tempState = { ...tempState, newsFeed: [{
+          id: `award-mvp-${tempState.season}`,
+          category: 'award' as NewsCategory,
+          headline: `MVP — ${tempState.season} SEASON`,
+          content: pickAw([
+            `${seasonAwards.mvp.name} is named the ${tempState.season} Most Valuable Player! The ${seasonAwards.mvp.teamName} superstar put together an unforgettable season: ${seasonAwards.mvp.statsLabel}. The league's highest honour — well deserved.`,
+            `OFFICIAL: ${seasonAwards.mvp.name} wins the ${tempState.season} MVP award. ${seasonAwards.mvp.statsLabel} — one of the most dominant individual campaigns in recent memory for the ${seasonAwards.mvp.teamName}.`,
+            `The ${tempState.season} MVP is ${seasonAwards.mvp.name}. Night after night the ${seasonAwards.mvp.teamName} star delivered — ${seasonAwards.mvp.statsLabel} — making this the clear and unanimous choice for the league's most prestigious individual award.`,
+          ]),
+          teamId: seasonAwards.mvp.teamId,
+          timestamp: awDay, realTimestamp: Date.now(), isBreaking: true,
+        }, ...(tempState.newsFeed ?? [])].slice(0, 300) };
+      }
 
       const generateInitialBracket = (teams: Team[], season: number): PlayoffBracket => {
         const getSeededTeams = (conf: 'Eastern' | 'Western') => 
@@ -3128,7 +3195,7 @@ const App: React.FC = () => {
     }
   };
 
-  const handleAdvanceToRegularSeason = () => {
+  const handleAdvanceToRegularSeason = async () => {
     if (!league) return;
 
     // ── Offseason grade gate: show grade modal before leaving the offseason ─
@@ -3142,16 +3209,41 @@ const App: React.FC = () => {
       return; // Resume when user clicks "Begin Preseason" in the modal
     }
 
-    // ── Case 1: Skip preseason → jump straight to Regular Season ─────────
+    // ── Case 1: Skip preseason → simulate ALL remaining preseason games ─────
+    // Results are preserved in preseasonSchedule/preseasonHistory so the
+    // Schedule tab shows full scores after the skip completes.
     if (league.seasonPhase === 'Preseason' && !league.isOffseason) {
-      setLeague(prev => {
-        if (!prev) return null;
-        // Apply the same roster cuts that happen after preseason completes,
-        // so AI teams start the regular season with 14-man rosters.
+      setLoading(true);
+      try {
+        let state = { ...league };
+        const unplayed = (state.preseasonSchedule ?? [])
+          .filter(g => !g.played)
+          .sort((a, b) => a.day - b.day);
+
+        for (const game of unplayed) {
+          const home = state.teams.find(t => t.id === game.homeTeamId);
+          const away = state.teams.find(t => t.id === game.awayTeamId);
+          if (!home || !away) continue;
+          const rivalry = state.rivalryHistory?.find(r =>
+            (r.team1Id === home.id && r.team2Id === away.id) ||
+            (r.team1Id === away.id && r.team2Id === home.id)
+          );
+          const rivalryLevel = getRivalryLevel(rivalry);
+          state = { ...state, currentDay: game.day };
+          const result = simulateGame(
+            home, away, game.day, state.season,
+            (game as any).homeB2B ?? false, (game as any).awayB2B ?? false,
+            rivalryLevel, state.settings,
+          );
+          result.id = game.id;
+          state = await finalizePreseasonGameResult(state, game.id, result);
+        }
+
+        // Apply the same 14-man roster cuts that happen when preseason finishes naturally
         const SKIP_MAX_ROSTER = 14;
-        const skipCuts: typeof prev.freeAgents = [];
-        const teamsAfterSkipCut = prev.teams.map(t => {
-          if (t.id === prev.userTeamId) return t; // user manages own cuts
+        const skipCuts: typeof state.freeAgents = [];
+        const teamsAfterCut = state.teams.map(t => {
+          if (t.id === state.userTeamId) return t;
           if (t.roster.length <= SKIP_MAX_ROSTER) return t;
           const sorted = [...t.roster].sort((a, b) => b.rating - a.rating);
           skipCuts.push(...sorted.slice(SKIP_MAX_ROSTER).map(p => ({
@@ -3159,24 +3251,29 @@ const App: React.FC = () => {
           })));
           return { ...t, roster: sorted.slice(0, SKIP_MAX_ROSTER) };
         });
-        const existingFAIds = new Set(prev.freeAgents.map(p => p.id));
-        return {
-          ...prev,
-          teams: teamsAfterSkipCut,
-          freeAgents: [...prev.freeAgents, ...skipCuts.filter(p => !existingFAIds.has(p.id))],
+        const existingFAIds = new Set(state.freeAgents.map(p => p.id));
+        const totalGames = (state.preseasonSchedule ?? []).length;
+
+        state = {
+          ...state,
+          teams: teamsAfterCut,
+          freeAgents: [...state.freeAgents, ...skipCuts.filter(p => !existingFAIds.has(p.id))],
           currentDay: 1,
           seasonPhase: 'Regular Season' as SeasonPhase,
           newsFeed: [{
-            id: `preseason-skipped-${prev.season}`,
+            id: `preseason-complete-skip-${state.season}`,
             category: 'milestone' as const,
-            headline: 'PRESEASON SKIPPED — REGULAR SEASON BEGINS',
-            content: 'The preseason has been skipped. AI teams have been cut to 14-man rosters. Finalize your own rotations — the regular season is live!',
+            headline: 'PRESEASON COMPLETE — REGULAR SEASON BEGINS',
+            content: `All ${totalGames} preseason games have been simulated — check the Schedule tab for full results. AI teams have been cut to 14-man rosters. The regular season tips off now!`,
             timestamp: 1,
             realTimestamp: Date.now(),
             isBreaking: true,
-          }, ...prev.newsFeed].slice(0, 200),
+          }, ...state.newsFeed].slice(0, 200),
         };
-      });
+        setLeague(state);
+      } finally {
+        setLoading(false);
+      }
       return;
     }
 

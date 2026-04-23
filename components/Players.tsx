@@ -337,7 +337,12 @@ const Players: React.FC<PlayersProps> = ({ league, onViewPlayer, watchList, onTo
                           <WatchToggle playerId={p.id} watchList={watchList} onToggle={onToggleWatch} />
                         </td>
                         <td className="px-4 py-4">
-                          <p className="font-bold text-slate-200 uppercase tracking-tight group-hover:text-white">{p.name}</p>
+                          <p className="font-bold text-slate-200 uppercase tracking-tight group-hover:text-white flex items-center gap-1">
+                            {p.name}
+                            {(p.allStarSelections?.length ?? 0) > 0 && (
+                              <span title={`${p.allStarSelections!.length}× All-Star`} className="text-amber-400 text-xs leading-none select-none">★</span>
+                            )}
+                          </p>
                           <p className="text-[10px] text-slate-500 mt-0.5 uppercase">{p.position} · {p.archetype ?? p.position}</p>
                         </td>
                         <td className="px-4 py-4">
@@ -517,7 +522,12 @@ const Players: React.FC<PlayersProps> = ({ league, onViewPlayer, watchList, onTo
                         {rookie  && <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 shrink-0" title="Rookie (≤2 seasons pro)" />}
                         {injured && <span className="w-1.5 h-1.5 rounded-full bg-rose-500 shrink-0" title={`Injured: ${p.injuryType}`} />}
                         <WatchToggle playerId={p.id} watchList={watchList} onToggle={onToggleWatch} />
-                        <span className="font-bold text-slate-200 text-xs uppercase tracking-tight">{p.name}</span>
+                        <span className="font-bold text-slate-200 text-xs uppercase tracking-tight flex items-center gap-1">
+                          {p.name}
+                          {(p.allStarSelections?.length ?? 0) > 0 && (
+                            <span title={`${p.allStarSelections!.length}× All-Star`} className="text-amber-400 text-[10px] leading-none select-none">★</span>
+                          )}
+                        </span>
                         {subTab === 'ratings' && traits.map(trait => (
                           <span
                             key={trait}
