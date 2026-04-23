@@ -1914,7 +1914,7 @@ const App: React.FC = () => {
             ...p, isFreeAgent: true, inSeasonFA: true, contractYears: 0,
             desiredContract: {
               years: p.rating >= 70 ? 2 : 1,
-              salary: isWomensLeagueCut ? (p.desiredContract?.salary || p.salary || 25_000) : computeMensMarketSalary(p.rating),
+              salary: isWomensLeagueCut ? (p.desiredContract?.salary || p.salary || 25_000) : computeMensMarketSalary(p.rating, newState.season ?? 2026),
             },
           }));
           releasedCuts.push(...released);
@@ -2042,7 +2042,7 @@ const App: React.FC = () => {
           .filter(fa => {
             const marketVal = inSeasonRules.isWomens
               ? (fa.desiredContract?.salary || leagueMin)
-              : Math.max(fa.desiredContract?.salary || 0, computeMensMarketSalary(fa.rating));
+              : Math.max(fa.desiredContract?.salary || 0, computeMensMarketSalary(fa.rating, newState.season ?? 2026));
             return marketVal <= teamCapSpace * 1.2;
           })
           .sort((a, b) => b.rating - a.rating);
@@ -2050,7 +2050,7 @@ const App: React.FC = () => {
         const fa = eligible[Math.floor(Math.random() * Math.min(3, eligible.length))];
         const faDesired = inSeasonRules.isWomens
           ? (fa.desiredContract?.salary || leagueMin)
-          : Math.max(fa.desiredContract?.salary || 0, computeMensMarketSalary(fa.rating));
+          : Math.max(fa.desiredContract?.salary || 0, computeMensMarketSalary(fa.rating, newState.season ?? 2026));
         // AI GMs are conservative: 75–95% of market for bench/rotation, 85–100% for starters+
         const conservativeMult = fa.rating >= 85 ? 0.85 + Math.random() * 0.15
           : fa.rating >= 75 ? 0.80 + Math.random() * 0.15
@@ -2099,14 +2099,14 @@ const App: React.FC = () => {
           if (team.roster.length < maxRoster) {
             // Has room — sign if best affordable FA is a meaningful upgrade over current bench
             const affordable = qualityFAs.find(fa => {
-              const mkt = inSeasonRules.isWomens ? (fa.desiredContract?.salary || leagueMin) : Math.max(fa.desiredContract?.salary || 0, computeMensMarketSalary(fa.rating));
+              const mkt = inSeasonRules.isWomens ? (fa.desiredContract?.salary || leagueMin) : Math.max(fa.desiredContract?.salary || 0, computeMensMarketSalary(fa.rating, newState.season ?? 2026));
               return mkt <= teamCapSpace * 1.1;
             });
             if (!affordable) continue;
             const benchOVRs = [...team.roster].sort((a, b) => a.rating - b.rating).slice(0, 4);
             const avgBenchOVR = benchOVRs.reduce((s, p) => s + p.rating, 0) / Math.max(1, benchOVRs.length);
             if (affordable.rating < avgBenchOVR + 4) continue; // not a meaningful upgrade
-            const p2Market = inSeasonRules.isWomens ? (affordable.desiredContract?.salary || leagueMin) : Math.max(affordable.desiredContract?.salary || 0, computeMensMarketSalary(affordable.rating));
+            const p2Market = inSeasonRules.isWomens ? (affordable.desiredContract?.salary || leagueMin) : Math.max(affordable.desiredContract?.salary || 0, computeMensMarketSalary(affordable.rating, newState.season ?? 2026));
             const rawSal = Math.round(p2Market * (0.80 + Math.random() * 0.15) / 250_000) * 250_000;
             const salary = Math.max(leagueMin, Math.min(rawSal, teamCapSpace));
             const sigType = salary <= 700_000 ? '10-day deal' : 'rest-of-season deal';
@@ -2143,11 +2143,11 @@ const App: React.FC = () => {
             // Check affordability after waiving
             const capAfterWaive = cap - (teamSalary - (worstBench.salary || 0));
             const affordable = qualityFAs.find(fa => {
-              const mkt = inSeasonRules.isWomens ? (fa.desiredContract?.salary || leagueMin) : Math.max(fa.desiredContract?.salary || 0, computeMensMarketSalary(fa.rating));
+              const mkt = inSeasonRules.isWomens ? (fa.desiredContract?.salary || leagueMin) : Math.max(fa.desiredContract?.salary || 0, computeMensMarketSalary(fa.rating, newState.season ?? 2026));
               return fa.id !== worstBench.id && mkt <= capAfterWaive * 1.1;
             });
             if (!affordable) continue;
-            const p2wMarket = inSeasonRules.isWomens ? (affordable.desiredContract?.salary || leagueMin) : Math.max(affordable.desiredContract?.salary || 0, computeMensMarketSalary(affordable.rating));
+            const p2wMarket = inSeasonRules.isWomens ? (affordable.desiredContract?.salary || leagueMin) : Math.max(affordable.desiredContract?.salary || 0, computeMensMarketSalary(affordable.rating, newState.season ?? 2026));
             const rawSal = Math.round(p2wMarket * (0.80 + Math.random() * 0.15) / 250_000) * 250_000;
             const salary = Math.max(leagueMin, Math.min(rawSal, capAfterWaive));
             const signedFa = { ...affordable, isFreeAgent: false, inSeasonFA: false, salary, contractYears: 1, morale: Math.min(100, (affordable.morale || 70) + 8) };
@@ -2972,10 +2972,7 @@ const App: React.FC = () => {
         if (p.contractYears > 1) return p;       // not expiring
         if (p.rating < 88) return p;             // not a franchise star
         if ((p.morale ?? 75) < 60) return p;     // unhappy — let them walk
-        const extSalary = Math.round((
-          p.rating >= 95 ? 35_000_000 + (p.rating - 95) * 1_750_000 :
-                           18_000_000 + (p.rating - 88) * 2_428_571
-        ) / 250_000) * 250_000;
+        const extSalary = computeMensMarketSalary(p.rating, tempState.season ?? 2026);
         if (currentPayroll + extSalary > cap * 1.1) return p; // not enough cap
         return { ...p, contractYears: 3 + Math.floor(Math.random() * 2), salary: extSalary };
       });
@@ -2989,13 +2986,10 @@ const App: React.FC = () => {
         if (p.contractYears <= 1) {
           // Player enters free agency
           const _r = p.rating;
-          const desiredBase = Math.round((
-            _r >= 95 ? 35_000_000 + (_r - 95) * 1_750_000 :
-            _r >= 88 ? 18_000_000 + (_r - 88) * 2_428_571 :
-            _r >= 80 ? 8_500_000  + (_r - 80) * 1_187_500 :
-            _r >= 70 ? 3_500_000  + (_r - 70) * 500_000   :
-            _r >= 60 ? 1_500_000  + (_r - 60) * 200_000   : 1_100_000
-          ) / 250_000) * 250_000;
+          const isWomensOffseason = (tempState.settings.playerGenderRatio ?? 0) === 100;
+          const desiredBase = isWomensOffseason
+            ? (p.desiredContract?.salary || p.salary || 25_000)
+            : computeMensMarketSalary(_r, tempState.season ?? 2026);
           const desiredYears = p.rating >= 80 ? 4 : p.rating >= 70 ? 3 : p.age >= 33 ? 1 : 2;
           // Interest in user's team: based on wins + market size
           const userWins = tempState.teams.find(t2 => t2.id === tempState.userTeamId)?.wins ?? 0;
@@ -3272,7 +3266,7 @@ const App: React.FC = () => {
             ...p, isFreeAgent: true, inSeasonFA: true, contractYears: 0,
             desiredContract: {
               years: p.rating >= 70 ? 2 : 1,
-              salary: isWomensSkip ? (p.desiredContract?.salary || p.salary || 25_000) : computeMensMarketSalary(p.rating),
+              salary: isWomensSkip ? (p.desiredContract?.salary || p.salary || 25_000) : computeMensMarketSalary(p.rating, newState.season ?? 2026),
             },
           })));
           return { ...t, roster: sorted.slice(0, SKIP_MAX_ROSTER) };
@@ -3339,7 +3333,7 @@ const App: React.FC = () => {
         const undraftedRookies = (prev.prospects ?? [])
           .filter(p => !draftedIds.has(p.id) && !existingFAIds.has(p.id))
           .map(p => {
-            const rookieSal = isWomensLeagueRookie ? 600_000 : computeMensMarketSalary(p.rating);
+            const rookieSal = isWomensLeagueRookie ? 600_000 : computeMensMarketSalary(p.rating, newState.season ?? 2026);
             return {
             ...p,
             isFreeAgent: true,
@@ -3477,7 +3471,7 @@ const App: React.FC = () => {
           years: p.rating >= 70 ? 2 : 1,
           salary: (league.settings.playerGenderRatio ?? 0) === 100
             ? (p.desiredContract?.salary || p.salary || 25_000)
-            : computeMensMarketSalary(p.rating),
+            : computeMensMarketSalary(p.rating, league.season ?? 2026),
         },
       };
       updatedFAs = [waivedFA, ...league.freeAgents];
@@ -3523,7 +3517,7 @@ const App: React.FC = () => {
           years: p.rating >= 70 ? 2 : 1,
           salary: (league.settings.playerGenderRatio ?? 0) === 100
             ? (p.desiredContract?.salary || p.salary || 25_000)
-            : computeMensMarketSalary(p.rating),
+            : computeMensMarketSalary(p.rating, league.season ?? 2026),
         },
       };
       updatedFAs = [waivedFA, ...league.freeAgents];

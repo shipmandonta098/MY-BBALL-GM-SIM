@@ -1363,6 +1363,17 @@ const calcWNBASalary = (rating: number, year: number): number => {
   return Math.round((base * (0.85 + Math.random() * 0.30)) / unit) * unit;
 };
 
+/** NBA salary with era-appropriate random variance — used only for setting a player's current contract. */
+const calcNBASalary = (rating: number, year: number): number => {
+  const market = computeMensMarketSalary(rating, year);
+  const unit =
+    market >= 10_000_000 ? 250_000 :
+    market >=  1_000_000 ?  50_000 :
+    market >=    100_000 ?   5_000 :
+    market >=     10_000 ?   1_000 : 100;
+  return Math.round((market * (0.80 + Math.random() * 0.40)) / unit) * unit;
+};
+
 export const generatePlayer = (id: string, ageRange: [number, number] = [19, 38], genderRatio: number = 0, draftCtx?: DraftContext, leagueYear?: number, minRating = 58): Player => {
   const gender = getRandomGender(genderRatio);
   
@@ -1445,20 +1456,13 @@ export const generatePlayer = (id: string, ageRange: [number, number] = [19, 38]
     attributes: pAttrs as Player['attributes'],
     salary: gender === 'Female'
       ? calcWNBASalary(rating, _leagueYear)
-      : Math.round((
-          rating >= 95 ? 35_000_000 + (rating - 95) * 1_750_000 :  // $35M–$42M (supermax tier)
-          rating >= 88 ? 18_000_000 + (rating - 88) * 2_428_571 :  // $18M–$33M (star tier)
-          rating >= 80 ? 8_500_000  + (rating - 80) * 1_187_500 :  // $8.5M–$17.5M (starter tier)
-          rating >= 70 ? 3_500_000  + (rating - 70) * 500_000   :  // $3.5M–$8.5M (role player)
-          rating >= 60 ? 1_500_000  + (rating - 60) * 200_000   :  // $1.5M–$3.5M (bench)
-                         1_100_000                                  // league minimum
-        ) * (0.85 + Math.random() * 0.30) / 250_000) * 250_000,
+      : calcNBASalary(rating, _leagueYear),
     contractYears: Math.floor(Math.random() * 5) + 1,
     desiredContract: {
       years: rating >= 80 ? 4 : rating >= 70 ? 3 : 2,
       salary: gender === 'Female'
         ? calcWNBASalary(rating, _leagueYear)
-        : computeMensMarketSalary(rating),
+        : computeMensMarketSalary(rating, _leagueYear),
     },
     stats: {
       points: 0, rebounds: 0, offReb: 0, defReb: 0, assists: 0, steals: 0, blocks: 0, gamesPlayed: 0, gamesStarted: 0,
@@ -1517,13 +1521,7 @@ export const generateFreeAgentPool = (count: number, season: number, genderRatio
         years: Math.floor(Math.random() * 3) + 1,
         salary: p.gender === 'Female'
           ? calcWNBASalary(skewedRating, season)
-          : Math.round((
-              skewedRating >= 95 ? 35_000_000 + (skewedRating - 95) * 1_750_000 :
-              skewedRating >= 88 ? 18_000_000 + (skewedRating - 88) * 2_428_571 :
-              skewedRating >= 80 ? 8_500_000  + (skewedRating - 80) * 1_187_500 :
-              skewedRating >= 70 ? 3_500_000  + (skewedRating - 70) * 500_000   :
-              skewedRating >= 60 ? 1_500_000  + (skewedRating - 60) * 200_000   : 1_100_000
-            ) * (0.90 + Math.random() * 0.20) / 250_000) * 250_000
+          : computeMensMarketSalary(skewedRating, season)
       },
       interestScore: 30 + Math.floor(Math.random() * 50)
     };
@@ -2495,4 +2493,17 @@ const WNBA_ERA_TABLE: EraEntry[] = [
 export const getWNBAHistoricalFinancials = (year: number): HistoricalFinancials => {
   const entry = WNBA_ERA_TABLE.find(e => year >= e.from && year <= e.to);
   return entry ? entry.f : WNBA_ERA_TABLE[WNBA_ERA_TABLE.length - 1].f;
+};
+
+/**
+ * Returns the maximum individual player salary for a given year and gender.
+ * Used by the LeagueConfiguration banner and settings validation.
+ */
+export const getEraMaxPlayerSalary = (year: number, isWomens: boolean, salaryCap: number): number => {
+  if (isWomens) {
+    const h = getWNBAHistoricalFinancials(year);
+    const pct = h.maxPlayerSalaryPct ?? 30;
+    return Math.round((salaryCap * pct) / 5_000) * 5_000;
+  }
+  return computeMensMarketSalary(99, year);
 };
