@@ -1902,8 +1902,8 @@ const App: React.FC = () => {
     if (usePreseason) {
       const allPreseasonDone = (newState.preseasonSchedule ?? []).every(g => g.played);
       if (allPreseasonDone) {
-        // Cut AI team rosters to 15 (final roster) — release excess to FA pool
-        const MAX_ROSTER = 15;
+        // Cut AI team rosters to 14 (final roster) — release excess to FA pool
+        const MAX_ROSTER = 14;
         const releasedCuts: typeof newState.freeAgents = [];
         const postCutTeams = newState.teams.map(t => {
           if (t.id === newState.userTeamId) return t; // user manages own cuts
@@ -1929,7 +1929,7 @@ const App: React.FC = () => {
             id: `preseason-complete-${newState.season}`,
             category: 'milestone' as const,
             headline: 'PRESEASON COMPLETE — REGULAR SEASON BEGINS',
-            content: `Training camp is over. AI teams have set their 15-man rosters. Check your own depth chart — the regular season tips off now!`,
+            content: `Training camp is over. AI teams have set their 14-man rosters. Check your own depth chart — the regular season tips off now!`,
             timestamp: 1,
             realTimestamp: Date.now(),
             isBreaking: true,
@@ -2006,10 +2006,11 @@ const App: React.FC = () => {
     }
 
     // ── AI in-season / preseason signings ──────────────────────────────────
-    // Pass 1 – Fill short rosters (preseason: every team; regular: ~30% chance).
+    // Pass 1 – Fill short rosters (preseason: every team; regular season: any team under 14).
     // Pass 2 – Upgrade/waive-and-sign evaluation, staggered every 4-6 days per team.
     const isPreseasonPhaseSign = newState.seasonPhase === 'Preseason';
-    const signingThreshold = isPreseasonPhaseSign ? 16 : (newState.tradeDeadlinePassed ? 13 : 10);
+    // Regular season target is 14 active healthy players; preseason fills up to 15 for camp competition.
+    const signingThreshold = isPreseasonPhaseSign ? 15 : 14;
     if (!newState.isOffseason && newState.freeAgents.length > 0) {
       const cap = newState.settings.salaryCap || 140_000_000;
       const maxRoster = newState.settings.maxRosterSize ?? 15;
@@ -2020,10 +2021,11 @@ const App: React.FC = () => {
         const activeRoster = t.roster.filter(p => !p.injuryDaysLeft || p.injuryDaysLeft === 0);
         return activeRoster.length < signingThreshold;
       });
+      // In regular season process ALL teams that need help (not just 1 random one) with high probability.
       const teamsToProcess = isPreseasonPhaseSign
         ? aiTeamsNeedingHelp
-        : (Math.random() < 0.3 && aiTeamsNeedingHelp.length > 0
-            ? [aiTeamsNeedingHelp[Math.floor(Math.random() * aiTeamsNeedingHelp.length)]]
+        : (aiTeamsNeedingHelp.length > 0 && Math.random() < 0.85
+            ? aiTeamsNeedingHelp
             : []);
       const inSeasonRules = getContractRules(newState);
       const leagueMin = inSeasonRules.minPlayerSalary;
@@ -2510,7 +2512,44 @@ const App: React.FC = () => {
           }, ...(tempState.newsFeed ?? [])].slice(0, 300),
         };
 
-        // 2. #1 seed announcements (East + West)
+        // 2a. Division winner announcements (one news item per division)
+        {
+          const divMap = new Map<string, Team[]>();
+          for (const t of tempState.teams) {
+            if (!t.division) continue;
+            if (!divMap.has(t.division)) divMap.set(t.division, []);
+            divMap.get(t.division)!.push(t);
+          }
+          const divEntries = [...divMap.entries()].sort(([a], [b]) => a.localeCompare(b));
+          for (const [division, divTeams] of divEntries) {
+            const winner = [...divTeams].sort((a, b) =>
+              (b.wins / Math.max(1, b.wins + b.losses)) - (a.wins / Math.max(1, a.wins + a.losses)) ||
+              b.wins - a.wins
+            )[0];
+            if (!winner) continue;
+            const wl = `${winner.wins}-${winner.losses}`;
+            tempState = {
+              ...tempState,
+              newsFeed: [{
+                id: `div-winner-${tempState.season}-${division}`,
+                category: 'milestone' as NewsCategory,
+                headline: `${division.toUpperCase()} DIVISION CHAMPIONS`,
+                content: pickN([
+                  `The ${winner.city} ${winner.name} clinch the ${division} Division title with a ${wl} record! The city is celebrating tonight — what a season.`,
+                  `${winner.city} ${winner.name} are your ${division} Division Champions! A dominant ${wl} finish puts them atop the division — respect.`,
+                  `${winner.name} clinch the ${division} Division! A ${wl} regular season earns them the banner — ${winner.city} has something to cheer about.`,
+                  `OFFICIAL: The ${winner.city} ${winner.name} (${wl}) win the ${division} Division championship. Home-court secured and bragging rights earned.`,
+                ]),
+                timestamp: nowDay,
+                realTimestamp: Date.now(),
+                teamId: winner.id,
+                isBreaking: true,
+              }, ...(tempState.newsFeed ?? [])].slice(0, 300),
+            };
+          }
+        }
+
+        // 2b. #1 seed announcements (East + West)
         for (const conf of ['Eastern', 'Western'] as const) {
           const top = bracket.series.find(s => s.conference === conf && s.team1Seed === 1);
           if (!top) continue;
@@ -3107,15 +3146,31 @@ const App: React.FC = () => {
     if (league.seasonPhase === 'Preseason' && !league.isOffseason) {
       setLeague(prev => {
         if (!prev) return null;
+        // Apply the same roster cuts that happen after preseason completes,
+        // so AI teams start the regular season with 14-man rosters.
+        const SKIP_MAX_ROSTER = 14;
+        const skipCuts: typeof prev.freeAgents = [];
+        const teamsAfterSkipCut = prev.teams.map(t => {
+          if (t.id === prev.userTeamId) return t; // user manages own cuts
+          if (t.roster.length <= SKIP_MAX_ROSTER) return t;
+          const sorted = [...t.roster].sort((a, b) => b.rating - a.rating);
+          skipCuts.push(...sorted.slice(SKIP_MAX_ROSTER).map(p => ({
+            ...p, isFreeAgent: true, inSeasonFA: true, contractYears: 0,
+          })));
+          return { ...t, roster: sorted.slice(0, SKIP_MAX_ROSTER) };
+        });
+        const existingFAIds = new Set(prev.freeAgents.map(p => p.id));
         return {
           ...prev,
+          teams: teamsAfterSkipCut,
+          freeAgents: [...prev.freeAgents, ...skipCuts.filter(p => !existingFAIds.has(p.id))],
           currentDay: 1,
           seasonPhase: 'Regular Season' as SeasonPhase,
           newsFeed: [{
             id: `preseason-skipped-${prev.season}`,
             category: 'milestone' as const,
             headline: 'PRESEASON SKIPPED — REGULAR SEASON BEGINS',
-            content: 'The preseason has been skipped. The regular season is now underway — finalize your rotations!',
+            content: 'The preseason has been skipped. AI teams have been cut to 14-man rosters. Finalize your own rotations — the regular season is live!',
             timestamp: 1,
             realTimestamp: Date.now(),
             isBreaking: true,

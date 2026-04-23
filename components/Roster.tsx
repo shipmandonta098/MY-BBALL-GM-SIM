@@ -488,6 +488,12 @@ const Roster: React.FC<RosterProps> = ({ leagueTeams, userTeamId, initialTeamId,
                           }`}>
                             {player.name}
                           </span>
+                          {(player.allStarSelections?.length ?? 0) > 0 && (
+                            <span
+                              title={`${player.allStarSelections!.length}× All-Star`}
+                              className="text-amber-400 text-base leading-none select-none"
+                            >★</span>
+                          )}
                           {(() => {
                             const m = moraleInfo(player.morale);
                             return (

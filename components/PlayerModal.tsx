@@ -982,7 +982,15 @@ const PlayerModal: React.FC<PlayerModalProps> = ({
           <div className="absolute bottom-8 left-10 md:bottom-10 md:left-12 flex items-end gap-8">
 
             <div className="relative z-10 flex flex-col">
-              <h2 className="text-5xl md:text-8xl font-display font-bold uppercase tracking-tighter text-white drop-shadow-lg leading-tight">{player.name}</h2>
+              <h2 className="text-5xl md:text-8xl font-display font-bold uppercase tracking-tighter text-white drop-shadow-lg leading-tight flex items-baseline gap-3">
+                {player.name}
+                {(player.allStarSelections?.length ?? 0) > 0 && (
+                  <span
+                    title={`${player.allStarSelections!.length}× All-Star`}
+                    className="text-amber-400 text-4xl md:text-6xl leading-none select-none drop-shadow-md"
+                  >★</span>
+                )}
+              </h2>
               <div className="flex flex-wrap items-center gap-4 mt-2">
                 <span className="px-4 py-1.5 bg-amber-500 text-slate-950 text-xs font-black uppercase rounded-lg shadow-lg shadow-amber-500/20">{player.position}</span>
                 <span className="text-slate-100 font-display font-bold text-xl uppercase tracking-wider">
