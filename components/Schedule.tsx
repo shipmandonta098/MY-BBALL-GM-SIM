@@ -446,7 +446,7 @@ const Schedule: React.FC<ScheduleProps> = ({ league, onSimulate, onScout, onWatc
     <div className="space-y-8 animate-in fade-in duration-500 pb-40">
 
       {/* ── Preseason Schedule Section ── */}
-      {isPreseasonPhase && hasPreseasonGames && (
+      {hasPreseasonGames && (
         <div className="space-y-4 animate-in slide-in-from-top-2">
           {/* Header bar */}
           <div className="bg-gradient-to-br from-amber-900/30 to-slate-900 border border-amber-500/30 rounded-[2rem] p-6 shadow-xl">
