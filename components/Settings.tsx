@@ -3,6 +3,7 @@ import React, { useState, useMemo } from 'react';
 import { LeagueState, LeagueSettings } from '../types';
 import { getHistoricalFinancials } from '../constants';
 import { fmtSalary } from '../utils/formatters';
+import { useTheme, type Theme } from '../context/ThemeContext';
 import NumericInput from './NumericInput';
 
 interface SettingsProps {
@@ -11,7 +12,7 @@ interface SettingsProps {
   onRegenerateSchedule?: () => Promise<boolean>;
 }
 
-type SettingsTab = 'league' | 'gameplay' | 'sliders' | 'simulation' | 'godmode';
+type SettingsTab = 'league' | 'gameplay' | 'sliders' | 'simulation' | 'godmode' | 'appearance';
 
 interface ChangeEntry {
   field: string;
@@ -178,10 +179,11 @@ const SEARCH_INDEX: { tab: SettingsTab; label: string }[] = [
 
 const TAB_LABELS: Record<SettingsTab, string> = {
   league: 'League', gameplay: 'Gameplay', sliders: 'Sliders',
-  simulation: 'Simulation', godmode: 'God Mode',
+  simulation: 'Simulation', godmode: 'God Mode', appearance: 'Appearance',
 };
 
 const Settings: React.FC<SettingsProps> = ({ league, updateLeague, onRegenerateSchedule }) => {
+  const { theme, setTheme } = useTheme();
   const [activeTab, setActiveTab] = useState<SettingsTab>('league');
   const [searchQuery, setSearchQuery] = useState('');
   const [changeLog, setChangeLog]     = useState<ChangeEntry[]>([]);
@@ -440,7 +442,7 @@ const Settings: React.FC<SettingsProps> = ({ league, updateLeague, onRegenerateS
               League <span className="text-amber-500">Settings</span>
             </h2>
             <div className="flex flex-wrap gap-2">
-              {(['league','gameplay','sliders','simulation','godmode'] as SettingsTab[]).map(id => (
+              {(['league','gameplay','sliders','simulation','godmode','appearance'] as SettingsTab[]).map(id => (
                 <React.Fragment key={id}><TabButton id={id} label={TAB_LABELS[id]} /></React.Fragment>
               ))}
             </div>
@@ -1155,6 +1157,99 @@ const Settings: React.FC<SettingsProps> = ({ league, updateLeague, onRegenerateS
             <SelectField label="Turnover Frequency" value={s.turnoverFrequency ?? 'Medium'}
               options={['Low','Medium','High']}
               onChange={v => updateSettings({ turnoverFrequency: v as any }, 'Turnover Frequency')} />
+          </div>
+        )}
+
+        {/* ════════════════════ APPEARANCE TAB ════════════════════ */}
+        {activeTab === 'appearance' && (
+          <div className="space-y-6 animate-in slide-in-from-bottom-2">
+
+            <div className="bg-slate-900 border border-slate-800 rounded-[2rem] p-8 space-y-6">
+              <div>
+                <h3 className="text-2xl font-display font-bold uppercase text-white tracking-tight">
+                  App <span className="text-amber-500">Theme</span>
+                </h3>
+                <p className="text-xs text-slate-500 mt-1 uppercase tracking-widest">Choose a visual style — updates instantly</p>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                {(
+                  [
+                    {
+                      id: 'default' as Theme,
+                      name: 'Default',
+                      desc: 'Dark slate with orange accents — the classic look',
+                      preview: ['#0f172a','#1e293b','#f59e0b'],
+                      textPreview: 'text-amber-500',
+                    },
+                    {
+                      id: 'dark' as Theme,
+                      name: 'Pure Dark',
+                      desc: 'Near-black backgrounds, steel-grey tones',
+                      preview: ['#020202','#0a0a0a','#a1a1aa'],
+                      textPreview: 'text-zinc-400',
+                    },
+                    {
+                      id: 'light' as Theme,
+                      name: 'Light',
+                      desc: 'Clean white canvas with dark text',
+                      preview: ['#f1f5f9','#ffffff','#d97706'],
+                      textPreview: 'text-amber-600',
+                    },
+                    {
+                      id: 'neon' as Theme,
+                      name: 'Neon',
+                      desc: 'Deep space dark with glowing orange & purple',
+                      preview: ['#07071a','#0f0f28','#ff6a10'],
+                      textPreview: 'text-orange-500',
+                    },
+                  ] as { id: Theme; name: string; desc: string; preview: string[]; textPreview: string }[]
+                ).map(t => {
+                  const active = theme === t.id;
+                  return (
+                    <button
+                      key={t.id}
+                      onClick={() => setTheme(t.id)}
+                      className={`relative group text-left p-5 rounded-2xl border-2 transition-all duration-200 ${
+                        active
+                          ? 'border-amber-500 bg-amber-500/10'
+                          : 'border-slate-700 bg-slate-950/40 hover:border-slate-600 hover:bg-slate-800/60'
+                      }`}
+                    >
+                      {/* colour swatches */}
+                      <div className="flex gap-2 mb-4">
+                        {t.preview.map((c, i) => (
+                          <span
+                            key={i}
+                            className="w-8 h-8 rounded-xl border border-slate-700 shadow-inner"
+                            style={{ backgroundColor: c }}
+                          />
+                        ))}
+                      </div>
+
+                      <div className="flex items-center justify-between">
+                        <span className="text-sm font-black uppercase tracking-widest text-white">{t.name}</span>
+                        {active && (
+                          <span className="text-[9px] font-black uppercase tracking-widest text-amber-500 bg-amber-500/15 px-2 py-1 rounded-lg">
+                            Active
+                          </span>
+                        )}
+                      </div>
+                      <p className="text-[11px] text-slate-500 mt-1 leading-relaxed">{t.desc}</p>
+
+                      {active && (
+                        <div className="absolute top-3 right-3 w-4 h-4 rounded-full bg-amber-500 flex items-center justify-center shadow-lg shadow-amber-500/30">
+                          <svg className="w-2.5 h-2.5 text-slate-950" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="3">
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+                          </svg>
+                        </div>
+                      )}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
           </div>
         )}
 
