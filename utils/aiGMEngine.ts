@@ -321,24 +321,106 @@ function makeTransaction(
   };
 }
 
+// ─── Value Over Replacement: how much better is this player vs a freely available sub ─
+function valueOverReplacement(p: Player): number {
+  // Replacement level ≈ 74 OVR (a player any team can find on the street)
+  const REPLACEMENT_OVR = 74;
+  const ratingVOR = p.rating - REPLACEMENT_OVR;
+
+  // Age curve: prime 26-30, slight boost for upside youth, penalty for old age
+  const ageMultiplier =
+    p.age <= 23 ? 1.10 :
+    p.age <= 30 ? 1.00 :
+    p.age <= 33 ? 0.90 :
+    p.age <= 36 ? 0.78 : 0.62;
+
+  // Status bonus: starters provide more win-share per dollar
+  const roleBonus = p.status === 'Starter' ? 4 : p.status === 'Rotation' ? 1 : -2;
+
+  // Long-term injury heavily reduces immediate value
+  const injuryDays = p.injuryDaysLeft ?? 0;
+  const injuryPenalty = injuryDays > 60 ? -10 : injuryDays > 30 ? -5 : 0;
+
+  return (ratingVOR * ageMultiplier) + roleBonus + injuryPenalty;
+}
+
 // ─── Roster evaluation: who gets cut ────────────────────────
-function shouldRelease(p: Player, salary: number, personality: AIGMPersonality): boolean {
-  // Rating floor cuts — always release severely underpaid talent
-  if (salary > 500_000 && p.rating < 70) return true;
-  if (p.rating < 68) return true;
+type ReleaseReason = 'dead_weight' | 'long_term_injury' | 'youth_over_veteran' | 'cap_desperation' | 'none';
 
-  // Personality-specific age/rating thresholds
-  if (personality === 'Rebuilder' && p.age > 32 && p.rating < 82) return true;
-  if (personality === 'Win Now' && p.rating < 74) return true;
+function shouldRelease(
+  p: Player,
+  salary: number,
+  personality: AIGMPersonality,
+  capType: 'Soft Cap' | 'Hard Cap',
+  salaryCap: number,
+  teamPayroll: number,
+  luxuryTaxLine: number,
+  secondApron: number,
+  isWomens: boolean,
+): { release: boolean; reason: ReleaseReason } {
+  const no = { release: false, reason: 'none' as const };
+  const salaryPct = salary / salaryCap; // salary as fraction of cap — scales for both leagues
 
-  // Value-efficiency: release obviously overpaid players relative to their rating
-  const salaryM = salary / 1_000_000;
-  if (p.rating < 76 && salaryM > 10) return true;   // $10M+ on a <76 OVR player is dead money
-  if (p.rating < 80 && salaryM > 18) return true;   // $18M+ on a <80 OVR player — cut bait
-  if (p.rating < 84 && salaryM > 26) return true;   // $26M+ on a <84 OVR — not worth it
-  if (p.rating < 87 && salaryM > 34) return true;   // $34M+ on a <87 OVR — restructure/waive
+  const vor = valueOverReplacement(p);
 
-  return false;
+  // ── ABSOLUTE DEAD WEIGHT: release regardless of cap rules ──────────────────
+  // Truly below-minimum-value player — any team would cut these
+  if (p.rating < 65) return { release: true, reason: 'dead_weight' };
+  // Paying more than league min for a player who can't hold a roster spot
+  if (salary > salaryCap * 0.004 && p.rating < 68) return { release: true, reason: 'dead_weight' };
+  // VOR so negative they actively hurt the roster
+  if (vor < -12) return { release: true, reason: 'dead_weight' };
+
+  // ── LONG-TERM INJURY + OLD + BELOW STAR THRESHOLD ─────────────────────────
+  const injuryDays = p.injuryDaysLeft ?? 0;
+  if (injuryDays > 60 && p.age >= 34 && p.rating < 82) {
+    return { release: true, reason: 'long_term_injury' };
+  }
+  // Very old player with severe long-term injury and not a star
+  if (injuryDays > 45 && p.age >= 37 && p.rating < 88) {
+    return { release: true, reason: 'long_term_injury' };
+  }
+
+  // ── HARD CAP: standard aggressive release logic ────────────────────────────
+  if (capType === 'Hard Cap') {
+    if (p.rating < 70) return { release: true, reason: 'dead_weight' };
+    if (personality === 'Rebuilder' && p.age > 32 && p.rating < 82) return { release: true, reason: 'youth_over_veteran' };
+    if (personality === 'Win Now' && p.rating < 74) return { release: true, reason: 'dead_weight' };
+    // Cap-relative overpay thresholds (7%/13%/19%/24% of cap → ≈$10M/$18M/$26M/$34M on $140M cap)
+    if (p.rating < 76 && salaryPct > 0.07) return { release: true, reason: 'dead_weight' };
+    if (p.rating < 80 && salaryPct > 0.13) return { release: true, reason: 'dead_weight' };
+    if (p.rating < 84 && salaryPct > 0.19) return { release: true, reason: 'dead_weight' };
+    if (p.rating < 87 && salaryPct > 0.24) return { release: true, reason: 'dead_weight' };
+    return no;
+  }
+
+  // ── SOFT CAP: be conservative — luxury tax is the cost of winning ──────────
+  // AI GMs should willingly pay into luxury tax for productive players.
+  // Only waive under these specific, justified circumstances:
+
+  // 1. Rebuilder clearing minutes for youth development
+  if (personality === 'Rebuilder') {
+    if (p.age > 34 && p.rating < 80 && vor < 3) return { release: true, reason: 'youth_over_veteran' };
+    if (p.age > 37 && p.rating < 87) return { release: true, reason: 'youth_over_veteran' };
+  }
+
+  // 2. Team is in genuine second-apron crisis AND player is below replacement
+  const overSecondApron = teamPayroll > secondApron;
+  if (overSecondApron && vor < 0) {
+    return { release: true, reason: 'cap_desperation' };
+  }
+
+  // 3. Catastrophic salary-to-value mismatch even for a soft-cap team:
+  //    >20% of cap for a clearly below-average player (generous threshold, rarely triggered)
+  //    Women's: apply the same cap-relative standard — no need to change the percentage
+  if (p.rating < 74 && salaryPct > 0.20 && vor < 0) {
+    return { release: true, reason: 'dead_weight' };
+  }
+  // Extremely egregious contract for a player who is firmly below-average
+  if (p.rating < 77 && salaryPct > 0.28) return { release: true, reason: 'dead_weight' };
+
+  // Everything else: keep the player (even if overpaid) — trade them instead
+  return no;
 }
 
 // ─── Main offseason AI GM run ────────────────────────────────
@@ -379,6 +461,10 @@ export function runAIGMOffseason(
     [...faPool].sort((a, b) => b.rating - a.rating).slice(0, 5).map(p => p.id)
   );
 
+  // Detect women's league for conservatism adjustments
+  const isWomensLeague = (s.settings.playerGenderRatio ?? 0) === 100;
+  const capType = s.settings.salaryCapType ?? 'Soft Cap';
+
   for (let teamIdx = 0; teamIdx < s.teams.length; teamIdx++) {
     const t = s.teams[teamIdx];
     if (t.id === s.userTeamId) continue;
@@ -392,77 +478,132 @@ export function runAIGMOffseason(
     let currentRoster = [...t.roster];
 
     if (s.draftPhase === 'completed') {
-      const released: Player[] = [];
+      const teamPayroll = rosterSalary(t);
+      const released: { player: Player; reason: ReleaseReason }[] = [];
+      // Players worth keeping but overpaid → mark for trade block instead of waiving
+      const tradeBlockCandidates: Player[] = [];
       const minRoster = s.settings.minRosterSize ?? 10;
-      // Cap releases per team per offseason run to prevent mass-waiving
+      // Under a soft cap AI GMs should rarely waive good players — cap releases to 2 per team.
+      // Under a hard cap the limit stays at 3.
       let releasesThisTeam = 0;
-      const MAX_RELEASES_PER_TEAM = 3;
+      const MAX_RELEASES_PER_TEAM = capType === 'Hard Cap' ? 3 : 2;
 
       currentRoster = currentRoster.filter(p => {
         if (releasesThisTeam >= MAX_RELEASES_PER_TEAM) return true;
-        if (currentRoster.length <= minRoster) return true; // never below minimum
-        if (personality === 'Loyalist' && p.morale >= 60) return true; // loyalist keeps happy players
-        if (shouldRelease(p, p.salary, personality)) {
-          released.push(p);
+        if (currentRoster.length <= minRoster) return true;
+        if (personality === 'Loyalist' && p.morale >= 60) return true;
+        const { release, reason } = shouldRelease(
+          p, p.salary, personality,
+          capType, salaryCap, teamPayroll, luxuryTaxLine, SECOND_APRON, isWomensLeague,
+        );
+        if (release) {
+          released.push({ player: p, reason });
           releasesThisTeam++;
           return false;
+        }
+        // Under soft cap: overpaid-but-decent players go on trade block instead of getting waived
+        if (capType === 'Soft Cap' && p.rating >= 74 && p.salary / salaryCap > 0.12 && p.rating < 82) {
+          tradeBlockCandidates.push(p);
         }
         return true;
       });
 
-      released.forEach(p => {
-        faPool.push({ ...p, isFreeAgent: true, contractYears: 0 });
-        const ageSuffix = p.age >= 32 ? `, age ${p.age},` : '';
+      // Mark trade-block candidates (keep on roster, explore trades)
+      tradeBlockCandidates.forEach(p => {
+        const idx = currentRoster.findIndex(r => r.id === p.id);
+        if (idx >= 0) currentRoster[idx] = { ...currentRoster[idx], onTradeBlock: true };
         const salaryM = (p.salary / 1_000_000).toFixed(1);
-        const lastName = p.name.split(' ').slice(-1)[0];
         newsItems.push(makeNewsItem(
           'transaction',
-          `${t.abbreviation} ROSTER MOVE`,
-          (() => {
-            const templates = [
-              `${t.name} have released ${p.name}${ageSuffix} as they reshape the roster heading into the offseason. He clears waivers immediately.`,
-              `${p.name} has been waived by ${t.name}. The move frees up $${salaryM}M and creates flexibility for the front office.`,
-              `${t.name} part ways with ${lastName} in a roster move. The ${p.position} becomes an unrestricted free agent.`,
-              `${t.name} announce the release of ${p.name}. The organization thanked him for his contributions and wishes him well.`,
-            ];
-            return templates[Math.floor(Math.random() * templates.length)];
-          })(),
-          s.currentDay, t.id, p.id
+          `${t.abbreviation} EXPLORING TRADE`,
+          `${t.name} have made ${p.name} ($${salaryM}M) available for trade as the front office looks to reshape the roster and improve flexibility.`,
+          s.currentDay, t.id, p.id,
         ));
+      });
+
+      released.forEach(({ player: p, reason }) => {
+        faPool.push({ ...p, isFreeAgent: true, contractYears: 0 });
+        const pronoun = p.gender === 'Female' ? 'her' : 'his';
+        const salaryM = (p.salary / 1_000_000).toFixed(1);
+        const lastName = p.name.split(' ').slice(-1)[0];
+
+        // Context-specific Dynasty Feed messaging
+        const content = (() => {
+          switch (reason) {
+            case 'youth_over_veteran':
+              return `${t.name} have released veteran ${p.name} (age ${p.age}) to open roster minutes for younger talent. The move accelerates the team's rebuild.`;
+            case 'long_term_injury':
+              return `${p.name} has been waived by ${t.name} following a lengthy injury. The ${p.position} was sidelined for the foreseeable future, and both sides agreed a fresh start made sense.`;
+            case 'cap_desperation':
+              return `${t.name} part ways with ${p.name} ($${salaryM}M) in a salary-clearing move to get below the second-apron threshold and restore financial flexibility.`;
+            case 'dead_weight':
+            default: {
+              const templates = [
+                `${t.name} have released ${p.name} as they reshape the roster heading into the offseason. ${p.name} clears waivers and becomes an unrestricted free agent.`,
+                `${p.name} has been waived by ${t.name}. The ${p.position} failed to hold a consistent roster spot and the front office moved on.`,
+                `${t.name} part ways with ${lastName} in a roster move. The organization thanked ${pronoun} for ${pronoun} contributions and wished ${pronoun} well.`,
+              ];
+              return templates[Math.floor(Math.random() * templates.length)];
+            }
+          }
+        })();
+
+        newsItems.push(makeNewsItem('transaction', `${t.abbreviation} ROSTER MOVE`, content, s.currentDay, t.id, p.id));
         txs.push(makeTransaction(s, 'release', [t.id], `${t.name} released ${p.name}.`, [p.id]));
       });
     }
 
     // ── 1.8 EMERGENCY CAP RELIEF ────────────────────────────────
-    // If current payroll already exceeds the first-apron threshold (LUXURY_CEILING),
-    // force-release worst-value non-star contracts until back under. Also apply a
-    // softer pass at the luxury tax line for rebuilding/balanced teams.
+    // Under a SOFT CAP: AI GMs can and should operate in the luxury tax — even the
+    // first apron — for a competitive roster. Emergency relief only kicks in when the
+    // team is genuinely above the SECOND APRON (near-hard cap), which severely limits
+    // roster moves and triggers punishing repeater-tax bills.
+    // Under a HARD CAP: enforce strictly at the first-apron ceiling as before.
     // Never cut 88+ OVR players, never drop below min roster size.
+    // Women's leagues: same cap-relative logic, just lower dollar figures.
     {
       const minRoster = s.settings.minRosterSize ?? 10;
       let emergencyCuts = 0;
-      const reliefTarget = (personality === 'Win Now' || personality === 'Superstar Chaser')
-        ? LUXURY_CEILING      // aggressive teams: only cut if above first apron
-        : luxuryTaxLine + 15_000_000;  // others: cut down to near tax line
+
+      // Soft cap: only trigger if above second apron (truly punishing territory).
+      // Hard cap: trigger at first apron (LUXURY_CEILING) as before.
+      // Aggressive personalities (Win Now, Superstar Chaser) get a small buffer
+      // even in second-apron territory before we force cuts.
+      const isAggressive = personality === 'Win Now' || personality === 'Superstar Chaser';
+      const reliefTarget = capType === 'Hard Cap'
+        ? (isAggressive ? LUXURY_CEILING : luxuryTaxLine + 15_000_000)
+        : (isAggressive ? SECOND_APRON + salaryCap * 0.03 : SECOND_APRON); // soft cap: only cut past 2nd apron
+
+      // Under soft cap, protect any player with OVR ≥ 82 from emergency cuts
+      // (they're worth the tax bill). Hard cap: protect only 88+ OVR.
+      const emergencyCutFloor = capType === 'Hard Cap' ? 88 : 82;
+
+      // Max cuts: fewer allowed under soft cap to avoid over-waiving good players
+      const MAX_EMERGENCY_CUTS = capType === 'Hard Cap' ? 8 : 4;
+
       while (
         rosterSalary({ ...t, roster: currentRoster }) > reliefTarget &&
         currentRoster.length > minRoster &&
-        emergencyCuts < 8
+        emergencyCuts < MAX_EMERGENCY_CUTS
       ) {
+        // Sort by value-over-replacement (ascending) — cut least-valuable first
         const candidates = currentRoster
-          .filter(p => p.rating < 88)
-          .sort((a, b) => (a.rating / Math.max(1, a.salary)) - (b.rating / Math.max(1, b.salary)));
+          .filter(p => p.rating < emergencyCutFloor)
+          .sort((a, b) => valueOverReplacement(a) - valueOverReplacement(b));
         if (candidates.length === 0) break;
         const toCut = candidates[0];
         currentRoster = currentRoster.filter(p => p.id !== toCut.id);
         faPool.push({ ...toCut, isFreeAgent: true, contractYears: 0 });
         emergencyCuts++;
         const salaryM = (toCut.salary / 1_000_000).toFixed(1);
+        const capContext = capType === 'Hard Cap'
+          ? 'luxury tax ceiling'
+          : 'second-apron threshold';
         newsItems.push(makeNewsItem(
           'transaction',
           `${t.abbreviation} CAP RELIEF`,
-          `${t.name} release ${toCut.name} ($${salaryM}M) in a cap-clearing move to get under the luxury tax ceiling.`,
-          s.currentDay, t.id, toCut.id
+          `${t.name} release ${toCut.name} ($${salaryM}M) in a salary-clearing move to get below the ${capContext} and restore roster flexibility.`,
+          s.currentDay, t.id, toCut.id,
         ));
         txs.push(makeTransaction(s, 'release', [t.id], `${t.name} released ${toCut.name} (cap relief).`, [toCut.id]));
       }
