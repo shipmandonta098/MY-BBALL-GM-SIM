@@ -8,6 +8,7 @@ export type InjuryType = 'Ankle Sprain' | 'Hamstring Strain' | 'Knee Sprain' | '
 export type Gender = 'Male' | 'Female' | 'Non-binary';
 
 export type PersonalityTrait = 'Leader' | 'Diva/Star' | 'Loyal' | 'Professional' | 'Gym Rat' | 'Lazy' | 'Clutch' | 'Tough/Alpha' | 'Friendly/Team First' | 'Money Hungry' | 'Hot Head' | 'Workhorse' | 'Streaky';
+export type TrainingFocusArea = 'Shooting / 3PT' | 'Playmaking / Passing' | 'Defense / Rebounding' | 'Post Scoring / Interior' | 'Athleticism / Dunking' | 'Finishing / Layups' | 'Free Throws' | 'Mental / Leadership';
 
 export interface PlayerTendencies {
   offensiveTendencies: {
@@ -385,6 +386,14 @@ export interface Player {
   allStarMvpYears?: number[];
   /** Years (season numbers) in which this player won a championship ring */
   championYears?: number[];
+
+  /** Active GM-assigned training priority for this player */
+  trainingFocus?: {
+    areas: TrainingFocusArea[];
+    seasonSet: number;
+    daysRemaining: number;
+    playerResponse: 'enthusiastic' | 'receptive' | 'resistant';
+  };
 
   // ── Contract extensions ──────────────────────────────────────────────────
   /** Free-agency classification once contract expires */
@@ -898,6 +907,8 @@ export interface LeagueState {
   };
   /** Offseason alert queue shown after draft lottery / draft completion. Undefined = not yet generated. */
   offseasonAlerts?: OffseasonAlert[];
+  /** Number of training-focus interventions the GM has used this season (max 4). */
+  devInterventionsThisSeason?: number;
 }
 
 export type TransactionType = 'trade' | 'signing' | 'release' | 'hiring' | 'firing' | 'injury' | 'waiver' | 'draft';
