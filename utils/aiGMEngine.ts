@@ -756,6 +756,47 @@ export function runAIGMOffseason(
     const winPct = (wins + losses) > 0 ? wins / (wins + losses) : 0.5;
     const hc = t.staff.headCoach;
 
+    // ── 3a. COACH EXTENSIONS ─────────────────────────────────
+    // AI GMs extend a performing coach when his deal has 1 year left and
+    // the team is winning. Loyalist GMs are the most eager to extend;
+    // Win Now GMs extend quickly if contending; Rebuilders wait for results.
+    if (hc && !hc.isInterim && hc.contractYears <= 1 && winPct >= 0.50) {
+      const extendBase = winPct >= 0.65 ? 0.80 : winPct >= 0.55 ? 0.55 : 0.30;
+      const extendBonus =
+        personality === 'Loyalist'       ? 0.20 :
+        personality === 'Win Now'        ? 0.12 :
+        personality === 'Balanced'       ? 0.05 : 0;
+      if (Math.random() < extendBase + extendBonus) {
+        const newYears = 2 + Math.floor(Math.random() * 2); // 2–3 year extension
+        const raise = 1.05 + Math.random() * 0.10;          // 5–15% salary increase
+        const newSalary = Math.round((hc.salary || 3_000_000) * raise);
+        const extCoach = { ...hc, contractYears: newYears, salary: newSalary };
+        // Update the coach in state immediately; roster update follows at line 812
+        s = {
+          ...s,
+          teams: s.teams.map(tm =>
+            tm.id === t.id
+              ? { ...tm, staff: { ...tm.staff, headCoach: extCoach } }
+              : tm
+          ),
+        };
+        const salaryM = (newSalary / 1_000_000).toFixed(1);
+        const winsStr = `${wins}-${losses}`;
+        const templates = [
+          `${t.name} have extended Head Coach ${hc.name} with a ${newYears}-year deal worth $${salaryM}M/yr. The front office rewards a ${winsStr} season with long-term stability.`,
+          `${hc.name} is staying in ${t.name} — the organization locked him up with a ${newYears}-year extension. A ${winsStr} record made this an easy call.`,
+          `${t.name} and Head Coach ${hc.name} agree to a ${newYears}-year extension. The ${winsStr} campaign earned him a new deal and a salary bump.`,
+        ];
+        newsItems.push(makeNewsItem(
+          'hiring',
+          `${t.abbreviation} COACH EXTENDED`,
+          templates[Math.floor(Math.random() * templates.length)],
+          s.currentDay, t.id,
+        ));
+        txs.push(makeTransaction(s, 'hiring', [t.id], `${t.name} extended Head Coach ${hc.name} (${newYears} yrs / $${salaryM}M/yr).`));
+      }
+    }
+
     if (hc && winPct < 0.35) {
       // Fire threshold by personality
       const fireChance = personality === 'Win Now' ? 0.85 : personality === 'Loyalist' ? 0.25 : 0.5;

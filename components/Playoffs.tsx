@@ -390,13 +390,26 @@ const Playoffs: React.FC<PlayoffsProps> = ({ league, updateLeague, onStartOffsea
           seriesScore: `${champWins}-${ruWins}`,
           finalsMvp: mvpEntry[mvpId]?.name ?? '—',
        };
+       // Stamp a championship ring on every player currently on the winning roster
+       const ringYear = state.season;
+       const teamsWithRings = updatedTeams.map(t => {
+          if (t.id !== championId) return t;
+          return {
+            ...t,
+            roster: t.roster.map(p => ({
+              ...p,
+              championYears: [...(p.championYears ?? []), ringYear],
+            })),
+          };
+       });
+
        return {
           ...state,
           playoffBracket: nextBracket,
           championshipHistory: [champRecord, ...(state.championshipHistory || [])],
           history: [result, ...state.history],
           rivalryHistory: history,
-          teams: updatedTeams,
+          teams: teamsWithRings,
           newsFeed,
        };
     }

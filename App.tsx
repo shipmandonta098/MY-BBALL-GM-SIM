@@ -699,6 +699,15 @@ const App: React.FC = () => {
     setStatus('game');
   };
 
+  const handleResign = () => {
+    if (!league) return;
+    // Clear the userTeamId so team selection screen shows; preserve all other state
+    const updated = { ...league, userTeamId: '', lastUpdated: Date.now() };
+    setLeague(updated);
+    db.leagues.put(updated);
+    setStatus('setup');
+  };
+
   const addNewsItem = async (state: LeagueState, category: NewsCategory, data: { player?: Player, team?: Team, coach?: Coach, detail?: string }, isBreaking: boolean = false) => {
     const content = await generateNewsHeadline(category, data);
     const newItem: NewsItem = {
@@ -2175,6 +2184,103 @@ const App: React.FC = () => {
               ].slice(0, 200),
             };
             qualityFAs.splice(qualityFAs.indexOf(affordable), 1);
+          }
+        }
+      }
+
+      // Pass 3: post-trade-deadline playoff-push signings (more aggressive for contenders)
+      if (newState.tradeDeadlinePassed && !newState.playoffBracket && newState.freeAgents.length > 0) {
+        const pickArr = <T,>(arr: T[]): T => arr[Math.floor(Math.random() * arr.length)];
+        // Rank teams by win% to identify contenders (top-half of standings)
+        const sortedByWins = [...newState.teams]
+          .filter(t => t.id !== newState.userTeamId)
+          .sort((a, b) => (b.wins / Math.max(1, b.wins + b.losses)) - (a.wins / Math.max(1, a.wins + a.losses)));
+        const playoffCutline = Math.ceil(sortedByWins.length / 2);
+        const contenders = sortedByWins.slice(0, playoffCutline);
+
+        const postDlFAs = [...newState.freeAgents]
+          .filter(fa => fa.rating >= 68)
+          .sort((a, b) => b.rating - a.rating);
+
+        for (const team of contenders) {
+          // Stagger: evaluate every 5 days per team
+          const teamHash2 = team.id.split('').reduce((acc, c) => acc + c.charCodeAt(0), 0);
+          if ((newState.currentDay + teamHash2) % 5 !== 0) continue;
+          if (postDlFAs.length === 0) break;
+
+          const teamSalary = team.roster.reduce((s, p) => s + (p.salary || 0), 0);
+          const teamCapSpace = cap - teamSalary;
+
+          if (team.roster.length < maxRosterForSign) {
+            // Has cap room — sign if a meaningful upgrade is available
+            const affordable = postDlFAs.find(fa => {
+              const mkt = inSeasonRules.isWomens ? (fa.desiredContract?.salary || inSeasonRules.minPlayerSalary) : Math.max(fa.desiredContract?.salary || 0, computeMensMarketSalary(fa.rating, newState.season ?? 2026));
+              return mkt <= teamCapSpace * 1.15;
+            });
+            if (!affordable) continue;
+            const benchOVRs = [...team.roster].sort((a, b) => a.rating - b.rating).slice(0, 5);
+            const avgBench = benchOVRs.reduce((s, p) => s + p.rating, 0) / Math.max(1, benchOVRs.length);
+            if (affordable.rating < avgBench + 3) continue;
+            const mkt = inSeasonRules.isWomens ? (affordable.desiredContract?.salary || inSeasonRules.minPlayerSalary) : Math.max(affordable.desiredContract?.salary || 0, computeMensMarketSalary(affordable.rating, newState.season ?? 2026));
+            const rawSal = Math.round(mkt * (0.85 + Math.random() * 0.12) / (inSeasonRules.isWomens ? 5_000 : 250_000)) * (inSeasonRules.isWomens ? 5_000 : 250_000);
+            const salary = Math.max(inSeasonRules.minPlayerSalary, Math.min(rawSal, Math.min(teamCapSpace, inSeasonRules.maxPlayerSalary)));
+            const signedFa = { ...affordable, isFreeAgent: false, inSeasonFA: false, salary, contractYears: 1, morale: Math.min(100, (affordable.morale || 70) + 10) };
+            newState = {
+              ...newState,
+              teams: newState.teams.map(t => t.id === team.id ? { ...t, roster: [...t.roster, signedFa] } : t),
+              freeAgents: newState.freeAgents.filter(p => p.id !== affordable.id),
+              newsFeed: [{
+                id: `playoff-push-sign-${newState.currentDay}-${affordable.id}`,
+                category: 'transaction' as const,
+                headline: `${team.name} add ${affordable.name} in playoff push`,
+                content: pickArr([
+                  `With the trade deadline behind them, the ${team.name} bolster their roster by signing ${affordable.name} (${affordable.position}, ${affordable.rating} OVR) — a clear statement of intent for the postseason.`,
+                  `${team.city} makes a post-deadline move: ${affordable.name} (${affordable.rating} OVR) joins the ${team.name} on a rest-of-season deal as they eye a playoff berth.`,
+                  `${affordable.name} is heading to ${team.city}. The ${team.name} sign the ${affordable.rating}-OVR ${affordable.position} to bolster their playoff-push rotation.`,
+                ]),
+                timestamp: newState.currentDay,
+                realTimestamp: Date.now(),
+                isBreaking: affordable.rating >= 80,
+              }, ...newState.newsFeed].slice(0, 200),
+            };
+            postDlFAs.splice(postDlFAs.indexOf(affordable), 1);
+          } else {
+            // Full roster — waive-and-sign if FA is a clear upgrade (lower bar for contenders: +5 OVR)
+            const bestFA = postDlFAs[0];
+            const nonStarters = [...team.roster]
+              .filter(p => p.status !== 'Starter' && !p.isSuspended && !(p.injuryDaysLeft && p.injuryDaysLeft > 0))
+              .sort((a, b) => a.rating - b.rating);
+            const worstBench = nonStarters[0];
+            if (!worstBench || bestFA.rating < worstBench.rating + 5) continue;
+            const capAfterWaive = cap - (teamSalary - (worstBench.salary || 0));
+            const affordable2 = postDlFAs.find(fa => {
+              const mkt = inSeasonRules.isWomens ? (fa.desiredContract?.salary || inSeasonRules.minPlayerSalary) : Math.max(fa.desiredContract?.salary || 0, computeMensMarketSalary(fa.rating, newState.season ?? 2026));
+              return fa.id !== worstBench.id && mkt <= capAfterWaive * 1.15;
+            });
+            if (!affordable2) continue;
+            const mkt2 = inSeasonRules.isWomens ? (affordable2.desiredContract?.salary || inSeasonRules.minPlayerSalary) : Math.max(affordable2.desiredContract?.salary || 0, computeMensMarketSalary(affordable2.rating, newState.season ?? 2026));
+            const rawSal2 = Math.round(mkt2 * (0.85 + Math.random() * 0.12) / (inSeasonRules.isWomens ? 5_000 : 250_000)) * (inSeasonRules.isWomens ? 5_000 : 250_000);
+            const salary2 = Math.max(inSeasonRules.minPlayerSalary, Math.min(rawSal2, Math.min(capAfterWaive, inSeasonRules.maxPlayerSalary)));
+            const signedFa2 = { ...affordable2, isFreeAgent: false, inSeasonFA: false, salary: salary2, contractYears: 1, morale: Math.min(100, (affordable2.morale || 70) + 10) };
+            const waived2: Player = { ...worstBench, isFreeAgent: true, salary: 0, contractYears: 0 };
+            newState = {
+              ...newState,
+              teams: newState.teams.map(t => t.id === team.id ? { ...t, roster: [...team.roster.filter(p => p.id !== worstBench.id), signedFa2] } : t),
+              freeAgents: [...newState.freeAgents.filter(p => p.id !== affordable2.id), waived2],
+              newsFeed: [{
+                id: `playoff-waive-sign-${newState.currentDay}-${affordable2.id}`,
+                category: 'transaction' as const,
+                headline: `${team.name} cut ${worstBench.name}, sign ${affordable2.name} for playoff push`,
+                content: pickArr([
+                  `Playoff-push move: ${team.name} waive ${worstBench.name} and add ${affordable2.name} (${affordable2.position}, ${affordable2.rating} OVR) on a rest-of-season deal.`,
+                  `${team.city} shuffles the roster — ${worstBench.name} is released and ${affordable2.name} (${affordable2.rating} OVR) signs on as the ${team.name} gear up for the postseason.`,
+                ]),
+                timestamp: newState.currentDay,
+                realTimestamp: Date.now(),
+                isBreaking: affordable2.rating >= 80,
+              }, ...newState.newsFeed].slice(0, 200),
+            };
+            postDlFAs.splice(postDlFAs.indexOf(affordable2), 1);
           }
         }
       }
@@ -3727,7 +3833,7 @@ const App: React.FC = () => {
       <main className="flex-1 overflow-y-auto p-6 md:p-10 space-y-8 pb-32 transition-all duration-300 ease-in-out">
         <div key={activeTab} className="animate-in fade-in slide-in-from-bottom-2 duration-500">
           {activeTab === 'dashboard' && <Dashboard league={league} news={news} onSimulate={handleSimulate} onScout={handleViewPlayer} scoutingReport={scoutingReport} setActiveTab={setActiveTab} onViewRoster={handleViewRoster} onManageTeam={handleManageTeam} onAdvanceToRegularSeason={handleAdvanceToRegularSeason} onOpenOffseasonAlerts={() => setShowOffseasonAlerts(true)} />}
-          {activeTab === 'gm_profile' && <GMProfileView league={league} updateLeague={updateLeagueState} />}
+          {activeTab === 'gm_profile' && <GMProfileView league={league} updateLeague={updateLeagueState} onResign={handleResign} />}
           {activeTab === 'team_management' && (
             <TeamManagement 
               league={league} 
@@ -3915,6 +4021,12 @@ const App: React.FC = () => {
         for (const mvpYear of (selectedPlayer.allStarMvpYears ?? [])) {
           if (!careerAwards.some(a => a.label === 'All-Star MVP' && a.year === mvpYear)) {
             careerAwards.push({ label: 'All-Star MVP', year: mvpYear, icon: '⭐' });
+          }
+        }
+        // Championship rings — every player on a title-winning roster
+        for (const year of (selectedPlayer.championYears ?? [])) {
+          if (!careerAwards.some(a => a.label === 'Champion' && a.year === year)) {
+            careerAwards.push({ label: 'Champion', year, icon: '🏆' });
           }
         }
         careerAwards.sort((a, b) => b.year - a.year);
