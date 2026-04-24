@@ -2018,10 +2018,24 @@ const PlayerModal: React.FC<PlayerModalProps> = ({
                 )}
 
                 {/* ── Career awards & honours ─────────────────────────────────── */}
-                {(careerAwards.length > 0 || (player.allStarSelections?.length ?? 0) > 0) && (
+                {(careerAwards.length > 0 || (player.allStarSelections?.length ?? 0) > 0 || (player.championYears?.length ?? 0) > 0) && (
                   <div className="space-y-3">
                     <p className="text-[10px] font-black text-slate-600 uppercase tracking-widest">Honours & Awards</p>
                     <div className="flex flex-wrap gap-2">
+                      {/* Championship rings — shown as a distinct gold banner */}
+                      {(player.championYears?.length ?? 0) > 0 && (
+                        <div className="flex items-center gap-2 px-3 py-2 bg-amber-500/15 border border-amber-400/40 rounded-2xl">
+                          <span className="text-base leading-none">🏆</span>
+                          <div>
+                            <div className="text-[9px] font-black uppercase tracking-widest text-amber-400/80">Champion</div>
+                            <div className="text-xs font-bold text-amber-300">
+                              {player.championYears!.length === 1
+                                ? `${player.championYears![0]}`
+                                : `${player.championYears!.length}× (${player.championYears!.slice().sort((a,b)=>a-b).join(', ')})`}
+                            </div>
+                          </div>
+                        </div>
+                      )}
                       {/* All-Star selections bubble */}
                       {(player.allStarSelections?.length ?? 0) > 0 && (
                         <div className="flex items-center gap-2 px-3 py-2 bg-amber-500/10 border border-amber-500/25 rounded-2xl">

@@ -383,6 +383,8 @@ export interface Player {
   allStarSelections?: number[];
   /** Years in which this player won the All-Star Game MVP award */
   allStarMvpYears?: number[];
+  /** Years (season numbers) in which this player won a championship ring */
+  championYears?: number[];
 
   // ── Contract extensions ──────────────────────────────────────────────────
   /** Free-agency classification once contract expires */

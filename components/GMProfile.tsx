@@ -6,6 +6,7 @@ import TeamBadge from './TeamBadge';
 interface GMProfileProps {
   league: LeagueState;
   updateLeague: (updated: Partial<LeagueState>) => void;
+  onResign?: () => void;
 }
 
 const STYLE_OPTIONS = ['Offense', 'Defense', 'Balanced'] as const;
@@ -27,11 +28,12 @@ const milestoneIcon = (type: string) => {
   }
 };
 
-const GMProfileView: React.FC<GMProfileProps> = ({ league, updateLeague }) => {
+const GMProfileView: React.FC<GMProfileProps> = ({ league, updateLeague, onResign }) => {
   const profile = league.gmProfile;
   const userTeam = league.teams.find(t => t.id === league.userTeamId)!;
   const [isEditingName, setIsEditingName] = useState(false);
   const [newName, setNewName] = useState(profile.name);
+  const [showResignModal, setShowResignModal] = useState(false);
 
   const handleSaveName = () => {
     updateLeague({ gmProfile: { ...profile, name: newName } });
@@ -138,6 +140,19 @@ const GMProfileView: React.FC<GMProfileProps> = ({ league, updateLeague }) => {
                 <span className="self-center text-xs text-slate-500 italic">{STYLE_META[profile.preferredStyle]?.desc}</span>
               )}
             </div>
+
+            {/* Resign button — only shown if handler is wired up */}
+            {onResign && (
+              <div className="mt-6 flex justify-center md:justify-start">
+                <button
+                  onClick={() => setShowResignModal(true)}
+                  className="flex items-center gap-2 px-4 py-2 rounded-xl border border-rose-500/30 bg-rose-500/10 text-rose-400 text-xs font-black uppercase tracking-widest hover:bg-rose-500/20 hover:border-rose-500/60 transition-all"
+                >
+                  <span>🚪</span>
+                  Resign as GM
+                </button>
+              </div>
+            )}
           </div>
         </div>
       </div>
@@ -333,6 +348,36 @@ const GMProfileView: React.FC<GMProfileProps> = ({ league, updateLeague }) => {
       </div>
 
       {/* ── Season Structure Summary removed ── */}
+
+      {/* ── Resign Confirmation Modal ─────────────────────────────────────── */}
+      {showResignModal && (
+        <div className="fixed inset-0 z-[9000] bg-slate-950/90 backdrop-blur-sm flex items-center justify-center p-6 animate-in fade-in duration-200">
+          <div className="bg-slate-900 border border-rose-500/40 rounded-[2rem] p-10 shadow-2xl max-w-md w-full space-y-6 text-center">
+            <div className="text-6xl">🚪</div>
+            <div>
+              <h2 className="text-3xl font-display font-bold uppercase text-white tracking-tight">Resign as GM?</h2>
+              <p className="text-slate-400 mt-2 text-sm leading-relaxed">
+                You will step down from the <span className="text-white font-bold">{userTeam.city} {userTeam.name}</span>.
+                Your career record and reputation will be preserved if you choose a new team.
+              </p>
+            </div>
+            <div className="flex gap-3">
+              <button
+                onClick={() => setShowResignModal(false)}
+                className="flex-1 px-6 py-3 rounded-xl bg-slate-800 border border-slate-700 text-slate-300 font-bold text-sm hover:bg-slate-700 transition-all"
+              >
+                Stay
+              </button>
+              <button
+                onClick={() => { setShowResignModal(false); onResign?.(); }}
+                className="flex-1 px-6 py-3 rounded-xl bg-rose-500 text-white font-black text-sm uppercase tracking-widest hover:bg-rose-600 transition-all shadow-lg"
+              >
+                Resign
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
     </div>
   );
