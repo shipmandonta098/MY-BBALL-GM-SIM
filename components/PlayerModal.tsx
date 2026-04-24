@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { Player, PlayerStatus, PersonalityTrait, Position, PlayerTendencies, TeamRotation } from '../types';
+import { Player, PlayerStatus, PersonalityTrait, Position, PlayerTendencies, TeamRotation, TrainingFocusArea } from '../types';
 import { getFlag, countryFromHometown, POS_ATTR_RANGES, PosAttrRangeKey, enforcePositionalBounds, FEMALE_ATTR_CAPS, NAMES_MALE, NAMES_FEMALE, COLLEGES_HIGH_MAJOR, COLLEGES_MID_MAJOR, ALL_HOMETOWNS, deriveComposites, deriveArchetype } from '../constants';
 import { fmtSalary } from '../utils/formatters';
 
@@ -45,6 +45,12 @@ interface PlayerModalProps {
   teams?: string[];
   /** League max player salary for God Mode validation */
   maxPlayerSalary?: number;
+  /** How many dev-focus interventions the GM has used this season */
+  devInterventionsUsed?: number;
+  /** Maximum allowed interventions per season */
+  devInterventionsMax?: number;
+  /** Called when GM sets a new training focus for this player */
+  onSetTrainingFocus?: (playerId: string, areas: TrainingFocusArea[], durationDays: number) => void;
 }
 
 const traitIcons: Record<PersonalityTrait, string> = {
@@ -82,10 +88,49 @@ const PlayerModal: React.FC<PlayerModalProps> = ({
   leagueContext,
   teams = [],
   maxPlayerSalary,
+  devInterventionsUsed = 0,
+  devInterventionsMax = 4,
+  onSetTrainingFocus,
 }) => {
   const [isEditing, setIsEditing] = React.useState(false);
   const [statsTab, setStatsTab] = useState<'season' | 'career' | 'advanced' | 'playoffs'>('season');
+  const [showFocusPanel, setShowFocusPanel] = useState(false);
+  const [focusDraft, setFocusDraft] = useState<TrainingFocusArea[]>([]);
+  const [focusDuration, setFocusDuration] = useState<30 | 60 | 90>(60);
   const [vsTeamId, setVsTeamId] = useState<string>('all');
+
+  const ALL_FOCUS_AREAS: TrainingFocusArea[] = [
+    'Shooting / 3PT', 'Playmaking / Passing', 'Defense / Rebounding',
+    'Post Scoring / Interior', 'Athleticism / Dunking', 'Finishing / Layups',
+    'Free Throws', 'Mental / Leadership',
+  ];
+  const FOCUS_ICONS: Record<TrainingFocusArea, string> = {
+    'Shooting / 3PT':          '🎯',
+    'Playmaking / Passing':    '🎩',
+    'Defense / Rebounding':    '🛡️',
+    'Post Scoring / Interior': '🏋️',
+    'Athleticism / Dunking':   '💥',
+    'Finishing / Layups':      '🔥',
+    'Free Throws':             '🎱',
+    'Mental / Leadership':     '🧠',
+  };
+  const toggleFocusArea = (area: TrainingFocusArea) => {
+    setFocusDraft(prev =>
+      prev.includes(area)
+        ? prev.filter(a => a !== area)
+        : prev.length < 2 ? [...prev, area] : prev
+    );
+  };
+  const previewResponse = (): { label: string; color: string; desc: string } => {
+    const morale = player.morale ?? 75;
+    const traits = player.personalityTraits ?? [];
+    if (traits.includes('Gym Rat') || traits.includes('Workhorse') || (morale >= 75 && !traits.includes('Lazy') && !traits.includes('Diva/Star'))) {
+      return { label: '🔥 Enthusiastic', color: 'text-emerald-400', desc: '+40% development bonus' };
+    } else if (traits.includes('Lazy') || traits.includes('Diva/Star') || morale < 40) {
+      return { label: '😤 Resistant', color: 'text-rose-400', desc: 'Only 45% of bonus applies' };
+    }
+    return { label: '👍 Receptive', color: 'text-amber-400', desc: 'Standard development bonus' };
+  };
 
   // ── Last 5 non-DNP games (most recent first) ──────────────────────────────
   const last5Games = useMemo(() =>
@@ -1121,9 +1166,28 @@ const PlayerModal: React.FC<PlayerModalProps> = ({
           </section>
 
           <section className="space-y-8">
-            <div className="flex items-center gap-4">
+            <div className="flex items-center gap-4 flex-wrap">
               <h3 className="text-[10px] font-black text-amber-500 uppercase tracking-[0.5em] whitespace-nowrap">Technical Attribute Matrix</h3>
-              <div className="h-px w-full bg-slate-800/50"></div>
+              <div className="h-px flex-1 bg-slate-800/50"></div>
+              {/* Active training focus badge */}
+              {player.trainingFocus && player.trainingFocus.daysRemaining > 0 && (
+                <div className="flex items-center gap-1.5 px-2.5 py-1 bg-sky-500/10 border border-sky-500/30 rounded-xl">
+                  <span className="text-xs leading-none">🎯</span>
+                  <div>
+                    <div className="text-[8px] font-black uppercase tracking-widest text-sky-400/70">Training Focus</div>
+                    <div className="text-[10px] font-bold text-sky-300 leading-tight">
+                      {player.trainingFocus.areas.join(' · ')}
+                    </div>
+                  </div>
+                  <span className={`ml-1 text-[8px] font-black uppercase ${
+                    player.trainingFocus.playerResponse === 'enthusiastic' ? 'text-emerald-400' :
+                    player.trainingFocus.playerResponse === 'resistant' ? 'text-rose-400' : 'text-amber-400'
+                  }`}>
+                    {player.trainingFocus.playerResponse === 'enthusiastic' ? '🔥 All-In' :
+                     player.trainingFocus.playerResponse === 'resistant' ? '😤 Resisting' : '👍 On-Board'}
+                  </span>
+                </div>
+              )}
             </div>
             
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-x-8 gap-y-10">
@@ -2367,10 +2431,10 @@ const PlayerModal: React.FC<PlayerModalProps> = ({
 
         {isUserTeam && (
            <div className="p-10 bg-slate-950/80 border-t border-slate-800 flex flex-wrap justify-between items-center gap-6">
-              <div className="flex items-center gap-6">
+              <div className="flex items-center gap-6 flex-wrap">
                  <div className="space-y-2">
                     <label className="text-[10px] font-black uppercase text-slate-500 tracking-widest">Roster Status</label>
-                    <select 
+                    <select
                        value={player.status}
                        onChange={(e) => onUpdateStatus(player.id, e.target.value as PlayerStatus)}
                        className="bg-slate-900 border border-slate-800 rounded-xl px-4 py-2 text-sm font-bold text-white focus:outline-none"
@@ -2381,6 +2445,27 @@ const PlayerModal: React.FC<PlayerModalProps> = ({
                        <option value="Injured">Injured</option>
                     </select>
                  </div>
+                 {onSetTrainingFocus && (
+                   <div className="space-y-2">
+                     <label className="text-[10px] font-black uppercase text-slate-500 tracking-widest">
+                       Dev Focus <span className="text-slate-600">({devInterventionsUsed}/{devInterventionsMax} used)</span>
+                     </label>
+                     <button
+                       onClick={() => { setFocusDraft(player.trainingFocus?.areas ?? []); setFocusDuration(60); setShowFocusPanel(true); }}
+                       disabled={devInterventionsUsed >= devInterventionsMax && !player.trainingFocus}
+                       className={`flex items-center gap-2 px-4 py-2 rounded-xl border text-sm font-bold transition-all ${
+                         player.trainingFocus && player.trainingFocus.daysRemaining > 0
+                           ? 'bg-sky-500/10 border-sky-500/40 text-sky-300 hover:bg-sky-500/20'
+                           : devInterventionsUsed >= devInterventionsMax
+                           ? 'bg-slate-800/30 border-slate-700/30 text-slate-600 cursor-not-allowed'
+                           : 'bg-slate-800 border-slate-700 text-slate-300 hover:border-amber-500/50 hover:text-amber-400'
+                       }`}
+                     >
+                       <span>🎯</span>
+                       {player.trainingFocus && player.trainingFocus.daysRemaining > 0 ? 'Edit Focus' : 'Set Training Focus'}
+                     </button>
+                   </div>
+                 )}
               </div>
               {draftLocked ? (
                 <div className="flex flex-col items-end gap-1">
@@ -2418,6 +2503,109 @@ const PlayerModal: React.FC<PlayerModalProps> = ({
                 </span>
               )}
            </div>
+        )}
+
+        {/* ── Training Focus Panel ─────────────────────────────────────────────── */}
+        {showFocusPanel && (
+          <div className="absolute inset-0 z-[100] bg-slate-950/95 backdrop-blur-sm rounded-[3rem] flex flex-col p-10 overflow-y-auto animate-in fade-in duration-200">
+            <div className="flex items-center justify-between mb-6">
+              <div>
+                <h2 className="text-2xl font-display font-bold uppercase text-white tracking-tight">Discuss Development</h2>
+                <p className="text-xs text-slate-500 mt-1">{player.name} · {devInterventionsUsed}/{devInterventionsMax} interventions used this season</p>
+              </div>
+              <button onClick={() => setShowFocusPanel(false)} className="text-slate-500 hover:text-white text-2xl p-2 transition-colors">✕</button>
+            </div>
+
+            {/* Current focus (if any) */}
+            {player.trainingFocus && player.trainingFocus.daysRemaining > 0 && (
+              <div className="mb-6 p-4 bg-sky-500/10 border border-sky-500/30 rounded-2xl">
+                <p className="text-[10px] font-black uppercase tracking-widest text-sky-400/70 mb-1">Current Focus Active</p>
+                <p className="text-sm font-bold text-sky-300">{player.trainingFocus.areas.join(' + ')} — {player.trainingFocus.daysRemaining} days remaining</p>
+              </div>
+            )}
+
+            {/* Player reaction preview */}
+            {(() => { const r = previewResponse(); return (
+              <div className="mb-6 p-4 bg-slate-900 border border-slate-800 rounded-2xl flex items-center gap-4">
+                <div>
+                  <p className="text-[10px] font-black uppercase tracking-widest text-slate-500 mb-0.5">Player Attitude</p>
+                  <p className={`text-sm font-bold ${r.color}`}>{r.label}</p>
+                  <p className="text-xs text-slate-500 mt-0.5">{r.desc}</p>
+                </div>
+                <div className="ml-auto text-right">
+                  <p className="text-[10px] font-black uppercase tracking-widest text-slate-500 mb-0.5">Morale</p>
+                  <p className={`text-sm font-bold ${player.morale >= 70 ? 'text-emerald-400' : player.morale >= 45 ? 'text-amber-400' : 'text-rose-400'}`}>{player.morale}</p>
+                </div>
+              </div>
+            ); })()}
+
+            {/* Area selection (pick 1 or 2) */}
+            <p className="text-[10px] font-black uppercase tracking-widest text-slate-500 mb-3">Choose 1–2 Focus Areas</p>
+            <div className="grid grid-cols-2 gap-2 mb-6">
+              {ALL_FOCUS_AREAS.map(area => {
+                const selected = focusDraft.includes(area);
+                const disabled = !selected && focusDraft.length >= 2;
+                return (
+                  <button
+                    key={area}
+                    onClick={() => !disabled && toggleFocusArea(area)}
+                    className={`flex items-center gap-2 px-4 py-3 rounded-xl border text-sm font-bold text-left transition-all ${
+                      selected
+                        ? 'bg-sky-500/20 border-sky-500/60 text-sky-200'
+                        : disabled
+                        ? 'bg-slate-900/40 border-slate-800/40 text-slate-600 cursor-not-allowed'
+                        : 'bg-slate-900 border-slate-800 text-slate-400 hover:border-slate-600 hover:text-white'
+                    }`}
+                  >
+                    <span className="text-base">{FOCUS_ICONS[area]}</span>
+                    <span className="text-xs leading-tight">{area}</span>
+                    {selected && <span className="ml-auto text-sky-400 text-xs">✓</span>}
+                  </button>
+                );
+              })}
+            </div>
+
+            {/* Duration picker */}
+            <p className="text-[10px] font-black uppercase tracking-widest text-slate-500 mb-3">Duration</p>
+            <div className="flex gap-2 mb-8">
+              {([30, 60, 90] as const).map(d => (
+                <button
+                  key={d}
+                  onClick={() => setFocusDuration(d)}
+                  className={`flex-1 py-3 rounded-xl border text-sm font-bold transition-all ${
+                    focusDuration === d
+                      ? 'bg-amber-500/20 border-amber-500/60 text-amber-300'
+                      : 'bg-slate-900 border-slate-800 text-slate-500 hover:text-white'
+                  }`}
+                >
+                  {d === 30 ? '1 Month' : d === 60 ? '2 Months' : '3 Months'}
+                </button>
+              ))}
+            </div>
+
+            {/* Confirm / Cancel */}
+            <div className="flex gap-3 mt-auto">
+              <button
+                onClick={() => setShowFocusPanel(false)}
+                className="flex-1 py-3 rounded-xl bg-slate-800 border border-slate-700 text-slate-300 font-bold text-sm hover:bg-slate-700 transition-all"
+              >Cancel</button>
+              <button
+                disabled={focusDraft.length === 0}
+                onClick={() => {
+                  if (focusDraft.length === 0 || !onSetTrainingFocus) return;
+                  onSetTrainingFocus(player.id, focusDraft, focusDuration);
+                  setShowFocusPanel(false);
+                }}
+                className={`flex-1 py-3 rounded-xl font-black text-sm uppercase tracking-widest transition-all ${
+                  focusDraft.length > 0
+                    ? 'bg-sky-500 text-white hover:bg-sky-400 shadow-lg'
+                    : 'bg-slate-800 text-slate-600 cursor-not-allowed'
+                }`}
+              >
+                {player.trainingFocus && player.trainingFocus.daysRemaining > 0 ? 'Update Focus' : 'Set Focus'}
+              </button>
+            </div>
+          </div>
         )}
       </div>
     </div>

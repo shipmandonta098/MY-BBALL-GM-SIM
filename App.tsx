@@ -1,6 +1,6 @@
 
 import React, { useState, useEffect, useCallback } from 'react';
-import { LeagueState, Player, Team, GameResult, PlayerStatus, ScheduleGame, BulkSimSummary, Prospect, Coach, TradeProposal, Position, NewsItem, NewsCategory, LeagueSettings, SeasonAwards, PlayoffBracket, PlayoffSeries, Transaction, TransactionType, PowerRankingSnapshot, PowerRankingEntry, GMProfile, GMMilestone, RivalryStats, InjuryType, SeasonPhase, AllStarWeekendData, AllStarVoteEntry, PreviousSeasonStanding } from './types';
+import { LeagueState, Player, Team, GameResult, PlayerStatus, ScheduleGame, BulkSimSummary, Prospect, Coach, TradeProposal, Position, NewsItem, NewsCategory, LeagueSettings, SeasonAwards, PlayoffBracket, PlayoffSeries, Transaction, TransactionType, PowerRankingSnapshot, PowerRankingEntry, GMProfile, GMMilestone, RivalryStats, InjuryType, SeasonPhase, AllStarWeekendData, AllStarVoteEntry, PreviousSeasonStanding, TrainingFocusArea } from './types';
 import { generateLeagueTeams, generateSeasonSchedule, generateProspects, generateFreeAgentPool, generateCoachPool, EXPANSION_TEAM_POOL, generateCoach, generatePlayer, generateDefaultRotation, enforcePositionalBounds, ageFromBirthdate, getCoachPreferredScheme, generateGMName } from './constants';
 import { generatePreseasonSchedule, buildPreseasonHeadline, buildPreseasonRookieHeadline } from './utils/preseasonEngine';
 import { simulateGame, normalizeLeagueOVRs } from './utils/simEngine';
@@ -967,19 +967,29 @@ const App: React.FC = () => {
     }
 
     // Facilities morale boost — elite facilities add up to +20 baseline morale per week
+    // Also decrement active training focus duration for user team
     if (newState.currentDay % 7 === 0) {
       newState = {
         ...newState,
         teams: newState.teams.map(t => {
           const facBudget = t.finances?.budgets?.facilities ?? 20;
-          const moraleBoost = ((facBudget - 20) / 80) * 20; // 0 at tier1, up to +20 at elite
-          if (moraleBoost <= 0) return t;
+          const moraleBoost = ((facBudget - 20) / 80) * 20;
+          const isUser = t.id === newState.userTeamId;
           return {
             ...t,
-            roster: t.roster.map(p => ({
-              ...p,
-              morale: Math.min(100, (p.morale ?? 75) + moraleBoost)
-            }))
+            roster: t.roster.map(p => {
+              let updated = moraleBoost > 0 ? { ...p, morale: Math.min(100, (p.morale ?? 75) + moraleBoost) } : p;
+              if (isUser && updated.trainingFocus && updated.trainingFocus.daysRemaining > 0) {
+                const newDays = updated.trainingFocus.daysRemaining - 7;
+                updated = {
+                  ...updated,
+                  trainingFocus: newDays <= 0
+                    ? undefined
+                    : { ...updated.trainingFocus, daysRemaining: newDays },
+                };
+              }
+              return updated;
+            }),
           };
         })
       };
@@ -3060,6 +3070,7 @@ const App: React.FC = () => {
     tempState.isOffseason = true;
     tempState.seasonPhase = 'Offseason' as SeasonPhase;
     tempState.tradeDeadlinePassed = false;
+    tempState.devInterventionsThisSeason = 0;
     // allStarWeekend is preserved here so results remain viewable during offseason/playoffs
     // It is cleared when the new season schedule begins (handleAdvanceToRegularSeason)
     tempState.draftPhase = 'lottery';
@@ -3173,6 +3184,16 @@ const App: React.FC = () => {
         PF: ['interiorDef','defReb','offReb','postScoring','strength'],
         C:  ['interiorDef','strength','offReb','defReb','blocks'],
       };
+      const FOCUS_ATTR_MAP: Record<TrainingFocusArea, (keyof Player['attributes'])[]> = {
+        'Shooting / 3PT':          ['shooting3pt', 'shooting', 'shootingMid', 'freeThrow'],
+        'Playmaking / Passing':    ['passing', 'ballHandling', 'offensiveIQ'],
+        'Defense / Rebounding':    ['perimeterDef', 'interiorDef', 'defReb', 'steals', 'blocks', 'defensiveIQ'],
+        'Post Scoring / Interior': ['postScoring', 'strength', 'interiorDef', 'offReb'],
+        'Athleticism / Dunking':   ['athleticism', 'dunks', 'jumping', 'speed'],
+        'Finishing / Layups':      ['layups', 'athleticism', 'speed'],
+        'Free Throws':             ['freeThrow'],
+        'Mental / Leadership':     ['offensiveIQ', 'defensiveIQ', 'stamina'],
+      };
       const rosterWithProg = t.roster.map(p => {
         let growth = 0;
         if (p.age < 25) {
@@ -3180,15 +3201,38 @@ const App: React.FC = () => {
         } else if (p.age > 33) {
           growth = -Math.floor(Math.random() * 3 * vetRate);
         }
-        if (growth === 0) return enforcePositionalBounds(p);
-        const devKeys = POS_DEV_KEYS[p.position] ?? POS_DEV_KEYS['SF'];
-        // Apply growth to 2 random relevant attributes
-        const picked = [...devKeys].sort(() => 0.5 - Math.random()).slice(0, 2);
         const newAttrs = { ...p.attributes } as any;
-        picked.forEach(k => {
-          newAttrs[k] = Math.min(99, Math.max(0, (newAttrs[k] ?? 50) + growth));
-        });
-        return enforcePositionalBounds({ ...p, attributes: newAttrs as Player['attributes'] });
+
+        // Apply training focus bonus (set this season, active or just expired)
+        const focus = p.trainingFocus;
+        const isUserPlayer = t.id === tempState.userTeamId;
+        if (isUserPlayer && focus && focus.seasonSet === tempState.season) {
+          const responseMult = focus.playerResponse === 'enthusiastic' ? 1.40
+            : focus.playerResponse === 'receptive' ? 1.00 : 0.45;
+          const focusBonus = Math.max(1, Math.round(2 * devMultiplier * responseMult));
+          const focusKeys = focus.areas.flatMap(a => FOCUS_ATTR_MAP[a]);
+          const uniqueFocusKeys = [...new Set(focusKeys)];
+          const pickedFocus = [...uniqueFocusKeys].sort(() => 0.5 - Math.random()).slice(0, 2);
+          pickedFocus.forEach(k => {
+            newAttrs[k] = Math.min(99, Math.max(0, (newAttrs[k] ?? 50) + focusBonus));
+          });
+        }
+
+        const hasFocus = isUserPlayer && focus && focus.seasonSet === tempState.season;
+        if (growth === 0 && !hasFocus) {
+          return enforcePositionalBounds({ ...p, trainingFocus: undefined });
+        }
+        if (growth !== 0) {
+          const devKeys = POS_DEV_KEYS[p.position] ?? POS_DEV_KEYS['SF'];
+          // Bias toward focus areas when active
+          const focusKeys = hasFocus ? focus!.areas.flatMap(a => FOCUS_ATTR_MAP[a]) : [];
+          const combined = [...new Set([...focusKeys, ...devKeys])];
+          const picked = combined.sort(() => 0.5 - Math.random()).slice(0, 2);
+          picked.forEach(k => {
+            newAttrs[k] = Math.min(99, Math.max(0, (newAttrs[k] ?? 50) + growth));
+          });
+        }
+        return enforcePositionalBounds({ ...p, attributes: newAttrs as Player['attributes'], trainingFocus: undefined });
       });
       // Remove expired contracts from roster (they become free agents)
       const retained = rosterWithProg.filter(p => p.contractYears > 1);
@@ -3486,6 +3530,61 @@ const App: React.FC = () => {
     setLeague({ ...league, teams: league.teams.map(t => t.id === teamId ? { ...t, roster: updatedRoster } : t) }); 
   };
   
+  const FOCUS_ATTRS: Record<TrainingFocusArea, (keyof Player['attributes'])[]> = {
+    'Shooting / 3PT':          ['shooting3pt', 'shooting', 'shootingMid', 'freeThrow'],
+    'Playmaking / Passing':    ['passing', 'ballHandling', 'offensiveIQ'],
+    'Defense / Rebounding':    ['perimeterDef', 'interiorDef', 'defReb', 'steals', 'blocks', 'defensiveIQ'],
+    'Post Scoring / Interior': ['postScoring', 'strength', 'interiorDef', 'offReb'],
+    'Athleticism / Dunking':   ['athleticism', 'dunks', 'jumping', 'speed'],
+    'Finishing / Layups':      ['layups', 'athleticism', 'speed'],
+    'Free Throws':             ['freeThrow'],
+    'Mental / Leadership':     ['offensiveIQ', 'defensiveIQ', 'stamina'],
+  };
+
+  const handleSetTrainingFocus = (playerId: string, areas: TrainingFocusArea[], durationDays: number) => {
+    if (!league) return;
+    const interventions = league.devInterventionsThisSeason ?? 0;
+    if (interventions >= 4) return;
+    const player = league.teams.find(t => t.id === league.userTeamId)?.roster.find(p => p.id === playerId);
+    if (!player) return;
+
+    // Determine player response from morale + personality
+    const morale = player.morale ?? 75;
+    const traits = player.personalityTraits ?? [];
+    const isGymRat    = traits.includes('Gym Rat');
+    const isWorkhorse = traits.includes('Workhorse');
+    const isLazy      = traits.includes('Lazy');
+    const isDiva      = traits.includes('Diva/Star');
+    const isPro       = traits.includes('Professional');
+    let response: 'enthusiastic' | 'receptive' | 'resistant';
+    if (isGymRat || isWorkhorse || (morale >= 75 && !isLazy && !isDiva)) {
+      response = 'enthusiastic';
+    } else if (isLazy || isDiva || morale < 40) {
+      response = 'resistant';
+    } else if (isPro || morale >= 55) {
+      response = 'receptive';
+    } else {
+      response = morale < 40 ? 'resistant' : 'receptive';
+    }
+
+    const updated: Player = {
+      ...player,
+      trainingFocus: { areas, seasonSet: league.season, daysRemaining: durationDays, playerResponse: response },
+    };
+    setLeague(prev => {
+      if (!prev) return prev;
+      return {
+        ...prev,
+        devInterventionsThisSeason: (prev.devInterventionsThisSeason ?? 0) + 1,
+        teams: prev.teams.map(t => ({
+          ...t,
+          roster: t.roster.map(p => p.id === playerId ? updated : p),
+        })),
+      };
+    });
+    if (selectedPlayer?.id === playerId) setSelectedPlayer(updated);
+  };
+
   const handleUpdatePlayer = (updatedPlayer: Player) => {
     if (!league) return;
     
@@ -4047,6 +4146,9 @@ const App: React.FC = () => {
             godMode={league.settings.godMode}
             onUpdatePlayer={handleUpdatePlayer}
             maxPlayerSalary={getContractRules(league).maxPlayerSalary}
+            devInterventionsUsed={league.devInterventionsThisSeason ?? 0}
+            devInterventionsMax={4}
+            onSetTrainingFocus={handleSetTrainingFocus}
             isCurrentAllStar={isCurrentAllStar}
             currentAllStarRole={currentAllStarRole}
             careerAwards={careerAwards}
