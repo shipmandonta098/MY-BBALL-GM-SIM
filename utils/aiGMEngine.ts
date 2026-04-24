@@ -10,6 +10,7 @@ import {
 } from '../types';
 import { generateCoach } from '../constants';
 import { snapshotPlayerStats } from './playerUtils';
+import { computeMensMarketSalary } from './contractRules';
 
 // ─── Types ──────────────────────────────────────────────────
 export type AIGMPersonality =
@@ -188,56 +189,73 @@ function faOfferAmount(
   personality: AIGMPersonality,
   negotiationRating: number,
   difficulty: string,
-  isTopFA: boolean
+  isTopFA: boolean,
+  year: number,           // league season — needed for era-correct market salary
+  isWomensLeague: boolean,
 ): number {
-  const capSpace = Math.max(0, salaryCap - rosterSalary(teamContext));
-  const maxBid = Math.min(capSpace, salaryCap * 0.35);
-  const baseBid = Math.max(500_000, p.salary * 1.05);
+  // ── Base bid: current market value for this OVR in this era ──────────────
+  // Critical fix: use the player's MARKET salary for their current OVR,
+  // NOT their existing contract salary. A player who was signed cheaply 3
+  // years ago at $2M and has since improved to 90 OVR deserves a $40M+ offer.
+  const marketSalary = isWomensLeague
+    ? (p.desiredContract?.salary ?? p.salary) // women's: use desired/existing (already calibrated)
+    : computeMensMarketSalary(p.rating, year);
+
+  // ── Max bid: respect the era max player salary, not just current cap space ──
+  // Under a soft cap, AI teams can use Bird Rights / over-cap mechanisms to
+  // re-sign players above the cap. Capping bids at current cap space was wrong.
+  const maxPlayerSalary = Math.round(salaryCap * 0.36); // ~35–36% of cap = supermax tier
+
+  const baseBid = marketSalary;
 
   let multiplier = 1.0;
 
   switch (personality) {
     case 'Rebuilder':
-      if (p.age > 24) multiplier = 0.7;
-      if (p.age <= 23) multiplier = 1.1;
+      // Rebuilders underpay veterans (prefer youth), but still offer market for young stars
+      if (p.age > 28) multiplier = 0.72;
+      else if (p.age <= 23) multiplier = 1.05;
       break;
     case 'Win Now':
-      if (p.rating >= 85) multiplier = 1.3;
-      multiplier *= 1.1;
+      if (p.rating >= 85) multiplier = 1.25;
+      multiplier *= 1.08;
       break;
     case 'Analytics': {
       const fga = p.stats.fga || 1;
       const fta = p.stats.fta || 0;
       const ts = (fga + 0.44 * fta) > 0 ? p.stats.points / (2 * (fga + 0.44 * fta)) : 0.5;
-      multiplier = 0.8 + ts * 0.5;
+      multiplier = 0.85 + ts * 0.45;
       break;
     }
     case 'Loyalist':
-      multiplier = p.isFreeAgent ? 0.85 : 1.0; // prefers re-signing own FAs
+      multiplier = p.isFreeAgent ? 0.88 : 1.0; // slight preference for own FAs
       break;
     case 'Superstar Chaser':
-      if (p.rating >= 85) multiplier = 1.5;
+      if (p.rating >= 85) multiplier = 1.45;
       break;
     default:
       multiplier = 1.0;
   }
 
-  // Top FA bidding war bonus for aggressive personalities
+  // Top FA bidding war premium for aggressive personalities
   if (isTopFA && (personality === 'Win Now' || personality === 'Superstar Chaser')) {
-    multiplier *= 1.15; // +15% in bidding wars
+    multiplier *= 1.12;
   }
 
   // Difficulty modifier — affects AI GM decision quality, NOT simulation math
   const dTier = normalizeDifficulty(difficulty);
-  if (dTier === 1) multiplier *= 0.80; // Rookie: AI overpays / poor decisions
-  if (dTier === 3) multiplier *= 1.10; // All-Star: optimized bidding
-  if (dTier === 4) multiplier *= 1.20; // Legend: maximally aggressive
+  if (dTier === 1) multiplier *= 0.82; // Rookie: slightly low bids
+  if (dTier === 3) multiplier *= 1.08; // All-Star: well-calibrated
+  if (dTier === 4) multiplier *= 1.18; // Legend: maximally aggressive
 
-  // Poor negotiation → overpays
-  if (negotiationRating < 60) multiplier *= 1.0 + (0.2 * (1 - negotiationRating / 100));
+  // Poor negotiation skill → occasionally overpays relative to market
+  if (negotiationRating < 60) multiplier *= 1.0 + (0.15 * (1 - negotiationRating / 100));
 
   const bid = Math.round(baseBid * multiplier);
-  return Math.max(600_000, Math.min(maxBid, bid));
+
+  // Floor: AI should always offer a reasonable minimum (league min + small buffer)
+  const leagueMin = isWomensLeague ? Math.max(25_000, salaryCap * 0.012) : computeMensMarketSalary(55, year);
+  return Math.max(leagueMin, Math.min(maxPlayerSalary, bid));
 }
 
 // ─── Helper: sum salary for a team ──────────────────────────
@@ -618,7 +636,7 @@ export function runAIGMOffseason(
       for (const fa of ownExpiring) {
         if (currentRoster.length >= (s.settings.maxRosterSize ?? 15)) break;
         const currentSalary = rosterSalary({ ...t, roster: currentRoster });
-        const offerAmt = faOfferAmount(fa, { ...t, roster: currentRoster }, salaryCap, personality, ratings.negotiation, difficulty, topFAIds.has(fa.id));
+        const offerAmt = faOfferAmount(fa, { ...t, roster: currentRoster }, salaryCap, personality, ratings.negotiation, difficulty, topFAIds.has(fa.id), s.season ?? 2026, isWomensLeague);
         const isHardCap = s.settings.salaryCapType === 'Hard Cap';
         if (isHardCap && currentSalary + offerAmt > salaryCap) continue;
         if (!isHardCap && personality === 'Win Now' && currentSalary + offerAmt > CAP_WIN_NOW) continue;
@@ -687,7 +705,7 @@ export function runAIGMOffseason(
         const offerAmt = faOfferAmount(
           fa, { ...t, roster: currentRoster }, salaryCap,
           personality, ratings.negotiation, difficulty,
-          topFAIds.has(fa.id)
+          topFAIds.has(fa.id), s.season ?? 2026, isWomensLeague,
         );
         const isHardCap = s.settings.salaryCapType === 'Hard Cap';
         if (isHardCap && currentSalary + offerAmt > salaryCap) continue;

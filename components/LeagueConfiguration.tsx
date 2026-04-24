@@ -2,6 +2,7 @@
 import React, { useState, useEffect } from 'react';
 import { LeagueSettings } from '../types';
 import { getHistoricalFinancials, getWNBAHistoricalFinancials, getEraMaxPlayerSalary } from '../constants';
+import { computeMensMarketSalary } from '../utils/contractRules';
 import { fmtSalary } from '../utils/formatters';
 import NumericInput from './NumericInput';
 
@@ -538,6 +539,14 @@ const LeagueConfiguration: React.FC<LeagueConfigurationProps> = ({ onConfirm, on
                 <span className={accentColor}>
                   Max Contract: {fmtSalary(getEraMaxPlayerSalary(year, isWomensLeague, h.salaryCap))}/yr
                 </span>
+                {!isWomensLeague && (
+                  <>
+                    <span>·</span>
+                    <span className="text-slate-300">
+                      Typical Star Max: {fmtSalary(computeMensMarketSalary(90, year))}/yr
+                    </span>
+                  </>
+                )}
                 {isWomensLeague && h.maxContractYears && (<><span>·</span><span>Max Yrs: {h.maxContractYears}yr</span></>)}
                 {isWomensLeague && h.birdRights !== undefined && (<><span>·</span><span>Bird Rights: {h.birdRights ? 'Yes' : 'No'}</span></>)}
                 {isWomensLeague && h.draftRounds && (<><span>·</span><span>Draft: {h.draftRounds} rounds</span></>)}
