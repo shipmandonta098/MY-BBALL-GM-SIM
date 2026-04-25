@@ -3,6 +3,7 @@ import { LeagueState, Team, Player, GameResult } from '../types';
 import TeamBadge from './TeamBadge';
 import { teamSeasonAttendance } from '../utils/attendanceEngine';
 import { fmtSalary } from '../utils/formatters';
+import { calcTeamEffectiveOVR, getTeamInjuryNote } from '../utils/injuryEffects';
 
 interface DashboardProps {
   league: LeagueState;
@@ -63,7 +64,8 @@ const Dashboard: React.FC<DashboardProps> = ({ league, news, onSimulate, onScout
   const nextOpponent = opponents[league.currentDay % opponents.length];
 
   const winPct = (userTeam.wins / (userTeam.wins + userTeam.losses || 1)).toFixed(3);
-  const teamOvr = Math.round(userTeam.roster.reduce((acc, p) => acc + p.rating, 0) / userTeam.roster.length);
+  const teamOvr = calcTeamEffectiveOVR(userTeam.roster);
+  const teamOvrInjuryNote = getTeamInjuryNote(userTeam.roster);
   const teamMorale = Math.round(userTeam.roster.reduce((acc, p) => acc + p.morale, 0) / userTeam.roster.length);
   
   // Advanced Stats Calculation
@@ -249,7 +251,7 @@ const Dashboard: React.FC<DashboardProps> = ({ league, news, onSimulate, onScout
                 <h3 className="text-xs font-black uppercase tracking-[0.3em] mb-1" style={{ color: userTeam.primaryColor }}>Game Preview</h3>
                 <p className="text-slate-300 text-sm leading-relaxed">
                   The <span className="text-white font-bold">{userTeam.city} {userTeam.name}</span> face off against the <span className="text-white font-bold">{nextOpponent.name}</span> in a crucial {userTeam.conference} matchup. 
-                  Win Probability: <span className="text-emerald-400 font-bold">{teamOvr > nextOpponent.roster.reduce((a,b)=>a+b.rating,0)/nextOpponent.roster.length ? '68%' : '42%'}</span>.
+                  Win Probability: <span className="text-emerald-400 font-bold">{teamOvr > calcTeamEffectiveOVR(nextOpponent.roster) ? '68%' : '42%'}</span>.
                 </p>
               </div>
               <div className="flex gap-3">
@@ -280,8 +282,10 @@ const Dashboard: React.FC<DashboardProps> = ({ league, news, onSimulate, onScout
                 <p className="text-[10px] text-slate-500 font-bold uppercase mb-1">Team OVR</p>
                 <div className="flex items-baseline gap-2">
                   <span className="text-3xl font-display font-black" style={{ color: userTeam.primaryColor }}>{teamOvr}</span>
-                  <span className="text-xs text-emerald-400 font-bold">↑ 2</span>
                 </div>
+                {teamOvrInjuryNote && (
+                  <p className="text-[9px] text-rose-400 font-bold mt-1 leading-tight">{teamOvrInjuryNote}</p>
+                )}
               </div>
               <div className="bg-slate-950/50 p-4 rounded-2xl border border-slate-800">
                 <p className="text-[10px] text-slate-500 font-bold uppercase mb-1">Team Morale</p>
@@ -491,7 +495,11 @@ const Dashboard: React.FC<DashboardProps> = ({ league, news, onSimulate, onScout
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-800/50">
-                  {userTeam.roster.sort((a,b) => b.rating - a.rating).map((player, i) => (
+                  {[...userTeam.roster].sort((a,b) => {
+                    const effA = a.injuryOVRPenalty != null && (a.status === 'Injured' || (a.injuryDaysLeft ?? 0) > 0) ? Math.max(40, a.rating - a.injuryOVRPenalty) : a.rating;
+                    const effB = b.injuryOVRPenalty != null && (b.status === 'Injured' || (b.injuryDaysLeft ?? 0) > 0) ? Math.max(40, b.rating - b.injuryOVRPenalty) : b.rating;
+                    return effB - effA;
+                  }).map((player, i) => (
                     <tr 
                       key={player.id} 
                       className={`group hover:bg-slate-800/30 transition-all cursor-pointer ${i < 5 ? 'bg-slate-800/10' : ''}`}
@@ -508,8 +516,26 @@ const Dashboard: React.FC<DashboardProps> = ({ league, news, onSimulate, onScout
                       </td>
                       <td className="px-6 py-4 text-xs font-bold text-slate-400">{player.position}</td>
                       <td className="px-6 py-4 text-center text-sm font-medium">{player.age}</td>
-                      <td className="px-6 py-4 text-center font-display font-bold text-lg text-white">{player.rating}</td>
-                      <td className="px-6 py-4 text-center font-display font-bold text-sm text-slate-500">{player.potential}</td>
+                      <td className="px-6 py-4 text-center">
+                        {(() => {
+                          const isInj = player.status === 'Injured' || (player.injuryDaysLeft != null && player.injuryDaysLeft > 0);
+                          const eff = isInj && player.injuryOVRPenalty != null ? Math.max(40, player.rating - player.injuryOVRPenalty) : player.rating;
+                          return (
+                            <div>
+                              <span className="font-display font-bold text-lg" style={{ color: isInj ? '#f43f5e' : 'white' }}>{eff}</span>
+                              {isInj && player.injuryOVRPenalty != null && (
+                                <div className="text-[8px] font-black text-rose-500 uppercase leading-none">(INJ -{player.injuryOVRPenalty})</div>
+                              )}
+                            </div>
+                          );
+                        })()}
+                      </td>
+                      <td className="px-6 py-4 text-center">
+                        <span className="font-display font-bold text-sm text-slate-500">{player.potential}</span>
+                        {player.potentialLossNote && (
+                          <div className="text-[8px] font-black text-rose-400 leading-tight">{player.potentialLossNote}</div>
+                        )}
+                      </td>
                       <td className="px-6 py-4 text-center font-mono text-sm text-slate-300">{(player.stats.points / (player.stats.gamesPlayed || 1)).toFixed(1)}</td>
                       <td className="px-6 py-4 text-center font-mono text-sm text-slate-300">{(player.stats.rebounds / (player.stats.gamesPlayed || 1)).toFixed(1)}</td>
                       <td className="px-6 py-4 text-center font-mono text-sm text-slate-300">{(player.stats.assists / (player.stats.gamesPlayed || 1)).toFixed(1)}</td>

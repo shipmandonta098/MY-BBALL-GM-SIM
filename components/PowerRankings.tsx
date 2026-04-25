@@ -4,6 +4,7 @@ import TeamBadge from './TeamBadge';
 import { generateTeamComparisonInsight } from '../services/geminiService';
 import { fmtSalary } from '../utils/formatters';
 import { PlayerLink } from '../context/NavigationContext';
+import { calcTeamEffectiveOVR, getEffectiveRating } from '../utils/injuryEffects';
 
 interface PowerRankingsProps {
   league: LeagueState;
@@ -24,7 +25,7 @@ const PowerRankings: React.FC<PowerRankingsProps> = ({ league, onViewRoster, onM
   const teamData = useMemo(() => {
     return league.teams.map(team => {
       const winPct = team.wins / (team.wins + team.losses || 1);
-      const teamOvr = Math.round(team.roster.reduce((sum, p) => sum + p.rating, 0) / team.roster.length);
+      const teamOvr = calcTeamEffectiveOVR(team.roster);
       const teamGames = league.history.filter(g => g.homeTeamId === team.id || g.awayTeamId === team.id);
       let totalDiff = 0;
       teamGames.forEach(g => {
@@ -74,8 +75,8 @@ const PowerRankings: React.FC<PowerRankingsProps> = ({ league, onViewRoster, onM
   };
 
   const TeamComparisonCard = ({ team, side }: { team: Team, side: 'left' | 'right' }) => {
-    const ovr = Math.round(team.roster.reduce((a,b)=>a+b.rating,0)/team.roster.length);
-    const top5 = team.roster.sort((a,b)=>b.rating-a.rating).slice(0, 5);
+    const ovr = calcTeamEffectiveOVR(team.roster);
+    const top5 = [...team.roster].sort((a,b)=>getEffectiveRating(b)-getEffectiveRating(a)).slice(0, 5);
     const cap = team.budget - team.roster.reduce((s,p)=>s+p.salary,0);
 
     return (

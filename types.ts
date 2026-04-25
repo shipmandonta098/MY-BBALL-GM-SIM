@@ -380,6 +380,10 @@ export interface Player {
   suspensionAppealed?: boolean;
   injuryType?: InjuryType;
   injuryDaysLeft?: number;
+  /** OVR points subtracted while this player is injured (cleared on recovery). */
+  injuryOVRPenalty?: number;
+  /** Set when a moderate/severe injury permanently reduces potential on recovery. */
+  potentialLossNote?: string;
   /** Years (season numbers) in which this player was selected as an All-Star */
   allStarSelections?: number[];
   /** Years in which this player won the All-Star Game MVP award */

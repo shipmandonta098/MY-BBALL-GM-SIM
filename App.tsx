@@ -18,6 +18,7 @@ import OwnerReactionModal from './components/OwnerReactionModal';
 import { calcReleaseReaction, OwnerReaction } from './utils/ownerReactionEngine';
 import { computeOffseasonGrade, computeDraftGrade, OffseasonGradeData, DraftGradeData } from './utils/offseasonGradeEngine';
 import { fmtSalary } from './utils/formatters';
+import { calcInjuryOVRPenalty, rollPotentialLoss, calcTeamEffectiveOVR } from './utils/injuryEffects';
 import { getContractRules, computeMensMarketSalary } from './utils/contractRules';
 import OffseasonGradeModal from './components/OffseasonGradeModal';
 import DraftGradeModal from './components/DraftGradeModal';
@@ -540,7 +541,7 @@ const App: React.FC = () => {
 
     const entries: PowerRankingEntry[] = state.teams.map(team => {
       const winPct = team.wins / (team.wins + team.losses || 1);
-      const teamOvr = team.roster.reduce((sum, p) => sum + p.rating, 0) / team.roster.length;
+      const teamOvr = calcTeamEffectiveOVR(team.roster);
       
       const teamGames = state.history.filter(g => g.homeTeamId === team.id || g.awayTeamId === team.id);
       let totalDiff = 0;
@@ -851,8 +852,22 @@ const App: React.FC = () => {
             const bonusTick = Math.random() < bonusTickChance ? 1 : 0;
             const daysLeft = (p.injuryDaysLeft ?? 1) - 1 - bonusTick;
             if (daysLeft <= 0) {
+              // Roll for permanent potential loss on recovery from moderate/severe injuries
+              const originalDays = (p.injuryDaysLeft ?? 1) + 1; // approximate original duration from days-left
+              const potLoss = rollPotentialLoss(originalDays);
+              const potentialAfter = potLoss
+                ? Math.max(p.rating, p.potential - potLoss.loss)
+                : p.potential;
               recovering.push({ player: p, team: t });
-              return { ...p, status: 'Rotation' as PlayerStatus, injuryType: undefined, injuryDaysLeft: 0 };
+              return {
+                ...p,
+                status: 'Rotation' as PlayerStatus,
+                injuryType: undefined,
+                injuryDaysLeft: 0,
+                injuryOVRPenalty: undefined,
+                potential: potentialAfter,
+                potentialLossNote: potLoss ? potLoss.note : p.potentialLossNote,
+              };
             }
             return { ...p, injuryDaysLeft: daysLeft };
           })
@@ -885,7 +900,7 @@ const App: React.FC = () => {
           teams: newState.teams.map(t => t.id !== team.id ? t : {
             ...t,
             roster: t.roster.map(p => p.id !== unlucky.id ? p : {
-              ...p, status: 'Injured' as PlayerStatus, injuryType: 'Illness' as InjuryType, injuryDaysLeft: days
+              ...p, status: 'Injured' as PlayerStatus, injuryType: 'Illness' as InjuryType, injuryDaysLeft: days, injuryOVRPenalty: calcInjuryOVRPenalty(days)
             })
           })
         };
@@ -1270,7 +1285,7 @@ const App: React.FC = () => {
           teams: newState.teams.map(t => t.id !== inj.teamId ? t : {
             ...t,
             roster: t.roster.map(p => p.id !== inj.playerId ? p : {
-              ...p, status: 'Injured' as PlayerStatus, injuryType: inj.injuryType as InjuryType, injuryDaysLeft: preseasonDaysOut,
+              ...p, status: 'Injured' as PlayerStatus, injuryType: inj.injuryType as InjuryType, injuryDaysLeft: preseasonDaysOut, injuryOVRPenalty: calcInjuryOVRPenalty(preseasonDaysOut),
             }),
           }),
         };
@@ -1845,12 +1860,17 @@ const App: React.FC = () => {
 
     // Apply in-game injuries
     if (result.gameInjuries && result.gameInjuries.length > 0) {      for (const inj of result.gameInjuries) {
+        const ovrPenalty = calcInjuryOVRPenalty(inj.daysOut);
         newState = {
           ...newState,
           teams: newState.teams.map(t => t.id !== inj.teamId ? t : {
             ...t,
             roster: t.roster.map(p => p.id !== inj.playerId ? p : {
-              ...p, status: 'Injured' as PlayerStatus, injuryType: inj.injuryType as InjuryType, injuryDaysLeft: inj.daysOut
+              ...p,
+              status: 'Injured' as PlayerStatus,
+              injuryType: inj.injuryType as InjuryType,
+              injuryDaysLeft: inj.daysOut,
+              injuryOVRPenalty: ovrPenalty,
             })
           })
         };
