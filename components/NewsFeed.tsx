@@ -2,6 +2,27 @@ import React, { useState, useMemo } from 'react';
 import { LeagueState, NewsItem, NewsCategory, Team, Player } from '../types';
 import TeamBadge from './TeamBadge';
 
+const STOCK_DOMAINS = ['picsum.photos', 'placeholder.com', 'unsplash.com', 'via.placeholder'];
+const isValidLogo = (url?: string) => !!url && !STOCK_DOMAINS.some(d => url.includes(d));
+
+const TeamAvatar: React.FC<{ team: Team; className?: string }> = ({ team, className = '' }) => {
+  const [imgError, setImgError] = useState(false);
+  const showImg = !imgError && isValidLogo(team.logo);
+  return (
+    <div className={`w-full h-full flex items-center justify-center overflow-hidden ${className}`}
+      style={{ backgroundColor: showImg ? undefined : team.primaryColor }}>
+      {showImg ? (
+        <img src={team.logo} alt="" className="w-full h-full object-contain p-1"
+          onError={() => setImgError(true)} referrerPolicy="no-referrer" />
+      ) : (
+        <span className="font-black text-white text-[9px]">
+          {(team.abbreviation || team.name).substring(0, 3).toUpperCase()}
+        </span>
+      )}
+    </div>
+  );
+};
+
 interface NewsFeedProps {
   league: LeagueState;
   onViewPlayer: (player: Player) => void;
@@ -100,9 +121,7 @@ const NewsFeed: React.FC<NewsFeedProps> = ({ league, onViewPlayer, onViewRoster,
               >
                 <div className="w-12 h-12 rounded-full bg-slate-800 flex items-center justify-center text-xl shrink-0 border border-slate-700 shadow-inner group-hover:border-amber-500/50 transition-colors overflow-hidden">
                   {team
-                    ? <div className="w-full h-full flex items-center justify-center font-black text-white text-[9px]" style={{ backgroundColor: team.primaryColor }}>
-                        {(team.abbreviation || team.name).substring(0, 2).toUpperCase()}
-                      </div>
+                    ? <TeamAvatar team={team} />
                     : <span>{getCategoryIcon(item.category)}</span>}
                 </div>
                 
