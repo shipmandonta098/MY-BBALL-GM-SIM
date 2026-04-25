@@ -4,6 +4,7 @@ import TeamBadge from './TeamBadge';
 import WatchToggle from './WatchToggle';
 import { getFlag } from '../constants';
 import { fmtSalary } from '../utils/formatters';
+import { getEffectiveRating } from '../utils/injuryEffects';
 
 export interface RosterProps {
   leagueTeams: Team[];
@@ -551,12 +552,28 @@ const Roster: React.FC<RosterProps> = ({ leagueTeams, userTeamId, initialTeamId,
                     <span className="text-sm font-bold text-slate-300">{player.age}</span>
                   </td>
                   <td className="px-8 py-6 text-center">
-                    <span className={`text-2xl font-display font-black`} style={{ color: player.rating >= 85 ? activeTeam.primaryColor : player.rating >= 75 ? activeTeam.secondaryColor : '#64748b' }}>
-                      {player.rating}
-                    </span>
+                    {(() => {
+                      const effRating = getEffectiveRating(player);
+                      const isInj = isPlayerInjured(player);
+                      return (
+                        <div className="flex flex-col items-center gap-0.5">
+                          <span className="text-2xl font-display font-black" style={{ color: isInj ? '#f43f5e' : effRating >= 85 ? activeTeam.primaryColor : effRating >= 75 ? activeTeam.secondaryColor : '#64748b' }}>
+                            {effRating}
+                          </span>
+                          {isInj && player.injuryOVRPenalty != null && (
+                            <span className="text-[8px] font-black uppercase tracking-widest text-rose-500 leading-none">(Injured -{player.injuryOVRPenalty})</span>
+                          )}
+                        </div>
+                      );
+                    })()}
                   </td>
                   <td className="px-8 py-6 text-center">
-                    <span className="text-sm font-bold text-slate-500">{player.potential}</span>
+                    <div className="flex flex-col items-center gap-0.5">
+                      <span className="text-sm font-bold text-slate-500">{player.potential}</span>
+                      {player.potentialLossNote && (
+                        <span className="text-[8px] font-black text-rose-400 leading-tight text-center">{player.potentialLossNote}</span>
+                      )}
+                    </div>
                   </td>
                   <td className="px-8 py-6 text-right">
                     <div className="font-mono text-sm font-bold text-slate-100">{formatMoney(player.salary)}</div>

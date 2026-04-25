@@ -2,6 +2,7 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { Player, PlayerStatus, PersonalityTrait, Position, PlayerTendencies, TeamRotation, TrainingFocusArea } from '../types';
 import { getFlag, countryFromHometown, POS_ATTR_RANGES, PosAttrRangeKey, enforcePositionalBounds, FEMALE_ATTR_CAPS, NAMES_MALE, NAMES_FEMALE, COLLEGES_HIGH_MAJOR, COLLEGES_MID_MAJOR, ALL_HOMETOWNS, deriveComposites, deriveArchetype } from '../constants';
 import { fmtSalary } from '../utils/formatters';
+import { getEffectiveRating } from '../utils/injuryEffects';
 
 const POS_RANGE_KEYS: PosAttrRangeKey[] = ['shooting', 'playmaking', 'defense', 'rebounding', 'athleticism'];
 
@@ -1150,18 +1151,34 @@ const PlayerModal: React.FC<PlayerModalProps> = ({
              </div>
              <div className="space-y-4">
                 <h4 className="text-[10px] text-slate-500 font-black uppercase tracking-[0.2em]">Overall Efficiency</h4>
-                <div className="flex items-center gap-6">
-                   <span className="text-6xl font-display font-bold text-white">{player.rating}</span>
-                   <div className="flex-1 space-y-2">
-                      <div className="flex justify-between text-[10px] font-black text-slate-500 uppercase tracking-widest">
-                         <span>Rating: {player.rating}</span>
-                         <span>Potential: {player.potential}</span>
+                {(() => {
+                  const effRating = getEffectiveRating(player);
+                  const isInj = player.status === 'Injured' || (player.injuryDaysLeft != null && player.injuryDaysLeft > 0);
+                  return (
+                    <div className="flex items-center gap-6">
+                      <div className="flex flex-col items-center gap-1">
+                        <span className="text-6xl font-display font-bold" style={{ color: isInj ? '#f43f5e' : 'white' }}>{effRating}</span>
+                        {isInj && player.injuryOVRPenalty != null && (
+                          <span className="text-[10px] font-black uppercase tracking-widest text-rose-400 bg-rose-500/10 border border-rose-500/20 rounded px-2 py-0.5 whitespace-nowrap">
+                            Injured  -{player.injuryOVRPenalty} OVR
+                          </span>
+                        )}
                       </div>
-                      <div className="h-2 bg-slate-800 rounded-full overflow-hidden">
-                        <div className="h-full bg-amber-500" style={{ width: `${player.rating}%` }}></div>
+                      <div className="flex-1 space-y-2">
+                        <div className="flex justify-between text-[10px] font-black text-slate-500 uppercase tracking-widest">
+                          <span>Rating: {player.rating}{isInj && player.injuryOVRPenalty != null ? ` (Eff: ${effRating})` : ''}</span>
+                          <span>Potential: {player.potential}</span>
+                        </div>
+                        <div className="h-2 bg-slate-800 rounded-full overflow-hidden">
+                          <div className="h-full" style={{ width: `${effRating}%`, backgroundColor: isInj ? '#f43f5e' : '#f59e0b' }}></div>
+                        </div>
+                        {player.potentialLossNote && (
+                          <p className="text-[9px] font-bold text-rose-400 mt-1">{player.potentialLossNote}</p>
+                        )}
                       </div>
-                   </div>
-                </div>
+                    </div>
+                  );
+                })()}
              </div>
           </section>
 
