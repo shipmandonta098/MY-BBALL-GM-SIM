@@ -1504,12 +1504,13 @@ export const generateFreeAgentPool = (count: number, season: number, genderRatio
   return Array.from({ length: count }).map((_, i) => {
     const draftCtx: DraftContext = { season, teamNames, usedPicks };
     const p = generatePlayer(`fa-${season}-${i}`, [21, 36], genderRatio, draftCtx, season);
-    // Skew OVR: 30% → 60–69 (min/bench), 45% → 70–79 (role), 18% → 80–86 (starter), 7% → 87–92 (star+)
+    // Generated FA pool is capped at 75 OVR — realistic players above 75 are almost always
+    // on rosters. The only 76+ FAs are real players waived/released mid-season (not generated).
+    // Distribution: 20% → 60–67 (fringe/bench), 60% → 68–73 (rotation depth), 20% → 74–75 (ceiling).
     const tierRoll = Math.random();
     const [tierMin, tierMax] =
-      tierRoll < 0.30 ? [60, 69] :
-      tierRoll < 0.75 ? [70, 79] :
-      tierRoll < 0.93 ? [80, 86] : [87, 92];
+      tierRoll < 0.20 ? [60, 67] :
+      tierRoll < 0.80 ? [68, 73] : [74, 75];
     const skewedRating = Math.min(tierMax, Math.max(tierMin, p.rating));
     const skewedPlayer = skewedRating !== p.rating ? { ...p, rating: skewedRating } : p;
     return {
