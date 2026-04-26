@@ -3,6 +3,7 @@ import React, { useState, useMemo, useRef, useEffect } from 'react';
 import { LeagueState, SeasonAwards, AwardWinner, Player, Coach, Team } from '../types';
 import TeamBadge from './TeamBadge';
 import { PlayerLink } from '../context/NavigationContext';
+import { rawUPER, normalizePER, leagueAvgRawUPER } from '../utils/playerUtils';
 
 interface AwardsProps {
   league: LeagueState;
@@ -25,6 +26,12 @@ const Awards: React.FC<AwardsProps> = ({ league, onScout, onScoutCoach, onManage
   const allPlayers = useMemo(() => league.teams.flatMap(t => t.roster), [league.teams]);
   const allTeams = league.teams;
 
+  // League-average rawUPER for normalized PER (lg avg = 15.0)
+  const lgAvgRaw = useMemo(
+    () => leagueAvgRawUPER(allPlayers.map(p => p.stats)),
+    [allPlayers],
+  );
+
   const awardRaces = useMemo(() => {
     // ── Season context ───────────────────────────────────────────────────────
     // Use the maximum team record (wins+losses) so the threshold scales with
@@ -41,12 +48,7 @@ const Awards: React.FC<AwardsProps> = ({ league, onScout, onScoutCoach, onManage
     const getSPG  = (p: Player) => p.stats.gamesPlayed > 0 ? p.stats.steals   / p.stats.gamesPlayed : 0;
     const getMPG  = (p: Player) => p.stats.gamesPlayed > 0 ? p.stats.minutes  / p.stats.gamesPlayed : 0;
     const getFGPct = (p: Player) => p.stats.fga > 0 ? p.stats.fgm / p.stats.fga : 0;
-    const getPER  = (p: Player) => {
-      if (p.stats.gamesPlayed === 0) return 0;
-      const val = (p.stats.points + p.stats.rebounds + p.stats.assists + p.stats.steals + p.stats.blocks)
-                - (p.stats.fga - p.stats.fgm) - (p.stats.fta - p.stats.ftm) - p.stats.tov;
-      return val / p.stats.gamesPlayed;
-    };
+    const getPER  = (p: Player) => normalizePER(rawUPER(p.stats), lgAvgRaw);
 
     // ── Eligibility helpers ──────────────────────────────────────────────────
     // Rookie: drafted this season OR no prior career stats (undrafted first-year player)
@@ -148,7 +150,7 @@ const Awards: React.FC<AwardsProps> = ({ league, onScout, onScoutCoach, onManage
       .slice(0, 15);
 
     return { mvp, dpoy, roy, smoy, mip, coy, maxGamesPlayed, seasonActive };
-  }, [allPlayers, allTeams, league.season, league.isOffseason, league.teams]);
+  }, [allPlayers, allTeams, league.season, league.isOffseason, league.teams, lgAvgRaw]);
 
   // Recompute rank-movement deltas whenever awardRaces changes
   useEffect(() => {

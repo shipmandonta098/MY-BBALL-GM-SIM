@@ -3,6 +3,7 @@ import { Player, PlayerStatus, PersonalityTrait, Position, PlayerTendencies, Tea
 import { getFlag, countryFromHometown, POS_ATTR_RANGES, PosAttrRangeKey, enforcePositionalBounds, FEMALE_ATTR_CAPS, NAMES_MALE, NAMES_FEMALE, COLLEGES_HIGH_MAJOR, COLLEGES_MID_MAJOR, ALL_HOMETOWNS, deriveComposites, deriveArchetype } from '../constants';
 import { fmtSalary } from '../utils/formatters';
 import { getEffectiveRating, canPlayThrough, getInjurySeverity } from '../utils/injuryEffects';
+import { rawUPER, normalizePER, leagueAvgRawUPER } from '../utils/playerUtils';
 
 const POS_RANGE_KEYS: PosAttrRangeKey[] = ['shooting', 'playmaking', 'defense', 'rebounding', 'athleticism'];
 
@@ -1437,10 +1438,10 @@ const PlayerModal: React.FC<PlayerModalProps> = ({
             const twop = twopa > 0 ? twopm / twopa : 0;
             const ts  = (s.fga + 0.44 * s.fta) > 0
               ? s.points / (2 * (s.fga + 0.44 * s.fta)) : 0;
-            const per = s.minutes > 0
-              ? (s.points + s.rebounds + s.assists + s.steals + s.blocks
-                  - (s.fga - s.fgm) - (s.fta - s.ftm) - s.tov)
-                / s.minutes * 30 : 0;
+            const _lgAvgRaw = leagueAvgRawUPER(
+              (leagueContext?.allPlayers ?? []).map(p => p.stats)
+            );
+            const per = normalizePER(rawUPER(s), _lgAvgRaw);
             const pmPg = s.gamesPlayed > 0 ? s.plusMinus / s.gamesPlayed : 0;
 
             // Current-season splits from previous teams (trade splits)
@@ -1817,10 +1818,7 @@ const PlayerModal: React.FC<PlayerModalProps> = ({
                   const pTwoA = po.fga - po.threepa;
                   const pTs  = (po.fga + 0.44 * po.fta) > 0
                     ? po.points / (2 * (po.fga + 0.44 * po.fta)) : 0;
-                  const pPer = po.minutes > 0
-                    ? (po.points + po.rebounds + po.assists + po.steals + po.blocks
-                        - (po.fga - po.fgm) - (po.fta - po.ftm) - po.tov)
-                      / po.minutes * 30 : 0;
+                  const pPer = normalizePER(rawUPER(po), _lgAvgRaw);
 
                   const poCols = [
                     { label: 'GP',   value: String(po.gamesPlayed) },

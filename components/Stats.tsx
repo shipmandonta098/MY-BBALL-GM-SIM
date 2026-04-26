@@ -3,6 +3,7 @@ import { LeagueState, Player, Team, Position } from '../types';
 import TeamBadge from './TeamBadge';
 import { PlayerLink } from '../context/NavigationContext';
 import Attendance from './Attendance';
+import { rawUPER, normalizePER, leagueAvgRawUPER } from '../utils/playerUtils';
 
 interface StatsProps {
   league: LeagueState;
@@ -156,6 +157,12 @@ const Stats: React.FC<StatsProps> = ({ league, onViewRoster, onManageTeam, onVie
     });
   }, [league.teams, league.history, statsSource]);
 
+  // League-average rawUPER for PER normalization (all roster players, min 50 minutes)
+  const lgAvgRaw = useMemo(
+    () => leagueAvgRawUPER(league.teams.flatMap(t => t.roster.map(r => r.stats))),
+    [league.teams],
+  );
+
   // Advanced Stats Calculation
   const calculateAdvanced = (p: Player) => {
     const gp = Math.max(1, p.stats.gamesPlayed);
@@ -186,11 +193,8 @@ const Stats: React.FC<StatsProps> = ({ league, onViewRoster, onManageTeam, onVie
     // Usage%
     const USG = p.stats.minutes > 0 ? (p.stats.fga + 0.44 * p.stats.fta + p.stats.tov) / p.stats.minutes : 0;
 
-    // PER (simplified)
-    const PER = p.stats.minutes > 0
-      ? (p.stats.points + p.stats.rebounds + p.stats.assists + p.stats.steals + p.stats.blocks
-         - (p.stats.fga - p.stats.fgm) - (p.stats.fta - p.stats.ftm) - p.stats.tov) / p.stats.minutes * 30
-      : 0;
+    // PER — league-normalized so avg ≈ 15.0, stars 22–32, bench < 12
+    const PER = normalizePER(rawUPER(p.stats), lgAvgRaw);
 
     // ── Box Plus/Minus (BPM) — calibrated box-score approximation ──────
     // Positive = above league average, negative = below. Star ≈ +5–8, avg ≈ 0, scrub ≈ -4.
