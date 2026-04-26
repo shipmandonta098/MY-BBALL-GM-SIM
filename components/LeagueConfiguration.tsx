@@ -555,6 +555,7 @@ const LeagueConfiguration: React.FC<LeagueConfigurationProps> = ({ onConfirm, on
                 {isWomensLeague && h.birdRights !== undefined && (<><span>·</span><span>Bird Rights: {h.birdRights ? 'Yes' : 'No'}</span></>)}
                 {isWomensLeague && h.draftRounds && (<><span>·</span><span>Draft: {h.draftRounds} rounds</span></>)}
                 {isWomensLeague && h.draftClassSize && (<><span>·</span><span>Class Size: {h.draftClassSize}</span></>)}
+                {isWomensLeague && (<><span>·</span><span className="text-violet-300 font-black">Draft Eligibility: Domestic 22+ · Intl 20+</span></>)}
               </div>
               {!historicalOverride && (
                 <p className="text-[9px] text-slate-600 italic">{h.note}</p>
