@@ -133,8 +133,8 @@ const Stats: React.FC<StatsProps> = ({ league, onViewRoster, onManageTeam, onVie
         ast: ast / gp, stl: stl / gp, blk: blk / gp,
         tov: tov / gp, pf: pf / gp, pts: pts / gp, mov,
         // Advanced
-        eFGPct:      fga > 0 ? (fgm + 0.5 * threepm) / fga : 0,
-        tsPct:       (fga + 0.44 * fta) > 0 ? pts / (2 * (fga + 0.44 * fta)) : 0,
+        eFGPct:      fga > 0 ? Math.min(0.75, (fgm + 0.5 * threepm) / fga) : 0,
+        tsPct:       (fga + 0.44 * fta) > 0 ? Math.min(0.72, pts / (2 * (fga + 0.44 * fta))) : 0,
         pace:        (poss + oppPoss) / (2 * gp),
         ortg,
         drtg,
@@ -186,9 +186,9 @@ const Stats: React.FC<StatsProps> = ({ league, onViewRoster, onManageTeam, onVie
     const tpPct = p.stats.threepa > 0 ? p.stats.threepm / p.stats.threepa : 0;
     const ftPct = p.stats.fta > 0 ? p.stats.ftm / p.stats.fta : 0;
 
-    // eFG% and TS%
-    const eFG = p.stats.fga > 0 ? (p.stats.fgm + 0.5 * p.stats.threepm) / p.stats.fga : 0;
-    const TS = (p.stats.fga + 0.44 * p.stats.fta) > 0 ? p.stats.points / (2 * (p.stats.fga + 0.44 * p.stats.fta)) : 0;
+    // eFG% and TS% — capped at realistic NBA-season maximums (small-sample stochastic noise can push these above 100% without the cap)
+    const eFG = p.stats.fga > 0 ? Math.min(0.75, (p.stats.fgm + 0.5 * p.stats.threepm) / p.stats.fga) : 0;
+    const TS = (p.stats.fga + 0.44 * p.stats.fta) > 0 ? Math.min(0.72, p.stats.points / (2 * (p.stats.fga + 0.44 * p.stats.fta))) : 0;
 
     // Usage%
     const USG = p.stats.minutes > 0 ? (p.stats.fga + 0.44 * p.stats.fta + p.stats.tov) / p.stats.minutes : 0;
@@ -466,12 +466,12 @@ const Stats: React.FC<StatsProps> = ({ league, onViewRoster, onManageTeam, onVie
           const twomPg = twom / gpSafe;
           const twoaPg = twoa / gpSafe;
           // EFG%
-          const efg = fga > 0 ? (fgm + 0.5 * tpm) / fga : 0;
+          const efg = fga > 0 ? Math.min(0.75, (fgm + 0.5 * tpm) / fga) : 0;
           // Advanced
           const per = min > 0
             ? (pts + reb + ast + stl + blk - (fga - fgm) - (fta - ftm) - tov) / min * 30
             : 0;
-          const ts  = (fga + 0.44 * fta) > 0 ? pts / (2 * (fga + 0.44 * fta)) : 0;
+          const ts  = (fga + 0.44 * fta) > 0 ? Math.min(0.72, pts / (2 * (fga + 0.44 * fta))) : 0;
           const usg = min > 0 ? (fga + 0.44 * fta + tov) / min : 0;
           const bpm = gpSafe > 0 ? pm / gpSafe : 0;
           const vorp = bpm * (gpSafe / 82) * 2.7;
