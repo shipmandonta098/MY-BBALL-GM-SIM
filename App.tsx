@@ -1,6 +1,6 @@
 
 import React, { useState, useEffect, useCallback } from 'react';
-import { LeagueState, Player, Team, GameResult, PlayerStatus, ScheduleGame, BulkSimSummary, Prospect, Coach, TradeProposal, Position, NewsItem, NewsCategory, LeagueSettings, SeasonAwards, PlayoffBracket, PlayoffSeries, Transaction, TransactionType, PowerRankingSnapshot, PowerRankingEntry, GMProfile, GMMilestone, RivalryStats, InjuryType, SeasonPhase, AllStarWeekendData, AllStarVoteEntry, PreviousSeasonStanding, TrainingFocusArea } from './types';
+import { LeagueState, Player, Team, GameResult, PlayerStatus, ScheduleGame, BulkSimSummary, Prospect, Coach, TradeProposal, Position, NewsItem, NewsCategory, LeagueSettings, SeasonAwards, PlayoffBracket, PlayoffSeries, Transaction, TransactionType, PowerRankingSnapshot, PowerRankingEntry, GMProfile, GMMilestone, RivalryStats, InjuryType, SeasonPhase, AllStarWeekendData, AllStarVoteEntry, PreviousSeasonStanding, TrainingFocusArea, PlayerDevChange } from './types';
 import { generateLeagueTeams, generateSeasonSchedule, generateProspects, generateFreeAgentPool, generateCoachPool, EXPANSION_TEAM_POOL, generateCoach, generatePlayer, generateDefaultRotation, enforcePositionalBounds, ageFromBirthdate, getCoachPreferredScheme, generateGMName } from './constants';
 import { generatePreseasonSchedule, buildPreseasonHeadline, buildPreseasonRookieHeadline } from './utils/preseasonEngine';
 import { simulateGame, normalizeLeagueOVRs } from './utils/simEngine';
@@ -22,6 +22,7 @@ import { calcInjuryOVRPenalty, rollPotentialLoss, calcTeamEffectiveOVR } from '.
 import { getContractRules, computeMensMarketSalary } from './utils/contractRules';
 import OffseasonGradeModal from './components/OffseasonGradeModal';
 import DraftGradeModal from './components/DraftGradeModal';
+import DevReportModal from './components/DevReportModal';
 
 // Components
 import Sidebar from './components/Sidebar';
@@ -149,6 +150,10 @@ const App: React.FC = () => {
   // Draft grade modal state
   const [draftGradeData, setDraftGradeData] = useState<DraftGradeData | null>(null);
   const draftGradeShownForSeason = React.useRef<number>(-1);
+
+  // Dev report modal state
+  const [showDevReport, setShowDevReport] = useState(false);
+  const devReportShownForSeason = React.useRef<number>(-1);
 
   const refreshSaves = useCallback(async () => {
     const saves = await db.leagues.toArray();
@@ -3187,6 +3192,19 @@ const App: React.FC = () => {
     tempState.previousSeasonStandings = prevStandings;
     tempState.previousSeasonYear = tempState.season;
 
+    // Snapshot pre-progression ratings for dev report (user team only)
+    const preProgSnapshot = new Map<string, { ovr: number; pot: number; hadFocus: boolean }>();
+    const userTeamPre = tempState.teams.find(t => t.id === tempState.userTeamId);
+    if (userTeamPre) {
+      userTeamPre.roster.forEach(p => {
+        preProgSnapshot.set(p.id, {
+          ovr: p.rating,
+          pot: p.potential,
+          hadFocus: !!(p.trainingFocus && p.trainingFocus.seasonSet === tempState.season),
+        });
+      });
+    }
+
     tempState.teams = tempState.teams.map(t => {
       const facBudget     = t.finances?.budgets?.facilities ?? 20;
       const hcDevRating   = t.staff.headCoach?.ratingDevelopment ?? 50;
@@ -3218,9 +3236,23 @@ const App: React.FC = () => {
         let growth = 0;
         if (p.age < 25) {
           growth = Math.floor(Math.random() * 4 * devMultiplier * rookieMultiplier);
+        } else if (p.age >= 25 && p.age <= 29) {
+          // Prime age: small chance of +1 gain, otherwise stable
+          if (Math.random() < 0.35 * devMultiplier) growth = 1;
+        } else if (p.age >= 30 && p.age <= 33) {
+          // Early decline: mild chance of -1 or -2
+          if (Math.random() < 0.40 * vetRate) growth = -(1 + (p.age >= 32 && Math.random() < 0.4 ? 1 : 0));
         } else if (p.age > 33) {
-          growth = -Math.floor(Math.random() * 3 * vetRate);
+          growth = -Math.floor(1 + Math.random() * Math.min(5, (p.age - 33)) * vetRate);
         }
+
+        // Potential progression: peaks grow, veterans fade
+        let potDelta = 0;
+        if (p.age < 23) potDelta = Math.floor(Math.random() * 3 * devMultiplier);          // 0-2 pot gain
+        else if (p.age < 26) potDelta = Math.random() < 0.4 * devMultiplier ? 1 : 0;       // small gain
+        else if (p.age >= 31) potDelta = Math.random() < 0.5 * vetRate ? -1 : 0;            // small decline
+        else if (p.age >= 34) potDelta = -Math.floor(Math.random() < 0.6 * vetRate ? 1 + Math.random() : 0);
+
         const newAttrs = { ...p.attributes } as any;
 
         // Apply training focus bonus (set this season, active or just expired)
@@ -3239,12 +3271,11 @@ const App: React.FC = () => {
         }
 
         const hasFocus = isUserPlayer && focus && focus.seasonSet === tempState.season;
-        if (growth === 0 && !hasFocus) {
+        if (growth === 0 && potDelta === 0 && !hasFocus) {
           return enforcePositionalBounds({ ...p, trainingFocus: undefined });
         }
         if (growth !== 0) {
           const devKeys = POS_DEV_KEYS[p.position] ?? POS_DEV_KEYS['SF'];
-          // Bias toward focus areas when active
           const focusKeys = hasFocus ? focus!.areas.flatMap(a => FOCUS_ATTR_MAP[a]) : [];
           const combined = [...new Set([...focusKeys, ...devKeys])];
           const picked = combined.sort(() => 0.5 - Math.random()).slice(0, 2);
@@ -3252,12 +3283,33 @@ const App: React.FC = () => {
             newAttrs[k] = Math.min(99, Math.max(0, (newAttrs[k] ?? 50) + growth));
           });
         }
-        return enforcePositionalBounds({ ...p, attributes: newAttrs as Player['attributes'], trainingFocus: undefined });
+        const newPot = potDelta !== 0
+          ? Math.min(99, Math.max(p.rating, p.potential + potDelta))
+          : p.potential;
+        return enforcePositionalBounds({ ...p, attributes: newAttrs as Player['attributes'], potential: newPot, trainingFocus: undefined });
       });
       // Remove expired contracts from roster (they become free agents)
       const retained = rosterWithProg.filter(p => p.contractYears > 1);
       return { ...t, roster: retained.map(p => ({ ...p, contractYears: p.contractYears - 1 })), prevSeasonWins: t.wins, prevSeasonLosses: t.losses, wins: 0, losses: 0, lastTen: [] };
     });
+
+    // Build dev report for user team from pre/post snapshot
+    if (preProgSnapshot.size > 0) {
+      const userTeamPost = tempState.teams.find(t => t.id === tempState.userTeamId);
+      const devChanges: PlayerDevChange[] = [];
+      userTeamPost?.roster.forEach(p => {
+        const pre = preProgSnapshot.get(p.id);
+        if (!pre) return;
+        const ovrDelta = p.rating - pre.ovr;
+        const potDelta = p.potential - pre.pot;
+        if (ovrDelta !== 0 || potDelta !== 0) {
+          devChanges.push({ playerId: p.id, name: p.name, position: p.position, age: p.age, ovrBefore: pre.ovr, ovrAfter: p.rating, potBefore: pre.pot, potAfter: p.potential, hadFocus: pre.hadFocus });
+        }
+      });
+      // Sort: biggest gains first, then biggest declines
+      devChanges.sort((a, b) => (b.ovrAfter - b.ovrBefore) - (a.ovrAfter - a.ovrBefore));
+      tempState.devReport = devChanges;
+    }
 
     // Merge generated FA pool + expired-contract players (deduplicated by id)
     const generatedFAs = generateFreeAgentPool(70, tempState.season, tempState.settings.playerGenderRatio);
@@ -3392,6 +3444,14 @@ const App: React.FC = () => {
       setLeague(prev => prev ? { ...prev, ownerApproval: after } : null);
       setOffseasonGradeData(grade);
       return; // Resume when user clicks "Begin Preseason" in the modal
+    }
+
+    // ── Dev report gate: show development report after offseason grade ──────
+    if (league.isOffseason && devReportShownForSeason.current !== league.season
+        && league.devReport && league.devReport.length > 0) {
+      devReportShownForSeason.current = league.season;
+      setShowDevReport(true);
+      return; // Resume when user dismisses the modal
     }
 
     // ── Case 1: Skip preseason → simulate ALL remaining preseason games ─────
@@ -3537,6 +3597,7 @@ const App: React.FC = () => {
         seasonPhase: 'Preseason' as SeasonPhase,
         tradeDeadlinePassed: false,
         allStarWeekend: undefined,
+        devReport: undefined,
       };
     });
   };
@@ -3965,7 +4026,7 @@ const App: React.FC = () => {
           {activeTab === 'transactions' && <Transactions league={league} />}
           {activeTab === 'power_rankings' && <PowerRankings league={league} onViewRoster={handleViewRoster} onManageTeam={handleManageTeam} />}
           {activeTab === 'expansion' && <Expansion league={league} updateLeague={updateLeagueState} onScout={handleViewPlayer} />}
-          {activeTab === 'roster' && <Roster leagueTeams={league.teams} userTeamId={league.userTeamId} initialTeamId={rosterTeamId} onScout={handleViewPlayer} onScoutCoach={handleScoutCoach} scoutingReport={scoutingReport} onUpdateTeamRoster={handleUpdateTeamRoster} onManageTeam={handleManageTeam} godMode={league.settings.godMode} watchList={league.watchList ?? []} onToggleWatch={handleToggleWatch} minRosterSize={league.settings.minRosterSize ?? 10} maxRosterSize={league.settings.maxRosterSize ?? 18} />}
+          {activeTab === 'roster' && <Roster leagueTeams={league.teams} userTeamId={league.userTeamId} initialTeamId={rosterTeamId} onScout={handleViewPlayer} onScoutCoach={handleScoutCoach} scoutingReport={scoutingReport} onUpdateTeamRoster={handleUpdateTeamRoster} onManageTeam={handleManageTeam} godMode={league.settings.godMode} watchList={league.watchList ?? []} onToggleWatch={handleToggleWatch} minRosterSize={league.settings.minRosterSize ?? 10} maxRosterSize={league.settings.maxRosterSize ?? 18} devChanges={league.devReport} />}
           {activeTab === 'rotations' && <Rotations league={league} updateLeague={updateLeagueState} />}
           {activeTab === 'free_agency' && <FreeAgency league={league} updateLeague={updateLeagueState} onScout={handleViewPlayer} recordTransaction={recordTransaction} />}
           {activeTab === 'coach_market' && <CoachesMarket league={league} updateLeague={updateLeagueState} onScout={handleScoutCoach} />}
@@ -4266,6 +4327,16 @@ const App: React.FC = () => {
           teamName={userTeam?.name ?? 'Your Team'}
           onDismiss={() => setDraftGradeData(null)}
           onViewDraft={() => { setDraftGradeData(null); setActiveTab('draft'); }}
+        />
+      )}
+
+      {/* ── Offseason Dev Report modal ── */}
+      {showDevReport && league.devReport && (
+        <DevReportModal
+          changes={league.devReport}
+          season={league.season}
+          onViewRoster={() => { setShowDevReport(false); setActiveTab('roster'); }}
+          onBeginPreseason={() => { setShowDevReport(false); handleAdvanceToRegularSeason(); }}
         />
       )}
 
