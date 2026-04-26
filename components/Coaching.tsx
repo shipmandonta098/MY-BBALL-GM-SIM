@@ -237,28 +237,20 @@ const Coaching: React.FC<CoachingProps> = ({ league, updateLeague, godMode = fal
            <section className="bg-slate-900 border border-slate-800 rounded-3xl p-8 shadow-2xl">
               <h3 className="text-xs font-black uppercase tracking-[0.3em] text-slate-500 mb-1 pb-2 border-b border-slate-800">Team Playbook</h3>
 
-              {/* Coach fit indicator */}
+              {/* Scheme mismatch warning — only shown when GM has deviated from coach's pick */}
               {(() => {
                 const hc = userTeam.staff.headCoach;
                 if (!hc) return null;
                 const preferred = getCoachPreferredScheme(hc);
-                const isMatch = userTeam.activeScheme === preferred;
+                if (userTeam.activeScheme === preferred) return null;
                 return (
-                  <div className={`mt-4 mb-5 p-3 rounded-xl border text-[10px] font-bold flex items-start gap-2 ${
-                    isMatch
-                      ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400'
-                      : 'bg-orange-500/10 border-orange-500/30 text-orange-400'
-                  }`}>
-                    <span className="text-base leading-none mt-0.5">{isMatch ? '✓' : '⚠'}</span>
+                  <div className="mt-4 mb-5 p-3 rounded-xl border text-[10px] font-bold flex items-start gap-2 bg-orange-500/10 border-orange-500/30 text-orange-400">
+                    <span className="text-base leading-none mt-0.5">⚠</span>
                     <div>
-                      <p className="uppercase tracking-widest">
-                        {isMatch ? 'Scheme match' : 'Scheme mismatch'}
-                      </p>
+                      <p className="uppercase tracking-widest">Scheme mismatch</p>
                       <p className="font-normal text-slate-400 mt-0.5">
-                        {hc.name.split(' ').at(-1)} runs <span className="font-bold text-slate-200">{preferred}</span>
-                        {isMatch
-                          ? ' — players thrive in their natural system (+morale)'
-                          : ` — current playbook is ${userTeam.activeScheme}. Expect reduced morale for scorers and Diva players.`}
+                        {hc.name.split(' ').at(-1)} prefers <span className="font-bold text-slate-200">{preferred}</span>
+                        {` — running ${userTeam.activeScheme} instead. Expect reduced morale for scorers and Diva players.`}
                       </p>
                     </div>
                   </div>

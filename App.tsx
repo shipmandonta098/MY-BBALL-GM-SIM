@@ -3934,20 +3934,21 @@ const App: React.FC = () => {
             generatePlayer(`p-${teamId}-${j}`, [19, 38], genderRatio, undefined, season)
           );
           const data = nextExpansion!;
+          const expansionHC = generateCoach(`coach-${teamId}-hc`, 'B', genderRatio, season);
           const newTeam: Team = {
             id: teamId,
             name: data.name,
             city: data.city,
             roster,
             staff: {
-              headCoach: generateCoach(`coach-${teamId}-hc`, 'B', genderRatio, season),
+              headCoach: expansionHC,
               assistantOffense: generateCoach(`coach-${teamId}-off`, 'C', genderRatio, season),
               assistantDefense: generateCoach(`coach-${teamId}-def`, 'C', genderRatio, season),
               assistantDev: generateCoach(`coach-${teamId}-dev`, 'C', genderRatio, season),
               trainer: generateCoach(`coach-${teamId}-tr`, 'C', genderRatio, season),
             },
             staffBudget: 15000000,
-            activeScheme: 'Balanced',
+            activeScheme: getCoachPreferredScheme(expansionHC),
             wins: 0, losses: 0, homeWins: 0, homeLosses: 0, roadWins: 0, roadLosses: 0, confWins: 0, confLosses: 0, lastTen: [],
             budget: 180000000,
             logo: '',
