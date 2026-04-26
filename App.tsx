@@ -18,7 +18,7 @@ import OwnerReactionModal from './components/OwnerReactionModal';
 import { calcReleaseReaction, OwnerReaction } from './utils/ownerReactionEngine';
 import { computeOffseasonGrade, computeDraftGrade, OffseasonGradeData, DraftGradeData } from './utils/offseasonGradeEngine';
 import { fmtSalary } from './utils/formatters';
-import { calcInjuryOVRPenalty, rollPotentialLoss, calcTeamEffectiveOVR } from './utils/injuryEffects';
+import { calcInjuryOVRPenalty, rollPotentialLoss, calcTeamEffectiveOVR, rollCareerEnding, rollInjuryWorsening, getPlayThroughOVRExtra, canPlayThrough } from './utils/injuryEffects';
 import { getContractRules, computeMensMarketSalary } from './utils/contractRules';
 import OffseasonGradeModal from './components/OffseasonGradeModal';
 import DraftGradeModal from './components/DraftGradeModal';
@@ -853,12 +853,46 @@ const App: React.FC = () => {
         return {
           ...t,
           roster: t.roster.map(p => {
-            if (p.status !== 'Injured' && !(p.injuryDaysLeft != null && p.injuryDaysLeft > 0)) return p;
+            const hasInjury = p.status === 'Injured' || (p.injuryDaysLeft != null && p.injuryDaysLeft > 0);
+            if (!hasInjury) return p;
+
+            // Playing-through players: roll for worsening each day; career-ending injuries don't recover
+            if (p.isPlayingThrough && p.injuryDaysLeft && p.injuryDaysLeft > 0) {
+              const isPlayoffs = !!newState.playoffBracket;
+              const newDays = rollInjuryWorsening(p.injuryDaysLeft, isPlayoffs, false);
+              if (newDays !== null) {
+                // Injury worsened — pull player back to bench with escalated timeline
+                const newPenalty = calcInjuryOVRPenalty(newDays);
+                return {
+                  ...p,
+                  isPlayingThrough: false,
+                  status: 'Injured' as PlayerStatus,
+                  injuryDaysLeft: newDays,
+                  injuryOVRPenalty: newPenalty,
+                };
+              }
+              // No worsening — decrement days, clear when healed
+              const daysLeft = (p.injuryDaysLeft ?? 1) - 1;
+              if (daysLeft <= 0) {
+                return {
+                  ...p,
+                  isPlayingThrough: false,
+                  injuryType: undefined,
+                  injuryDaysLeft: 0,
+                  injuryOVRPenalty: undefined,
+                };
+              }
+              return { ...p, injuryDaysLeft: daysLeft };
+            }
+
+            // Career-ending injuries don't tick down (sidelined for the season)
+            if (p.isCareerEnding) return p;
+
             const bonusTick = Math.random() < bonusTickChance ? 1 : 0;
             const daysLeft = (p.injuryDaysLeft ?? 1) - 1 - bonusTick;
             if (daysLeft <= 0) {
               // Roll for permanent potential loss on recovery from moderate/severe injuries
-              const originalDays = (p.injuryDaysLeft ?? 1) + 1; // approximate original duration from days-left
+              const originalDays = (p.injuryDaysLeft ?? 1) + 1;
               const potLoss = rollPotentialLoss(originalDays);
               const potentialAfter = potLoss
                 ? Math.max(p.rating, p.potential - potLoss.loss)
@@ -870,6 +904,7 @@ const App: React.FC = () => {
                 injuryType: undefined,
                 injuryDaysLeft: 0,
                 injuryOVRPenalty: undefined,
+                isCareerEnding: undefined,
                 potential: potentialAfter,
                 potentialLossNote: potLoss ? potLoss.note : p.potentialLossNote,
               };
@@ -1864,8 +1899,17 @@ const App: React.FC = () => {
     }
 
     // Apply in-game injuries
-    if (result.gameInjuries && result.gameInjuries.length > 0) {      for (const inj of result.gameInjuries) {
-        const ovrPenalty = calcInjuryOVRPenalty(inj.daysOut);
+    if (result.gameInjuries && result.gameInjuries.length > 0) {
+      const isPlayoffs = !!newState.playoffBracket;
+      for (const inj of result.gameInjuries) {
+        // Roll career-ending before applying standard injury fields
+        const injVictim = newState.teams.find(t => t.id === inj.teamId)?.roster.find(p => p.id === inj.playerId);
+        const victimAge = injVictim?.age ?? 25;
+        const isCareerEnding = rollCareerEnding(inj.daysOut, victimAge, isPlayoffs);
+        const effectiveDays = isCareerEnding ? 999 : inj.daysOut;
+        const ovrPenalty = calcInjuryOVRPenalty(isCareerEnding ? 31 : inj.daysOut); // severe penalty for career-enders
+        const potLoss = isCareerEnding ? 3 + Math.floor(Math.random() * 6) : 0;
+
         newState = {
           ...newState,
           teams: newState.teams.map(t => t.id !== inj.teamId ? t : {
@@ -1874,15 +1918,20 @@ const App: React.FC = () => {
               ...p,
               status: 'Injured' as PlayerStatus,
               injuryType: inj.injuryType as InjuryType,
-              injuryDaysLeft: inj.daysOut,
+              injuryDaysLeft: effectiveDays,
               injuryOVRPenalty: ovrPenalty,
+              isPlayingThrough: false,
+              isCareerEnding: isCareerEnding || undefined,
+              ...(isCareerEnding ? {
+                potential: Math.max(p.rating, p.potential - potLoss),
+                potentialLossNote: `Potential severely impacted by career-threatening injury (-${potLoss})`,
+              } : {}),
             })
           })
         };
         const injTeam = newState.teams.find(t => t.id === inj.teamId)!;
         const injPlayer = injTeam.roster.find(p => p.id === inj.playerId)!;
         const wks = inj.daysOut >= 14 ? ` (${Math.round(inj.daysOut / 7)} wks)` : '';
-        // Injury morale hit: short = -5, long = -12
         const injMoraleDrop = inj.daysOut >= 14 ? -12 : -5;
         newState = {
           ...newState,
@@ -1895,8 +1944,16 @@ const App: React.FC = () => {
         newState = await addNewsItem(newState, 'injury', {
           player: injPlayer, team: injTeam,
           detail: (() => {
+            if (isCareerEnding) {
+              const careerTemplates = [
+                `BREAKING: ${injPlayer.name} has suffered a potentially career-altering ${inj.injuryType}. He is ruled out for the remainder of the season. The league holds its breath.`,
+                `Heartbreaking news: ${injPlayer.name} is done for the year after a catastrophic ${inj.injuryType}. His long-term future is in serious doubt.`,
+                `${injPlayer.name} exits on a stretcher with what doctors are calling a career-threatening ${inj.injuryType}. The organization offers no timetable for his return.`,
+              ];
+              return careerTemplates[Math.floor(Math.random() * careerTemplates.length)];
+            }
             const timeStr = wks ? wks.trim() : `${inj.daysOut} day${inj.daysOut !== 1 ? 's' : ''}`;
-            const severe = inj.daysOut >= 21;
+            const severe = inj.daysOut >= 31;
             const templates = severe ? [
               `${injPlayer.name} is set for an extended absence after suffering a ${inj.injuryType}. Timeline: ${timeStr}. A significant blow to the team.`,
               `${injPlayer.name} exits with a ${inj.injuryType} and faces a lengthy recovery — the team is scrambling to adjust their rotation. Expected out ${timeStr}.`,
@@ -1908,7 +1965,7 @@ const App: React.FC = () => {
             ];
             return templates[Math.floor(Math.random() * templates.length)];
           })()
-        }, inj.daysOut >= 14);
+        }, inj.daysOut >= 14 || isCareerEnding);
       }
     }
 
@@ -3666,6 +3723,31 @@ const App: React.FC = () => {
     if (selectedPlayer?.id === playerId) setSelectedPlayer(updated);
   };
 
+  const handlePlayThroughInjury = (playerId: string) => {
+    if (!league) return;
+    const player = league.teams.find(t => t.id === league.userTeamId)?.roster.find(p => p.id === playerId);
+    if (!player || !player.injuryDaysLeft || player.isCareerEnding) return;
+    if (!canPlayThrough(player.injuryDaysLeft)) return;
+    const extraPenalty = getPlayThroughOVRExtra(player.injuryDaysLeft);
+    const updated: Player = {
+      ...player,
+      isPlayingThrough: true,
+      status: player.status === 'Injured' ? 'Rotation' : player.status,
+      injuryOVRPenalty: (player.injuryOVRPenalty ?? 0) + extraPenalty,
+    };
+    setLeague(prev => {
+      if (!prev) return prev;
+      return {
+        ...prev,
+        teams: prev.teams.map(t => ({
+          ...t,
+          roster: t.roster.map(p => p.id === playerId ? updated : p),
+        })),
+      };
+    });
+    if (selectedPlayer?.id === playerId) setSelectedPlayer(updated);
+  };
+
   const handleUpdatePlayer = (updatedPlayer: Player) => {
     if (!league) return;
     
@@ -4231,6 +4313,7 @@ const App: React.FC = () => {
             devInterventionsUsed={league.devInterventionsThisSeason ?? 0}
             devInterventionsMax={4}
             onSetTrainingFocus={handleSetTrainingFocus}
+            onPlayThroughInjury={handlePlayThroughInjury}
             isCurrentAllStar={isCurrentAllStar}
             currentAllStarRole={currentAllStarRole}
             careerAwards={careerAwards}
