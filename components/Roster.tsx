@@ -20,6 +20,8 @@ export interface RosterProps {
   onToggleWatch?: (id: string) => void;
   minRosterSize?: number;
   maxRosterSize?: number;
+  /** Offseason development deltas to show ↑/↓ next to OVR and POT */
+  devChanges?: import('../types').PlayerDevChange[];
 }
 
 const traitIcons: Record<PersonalityTrait, string> = {
@@ -81,7 +83,8 @@ const moraleInfo = (morale: number | undefined) => {
   return             { emoji: '😠', label: 'Very Low',  color: 'text-rose-400' };
 };
 
-const Roster: React.FC<RosterProps> = ({ leagueTeams, userTeamId, initialTeamId, onScout, onScoutCoach, scoutingReport, onUpdateTeamRoster, onManageTeam, godMode, watchList = [], onToggleWatch, minRosterSize = 10, maxRosterSize = 18 }) => {
+const Roster: React.FC<RosterProps> = ({ leagueTeams, userTeamId, initialTeamId, onScout, onScoutCoach, scoutingReport, onUpdateTeamRoster, onManageTeam, godMode, watchList = [], onToggleWatch, minRosterSize = 10, maxRosterSize = 18, devChanges }) => {
+  const devMap = new Map((devChanges ?? []).map(c => [c.playerId, c]));
   const [selectedTeamId, setSelectedTeamId] = useState(initialTeamId || userTeamId);
   const [searchTerm, setSearchTerm] = useState('');
   const [posFilter, setPosFilter] = useState<string>('ALL');
@@ -555,11 +558,17 @@ const Roster: React.FC<RosterProps> = ({ leagueTeams, userTeamId, initialTeamId,
                     {(() => {
                       const effRating = getEffectiveRating(player);
                       const isInj = isPlayerInjured(player);
+                      const d = devMap.get(player.id);
+                      const delta = d ? d.ovrAfter - d.ovrBefore : 0;
                       return (
                         <div className="flex flex-col items-center gap-0.5">
-                          <span className="text-2xl font-display font-black" style={{ color: isInj ? '#f43f5e' : effRating >= 85 ? activeTeam.primaryColor : effRating >= 75 ? activeTeam.secondaryColor : '#64748b' }}>
-                            {effRating}
-                          </span>
+                          <div className="flex items-center gap-1">
+                            <span className="text-2xl font-display font-black" style={{ color: isInj ? '#f43f5e' : effRating >= 85 ? activeTeam.primaryColor : effRating >= 75 ? activeTeam.secondaryColor : '#64748b' }}>
+                              {effRating}
+                            </span>
+                            {delta > 0 && <span className="text-[10px] font-black text-emerald-400 leading-none">↑{delta}</span>}
+                            {delta < 0 && <span className="text-[10px] font-black text-rose-400 leading-none">↓{Math.abs(delta)}</span>}
+                          </div>
                           {isInj && player.injuryOVRPenalty != null && (
                             <span className="text-[8px] font-black uppercase tracking-widest text-rose-500 leading-none">(Injured -{player.injuryOVRPenalty})</span>
                           )}
@@ -569,7 +578,17 @@ const Roster: React.FC<RosterProps> = ({ leagueTeams, userTeamId, initialTeamId,
                   </td>
                   <td className="px-8 py-6 text-center">
                     <div className="flex flex-col items-center gap-0.5">
-                      <span className="text-sm font-bold text-slate-500">{player.potential}</span>
+                      {(() => {
+                        const d = devMap.get(player.id);
+                        const delta = d ? d.potAfter - d.potBefore : 0;
+                        return (
+                          <div className="flex items-center gap-1">
+                            <span className="text-sm font-bold text-slate-500">{player.potential}</span>
+                            {delta > 0 && <span className="text-[9px] font-black text-emerald-500/80 leading-none">↑{delta}</span>}
+                            {delta < 0 && <span className="text-[9px] font-black text-rose-500/80 leading-none">↓{Math.abs(delta)}</span>}
+                          </div>
+                        );
+                      })()}
                       {player.potentialLossNote && (
                         <span className="text-[8px] font-black text-rose-400 leading-tight text-center">{player.potentialLossNote}</span>
                       )}

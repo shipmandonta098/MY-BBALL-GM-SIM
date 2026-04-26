@@ -913,6 +913,20 @@ export interface LeagueState {
   offseasonAlerts?: OffseasonAlert[];
   /** Number of training-focus interventions the GM has used this season (max 4). */
   devInterventionsThisSeason?: number;
+  /** Per-player development changes captured at offseason — shown in Dev Report modal. */
+  devReport?: PlayerDevChange[];
+}
+
+export interface PlayerDevChange {
+  playerId: string;
+  name: string;
+  position: string;
+  age: number;
+  ovrBefore: number;
+  ovrAfter: number;
+  potBefore: number;
+  potAfter: number;
+  hadFocus: boolean;
 }
 
 export type TransactionType = 'trade' | 'signing' | 'release' | 'hiring' | 'firing' | 'injury' | 'waiver' | 'draft';
