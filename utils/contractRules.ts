@@ -3,6 +3,8 @@ import { fmtSalary } from './formatters';
 
 export interface ContractRules {
   isWomens: boolean;
+  /** True in Women's (WNBA) leagues — payroll cannot exceed the cap except for minimum contracts */
+  isHardCap: boolean;
   salaryCap: number;
   maxPlayerSalary: number;
   minPlayerSalary: number;
@@ -141,6 +143,7 @@ export function getContractRules(league: LeagueState): ContractRules {
 
   return {
     isWomens,
+    isHardCap: isWomens,
     salaryCap: cap,
     maxPlayerSalary,
     minPlayerSalary,

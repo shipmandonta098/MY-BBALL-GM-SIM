@@ -493,8 +493,8 @@ const LeagueConfiguration: React.FC<LeagueConfigurationProps> = ({ onConfirm, on
             ? '✏ Custom Financials'
             : isWomensLeague
               ? isFutureWNBA
-                ? `📅 Historical values loaded for ${year} — Future WNBA Projection`
-                : `📅 Historical values loaded for ${year} — WNBA Era`
+                ? `📅 Historical values loaded for ${year} — Future WNBA Projection · Hard Cap · No Luxury Tax`
+                : `📅 Historical values loaded for ${year} — WNBA Era · Hard Cap · No Luxury Tax`
               : `📅 Historical values loaded for ${year}`;
           const accentColor = isWomensLeague ? 'text-violet-400' : 'text-amber-500';
           const borderColor = historicalOverride
@@ -528,9 +528,13 @@ const LeagueConfiguration: React.FC<LeagueConfigurationProps> = ({ onConfirm, on
                   Cap: {noCap ? 'None' : fmtSalary(h.salaryCap)}
                 </span>
                 <span>·</span>
-                <span>
-                  Luxury Tax: {h.luxuryTaxLine === 0 ? 'None' : fmtSalary(h.luxuryTaxLine)}
-                </span>
+                {isWomensLeague ? (
+                  <span className="text-violet-400 font-black">Hard Cap · No Luxury Tax</span>
+                ) : (
+                  <span>
+                    Luxury Tax: {h.luxuryTaxLine === 0 ? 'None' : fmtSalary(h.luxuryTaxLine)}
+                  </span>
+                )}
                 <span>·</span>
                 <span>Rookie Scale: {h.rookieScaleContracts ? 'Yes' : 'No'}</span>
                 <span>·</span>

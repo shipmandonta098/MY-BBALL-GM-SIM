@@ -129,24 +129,28 @@ const FreeAgency: React.FC<FreeAgencyProps> = ({
   /** Tracks which player IDs have already had offer-sheet generation attempted */
   const rfaOffersProcessed = useRef<Set<string>>(new Set());
 
+  // ── Contract rules (gender + era aware) ──
+  const rules = useMemo(() => getContractRules(league), [league.settings]);
+  const isWomens = rules.isWomens;
+  const isHardCap = rules.isHardCap;
+  const VET_MIN = rules.minPlayerSalary;
+
   // ── Cap math ──
-  const salaryCap  = league.settings.salaryCap  || 140_000_000;
-  const luxuryTax  = league.settings.luxuryTaxLine || 170_000_000;
-  // NBA apron thresholds (proportional to cap)
-  const firstApron  = salaryCap + 56_000_000;   // ~$196M on $140M cap (first apron)
-  const secondApron = salaryCap + 68_000_000;   // ~$208M on $140M cap (second apron / hard cap)
+  const salaryCap  = league.settings.salaryCap  || (isWomens ? 2_200_000 : 140_000_000);
+  const luxuryTax  = league.settings.luxuryTaxLine || (isWomens ? salaryCap : 170_000_000);
+  // Women's leagues: hard cap = salary cap, no aprons. NBA: soft cap with apron tiers.
+  const firstApron  = isWomens ? salaryCap : salaryCap + 56_000_000;
+  const secondApron = isWomens ? salaryCap : salaryCap + 68_000_000;
   const userTeam = league.teams.find(t => t.id === league.userTeamId)!;
   const currentSalary = userTeam.roster.reduce((sum, p) => sum + (p.salary || 0), 0);
   const capSpace = salaryCap - currentSalary;
   const isOverCap   = capSpace < 0;
-  const isOverLux   = currentSalary > luxuryTax;
-  const isOverFirst  = currentSalary > firstApron;
-  const isOverSecond = currentSalary > secondApron;
-
-  // ── Contract rules (gender + era aware) ──
-  const rules = useMemo(() => getContractRules(league), [league.settings]);
-  const VET_MIN = rules.minPlayerSalary;
-  const canSignMin = !isOverSecond;
+  // Women's: no luxury tax concept
+  const isOverLux   = !isWomens && currentSalary > luxuryTax;
+  const isOverFirst  = !isWomens && currentSalary > firstApron;
+  const isOverSecond = !isWomens && currentSalary > secondApron;
+  // Women's hard cap: can always sign minimum deals, but nothing above cap
+  const canSignMin = isWomens ? true : !isOverSecond;
 
   // ── Gender-aware desired salary (shadows module-level getDesired) ──
   const getDesired = (p: Player) => ({
@@ -401,6 +405,11 @@ const FreeAgency: React.FC<FreeAgencyProps> = ({
       alert(`Offer exceeds the league max contract (${rules.maxSalaryLabel}). Reduce the salary.`);
       return;
     }
+    // Women's hard cap: block any offer above cap space unless it's a minimum deal
+    if (isHardCap && isOverCap && offer.salary > VET_MIN) {
+      alert(`WNBA Hard Cap: payroll already exceeds the salary cap. Only minimum contracts (${fmt(VET_MIN)}/yr) may be offered.`);
+      return;
+    }
     setIsSubmitting(true);
     setNegotiationResult(null);
 
@@ -602,21 +611,37 @@ const FreeAgency: React.FC<FreeAgencyProps> = ({
       const desired = getDesired(player, rules.year, rules.isWomens);
       const years = desired.years + (Math.random() < 0.3 ? 1 : 0);
       const salaryMult = 0.85 + Math.random() * 0.3;
-      const aiCapLine = league.settings.salaryCap || 140_000_000;
+      const aiCapLine = league.settings.salaryCap || (rules.isWomens ? 2_200_000 : 140_000_000);
       const teamSalary = team.roster.reduce((s, p) => s + (p.salary || 0), 0);
       const teamCapSpace = aiCapLine - teamSalary;
-      const aiSecondApron = aiCapLine + 68_000_000;
-      // Hard cap check: teams at/over second apron cannot sign anyone
-      if (teamSalary >= aiSecondApron) continue;
+
+      if (rules.isWomens) {
+        // Women's hard cap: teams over cap can only sign minimum deals
+        if (teamSalary >= aiCapLine + rules.minPlayerSalary) continue; // no room even for a min deal
+      } else {
+        // NBA: teams at/over second apron cannot sign anyone
+        const aiSecondApron = aiCapLine + 68_000_000;
+        if (teamSalary >= aiSecondApron) continue;
+      }
+
       const increment = rules.isWomens ? 5_000 : 250_000;
       const rawSalary = Math.round((desired.salary * salaryMult) / increment) * increment;
       const cappedSalary = Math.min(rawSalary, rules.maxPlayerSalary);
-      // Soft cap: over cap but under 2nd apron → minimum only; otherwise use cap space
-      const salary = teamCapSpace >= cappedSalary
-        ? cappedSalary                                       // has full space
-        : teamCapSpace > 0
-          ? Math.max(rules.minPlayerSalary, teamCapSpace)   // partial space: use what's available
-          : rules.minPlayerSalary;                          // over soft cap: veteran minimum only
+
+      let salary: number;
+      if (rules.isWomens) {
+        // Hard cap: can only sign within remaining cap space; minimum always allowed
+        salary = teamCapSpace >= cappedSalary
+          ? cappedSalary                   // fits under hard cap
+          : rules.minPlayerSalary;         // over cap: minimum exception only
+      } else {
+        // Soft cap: over cap but under 2nd apron → minimum only; otherwise use cap space
+        salary = teamCapSpace >= cappedSalary
+          ? cappedSalary                                       // has full space
+          : teamCapSpace > 0
+            ? Math.max(rules.minPlayerSalary, teamCapSpace)   // partial space: use what's available
+            : rules.minPlayerSalary;                          // over soft cap: veteran minimum only
+      }
 
       const totalValue = salary * years;
       const tx: Transaction = {
@@ -814,8 +839,8 @@ const FreeAgency: React.FC<FreeAgencyProps> = ({
               ) : null}
             </div>
 
-            {/* Luxury tax indicator */}
-            {currentSalary > salaryCap * 0.9 && (
+            {/* Luxury tax indicator — NBA only; women's leagues have no luxury tax */}
+            {!isWomens && currentSalary > salaryCap * 0.9 && (
               <div className={`px-5 py-3 rounded-2xl border text-center min-w-[110px] ${
                 isOverLux ? 'bg-rose-900/20 border-rose-500/30' : 'bg-amber-900/20 border-amber-500/30'
               }`}>
@@ -824,6 +849,20 @@ const FreeAgency: React.FC<FreeAgencyProps> = ({
                 </p>
                 <p className={`text-xl font-display font-bold ${isOverLux ? 'text-rose-400' : 'text-amber-400'}`}>
                   {isOverLux ? '+' : ''}{fmt(Math.abs(currentSalary - luxuryTax))}
+                </p>
+              </div>
+            )}
+            {/* Women's hard cap badge */}
+            {isWomens && (
+              <div className={`px-5 py-3 rounded-2xl border text-center min-w-[120px] ${
+                isOverCap ? 'bg-rose-900/30 border-rose-500/50' : 'bg-violet-500/10 border-violet-500/25'
+              }`}>
+                <p className="text-[10px] text-slate-500 uppercase font-bold mb-0.5">Hard Cap</p>
+                <p className={`text-xl font-display font-bold ${isOverCap ? 'text-rose-400' : 'text-violet-300'}`}>
+                  {isOverCap ? `-${fmt(Math.abs(capSpace))}` : fmt(capSpace)}
+                </p>
+                <p className={`text-[9px] font-bold uppercase mt-0.5 ${isOverCap ? 'text-rose-400' : 'text-violet-400/70'}`}>
+                  {isOverCap ? 'Min deals only' : 'No lux tax'}
                 </p>
               </div>
             )}
@@ -851,39 +890,62 @@ const FreeAgency: React.FC<FreeAgencyProps> = ({
         <div className="relative z-10 mt-5">
           <div className="flex justify-between text-[10px] text-slate-600 font-bold uppercase mb-1">
             <span>Payroll</span>
-            <span className={isOverSecond ? 'text-rose-400' : isOverFirst ? 'text-orange-400' : isOverCap ? 'text-amber-400' : 'text-slate-500'}>
-              {fmt(currentSalary)} / {fmt(salaryCap)} cap
-              {isOverSecond ? ' · ⚠ 2ND APRON' : isOverFirst ? ' · 1ST APRON' : isOverLux ? ' · LUX TAX' : ''}
+            <span className={
+              isWomens
+                ? isOverCap ? 'text-rose-400' : 'text-violet-400'
+                : isOverSecond ? 'text-rose-400' : isOverFirst ? 'text-orange-400' : isOverCap ? 'text-amber-400' : 'text-slate-500'
+            }>
+              {fmt(currentSalary)} / {fmt(salaryCap)} {isWomens ? 'hard cap' : 'cap'}
+              {isWomens
+                ? isOverCap ? ' · ⚠ HARD CAP EXCEEDED' : ''
+                : isOverSecond ? ' · ⚠ 2ND APRON' : isOverFirst ? ' · 1ST APRON' : isOverLux ? ' · LUX TAX' : ''}
             </span>
           </div>
-          {/* Bar scales to secondApron as 100% */}
-          <div className="h-2 bg-slate-800 rounded-full overflow-hidden">
-            <div
-              className={`h-full rounded-full transition-all duration-700 ${
-                isOverSecond ? 'bg-rose-600' : isOverFirst ? 'bg-orange-500' : isOverLux ? 'bg-amber-500' : isOverCap ? 'bg-orange-400' : 'bg-emerald-500'
-              }`}
-              style={{ width: `${Math.min(100, (currentSalary / secondApron) * 100)}%` }}
-            />
-          </div>
-          {/* Cap / lux / first-apron / second-apron tick marks */}
-          <div className="relative h-3">
-            {[
-              { val: salaryCap,   label: 'Cap',      color: 'bg-slate-500/70' },
-              { val: luxuryTax,   label: 'Tax',      color: 'bg-amber-500/60' },
-              { val: firstApron,  label: '1st',      color: 'bg-orange-500/60' },
-              { val: secondApron, label: '2nd',      color: 'bg-rose-500/60'   },
-            ].map(({ val, label, color }) => {
-              const pct = Math.min(99, (val / secondApron) * 100);
-              return (
-                <div key={label} className="absolute top-0 flex flex-col items-center" style={{ left: `${pct}%` }}>
-                  <div className={`w-0.5 h-2 ${color}`} />
-                  <span className={`text-[8px] font-black uppercase tracking-wide -translate-x-1/2 ${color.replace('bg-', 'text-').replace('/60', '/80').replace('/70', '/80')}`}>{label}</span>
+          {/* Bar scales to hard cap×1.15 for women's, secondApron for NBA */}
+          {(() => {
+            const barMax = isWomens ? salaryCap * 1.15 : secondApron;
+            const barColor = isWomens
+              ? isOverCap ? 'bg-rose-600' : currentSalary > salaryCap * 0.9 ? 'bg-amber-500' : 'bg-violet-500'
+              : isOverSecond ? 'bg-rose-600' : isOverFirst ? 'bg-orange-500' : isOverLux ? 'bg-amber-500' : isOverCap ? 'bg-orange-400' : 'bg-emerald-500';
+            const ticks = isWomens
+              ? [
+                  { val: salaryCap, label: 'Hard Cap', color: 'bg-rose-500/70' },
+                ]
+              : [
+                  { val: salaryCap,   label: 'Cap', color: 'bg-slate-500/70' },
+                  { val: luxuryTax,   label: 'Tax', color: 'bg-amber-500/60' },
+                  { val: firstApron,  label: '1st', color: 'bg-orange-500/60' },
+                  { val: secondApron, label: '2nd', color: 'bg-rose-500/60'   },
+                ];
+            return (
+              <>
+                <div className="h-2 bg-slate-800 rounded-full overflow-hidden">
+                  <div
+                    className={`h-full rounded-full transition-all duration-700 ${barColor}`}
+                    style={{ width: `${Math.min(100, (currentSalary / barMax) * 100)}%` }}
+                  />
                 </div>
-              );
-            })}
-          </div>
-          {/* Second-apron hard-stop warning */}
-          {isOverSecond && (
+                <div className="relative h-3">
+                  {ticks.map(({ val, label, color }) => {
+                    const pct = Math.min(99, (val / barMax) * 100);
+                    return (
+                      <div key={label} className="absolute top-0 flex flex-col items-center" style={{ left: `${pct}%` }}>
+                        <div className={`w-0.5 h-2 ${color}`} />
+                        <span className={`text-[8px] font-black uppercase tracking-wide -translate-x-1/2 ${color.replace('bg-', 'text-').replace('/60', '/80').replace('/70', '/80')}`}>{label}</span>
+                      </div>
+                    );
+                  })}
+                </div>
+              </>
+            );
+          })()}
+          {/* Hard-stop warnings */}
+          {isWomens && isOverCap && (
+            <p className="mt-1 text-[10px] font-bold text-rose-400 uppercase tracking-wide">
+              ⚫ WNBA Hard Cap Exceeded — only minimum contracts may be signed. Waive players to comply.
+            </p>
+          )}
+          {!isWomens && isOverSecond && (
             <p className="mt-1 text-[10px] font-bold text-rose-400 uppercase tracking-wide">
               ⚠ Second Apron — roster moves severely restricted. Waive players to regain flexibility.
             </p>
@@ -1167,12 +1229,16 @@ const FreeAgency: React.FC<FreeAgencyProps> = ({
                 {filteredFAs.map(p => {
                   const interest = interestLabel(p.interestScore ?? 50);
                   const desired = getDesired(p, rules.year, rules.isWomens);
-                  // Full deal: needs actual cap space. Min deal: always OK under soft cap (unless 2nd apron)
-                  const canSignFull = isInSeason
-                    ? capSpace >= desired.salary * 0.8
-                    : !moratoriumActive && capSpace >= desired.salary * 0.7;
-                  const canSign = canSignFull || canSignMin; // min exception always opens the door
-                  const minOnlyMode = !canSignFull && canSignMin; // over cap but minimum still available
+                  // Women's hard cap: need actual cap space for any deal above minimum.
+                  // NBA soft cap: min exception always available up to 2nd apron.
+                  const canSignFull = isHardCap
+                    ? capSpace >= desired.salary   // strict hard cap — must have full room
+                    : isInSeason
+                      ? capSpace >= desired.salary * 0.8
+                      : !moratoriumActive && capSpace >= desired.salary * 0.7;
+                  const canSign = canSignFull || canSignMin;
+                  // minOnlyMode: over cap but min contracts are still permitted
+                  const minOnlyMode = !canSignFull && canSignMin;
                   // Re-sign context: player previously on this team
                   const isFormerPlayer = p.lastTeamId === userTeam.id;
                   // Low morale blocks re-signing (bad relationship with org)
@@ -1638,7 +1704,24 @@ const FreeAgency: React.FC<FreeAgencyProps> = ({
                       </p>
                     </div>
                   )}
-                  {isOverCap && !isOverSecond && (
+                  {/* Women's hard cap warning — blocks all non-minimum offers when over cap */}
+                  {isHardCap && isOverCap && offer.salary > VET_MIN && (
+                    <div className="flex items-center gap-2 bg-rose-500/10 border border-rose-500/40 rounded-xl p-3">
+                      <span className="text-rose-400">🚫</span>
+                      <p className="text-[11px] text-rose-400 font-bold">
+                        WNBA Hard Cap — payroll exceeds the salary cap. Only minimum contracts ({fmt(VET_MIN)}/yr) may be signed. Waive players to create room.
+                      </p>
+                    </div>
+                  )}
+                  {isHardCap && isOverCap && offer.salary <= VET_MIN && (
+                    <div className="flex items-center gap-2 bg-violet-500/10 border border-violet-500/20 rounded-xl p-3">
+                      <span className="text-violet-400">ℹ</span>
+                      <p className="text-[11px] text-violet-300 font-bold">
+                        Over hard cap — minimum contract exception applies. This offer qualifies.
+                      </p>
+                    </div>
+                  )}
+                  {!isHardCap && isOverCap && !isOverSecond && (
                     <div className="flex items-center gap-2 bg-amber-500/10 border border-amber-500/20 rounded-xl p-3">
                       <span className="text-amber-400">⚠</span>
                       <p className="text-[11px] text-amber-400 font-bold">
@@ -1646,7 +1729,7 @@ const FreeAgency: React.FC<FreeAgencyProps> = ({
                       </p>
                     </div>
                   )}
-                  {isOverSecond && (
+                  {!isHardCap && isOverSecond && (
                     <div className="flex items-center gap-2 bg-rose-500/10 border border-rose-500/20 rounded-xl p-3">
                       <span className="text-rose-400">🚫</span>
                       <p className="text-[11px] text-rose-400 font-bold">
@@ -1671,8 +1754,21 @@ const FreeAgency: React.FC<FreeAgencyProps> = ({
                 {negotiationResult !== 'declined' && (
                   <button
                     onClick={submitOffer}
-                    disabled={isSubmitting || offer.salary <= 0 || isOverSecond || offer.salary > rules.maxPlayerSalary || (isOverCap && offer.salary > VET_MIN * 2)}
-                    title={isOverSecond ? 'Hard cap — no signings' : offer.salary > rules.maxPlayerSalary ? `Exceeds ${rules.maxSalaryLabel}` : (isOverCap && offer.salary > VET_MIN * 2) ? `Over cap — max offer is ${fmt(VET_MIN * 2)} (minimum exception)` : undefined}
+                    disabled={
+                      isSubmitting ||
+                      offer.salary <= 0 ||
+                      offer.salary > rules.maxPlayerSalary ||
+                      (!isHardCap && isOverSecond) ||
+                      (!isHardCap && isOverCap && offer.salary > VET_MIN * 2) ||
+                      (isHardCap && isOverCap && offer.salary > VET_MIN)
+                    }
+                    title={
+                      !isHardCap && isOverSecond ? 'Hard cap — no signings' :
+                      offer.salary > rules.maxPlayerSalary ? `Exceeds ${rules.maxSalaryLabel}` :
+                      !isHardCap && isOverCap && offer.salary > VET_MIN * 2 ? `Over cap — max offer is ${fmt(VET_MIN * 2)} (minimum exception)` :
+                      isHardCap && isOverCap && offer.salary > VET_MIN ? `WNBA Hard Cap — minimum contracts only (${fmt(VET_MIN)}/yr)` :
+                      undefined
+                    }
                     className="flex-1 py-3 bg-emerald-500 hover:bg-emerald-400 disabled:opacity-50 disabled:cursor-not-allowed text-slate-950 font-display font-black uppercase text-sm rounded-xl transition-all active:scale-95 shadow-lg shadow-emerald-500/20"
                   >
                     {isSubmitting ? (
@@ -1683,7 +1779,13 @@ const FreeAgency: React.FC<FreeAgencyProps> = ({
                         </svg>
                         Consulting Agent…
                       </span>
-                    ) : offer.salary > rules.maxPlayerSalary ? `Over Max (${rules.maxSalaryLabel})` : isOverCap && offer.salary > VET_MIN * 2 ? 'Reduce to Min Contract' : 'Send Offer'}
+                    ) : offer.salary > rules.maxPlayerSalary
+                      ? `Over Max (${rules.maxSalaryLabel})`
+                      : isHardCap && isOverCap && offer.salary > VET_MIN
+                        ? 'Hard Cap — Min Only'
+                        : !isHardCap && isOverCap && offer.salary > VET_MIN * 2
+                          ? 'Reduce to Min Contract'
+                          : 'Send Offer'}
                   </button>
                 )}
                 {negotiationResult === 'declined' && (

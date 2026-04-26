@@ -75,17 +75,26 @@ const Draft: React.FC<DraftProps> = ({ league, updateLeague, onScout, scoutingRe
     setIsSimming(true);
   };
 
+  const draftRules = getContractRules(league);
+
   const makePick = (teamId: string, prospect: Prospect) => {
     const team = league.teams.find(t => t.id === teamId)!;
-    const draftRules = getContractRules(league);
     const pickRound = (league.draftPicks?.[league.currentDraftPickIndex || 0]?.round) ?? 1;
     const rookieSalary = computeRookieSalary(prospect.rating, pickRound, draftRules);
+    // WNBA rookie scale: 1-4 year contracts with a team option on the final year
+    const contractYears = Math.min(draftRules.maxContractYears, league.settings.maxContractYears ?? (draftRules.isWomens ? 4 : 4));
     const newPlayer: Player = {
       ...prospect,
       salary: rookieSalary,
-      contractYears: Math.min(draftRules.maxContractYears, league.settings.maxContractYears ?? 4),
+      contractYears,
       status: 'Rotation',
       morale: 85,
+      // WNBA rookies get a team option on the last year of their scale contract
+      ...(draftRules.isWomens && {
+        isRookieContract: true,
+        teamOption: contractYears > 1,
+        teamOptionYear: contractYears,
+      }),
       stats: {
         points: 0, rebounds: 0, offReb: 0, defReb: 0, assists: 0, steals: 0, blocks: 0,
         gamesPlayed: 0, gamesStarted: 0, minutes: 0, fgm: 0, fga: 0,
@@ -267,6 +276,45 @@ const Draft: React.FC<DraftProps> = ({ league, updateLeague, onScout, scoutingRe
 
   // ─── DRAFT COMPLETE PHASE ─────────────────────────────────────────────────
   if (league.draftPhase === 'completed') {
+    // WNBA: rookies the user drafted this offseason — waivable before the regular season
+    const userRookies = draftRules.isWomens
+      ? userTeam.roster.filter(p => p.isRookieContract)
+      : [];
+
+    const waiveRookie = (player: Player) => {
+      const releasedPlayer: Player = {
+        ...player,
+        isFreeAgent: true,
+        isRookieContract: false,
+        teamOption: false,
+        faType: 'UFA' as const,
+        lastTeamId: userTeam.id,
+        inSeasonFA: false,
+        salary: 0,
+        contractYears: 0,
+        interestScore: Math.max(40, (player.interestScore ?? 50) - 10),
+      };
+      const updatedTeams = league.teams.map(t =>
+        t.id === userTeam.id
+          ? { ...t, roster: t.roster.filter(p => p.id !== player.id) }
+          : t
+      );
+      const existingFAIds = new Set(league.freeAgents.map(p => p.id));
+      const updatedFAs = existingFAIds.has(releasedPlayer.id)
+        ? league.freeAgents
+        : [...league.freeAgents, releasedPlayer];
+      const newsItem = {
+        id: `rookie-waive-${Date.now()}-${player.id}`,
+        category: 'transaction' as const,
+        headline: `✂ WAIVED: ${player.name} (Rookie)`,
+        content: `The ${userTeam.name} have waived rookie ${player.name} (${player.position}, ${player.rating} OVR) before the regular season. She is now an unrestricted free agent.`,
+        timestamp: league.currentDay,
+        realTimestamp: Date.now(),
+        isBreaking: false,
+      };
+      updateLeague({ teams: updatedTeams, freeAgents: updatedFAs, newsFeed: [newsItem, ...league.newsFeed] });
+    };
+
     return (
       <div className="space-y-8 animate-in fade-in duration-500 pb-40">
         <div className="bg-gradient-to-br from-emerald-900/40 to-slate-900 border border-emerald-500/20 rounded-[3rem] p-16 text-center shadow-2xl">
@@ -286,6 +334,48 @@ const Draft: React.FC<DraftProps> = ({ league, updateLeague, onScout, scoutingRe
             </button>
           )}
         </div>
+
+        {/* ── WNBA rookie waiver panel ──────────────────────────────────────── */}
+        {draftRules.isWomens && userRookies.length > 0 && (
+          <div className="bg-slate-900 border border-violet-500/20 rounded-3xl overflow-hidden shadow-2xl">
+            <div className="p-6 border-b border-slate-800 flex items-start justify-between flex-wrap gap-3">
+              <div>
+                <p className="text-[10px] font-black uppercase tracking-[0.4em] text-violet-400 mb-1">WNBA — Pre-Season Roster Decisions</p>
+                <h3 className="text-lg font-display font-bold uppercase text-white">Your Drafted Rookies</h3>
+                <p className="text-xs text-slate-400 mt-1">
+                  WNBA teams may waive drafted rookies before the regular season. Waived rookies become unrestricted free agents and are no longer on rookie scale.
+                </p>
+              </div>
+              <span className="text-[10px] font-black uppercase tracking-widest px-3 py-1.5 rounded-full bg-violet-500/10 border border-violet-500/25 text-violet-400">
+                {userRookies.length} Rookie{userRookies.length !== 1 ? 's' : ''}
+              </span>
+            </div>
+            <div className="divide-y divide-slate-800/50">
+              {userRookies.map(p => (
+                <div key={p.id} className="flex items-center justify-between gap-4 px-6 py-4 hover:bg-slate-800/20 transition-all">
+                  <div className="flex-1 min-w-0">
+                    <p className="font-bold text-slate-200 uppercase tracking-tight">{p.name}</p>
+                    <p className="text-[10px] text-slate-500 font-bold uppercase mt-0.5">
+                      {p.position} · {p.rating} OVR · {p.age} yrs
+                    </p>
+                  </div>
+                  <div className="text-right shrink-0">
+                    <p className="text-xs font-mono text-violet-300 font-bold">{p.contractYears}yr / ${p.salary.toLocaleString()}</p>
+                    <p className="text-[9px] text-slate-600 uppercase font-bold mt-0.5">
+                      Rookie Scale · Team Option Yr {p.teamOptionYear ?? p.contractYears}
+                    </p>
+                  </div>
+                  <button
+                    onClick={() => waiveRookie(p)}
+                    className="ml-2 px-4 py-2 text-[10px] font-black uppercase rounded-lg border border-rose-500/30 bg-rose-500/10 text-rose-400 hover:bg-rose-500/25 transition-all active:scale-95 shrink-0"
+                  >
+                    Waive Rookie
+                  </button>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
 
         {draftLog.length > 0 && (
           <div className="bg-slate-900 border border-slate-800 rounded-3xl p-6">

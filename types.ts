@@ -404,6 +404,8 @@ export interface Player {
   };
 
   // ── Contract extensions ──────────────────────────────────────────────────
+  /** True when this is a WNBA rookie scale contract; waivable before regular season */
+  isRookieContract?: boolean;
   /** Free-agency classification once contract expires */
   faType?: 'UFA' | 'RFA';
   /** True when the TEAM holds an option on this contract */
