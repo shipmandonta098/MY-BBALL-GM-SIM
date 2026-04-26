@@ -24,6 +24,7 @@ interface FreeAgencyProps {
     value?: number
   ) => Transaction[];
   onAdvanceSeason?: () => void;
+  onBeginTransition?: () => void;
 }
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
@@ -78,6 +79,7 @@ const FreeAgency: React.FC<FreeAgencyProps> = ({
   onScout,
   recordTransaction,
   onAdvanceSeason,
+  onBeginTransition,
 }) => {
   // ── Market tab ──
   const [marketTab, setMarketTab] = useState<'available' | 'upcoming'>('available');
@@ -683,6 +685,7 @@ const FreeAgency: React.FC<FreeAgencyProps> = ({
   // ── Advance to Next Season — simulate all remaining FA days then begin preseason ──
   const advanceToNextSeason = () => {
     if (league.draftPhase !== 'completed' || !onAdvanceSeason) return;
+    onBeginTransition?.(); // show loading overlay immediately before any work
 
     let updatedFAs = [...league.freeAgents];
     const allNews: typeof league.newsFeed = [];

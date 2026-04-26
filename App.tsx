@@ -142,6 +142,7 @@ const App: React.FC = () => {
   const [bulkSummary, setBulkSummary] = useState<BulkSimSummary | null>(null);
   const leagueRef = React.useRef<LeagueState | null>(null);
   leagueRef.current = league;
+  const [isSeasonTransitioning, setIsSeasonTransitioning] = useState(false);
 
   // Offseason grade modal state
   const [offseasonGradeData, setOffseasonGradeData] = useState<OffseasonGradeData | null>(null);
@@ -3611,12 +3612,18 @@ const App: React.FC = () => {
     }
 
     // ── Case 2: After offseason (or first season init) → enter Preseason ─
-    const numPreseasonGames = league.settings.preseasonGames ?? 6;
-    const freshPreseasonSchedule = generatePreseasonSchedule(league.teams, numPreseasonGames);
-    const needsFreshSchedule = league.isOffseason || league.schedule.every(g => g.played);
+    // Show loading overlay immediately, then defer expensive schedule generation
+    // to the next animation frame so React paints the overlay before JS blocks.
+    setIsSeasonTransitioning(true);
+    await new Promise<void>(resolve => requestAnimationFrame(() => setTimeout(resolve, 0)));
+
+    const snap = leagueRef.current!; // always current after async yield
+    const numPreseasonGames = snap.settings.preseasonGames ?? 6;
+    const freshPreseasonSchedule = generatePreseasonSchedule(snap.teams, numPreseasonGames);
+    const needsFreshSchedule = snap.isOffseason || snap.schedule.every(g => g.played);
     const newSchedule = needsFreshSchedule
-      ? generateSeasonSchedule(league.teams, league.settings.seasonLength, league.settings.divisionGames, league.settings.conferenceGames)
-      : league.schedule;
+      ? generateSeasonSchedule(snap.teams, snap.settings.seasonLength, snap.settings.divisionGames, snap.settings.conferenceGames)
+      : snap.schedule;
     setLeague(prev => {
       if (!prev) return null;
       const nextSeason = prev.season;
@@ -3683,6 +3690,11 @@ const App: React.FC = () => {
         devReport: undefined,
       };
     });
+    // Navigate to schedule so the user lands on preseason content (not free agency)
+    setActiveTab('schedule');
+    // Hold overlay briefly so IndexedDB auto-save can start before UI unlocks
+    await new Promise<void>(resolve => setTimeout(resolve, 150));
+    setIsSeasonTransitioning(false);
   };
 
   const handleScoutPlayer = async (player: Player | Prospect) => { setLoading(true); const report = await generateScoutingReport(player); setScoutingReport({ playerId: player.id, report }); setLoading(false); };
@@ -4137,7 +4149,7 @@ const App: React.FC = () => {
           {activeTab === 'expansion' && <Expansion league={league} updateLeague={updateLeagueState} onScout={handleViewPlayer} />}
           {activeTab === 'roster' && <Roster leagueTeams={league.teams} userTeamId={league.userTeamId} initialTeamId={rosterTeamId} onScout={handleViewPlayer} onScoutCoach={handleScoutCoach} scoutingReport={scoutingReport} onUpdateTeamRoster={handleUpdateTeamRoster} onManageTeam={handleManageTeam} godMode={league.settings.godMode} watchList={league.watchList ?? []} onToggleWatch={handleToggleWatch} minRosterSize={league.settings.minRosterSize ?? 10} maxRosterSize={league.settings.maxRosterSize ?? 18} devChanges={league.devReport} />}
           {activeTab === 'rotations' && <Rotations league={league} updateLeague={updateLeagueState} />}
-          {activeTab === 'free_agency' && <FreeAgency league={league} updateLeague={updateLeagueState} onScout={handleViewPlayer} recordTransaction={recordTransaction} onAdvanceSeason={handleAdvanceToRegularSeason} />}
+          {activeTab === 'free_agency' && <FreeAgency league={league} updateLeague={updateLeagueState} onScout={handleViewPlayer} recordTransaction={recordTransaction} onAdvanceSeason={handleAdvanceToRegularSeason} onBeginTransition={() => setIsSeasonTransitioning(true)} />}
           {activeTab === 'coach_market' && <CoachesMarket league={league} updateLeague={updateLeagueState} onScout={handleScoutCoach} />}
           {activeTab === 'awards' && <Awards league={league} onScout={handleViewPlayer} onScoutCoach={handleScoutCoach} onManageTeam={handleManageTeam} />}
           {activeTab === 'playoffs' && <Playoffs league={league} updateLeague={updateLeagueState} onStartOffseason={handleStartOffseason} onScout={handleViewPlayer} onViewBoxScore={(res, home, away) => setViewingBoxScore({ result: res, home, away })} onAddNews={async (cat, data, breaking) => {
@@ -4492,6 +4504,19 @@ const App: React.FC = () => {
             setWatchingGame(null);
           }}
         />
+      )}
+      {/* ── Season Transition Loading Overlay ────────────────────────────────── */}
+      {/* z-[100] sits above main content but below grade modal (z-110) and dev report (z-9500) */}
+      {isSeasonTransitioning && (
+        <div className="fixed inset-0 z-[100] bg-slate-950/95 backdrop-blur-sm flex flex-col items-center justify-center gap-6 animate-in fade-in duration-200">
+          <div className="w-16 h-16 border-4 border-slate-700 border-t-amber-500 rounded-full animate-spin" />
+          <div className="text-center">
+            <p className="font-display font-bold text-2xl uppercase tracking-widest text-white mb-2">
+              Advancing to {(league?.season ?? 2025) + 1} Preseason
+            </p>
+            <p className="text-slate-500 text-sm">Generating schedule &amp; applying development…</p>
+          </div>
+        </div>
       )}
     </div>
     </NavigationProvider>
