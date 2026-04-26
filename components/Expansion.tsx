@@ -323,6 +323,61 @@ const Expansion: React.FC<ExpansionProps> = ({ league, updateLeague, onScout }) 
   );
 
   // ══════════════════════════════════════════════════════════════════════════
+  // SCREEN 0: Season not yet complete — locked until offseason
+  // ══════════════════════════════════════════════════════════════════════════
+  const isWomensLeague = (league.settings.playerGenderRatio ?? 0) === 100;
+  const finalsLabel = isWomensLeague ? 'WNBA Finals' : 'NBA Finals';
+
+  if (!league.isOffseason && !draftState?.active) {
+    return (
+      <div className="space-y-8 animate-in fade-in duration-500 pb-40">
+        <PageHeader
+          title="Expansion Draft"
+          sub="Add a new franchise to your league"
+          badge="Locked"
+        />
+        <div className="bg-slate-900 border border-slate-800 rounded-3xl p-12 text-center space-y-6">
+          <div className="w-20 h-20 bg-slate-800 rounded-full flex items-center justify-center mx-auto">
+            <svg className="w-10 h-10 text-slate-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.5" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
+            </svg>
+          </div>
+          <div>
+            <p className="text-2xl font-display font-bold uppercase text-slate-400 tracking-wide mb-2">
+              Expansion Draft Locked
+            </p>
+            <p className="text-slate-500 text-sm max-w-md mx-auto">
+              The Expansion Draft becomes available after the{' '}
+              <span className="text-slate-300 font-semibold">{finalsLabel}</span>{' '}
+              conclude. Complete the current season — playoffs and championship — then return here during the offseason.
+            </p>
+          </div>
+          <div className="flex items-center justify-center gap-3 pt-2">
+            <div className="h-px flex-1 max-w-24 bg-slate-800" />
+            <span className="text-[10px] font-black uppercase tracking-widest text-slate-600">When it unlocks</span>
+            <div className="h-px flex-1 max-w-24 bg-slate-800" />
+          </div>
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 max-w-xl mx-auto text-left">
+            {[
+              { n: '1', t: 'Finish the Season', d: 'Complete all regular season games' },
+              { n: '2', t: 'Win the Championship', d: `Play through the playoffs and ${finalsLabel}` },
+              { n: '3', t: 'Enter Offseason', d: 'Expansion unlocks automatically once the season ends' },
+            ].map(step => (
+              <div key={step.n} className="bg-slate-950 border border-slate-800 rounded-2xl p-4 flex gap-3">
+                <span className="text-2xl font-display font-black text-slate-700">{step.n}</span>
+                <div>
+                  <p className="font-bold text-slate-300 text-sm">{step.t}</p>
+                  <p className="text-slate-600 text-xs mt-0.5">{step.d}</p>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // ══════════════════════════════════════════════════════════════════════════
   // SCREEN 1: Not enabled
   // ══════════════════════════════════════════════════════════════════════════
   if (!enabled) {
