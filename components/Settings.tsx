@@ -12,7 +12,7 @@ interface SettingsProps {
   onRegenerateSchedule?: () => Promise<boolean>;
 }
 
-type SettingsTab = 'league' | 'gameplay' | 'sliders' | 'simulation' | 'godmode' | 'appearance';
+type SettingsTab = 'league' | 'gameplay' | 'sliders' | 'simulation' | 'godmode' | 'appearance' | 'data';
 
 interface ChangeEntry {
   field: string;
@@ -180,6 +180,7 @@ const SEARCH_INDEX: { tab: SettingsTab; label: string }[] = [
 const TAB_LABELS: Record<SettingsTab, string> = {
   league: 'League', gameplay: 'Gameplay', sliders: 'Sliders',
   simulation: 'Simulation', godmode: 'God Mode', appearance: 'Appearance',
+  data: 'Save Data',
 };
 
 const Settings: React.FC<SettingsProps> = ({ league, updateLeague, onRegenerateSchedule }) => {
@@ -196,6 +197,10 @@ const Settings: React.FC<SettingsProps> = ({ league, updateLeague, onRegenerateS
   const [regenSuccess, setRegenSuccess]             = useState(false);
   const [regenError, setRegenError]                 = useState(false);
   const [regenLoading, setRegenLoading]             = useState(false);
+  // Data management
+  const [dataConfirm, setDataConfirm] = useState<{ label: string; detail: string; onConfirm: () => void } | null>(null);
+  const [dataSuccess, setDataSuccess] = useState<string | null>(null);
+  const [trimSeasons, setTrimSeasons] = useState<number>(5);
 
   const updateSettings = (updates: Partial<LeagueSettings>, label = '') => {
     const entries: ChangeEntry[] = Object.entries(updates).map(([k, v]) => ({
@@ -206,6 +211,78 @@ const Settings: React.FC<SettingsProps> = ({ league, updateLeague, onRegenerateS
     setChangeLog(prev => [...entries, ...prev].slice(0, 50));
     updateLeague({ settings: { ...league.settings, ...updates } });
   };
+
+  // ── Data management helpers ───────────────────────────────────────────────
+
+  const showSuccess = (msg: string) => {
+    setDataSuccess(msg);
+    setTimeout(() => setDataSuccess(null), 3500);
+  };
+
+  const confirmAction = (label: string, detail: string, onConfirm: () => void) => {
+    setDataConfirm({ label, detail, onConfirm });
+  };
+
+  const handleExportSave = () => {
+    const blob = new Blob([JSON.stringify(league, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `${league.leagueName.replace(/\s+/g, '_')}_S${league.season}_backup.json`;
+    a.click();
+    URL.revokeObjectURL(url);
+    showSuccess('Save exported successfully.');
+  };
+
+  const handleTrimOldData = () => {
+    const cutoff = league.season - trimSeasons;
+    const trimmedFeed = (league.newsFeed ?? []).filter(
+      n => !n.seasonYear || n.seasonYear > cutoff
+    );
+    // Strip play-by-play from all schedule games (biggest per-game data blob)
+    const trimmedSchedule = (league.schedule ?? []).map(g =>
+      g.result ? { ...g, result: { ...g.result, playByPlay: undefined } } : g
+    );
+    const trimmedPreseason = (league.preseasonHistory ?? []).map(g =>
+      g.result ? { ...g, result: { ...g.result, playByPlay: undefined } } : g
+    );
+    // Trim transactions: keep last 500 (plenty for recent activity)
+    const trimmedTx = (league.transactions ?? []).slice(0, 500);
+    updateLeague({
+      newsFeed: trimmedFeed,
+      schedule: trimmedSchedule,
+      preseasonHistory: trimmedPreseason as any,
+      transactions: trimmedTx,
+    });
+    showSuccess(`Purged data from seasons before ${cutoff + 1}. PBP logs cleared.`);
+  };
+
+  const handleClearFeed = () => {
+    updateLeague({ newsFeed: [] });
+    showSuccess('Dynasty Feed cleared.');
+  };
+
+  const handleClearTransactions = () => {
+    updateLeague({ transactions: [] });
+    showSuccess('Transaction log cleared.');
+  };
+
+  const handleClearPBP = () => {
+    const cleaned = (league.schedule ?? []).map(g =>
+      g.result ? { ...g, result: { ...g.result, playByPlay: undefined } } : g
+    );
+    const cleanedPre = (league.preseasonHistory ?? []).map(g =>
+      g.result ? { ...g, result: { ...g.result, playByPlay: undefined } } : g
+    );
+    updateLeague({ schedule: cleaned, preseasonHistory: cleanedPre as any });
+    showSuccess('Play-by-play logs cleared from all game records.');
+  };
+
+  // Estimate save size
+  const estimatedKB = Math.round(JSON.stringify(league).length / 1024);
+  const newsCount = (league.newsFeed ?? []).length;
+  const txCount = (league.transactions ?? []).length;
+  const pbpGames = (league.schedule ?? []).filter(g => g.result?.playByPlay && g.result.playByPlay.length > 0).length;
 
   const s = league.settings;
   const inSeason = !league.isOffseason;
@@ -442,7 +519,7 @@ const Settings: React.FC<SettingsProps> = ({ league, updateLeague, onRegenerateS
               League <span className="text-amber-500">Settings</span>
             </h2>
             <div className="flex flex-wrap gap-2">
-              {(['league','gameplay','sliders','simulation','godmode','appearance'] as SettingsTab[]).map(id => (
+              {(['league','gameplay','sliders','simulation','godmode','appearance','data'] as SettingsTab[]).map(id => (
                 <React.Fragment key={id}><TabButton id={id} label={TAB_LABELS[id]} /></React.Fragment>
               ))}
             </div>
@@ -1322,8 +1399,192 @@ const Settings: React.FC<SettingsProps> = ({ league, updateLeague, onRegenerateS
           </div>
         )}
 
+        {/* ════════════════════ DATA MANAGEMENT TAB ════════════════════ */}
+        {activeTab === 'data' && (
+          <div className="space-y-6 animate-in slide-in-from-bottom-2">
+
+            {/* Save size summary */}
+            <div className="bg-slate-900 border border-slate-800 rounded-3xl p-6 flex flex-wrap gap-6 items-center justify-between">
+              <div>
+                <h3 className="text-xs font-black uppercase tracking-widest text-slate-500 mb-1">Save File Health</h3>
+                <p className="text-white text-sm font-medium">
+                  Season <span className="text-amber-400 font-bold">{league.season}</span> &nbsp;·&nbsp;
+                  Estimated size: <span className={`font-bold ${estimatedKB > 2000 ? 'text-rose-400' : estimatedKB > 800 ? 'text-amber-400' : 'text-emerald-400'}`}>{estimatedKB > 1024 ? `${(estimatedKB/1024).toFixed(1)} MB` : `${estimatedKB} KB`}</span>
+                </p>
+                <div className="flex gap-4 mt-2 text-[10px] text-slate-500 font-bold uppercase tracking-widest">
+                  <span>News: {newsCount} items</span>
+                  <span>·</span>
+                  <span>Transactions: {txCount}</span>
+                  <span>·</span>
+                  <span>PBP logs: {pbpGames} games</span>
+                </div>
+              </div>
+              {estimatedKB > 800 && (
+                <div className="flex items-center gap-2 px-4 py-2 bg-amber-500/10 border border-amber-500/30 rounded-2xl">
+                  <svg className="w-4 h-4 text-amber-400 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 9v2m0 4h.01M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z" /></svg>
+                  <span className="text-[10px] font-black uppercase tracking-widest text-amber-400">Large save detected — consider trimming</span>
+                </div>
+              )}
+            </div>
+
+            {/* Export */}
+            <div className="bg-slate-900 border border-slate-800 rounded-3xl p-6 space-y-4">
+              <div className="flex items-start justify-between gap-4">
+                <div>
+                  <h3 className="text-sm font-black uppercase tracking-widest text-white mb-1">Export Save Data</h3>
+                  <p className="text-[11px] text-slate-500">Download a full backup as a <code className="text-amber-400">.json</code> file. Use the Title Screen to re-import it later.</p>
+                </div>
+                <button
+                  onClick={handleExportSave}
+                  className="shrink-0 px-5 py-3 bg-amber-500 hover:bg-amber-400 text-slate-950 font-display font-bold uppercase text-[10px] tracking-widest rounded-xl transition-all active:scale-95 shadow-lg shadow-amber-500/20"
+                >
+                  ↓ Download Backup
+                </button>
+              </div>
+            </div>
+
+            {/* Delete old season data */}
+            <div className="bg-slate-900 border border-slate-800 rounded-3xl p-6 space-y-5">
+              <div>
+                <h3 className="text-sm font-black uppercase tracking-widest text-white mb-1">Delete Old Season Data</h3>
+                <p className="text-[11px] text-slate-500 max-w-lg">
+                  Removes Dynasty Feed entries and strips play-by-play logs from seasons older than your chosen threshold.
+                  <span className="text-emerald-400 font-bold"> Core achievements, standings, awards, and championship records are always preserved.</span>
+                </p>
+              </div>
+              <div className="flex flex-wrap items-center gap-3">
+                <span className="text-[10px] font-black uppercase tracking-widest text-slate-400">Keep last</span>
+                {([3, 5, 7, 10] as const).map(n => (
+                  <button key={n} onClick={() => setTrimSeasons(n)}
+                    className={`px-4 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest border transition-all ${trimSeasons === n ? 'bg-amber-500/20 border-amber-500/50 text-amber-400' : 'bg-slate-950 border-slate-700 text-slate-500 hover:text-white'}`}>
+                    {n} Seasons
+                  </button>
+                ))}
+                <span className="text-[10px] font-black uppercase tracking-widest text-slate-400">of news history</span>
+              </div>
+              <div className="bg-amber-500/8 border border-amber-500/20 rounded-2xl px-4 py-3 text-[10px] text-amber-400/80 font-bold">
+                ⚠️ This action cannot be undone. Export a backup first if you want to preserve the full history.
+              </div>
+              <button
+                onClick={() => confirmAction(
+                  `Delete data older than ${league.season - trimSeasons} seasons`,
+                  `News entries from before season ${league.season - trimSeasons + 1} will be removed. Play-by-play logs will be stripped from all games. Standings, awards, and championships are preserved.`,
+                  handleTrimOldData
+                )}
+                className="px-6 py-3 bg-rose-500/15 hover:bg-rose-500/25 border border-rose-500/40 text-rose-400 font-display font-bold uppercase text-[10px] tracking-widest rounded-xl transition-all active:scale-95"
+              >
+                🗑 Purge Old Data
+              </button>
+            </div>
+
+            {/* Clear Dynasty Feed */}
+            <div className="bg-slate-900 border border-slate-800 rounded-3xl p-6 space-y-4">
+              <div className="flex items-start justify-between gap-4">
+                <div>
+                  <h3 className="text-sm font-black uppercase tracking-widest text-white mb-1">Clear Dynasty Feed</h3>
+                  <p className="text-[11px] text-slate-500">Removes all <span className="text-white font-bold">{newsCount}</span> news items from the feed. Stats and records are not affected.</p>
+                </div>
+                <button
+                  onClick={() => confirmAction(
+                    'Clear Dynasty Feed',
+                    `All ${newsCount} news items will be permanently deleted. This cannot be undone.`,
+                    handleClearFeed
+                  )}
+                  className="shrink-0 px-5 py-3 bg-rose-500/15 hover:bg-rose-500/25 border border-rose-500/40 text-rose-400 font-display font-bold uppercase text-[10px] tracking-widest rounded-xl transition-all active:scale-95"
+                >
+                  Clear Feed
+                </button>
+              </div>
+            </div>
+
+            {/* Clear Transactions */}
+            <div className="bg-slate-900 border border-slate-800 rounded-3xl p-6 space-y-4">
+              <div className="flex items-start justify-between gap-4">
+                <div>
+                  <h3 className="text-sm font-black uppercase tracking-widest text-white mb-1">Clear Transaction Log</h3>
+                  <p className="text-[11px] text-slate-500">Removes all <span className="text-white font-bold">{txCount}</span> entries from the League Log. Signings, trades, and waivers will no longer appear in history.</p>
+                </div>
+                <button
+                  onClick={() => confirmAction(
+                    'Clear Transaction Log',
+                    `All ${txCount} transaction records will be permanently deleted. This cannot be undone.`,
+                    handleClearTransactions
+                  )}
+                  className="shrink-0 px-5 py-3 bg-rose-500/15 hover:bg-rose-500/25 border border-rose-500/40 text-rose-400 font-display font-bold uppercase text-[10px] tracking-widest rounded-xl transition-all active:scale-95"
+                >
+                  Clear Log
+                </button>
+              </div>
+            </div>
+
+            {/* Clear PBP only */}
+            <div className="bg-slate-900 border border-slate-800 rounded-3xl p-6 space-y-4">
+              <div className="flex items-start justify-between gap-4">
+                <div>
+                  <h3 className="text-sm font-black uppercase tracking-widest text-white mb-1">Clear Play-by-Play Logs</h3>
+                  <p className="text-[11px] text-slate-500">
+                    Strips verbose play-by-play data from <span className="text-white font-bold">{pbpGames}</span> games. Box scores and final scores are kept. This is usually the biggest driver of save bloat.
+                  </p>
+                </div>
+                <button
+                  onClick={() => confirmAction(
+                    'Clear Play-by-Play Logs',
+                    `Removes the detailed play-by-play log from ${pbpGames} game records. Box scores, stats, and standings are unaffected.`,
+                    handleClearPBP
+                  )}
+                  className="shrink-0 px-5 py-3 bg-rose-500/15 hover:bg-rose-500/25 border border-rose-500/40 text-rose-400 font-display font-bold uppercase text-[10px] tracking-widest rounded-xl transition-all active:scale-95"
+                >
+                  Clear PBP
+                </button>
+              </div>
+            </div>
+
+          </div>
+        )}
+
       </div>
       )}
+
+      {/* ── Confirmation modal ── */}
+      {dataConfirm && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-sm">
+          <div className="bg-slate-900 border border-slate-700 rounded-3xl p-8 max-w-md w-full shadow-2xl space-y-5 animate-in fade-in zoom-in-95 duration-150">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-2xl bg-rose-500/15 border border-rose-500/30 flex items-center justify-center shrink-0">
+                <svg className="w-5 h-5 text-rose-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 9v2m0 4h.01M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z" /></svg>
+              </div>
+              <h3 className="text-lg font-display font-bold uppercase text-white tracking-wide">{dataConfirm.label}</h3>
+            </div>
+            <p className="text-sm text-slate-400 leading-relaxed">{dataConfirm.detail}</p>
+            <p className="text-[10px] font-black uppercase tracking-widest text-rose-400/80 border-t border-slate-800 pt-4">
+              ⚠️ This action cannot be undone. Core achievements and standings will be preserved.
+            </p>
+            <div className="flex gap-3 pt-1">
+              <button
+                onClick={() => setDataConfirm(null)}
+                className="flex-1 px-5 py-3 bg-slate-800 hover:bg-slate-700 text-slate-300 font-display font-bold uppercase text-[10px] tracking-widest rounded-xl transition-all"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={() => { dataConfirm.onConfirm(); setDataConfirm(null); }}
+                className="flex-1 px-5 py-3 bg-rose-600 hover:bg-rose-500 text-white font-display font-bold uppercase text-[10px] tracking-widest rounded-xl transition-all active:scale-95"
+              >
+                Confirm & Delete
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Success toast ── */}
+      {dataSuccess && (
+        <div className="fixed bottom-6 right-6 z-50 flex items-center gap-3 bg-emerald-900/90 border border-emerald-500/40 text-emerald-300 px-5 py-3 rounded-2xl shadow-2xl backdrop-blur-sm animate-in slide-in-from-bottom-2 duration-300">
+          <svg className="w-4 h-4 text-emerald-400 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M5 13l4 4L19 7" /></svg>
+          <span className="text-[11px] font-black uppercase tracking-widest">{dataSuccess}</span>
+        </div>
+      )}
+
     </div>
   );
 };
