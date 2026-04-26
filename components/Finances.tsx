@@ -27,10 +27,32 @@ const Finances: React.FC<FinancesProps> = ({ league, updateLeague }) => {
   const isOverSecond = payroll > secondApron;
   const taxMultiplier = league.settings.luxuryTaxMultiplier ?? 1.75;
   const luxuryTax = isOverTax ? (payroll - taxLine) * taxMultiplier : 0;
-  const totalExpenses = payroll + staffPayroll + luxuryTax + 5000000; // Operational constant
 
-  const estimatedGateReceipts = userTeam.wins * 500000 + (userTeam.finances.ticketPrice * 20000);
-  const totalRevenue = estimatedGateReceipts + 30000000; // Media rights + sponsorship
+  // Annual revenue projection — 41 home games × projected attendance × ticket price
+  const HOME_GAMES = 41;
+  const avgAttendance = Math.round(8_000 + (userTeam.finances.fanHype / 100) * 14_000);
+  const gateRevenue = HOME_GAMES * avgAttendance * (userTeam.finances.ticketPrice || 85);
+  const concessionRevenue = Math.round(HOME_GAMES * avgAttendance * (userTeam.finances.concessionPrice || 12) * 0.4);
+  const mediaDeal = 40_000_000;
+  const sponsorRevenue = Math.round(8_000_000 + (userTeam.finances.fanHype / 100) * 15_000_000);
+  const totalRevenue = gateRevenue + concessionRevenue + mediaDeal + sponsorRevenue;
+
+  // Staff facility annual costs (separate from coach salaries)
+  const staffAnnualCosts = (() => {
+    const budgets = (userTeam.finances.budgets ?? {}) as Record<string, number>;
+    const scoutIdx = getStaffTierIndex(budgets.scouting  ?? 20);
+    const medIdx   = getStaffTierIndex(budgets.health    ?? 20);
+    const facIdx   = getStaffTierIndex(budgets.facilities ?? 20);
+    return (
+      STAFF_CONFIG.scouting.tiers[scoutIdx].annualCost +
+      STAFF_CONFIG.medical.tiers[medIdx].annualCost +
+      STAFF_CONFIG.facilities.tiers[facIdx].annualCost
+    );
+  })();
+
+  const operationalExpenses = 5_000_000;
+  const totalExpenses = payroll + staffPayroll + staffAnnualCosts + luxuryTax + operationalExpenses;
+  const projectedNet = totalRevenue - totalExpenses;
 
   const formatMoney = fmtSalary;
 
@@ -224,8 +246,8 @@ const Finances: React.FC<FinancesProps> = ({ league, updateLeague }) => {
             </div>
             <div className="w-full md:w-64 bg-slate-950/50 rounded-3xl p-6 border border-slate-800/60 text-center">
                 <p className="text-[10px] text-slate-500 font-black uppercase mb-1">Projected Net</p>
-                <p className={`text-4xl font-display font-bold ${totalRevenue - totalExpenses > 0 ? 'text-emerald-400' : 'text-rose-500'}`}>
-                  {formatMoney(totalRevenue - totalExpenses)}
+                <p className={`text-4xl font-display font-bold ${projectedNet > 0 ? 'text-emerald-400' : 'text-rose-500'}`}>
+                  {formatMoney(projectedNet)}
                 </p>
                 <p className="text-[9px] text-slate-600 font-bold uppercase mt-2">Cash Reserves: {formatMoney(userTeam.finances.cash)}</p>
             </div>
@@ -333,6 +355,69 @@ const Finances: React.FC<FinancesProps> = ({ league, updateLeague }) => {
                {isOverSecond && <p className="text-[10px] text-rose-400 mt-0.5">OVER — severely restricted</p>}
             </div>
          </div>
+      </div>
+
+      {/* Financial Breakdown */}
+      <div className="bg-slate-900 border border-slate-800 rounded-[2.5rem] p-10 shadow-2xl">
+        <h3 className="text-xl font-display font-bold uppercase text-white mb-8 flex items-center gap-4">
+          <svg className="w-6 h-6 text-emerald-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+          Annual Financial Projection
+        </h3>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-10">
+          {/* Revenue */}
+          <div>
+            <p className="text-[10px] font-black uppercase tracking-widest text-emerald-500 mb-5">Revenue</p>
+            <div className="space-y-3">
+              {[
+                { label: `Gate Revenue (${HOME_GAMES} home games · ${avgAttendance.toLocaleString()} avg attendance)`, val: gateRevenue },
+                { label: 'Concession Sales', val: concessionRevenue },
+                { label: 'Media & TV Deal', val: mediaDeal },
+                { label: 'Sponsorships', val: sponsorRevenue },
+              ].map(({ label, val }) => (
+                <div key={label} className="flex justify-between items-center gap-4">
+                  <span className="text-[11px] text-slate-400 font-medium">{label}</span>
+                  <span className="text-sm font-bold text-emerald-400 whitespace-nowrap">{formatMoney(val)}</span>
+                </div>
+              ))}
+              <div className="border-t border-slate-700 pt-3 flex justify-between items-center">
+                <span className="text-xs font-black uppercase tracking-widest text-slate-300">Total Revenue</span>
+                <span className="text-lg font-display font-black text-emerald-400">{formatMoney(totalRevenue)}</span>
+              </div>
+            </div>
+          </div>
+          {/* Expenses */}
+          <div>
+            <p className="text-[10px] font-black uppercase tracking-widest text-rose-500 mb-5">Expenses</p>
+            <div className="space-y-3">
+              {[
+                { label: 'Roster Payroll', val: payroll },
+                { label: 'Coaching Staff', val: staffPayroll },
+                { label: 'Facilities & Dept. Operations', val: staffAnnualCosts + operationalExpenses },
+                ...(isOverTax ? [{ label: `Luxury Tax (×${taxMultiplier} on ${formatMoney(payroll - taxLine)} over line)`, val: luxuryTax }] : []),
+              ].map(({ label, val }) => (
+                <div key={label} className="flex justify-between items-center gap-4">
+                  <span className="text-[11px] text-slate-400 font-medium">{label}</span>
+                  <span className={`text-sm font-bold whitespace-nowrap ${label.startsWith('Luxury') ? 'text-amber-400' : 'text-rose-400'}`}>{formatMoney(val)}</span>
+                </div>
+              ))}
+              <div className="border-t border-slate-700 pt-3 flex justify-between items-center">
+                <span className="text-xs font-black uppercase tracking-widest text-slate-300">Total Expenses</span>
+                <span className="text-lg font-display font-black text-rose-400">{formatMoney(totalExpenses)}</span>
+              </div>
+            </div>
+          </div>
+        </div>
+        {/* Net summary bar */}
+        <div className={`mt-8 p-6 rounded-2xl border flex items-center justify-between gap-6 ${projectedNet >= 0 ? 'bg-emerald-500/8 border-emerald-500/25' : 'bg-rose-500/8 border-rose-500/25'}`}>
+          <div>
+            <p className="text-[10px] font-black uppercase tracking-widest text-slate-500 mb-1">Projected Annual Net</p>
+            <p className={`text-3xl font-display font-black ${projectedNet >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>{formatMoney(projectedNet)}</p>
+          </div>
+          <div className="text-right">
+            <p className="text-[10px] font-black uppercase tracking-widest text-slate-500 mb-1">Cash Reserves</p>
+            <p className="text-xl font-display font-bold text-white">{formatMoney(userTeam.finances.cash)}</p>
+          </div>
+        </div>
       </div>
 
       {/* Staff & Facilities Upgrades */}
