@@ -7,6 +7,7 @@ import { aiGMDraftPick, computeTeamNeeds, prospectNeedFit, TeamNeedItem } from '
 import DraftLottery from './DraftLottery';
 import ProspectProfile from './ProspectProfile';
 import DraftPickTrade from './DraftPickTrade';
+import LiveDraftTrade from './LiveDraftTrade';
 import TeamBadge from './TeamBadge';
 
 interface DraftProps {
@@ -34,9 +35,21 @@ const Draft: React.FC<DraftProps> = ({ league, updateLeague, onScout, scoutingRe
   // Prospect profile modal
   const [selectedProspect, setSelectedProspect] = useState<Prospect | null>(null);
 
-  // Pick trade modal
+  // Pick-for-pick trade modal (existing)
   const [showTradeModal, setShowTradeModal] = useState(false);
   const [pickToTrade, setPickToTrade] = useState<DraftPick | undefined>(undefined);
+
+  // Live Draft Trade modal — "TRADE FOR" a specific AI pick
+  const [showLiveTrade, setShowLiveTrade] = useState(false);
+  const [liveTradeTarget, setLiveTradeTarget] = useState<DraftPick | null>(null);
+
+  // AI-initiated draft trade offer
+  interface AIDraftOffer {
+    offeringTeam: Team;
+    theirPicks: DraftPick[];
+    wantedPick: DraftPick;
+  }
+  const [aiDraftOffer, setAiDraftOffer] = useState<AIDraftOffer | null>(null);
 
   // Draft order panel
   const [showDraftOrder, setShowDraftOrder] = useState(true);
@@ -139,7 +152,8 @@ const Draft: React.FC<DraftProps> = ({ league, updateLeague, onScout, scoutingRe
   };
 
   useEffect(() => {
-    if (!isDrafting) return;
+    // Pause draft loop whenever a trade modal is open
+    if (!isDrafting || showLiveTrade || showTradeModal) return;
 
     const picks = league.draftPicks || [];
     const cp = picks[currentPickIndex];
@@ -153,7 +167,47 @@ const Draft: React.FC<DraftProps> = ({ league, updateLeague, onScout, scoutingRe
     const delay = isSimToEnd ? 60 : isSimming ? 80 : 900;
     const timer = setTimeout(executeAIPick, delay);
     return () => clearTimeout(timer);
-  }, [isDrafting, currentPickIndex, isSimming, isSimToEnd]);
+  }, [isDrafting, currentPickIndex, isSimming, isSimToEnd, showLiveTrade, showTradeModal]);
+
+  // AI-initiative trade offers: fires after each pick advancement during draft
+  useEffect(() => {
+    if (!isDrafting || isSimToEnd || aiDraftOffer || showLiveTrade || currentPickIndex === 0) return;
+
+    // ~9% chance per pick, but only when not blitzing through
+    if (isSimming || Math.random() > 0.09) return;
+
+    const userUpcoming = (league.draftPicks ?? [])
+      .filter(p => p.currentTeamId === league.userTeamId && p.pick > currentPickIndex)
+      .sort((a, b) => a.pick - b.pick);
+
+    if (userUpcoming.length === 0) return;
+    const wantedPick = userUpcoming[0];
+
+    // Find an AI team with the right motivation to trade
+    const candidates = league.teams
+      .filter(t => t.id !== league.userTeamId)
+      .map(t => {
+        const personality = t.aiGM?.personality ?? 'Balanced';
+        const winPct = t.wins / Math.max(1, t.wins + t.losses);
+        const isContender = winPct >= 0.55 || personality === 'Win Now' || personality === 'Superstar Chaser';
+        const isRebuilder = personality === 'Rebuilder' || winPct < 0.38;
+        // Contenders want to move UP to user's pick; need a later pick they can offer
+        const theirLaterPicks = (league.draftPicks ?? [])
+          .filter(p => p.currentTeamId === t.id && p.pick > wantedPick.pick)
+          .sort((a, b) => a.pick - b.pick);
+        return { team: t, isContender, isRebuilder, theirLaterPicks };
+      })
+      .filter(c => c.isContender && c.theirLaterPicks.length > 0);
+
+    if (candidates.length === 0) return;
+
+    const chosen = candidates[Math.floor(Math.random() * candidates.length)];
+    // Offer their next 1-2 picks to entice
+    const theirPicks = chosen.theirLaterPicks.slice(0, chosen.theirLaterPicks.length >= 2 ? 2 : 1);
+
+    setAiDraftOffer({ offeringTeam: chosen.team, theirPicks, wantedPick });
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentPickIndex, isDrafting]);
 
   const availableProspects = useMemo(() => {
     const draftedIds = new Set(league.teams.flatMap(t => t.roster.map(p => p.id)));
@@ -271,6 +325,119 @@ const Draft: React.FC<DraftProps> = ({ league, updateLeague, onScout, scoutingRe
           onClose={() => { setShowTradeModal(false); setPickToTrade(undefined); }}
           preselectedUserPick={pickToTrade}
         />
+      )}
+
+      {showLiveTrade && liveTradeTarget && (
+        <LiveDraftTrade
+          league={league}
+          targetPick={liveTradeTarget}
+          updateLeague={updateLeague}
+          onClose={() => { setShowLiveTrade(false); setLiveTradeTarget(null); }}
+        />
+      )}
+
+      {/* AI-initiated trade offer banner */}
+      {aiDraftOffer && !showLiveTrade && (
+        <div className="fixed inset-0 z-[60] flex items-end sm:items-center justify-center bg-black/60 backdrop-blur-sm p-4">
+          <div className="bg-slate-900 border border-amber-500/40 rounded-3xl w-full max-w-lg p-6 shadow-2xl animate-in slide-in-from-bottom-4 sm:zoom-in-95 duration-300">
+            <div className="flex items-start gap-3 mb-4">
+              <div className="w-10 h-10 rounded-full bg-amber-500/20 border border-amber-500/40 flex items-center justify-center shrink-0">
+                <span className="text-lg">📞</span>
+              </div>
+              <div>
+                <p className="text-[9px] font-black uppercase tracking-widest text-amber-500 mb-0.5">Incoming Trade Offer</p>
+                <p className="text-white font-display font-bold text-base uppercase leading-tight">
+                  {aiDraftOffer.offeringTeam.name} wants to move up
+                </p>
+              </div>
+              <button
+                onClick={() => setAiDraftOffer(null)}
+                className="ml-auto w-7 h-7 rounded-full bg-slate-800 flex items-center justify-center text-slate-500 hover:text-white transition-colors text-xs shrink-0"
+              >
+                ✕
+              </button>
+            </div>
+
+            <div className="bg-slate-950/60 border border-slate-800 rounded-2xl p-4 mb-4">
+              <div className="flex items-center justify-between gap-4">
+                <div>
+                  <p className="text-[9px] text-slate-500 uppercase font-bold mb-1">They Offer</p>
+                  {aiDraftOffer.theirPicks.map(p => {
+                    const pos = p.round === 1 ? p.pick : p.pick - 30;
+                    return (
+                      <p key={`${p.round}-${p.pick}`} className="text-sm font-bold text-emerald-400">
+                        R{p.round} Pick #{pos}
+                      </p>
+                    );
+                  })}
+                </div>
+                <div className="text-2xl text-slate-600">⇄</div>
+                <div className="text-right">
+                  <p className="text-[9px] text-slate-500 uppercase font-bold mb-1">They Want</p>
+                  <p className="text-sm font-bold text-white">
+                    {aiDraftOffer.wantedPick.round === 1
+                      ? `R1 Pick #${aiDraftOffer.wantedPick.pick}`
+                      : `R2 Pick #${aiDraftOffer.wantedPick.pick - 30}`}
+                  </p>
+                  <p className="text-[9px] text-slate-600 uppercase mt-0.5">Your pick</p>
+                </div>
+              </div>
+            </div>
+
+            <div className="flex gap-3">
+              <button
+                onClick={() => {
+                  // Accept: swap picks in draftPicks
+                  const updatedPicks = (league.draftPicks ?? []).map(dp => {
+                    if (dp.pick === aiDraftOffer.wantedPick.pick && dp.round === aiDraftOffer.wantedPick.round)
+                      return { ...dp, currentTeamId: aiDraftOffer.offeringTeam.id };
+                    if (aiDraftOffer.theirPicks.some(tp => tp.pick === dp.pick && tp.round === dp.round))
+                      return { ...dp, currentTeamId: league.userTeamId };
+                    return dp;
+                  });
+                  const newsItem = {
+                    id: `ai-draft-offer-${Date.now()}`,
+                    category: 'transaction' as const,
+                    headline: '🔀 LIVE DRAFT TRADE',
+                    content: `${userTeam.name} trades R${aiDraftOffer.wantedPick.round} Pick #${aiDraftOffer.wantedPick.round === 1 ? aiDraftOffer.wantedPick.pick : aiDraftOffer.wantedPick.pick - 30} to ${aiDraftOffer.offeringTeam.name} for ${aiDraftOffer.theirPicks.map(p => `R${p.round} #${p.round === 1 ? p.pick : p.pick - 30}`).join(' + ')}.`,
+                    timestamp: league.currentDay,
+                    realTimestamp: Date.now(),
+                    isBreaking: true,
+                  };
+                  const wantedPickPos = aiDraftOffer.wantedPick.round === 1
+                    ? aiDraftOffer.wantedPick.pick
+                    : aiDraftOffer.wantedPick.pick - 30;
+                  setDraftLog(prev => [
+                    `TRADE: ${userTeam.name} sends R${aiDraftOffer.wantedPick.round} Pick #${wantedPickPos} to ${aiDraftOffer.offeringTeam.name} — receives ${aiDraftOffer.theirPicks.map(p => `R${p.round} #${p.round === 1 ? p.pick : p.pick - 30}`).join(' + ')}`,
+                    ...prev,
+                  ]);
+                  updateLeague({ draftPicks: updatedPicks, newsFeed: [newsItem, ...(league.newsFeed ?? [])] });
+                  setAiDraftOffer(null);
+                }}
+                className="flex-1 py-3 bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-display font-black uppercase text-sm rounded-xl transition-all active:scale-95"
+              >
+                Accept
+              </button>
+              <button
+                onClick={() => {
+                  // Counter: open LiveDraftTrade with their first pick as target
+                  setLiveTradeTarget(aiDraftOffer.theirPicks[0]);
+                  setShowLiveTrade(true);
+                  setAiDraftOffer(null);
+                }}
+                className="flex-1 py-3 bg-slate-800 hover:bg-amber-500 hover:text-slate-950 text-slate-300 font-display font-bold uppercase text-sm rounded-xl transition-all"
+              >
+                Counter
+              </button>
+              <button
+                onClick={() => setAiDraftOffer(null)}
+                className="px-5 py-3 bg-slate-800/50 hover:bg-slate-700 text-slate-500 font-bold uppercase text-sm rounded-xl transition-all"
+              >
+                Decline
+              </button>
+            </div>
+          </div>
+        </div>
       )}
 
       {/* Sim to End confirmation modal */}
@@ -539,6 +706,21 @@ const Draft: React.FC<DraftProps> = ({ league, updateLeague, onScout, scoutingRe
 
                       {/* Overall pick # */}
                       <span className="text-[9px] text-slate-700 font-bold tabular-nums shrink-0">#{pick.pick}</span>
+
+                      {/* TRADE FOR button — AI-owned upcoming picks only */}
+                      {!isMade && !isUserPick && (
+                        <button
+                          onClick={e => {
+                            e.stopPropagation();
+                            setLiveTradeTarget(pick);
+                            setShowLiveTrade(true);
+                          }}
+                          className="shrink-0 px-2 py-1 text-[8px] font-black uppercase rounded-lg border transition-all bg-amber-500/10 border-amber-500/30 text-amber-400 hover:bg-amber-500 hover:text-slate-950 hover:border-amber-500 active:scale-95 whitespace-nowrap"
+                          title={`Propose a trade to acquire this pick from ${pickingTeam?.name}`}
+                        >
+                          Trade For
+                        </button>
+                      )}
                     </div>
                   );
                 })}
@@ -639,9 +821,23 @@ const Draft: React.FC<DraftProps> = ({ league, updateLeague, onScout, scoutingRe
         {/* Left: Prospect Board */}
         <div className="lg:col-span-2 space-y-6">
           <div className="bg-slate-900 border border-slate-800 rounded-3xl overflow-hidden shadow-2xl">
-            <div className="p-6 border-b border-slate-800 flex justify-between items-center">
+            <div className="p-6 border-b border-slate-800 flex justify-between items-center flex-wrap gap-3">
               <h3 className="text-xl font-display font-bold uppercase tracking-widest text-white">Big Board</h3>
-              <div className="flex items-center gap-3">
+              <div className="flex items-center gap-2 flex-wrap">
+                {/* Trade Up shortcut — opens pick selector */}
+                {isDrafting && (
+                  <button
+                    onClick={() => {
+                      const nextAIPick = (league.draftPicks ?? []).find(
+                        p => p.currentTeamId !== league.userTeamId && p.pick > currentPickIndex
+                      );
+                      if (nextAIPick) { setLiveTradeTarget(nextAIPick); setShowLiveTrade(true); }
+                    }}
+                    className="px-3 py-1.5 text-[9px] font-black uppercase rounded-xl border border-amber-500/40 bg-amber-500/10 text-amber-400 hover:bg-amber-500 hover:text-slate-950 hover:border-amber-500 transition-all active:scale-95 whitespace-nowrap"
+                  >
+                    ⬆ Trade Up
+                  </button>
+                )}
                 <span className={`text-[9px] font-black uppercase px-2.5 py-1 rounded-lg border ${
                   draftClassTalent === 'Strong'
                     ? 'text-emerald-400 bg-emerald-500/15 border-emerald-500/30'
@@ -715,13 +911,28 @@ const Draft: React.FC<DraftProps> = ({ league, updateLeague, onScout, scoutingRe
                         })()}
                       </td>
                       <td className="px-6 py-5 text-right" onClick={e => e.stopPropagation()}>
-                        <div className="flex items-center justify-end gap-2">
+                        <div className="flex items-center justify-end gap-2 flex-wrap">
                           <button
                             onClick={() => { onScout(p); setSelectedProspect(p); }}
                             className="px-3 py-2 bg-slate-800 text-slate-400 text-[10px] font-black uppercase rounded-lg hover:bg-amber-500 hover:text-slate-950 transition-all"
                           >
                             Profile
                           </button>
+                          {/* TRADE FOR: show when draft is active and it's not yet the user's turn */}
+                          {isDrafting && !isUserTurn && (() => {
+                            const nextAIPick = (league.draftPicks ?? []).find(
+                              dp => dp.currentTeamId !== league.userTeamId && dp.pick > currentPickIndex
+                            );
+                            return nextAIPick ? (
+                              <button
+                                onClick={() => { setLiveTradeTarget(nextAIPick); setShowLiveTrade(true); }}
+                                className="px-3 py-2 text-[10px] font-black uppercase rounded-lg border border-amber-500/40 bg-amber-500/10 text-amber-400 hover:bg-amber-500 hover:text-slate-950 hover:border-amber-500 transition-all active:scale-95"
+                                title="Trade for a pick to draft this player"
+                              >
+                                Trade For
+                              </button>
+                            ) : null;
+                          })()}
                           <button
                             onClick={() => isUserTurn && makePick(league.userTeamId, p)}
                             disabled={!isUserTurn}
