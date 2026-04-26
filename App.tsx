@@ -1,7 +1,7 @@
 
 import React, { useState, useEffect, useCallback } from 'react';
 import { LeagueState, Player, Team, GameResult, PlayerStatus, ScheduleGame, BulkSimSummary, Prospect, Coach, TradeProposal, Position, NewsItem, NewsCategory, LeagueSettings, SeasonAwards, PlayoffBracket, PlayoffSeries, Transaction, TransactionType, PowerRankingSnapshot, PowerRankingEntry, GMProfile, GMMilestone, RivalryStats, InjuryType, SeasonPhase, AllStarWeekendData, AllStarVoteEntry, PreviousSeasonStanding, TrainingFocusArea, PlayerDevChange } from './types';
-import { generateLeagueTeams, generateSeasonSchedule, generateProspects, generateFreeAgentPool, generateCoachPool, EXPANSION_TEAM_POOL, generateCoach, generatePlayer, generateDefaultRotation, enforcePositionalBounds, ageFromBirthdate, getCoachPreferredScheme, generateGMName } from './constants';
+import { generateLeagueTeams, generateSeasonSchedule, generateProspects, generateFreeAgentPool, generateCoachPool, EXPANSION_TEAM_POOL, generateCoach, generatePlayer, generateDefaultRotation, enforcePositionalBounds, ageFromBirthdate, getCoachPreferredScheme, generateGMName, STAFF_CONFIG, getStaffTierIndex } from './constants';
 import { generatePreseasonSchedule, buildPreseasonHeadline, buildPreseasonRookieHeadline } from './utils/preseasonEngine';
 import { simulateGame, normalizeLeagueOVRs } from './utils/simEngine';
 import { computeGameAttendance } from './utils/attendanceEngine';
@@ -201,7 +201,7 @@ const App: React.FC = () => {
       const freshAlerts = generateOffseasonAlerts(aiResult.updatedState);
       return {
         ...aiResult.updatedState,
-        newsFeed: [sentinel, ...aiResult.updatedState.newsFeed].slice(0, 200),
+        newsFeed: [sentinel, ...aiResult.updatedState.newsFeed].slice(0, 2000),
         transactions: [...aiResult.transactions, ...(afterPre.transactions || [])].slice(0, 1000),
         offseasonAlerts: freshAlerts,
       };
@@ -720,7 +720,7 @@ const App: React.FC = () => {
       id: `news-${Date.now()}-${Math.random()}`, category, headline: category.toUpperCase(), content, timestamp: state.currentDay,
       realTimestamp: Date.now(), teamId: data.team?.id, playerId: data.player?.id, isBreaking
     };
-    return { ...state, newsFeed: [newItem, ...(state.newsFeed || [])].slice(0, 100) };
+    return { ...state, newsFeed: [newItem, ...(state.newsFeed || [])].slice(0, 2000) };
   };
 
   const processDailyLeagueEvents = async (state: LeagueState): Promise<LeagueState> => {
@@ -1017,7 +1017,7 @@ const App: React.FC = () => {
           timestamp: newState.currentDay, realTimestamp: Date.now(),
           teamId: team.id, playerId: player.id, isBreaking: false,
         };
-        newState = { ...newState, newsFeed: [cooldownNewsItem, ...(newState.newsFeed ?? [])].slice(0, 200) };
+        newState = { ...newState, newsFeed: [cooldownNewsItem, ...(newState.newsFeed ?? [])].slice(0, 2000) };
       }
     }
 
@@ -1085,7 +1085,7 @@ const App: React.FC = () => {
             }
             newState = {
               ...newState,
-              newsFeed: [{ id: cooldownId, category: 'trade_request' as const, headline: 'TRADE_REQUEST', content: detail, timestamp: newState.currentDay, realTimestamp: Date.now(), teamId: team?.id, playerId: unhappyDiva.id, isBreaking: true }, ...(newState.newsFeed ?? [])].slice(0, 100),
+              newsFeed: [{ id: cooldownId, category: 'trade_request' as const, headline: 'TRADE_REQUEST', content: detail, timestamp: newState.currentDay, realTimestamp: Date.now(), teamId: team?.id, playerId: unhappyDiva.id, isBreaking: true }, ...(newState.newsFeed ?? [])].slice(0, 2000),
             };
           }
         }
@@ -1369,7 +1369,7 @@ const App: React.FC = () => {
           realTimestamp: Date.now(),
           teamId: state.userTeamId,
           isBreaking: false,
-        }, ...newState.newsFeed].slice(0, 200),
+        }, ...newState.newsFeed].slice(0, 2000),
       };
     } else {
       // For non-user games, post ~30% of the time to avoid flooding the feed
@@ -1388,7 +1388,7 @@ const App: React.FC = () => {
             realTimestamp: Date.now(),
             teamId: winTeam.id,
             isBreaking: false,
-          }, ...newState.newsFeed].slice(0, 200),
+          }, ...newState.newsFeed].slice(0, 2000),
         };
       }
     }
@@ -1420,7 +1420,7 @@ const App: React.FC = () => {
           teamId: team.id,
           playerId: player.id,
           isBreaking: false,
-        }, ...newState.newsFeed].slice(0, 200),
+        }, ...newState.newsFeed].slice(0, 2000),
       };
       break; // one spotlight per game max
     }
@@ -1776,7 +1776,7 @@ const App: React.FC = () => {
               realTimestamp: Date.now(),
               teamId: involvedTeamId,
               isBreaking,
-            }, ...(newState.newsFeed ?? [])].slice(0, 150),
+            }, ...(newState.newsFeed ?? [])].slice(0, 2000),
           };
         }
       }
@@ -1803,7 +1803,7 @@ const App: React.FC = () => {
             ]);
             newState = {
               ...newState,
-              newsFeed: [{ id: cooldownId, category: 'transaction' as const, headline: 'TRANSACTION', content: detail, timestamp: newState.currentDay, realTimestamp: Date.now(), teamId: userTeamUpdated.id, playerId: p.id, isBreaking: false }, ...(newState.newsFeed ?? [])].slice(0, 100),
+              newsFeed: [{ id: cooldownId, category: 'transaction' as const, headline: 'TRANSACTION', content: detail, timestamp: newState.currentDay, realTimestamp: Date.now(), teamId: userTeamUpdated.id, playerId: p.id, isBreaking: false }, ...(newState.newsFeed ?? [])].slice(0, 2000),
             };
           }
         } else if (prevMorale >= 35 && p.morale < 35 && p.personalityTraits?.includes('Diva/Star')) {
@@ -1824,7 +1824,7 @@ const App: React.FC = () => {
             ]);
             newState = {
               ...newState,
-              newsFeed: [{ id: cooldownId, category: 'rumor' as const, headline: 'RUMOR', content: detail, timestamp: newState.currentDay, realTimestamp: Date.now(), teamId: userTeamUpdated.id, playerId: p.id, isBreaking: true }, ...(newState.newsFeed ?? [])].slice(0, 100),
+              newsFeed: [{ id: cooldownId, category: 'rumor' as const, headline: 'RUMOR', content: detail, timestamp: newState.currentDay, realTimestamp: Date.now(), teamId: userTeamUpdated.id, playerId: p.id, isBreaking: true }, ...(newState.newsFeed ?? [])].slice(0, 2000),
             };
           }
         }
@@ -2003,8 +2003,8 @@ const App: React.FC = () => {
     if (usePreseason) {
       const allPreseasonDone = (newState.preseasonSchedule ?? []).every(g => g.played);
       if (allPreseasonDone) {
-        // Cut AI team rosters to 14 (final roster) — release excess to FA pool
-        const MAX_ROSTER = 14;
+        // Cut AI team rosters to 15 (final roster) — release excess to FA pool
+        const MAX_ROSTER = 15;
         const releasedCuts: typeof newState.freeAgents = [];
         const postCutTeams = newState.teams.map(t => {
           if (t.id === newState.userTeamId) return t; // user manages own cuts
@@ -2041,7 +2041,7 @@ const App: React.FC = () => {
             timestamp: 1,
             realTimestamp: Date.now(),
             isBreaking: true,
-          }, ...newState.newsFeed].slice(0, 200),
+          }, ...newState.newsFeed].slice(0, 2000),
         };
         return { newState, dayResults }; // don't increment day again
       }
@@ -2087,7 +2087,7 @@ const App: React.FC = () => {
         if (tradeResult.newsItems.length > 0) {
           newState = {
             ...tradeResult.updatedState,
-            newsFeed: [...tradeResult.newsItems, ...(newState.newsFeed || [])].slice(0, 200),
+            newsFeed: [...tradeResult.newsItems, ...(newState.newsFeed || [])].slice(0, 2000),
             transactions: [...tradeResult.transactions, ...(newState.transactions || [])].slice(0, 1000),
           };
         } else {
@@ -2175,7 +2175,7 @@ const App: React.FC = () => {
                 timestamp: newState.currentDay,
                 realTimestamp: Date.now(),
                 isBreaking: false,
-              }, ...newState.newsFeed].slice(0, 200),
+              }, ...newState.newsFeed].slice(0, 2000),
         };
       }
 
@@ -2228,7 +2228,7 @@ const App: React.FC = () => {
                 timestamp: newState.currentDay,
                 realTimestamp: Date.now(),
                 isBreaking: affordable.rating >= 82,
-              }, ...newState.newsFeed].slice(0, 200),
+              }, ...newState.newsFeed].slice(0, 2000),
             };
             // Remove from qualityFAs to avoid double-signing same player
             qualityFAs.splice(qualityFAs.indexOf(affordable), 1);
@@ -2333,7 +2333,7 @@ const App: React.FC = () => {
                 timestamp: newState.currentDay,
                 realTimestamp: Date.now(),
                 isBreaking: affordable.rating >= 80,
-              }, ...newState.newsFeed].slice(0, 200),
+              }, ...newState.newsFeed].slice(0, 2000),
             };
             postDlFAs.splice(postDlFAs.indexOf(affordable), 1);
           } else {
@@ -2370,7 +2370,7 @@ const App: React.FC = () => {
                 timestamp: newState.currentDay,
                 realTimestamp: Date.now(),
                 isBreaking: affordable2.rating >= 80,
-              }, ...newState.newsFeed].slice(0, 200),
+              }, ...newState.newsFeed].slice(0, 2000),
             };
             postDlFAs.splice(postDlFAs.indexOf(affordable2), 1);
           }
@@ -2401,7 +2401,7 @@ const App: React.FC = () => {
             const aiDeadlineResult = aiGMTradeDeadlineAction(newState);
             newState = aiDeadlineResult.updatedState;
             if (aiDeadlineResult.newsItems?.length > 0) {
-              newState = { ...newState, newsFeed: [...aiDeadlineResult.newsItems, ...(newState.newsFeed || [])].slice(0, 100) };
+              newState = { ...newState, newsFeed: [...aiDeadlineResult.newsItems, ...(newState.newsFeed || [])].slice(0, 2000) };
             }
           } catch (_e) {}
           newState = {
@@ -2703,7 +2703,7 @@ const App: React.FC = () => {
             headline: `ALL-ROOKIE TEAMS — ${tempState.season}`,
             content: `${tempState.season} All-Rookie First Team: ${first}.${second} The next generation of stars has officially arrived.`,
             timestamp: awDay, realTimestamp: Date.now(), isBreaking: false,
-          }, ...(tempState.newsFeed ?? [])].slice(0, 300) };
+          }, ...(tempState.newsFeed ?? [])].slice(0, 2000) };
         }
 
         // All-Defensive Teams
@@ -2721,7 +2721,7 @@ const App: React.FC = () => {
               `Announcing the ${tempState.season} All-Defensive squads. First Team: ${first}.${second} Elite defenders who changed the game on the other end.`,
             ]),
             timestamp: awDay, realTimestamp: Date.now(), isBreaking: false,
-          }, ...(tempState.newsFeed ?? [])].slice(0, 300) };
+          }, ...(tempState.newsFeed ?? [])].slice(0, 2000) };
         }
 
         // DPOY
@@ -2736,7 +2736,7 @@ const App: React.FC = () => {
           ]),
           teamId: seasonAwards.dpoy.teamId,
           timestamp: awDay, realTimestamp: Date.now(), isBreaking: false,
-        }, ...(tempState.newsFeed ?? [])].slice(0, 300) };
+        }, ...(tempState.newsFeed ?? [])].slice(0, 2000) };
 
         // MVP — added last so it appears at the very top of the feed
         tempState = { ...tempState, newsFeed: [{
@@ -2750,7 +2750,7 @@ const App: React.FC = () => {
           ]),
           teamId: seasonAwards.mvp.teamId,
           timestamp: awDay, realTimestamp: Date.now(), isBreaking: true,
-        }, ...(tempState.newsFeed ?? [])].slice(0, 300) };
+        }, ...(tempState.newsFeed ?? [])].slice(0, 2000) };
       }
 
       const generateInitialBracket = (teams: Team[], season: number): PlayoffBracket => {
@@ -2795,7 +2795,7 @@ const App: React.FC = () => {
             timestamp: nowDay,
             realTimestamp: Date.now(),
             isBreaking: true,
-          }, ...(tempState.newsFeed ?? [])].slice(0, 300),
+          }, ...(tempState.newsFeed ?? [])].slice(0, 2000),
         };
 
         // 2a. Division winner announcements (one news item per division)
@@ -2830,7 +2830,7 @@ const App: React.FC = () => {
                 realTimestamp: Date.now(),
                 teamId: winner.id,
                 isBreaking: true,
-              }, ...(tempState.newsFeed ?? [])].slice(0, 300),
+              }, ...(tempState.newsFeed ?? [])].slice(0, 2000),
             };
           }
         }
@@ -2856,7 +2856,7 @@ const App: React.FC = () => {
               realTimestamp: Date.now(),
               teamId: t.id,
               isBreaking: true,
-            }, ...(tempState.newsFeed ?? [])].slice(0, 300),
+            }, ...(tempState.newsFeed ?? [])].slice(0, 2000),
           };
         }
 
@@ -2886,7 +2886,7 @@ const App: React.FC = () => {
               realTimestamp: Date.now(),
               teamId: t1.id,
               isBreaking: false,
-            }, ...(tempState.newsFeed ?? [])].slice(0, 300),
+            }, ...(tempState.newsFeed ?? [])].slice(0, 2000),
           };
         }
 
@@ -2914,7 +2914,7 @@ const App: React.FC = () => {
                 realTimestamp: Date.now(),
                 teamId: t.id,
                 isBreaking: false,
-              }, ...(tempState.newsFeed ?? [])].slice(0, 300),
+              }, ...(tempState.newsFeed ?? [])].slice(0, 2000),
             };
           }
         }
@@ -3148,6 +3148,32 @@ const App: React.FC = () => {
     }
 
     tempState.gmProfile = { ...tempState.gmProfile, totalSeasons: tempState.gmProfile.totalSeasons + 1 };
+
+    // ── Snapshot end-of-season profit for the user's team ────────────────────
+    {
+      const ut = tempState.teams.find(t => t.id === tempState.userTeamId);
+      if (ut) {
+        const _isWomens = (tempState.settings.playerGenderRatio ?? 0) === 100;
+        const _payroll = ut.roster.reduce((s, p) => s + p.salary, 0);
+        const _staffPayroll = (Object.values(ut.staff) as any[]).reduce((s, c) => s + (c?.salary || 0), 0);
+        const _capLine = tempState.settings.salaryCap || (_isWomens ? 2_200_000 : 140_000_000);
+        const _taxLine = tempState.settings.luxuryTaxLine || (_isWomens ? _capLine : 170_000_000);
+        const _taxMult = tempState.settings.luxuryTaxMultiplier ?? 1.75;
+        const _lux = !_isWomens && _payroll > _taxLine ? (_payroll - _taxLine) * _taxMult : 0;
+        const _hype = ut.finances.fanHype;
+        const _attendance = Math.round(8_000 + (_hype / 100) * 14_000);
+        const _rev = 41 * _attendance * (ut.finances.ticketPrice || 85)
+          + Math.round(41 * _attendance * (ut.finances.concessionPrice || 12) * 0.4)
+          + 40_000_000
+          + Math.round(8_000_000 + (_hype / 100) * 15_000_000);
+        const _budgets = ut.finances.budgets as any ?? {};
+        const _staffAnnual = STAFF_CONFIG.scouting.tiers[getStaffTierIndex(_budgets.scouting ?? 20)].annualCost
+          + STAFF_CONFIG.medical.tiers[getStaffTierIndex(_budgets.health ?? 20)].annualCost
+          + STAFF_CONFIG.facilities.tiers[getStaffTierIndex(_budgets.facilities ?? 20)].annualCost;
+        tempState.previousSeasonProfit = _rev - _payroll - _staffPayroll - _staffAnnual - _lux - 5_000_000;
+      }
+    }
+
     tempState.playoffBracket = undefined;
     tempState.isOffseason = true;
     tempState.seasonPhase = 'Offseason' as SeasonPhase;
@@ -3420,7 +3446,7 @@ const App: React.FC = () => {
       const preResult = aiGMPreOffseasonAgreements(tempState, tempState.settings.difficulty ?? 'Medium');
       tempState = preResult.updatedState;
       if (preResult.newsItems.length > 0) {
-        tempState.newsFeed = [...preResult.newsItems, ...(tempState.newsFeed || [])].slice(0, 200);
+        tempState.newsFeed = [...preResult.newsItems, ...(tempState.newsFeed || [])].slice(0, 2000);
       }
       if (preResult.transactions.length > 0) {
         tempState.transactions = [...preResult.transactions, ...(tempState.transactions || [])].slice(0, 1000);
@@ -3541,8 +3567,8 @@ const App: React.FC = () => {
           state = await finalizePreseasonGameResult(state, game.id, result);
         }
 
-        // Apply the same 14-man roster cuts that happen when preseason finishes naturally
-        const SKIP_MAX_ROSTER = 14;
+        // Apply the same 15-man roster cuts that happen when preseason finishes naturally
+        const SKIP_MAX_ROSTER = 15;
         const skipCuts: typeof state.freeAgents = [];
         const teamsAfterCut = state.teams.map(t => {
           if (t.id === state.userTeamId) return t;
@@ -3575,7 +3601,7 @@ const App: React.FC = () => {
             timestamp: 1,
             realTimestamp: Date.now(),
             isBreaking: true,
-          }, ...state.newsFeed].slice(0, 200),
+          }, ...state.newsFeed].slice(0, 2000),
         };
         setLeague(state);
       } finally {
@@ -4111,7 +4137,7 @@ const App: React.FC = () => {
           {activeTab === 'expansion' && <Expansion league={league} updateLeague={updateLeagueState} onScout={handleViewPlayer} />}
           {activeTab === 'roster' && <Roster leagueTeams={league.teams} userTeamId={league.userTeamId} initialTeamId={rosterTeamId} onScout={handleViewPlayer} onScoutCoach={handleScoutCoach} scoutingReport={scoutingReport} onUpdateTeamRoster={handleUpdateTeamRoster} onManageTeam={handleManageTeam} godMode={league.settings.godMode} watchList={league.watchList ?? []} onToggleWatch={handleToggleWatch} minRosterSize={league.settings.minRosterSize ?? 10} maxRosterSize={league.settings.maxRosterSize ?? 18} devChanges={league.devReport} />}
           {activeTab === 'rotations' && <Rotations league={league} updateLeague={updateLeagueState} />}
-          {activeTab === 'free_agency' && <FreeAgency league={league} updateLeague={updateLeagueState} onScout={handleViewPlayer} recordTransaction={recordTransaction} />}
+          {activeTab === 'free_agency' && <FreeAgency league={league} updateLeague={updateLeagueState} onScout={handleViewPlayer} recordTransaction={recordTransaction} onAdvanceSeason={handleAdvanceToRegularSeason} />}
           {activeTab === 'coach_market' && <CoachesMarket league={league} updateLeague={updateLeagueState} onScout={handleScoutCoach} />}
           {activeTab === 'awards' && <Awards league={league} onScout={handleViewPlayer} onScoutCoach={handleScoutCoach} onManageTeam={handleManageTeam} />}
           {activeTab === 'playoffs' && <Playoffs league={league} updateLeague={updateLeagueState} onStartOffseason={handleStartOffseason} onScout={handleViewPlayer} onViewBoxScore={(res, home, away) => setViewingBoxScore({ result: res, home, away })} onAddNews={async (cat, data, breaking) => {

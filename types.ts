@@ -179,6 +179,8 @@ export interface NewsItem {
   teamId?: string;
   playerId?: string;
   isBreaking?: boolean;
+  /** Season year (e.g. 2026) this item was generated in — used for year filter */
+  seasonYear?: number;
 }
 
 export interface Coach {
@@ -866,6 +868,8 @@ export interface LeagueState {
   previousSeasonStandings?: PreviousSeasonStanding[];
   /** Season number that previousSeasonStandings was captured from. */
   previousSeasonYear?: number;
+  /** Net profit (revenue − all expenses) recorded at end of the most recently completed season. */
+  previousSeasonProfit?: number;
   watchList?: string[];
   expansionDraft?: {
     active: boolean;

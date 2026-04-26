@@ -23,6 +23,7 @@ interface FreeAgencyProps {
     playerIds?: string[],
     value?: number
   ) => Transaction[];
+  onAdvanceSeason?: () => void;
 }
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
@@ -76,6 +77,7 @@ const FreeAgency: React.FC<FreeAgencyProps> = ({
   updateLeague,
   onScout,
   recordTransaction,
+  onAdvanceSeason,
 }) => {
   // ── Market tab ──
   const [marketTab, setMarketTab] = useState<'available' | 'upcoming'>('available');
@@ -666,6 +668,7 @@ const FreeAgency: React.FC<FreeAgencyProps> = ({
         teamId: team.id,
         playerId: player.id,
         isBreaking: false,
+        seasonYear: league.season,
       });
     }
 
@@ -675,6 +678,55 @@ const FreeAgency: React.FC<FreeAgencyProps> = ({
       newsFeed: [...newNews, ...league.newsFeed],
       transactions: [...newTxs, ...(league.transactions || [])].slice(0, 1000),
     });
+  };
+
+  // ── Advance to Next Season — simulate all remaining FA days then begin preseason ──
+  const advanceToNextSeason = () => {
+    if (league.draftPhase !== 'completed' || !onAdvanceSeason) return;
+
+    let updatedFAs = [...league.freeAgents];
+    const allNews: typeof league.newsFeed = [];
+    const allTxs: Transaction[] = [];
+    const aiTeams = league.teams.filter(t => t.id !== league.userTeamId);
+    let day = league.offseasonDay;
+    const MAX_SIM_DAYS = Math.max(MORATORIUM_DAYS + 25, day + 20);
+
+    while (day < MAX_SIM_DAYS && updatedFAs.length > 0) {
+      day++;
+      const count = day <= MORATORIUM_DAYS ? 0 : Math.min(AI_SIGNINGS_PER_DAY + Math.floor(Math.random() * 3), updatedFAs.length);
+      for (let i = 0; i < count; i++) {
+        if (updatedFAs.length === 0) break;
+        const maxIdx = Math.min(Math.floor(updatedFAs.length * 0.4) + 3, updatedFAs.length - 1);
+        const player = updatedFAs.splice(Math.floor(Math.random() * (maxIdx + 1)), 1)[0];
+        const team = aiTeams[Math.floor(Math.random() * aiTeams.length)];
+        if (!team) continue;
+        const desired = getDesired(player, rules.year, rules.isWomens);
+        const years = desired.years + (Math.random() < 0.3 ? 1 : 0);
+        const salaryMult = 0.85 + Math.random() * 0.3;
+        const aiCapLine = league.settings.salaryCap || (rules.isWomens ? 2_200_000 : 140_000_000);
+        const teamSalary = team.roster.reduce((s, p) => s + (p.salary || 0), 0);
+        const teamCapSpace = aiCapLine - teamSalary;
+        if (rules.isWomens) { if (teamSalary >= aiCapLine + rules.minPlayerSalary) continue; }
+        else { if (teamSalary >= aiCapLine + 68_000_000) continue; }
+        const increment = rules.isWomens ? 5_000 : 250_000;
+        const rawSal = Math.round((desired.salary * salaryMult) / increment) * increment;
+        const capSal = Math.min(rawSal, rules.maxPlayerSalary);
+        const salary = rules.isWomens
+          ? (teamCapSpace >= capSal ? capSal : rules.minPlayerSalary)
+          : (teamCapSpace >= capSal ? capSal : teamCapSpace > 0 ? Math.max(rules.minPlayerSalary, teamCapSpace) : rules.minPlayerSalary);
+        const totalValue = salary * years;
+        allTxs.push({ id: `tx-ai-skip-${Date.now()}-${i}`, type: 'signing', timestamp: league.currentDay, realTimestamp: Date.now() + i, teamIds: [team.id], playerIds: [player.id], description: `${team.name} agree to terms with ${player.name} on a ${years}-year, ${fmtSalary(totalValue)} deal.`, value: totalValue });
+        allNews.push({ id: `fa-skip-${Date.now()}-${i}`, category: 'transaction', headline: `${player.name} agrees to terms with ${team.name}`, content: `The ${team.name} sign ${player.name} (${player.position}, ${player.rating} OVR) — ${years} yr, ${fmt(totalValue)}.`, timestamp: league.currentDay, realTimestamp: Date.now() + i, teamId: team.id, playerId: player.id, seasonYear: league.season });
+      }
+    }
+
+    updateLeague({
+      freeAgents: updatedFAs,
+      offseasonDay: day,
+      newsFeed: [...allNews, ...league.newsFeed],
+      transactions: [...allTxs, ...(league.transactions || [])].slice(0, 1000),
+    });
+    onAdvanceSeason();
   };
 
   // ── Sort toggle ──
@@ -873,15 +925,27 @@ const FreeAgency: React.FC<FreeAgencyProps> = ({
               <p className="text-xl font-display font-bold text-slate-300">{fmt(currentSalary)}</p>
             </div>
 
-            {/* Advance Day — offseason only (moratorium phase) */}
+            {/* Advance Day / Next Season — offseason only */}
             {league.isOffseason && (
-              <button
-                onClick={advanceDay}
-                disabled={league.draftPhase !== 'completed'}
-                className="px-7 py-4 bg-amber-500 hover:bg-amber-400 text-slate-950 font-display font-bold uppercase rounded-xl transition-all shadow-xl shadow-amber-500/20 active:scale-95 disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-amber-500"
-              >
-                Advance Day →
-              </button>
+              <div className="flex items-center gap-3">
+                <button
+                  onClick={advanceDay}
+                  disabled={league.draftPhase !== 'completed'}
+                  className="px-7 py-4 bg-amber-500 hover:bg-amber-400 text-slate-950 font-display font-bold uppercase rounded-xl transition-all shadow-xl shadow-amber-500/20 active:scale-95 disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-amber-500"
+                >
+                  Advance Day →
+                </button>
+                {onAdvanceSeason && (
+                  <button
+                    onClick={advanceToNextSeason}
+                    disabled={league.draftPhase !== 'completed'}
+                    title="Simulate remaining free agency and begin next season"
+                    className="px-7 py-4 bg-emerald-600 hover:bg-emerald-500 text-white font-display font-bold uppercase rounded-xl transition-all shadow-xl shadow-emerald-600/20 active:scale-95 disabled:opacity-40 disabled:cursor-not-allowed"
+                  >
+                    ⏩ Next Season
+                  </button>
+                )}
+              </div>
             )}
           </div>
         </div>
