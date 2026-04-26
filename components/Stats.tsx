@@ -165,24 +165,63 @@ const Stats: React.FC<StatsProps> = ({ league, onViewRoster, onManageTeam, onVie
     const spg = p.stats.steals / gp;
     const bpg = p.stats.blocks / gp;
     const tpm = p.stats.threepm / gp;
+    const mpg = p.stats.minutes / gp;
+    const fgmpg = p.stats.fgm / gp;
+    const fgapg = p.stats.fga / gp;
+    const tpmpg = p.stats.threepm / gp;
+    const tpapg = p.stats.threepa / gp;
+    const ftmpg = p.stats.ftm / gp;
+    const ftapg = p.stats.fta / gp;
+    const drebpg = p.stats.defReb / gp;
+    const tovpg = p.stats.tov / gp;
+    const pfpg = p.stats.pf / gp;
     const fgPct = p.stats.fga > 0 ? p.stats.fgm / p.stats.fga : 0;
     const tpPct = p.stats.threepa > 0 ? p.stats.threepm / p.stats.threepa : 0;
+    const ftPct = p.stats.fta > 0 ? p.stats.ftm / p.stats.fta : 0;
 
-    // eFG%: (FGM + 0.5 * 3PM) / FGA
+    // eFG% and TS%
     const eFG = p.stats.fga > 0 ? (p.stats.fgm + 0.5 * p.stats.threepm) / p.stats.fga : 0;
-
-    // TS%: PTS / (2 * (FGA + 0.44 * FTA))
     const TS = (p.stats.fga + 0.44 * p.stats.fta) > 0 ? p.stats.points / (2 * (p.stats.fga + 0.44 * p.stats.fta)) : 0;
 
-    // Usage% (Estimated): (FGA + 0.44 * FTA + TOV) per minute relative to team
+    // Usage%
     const USG = p.stats.minutes > 0 ? (p.stats.fga + 0.44 * p.stats.fta + p.stats.tov) / p.stats.minutes : 0;
 
-    // Simplified PER: (PTS + REB + AST + STL + BLK - MissedFG - MissedFT - TOV) / MIN
-    const PER = p.stats.minutes > 0 ?
-      (p.stats.points + p.stats.rebounds + p.stats.assists + p.stats.steals + p.stats.blocks - (p.stats.fga - p.stats.fgm) - (p.stats.fta - p.stats.ftm) - p.stats.tov) / p.stats.minutes * 30
+    // PER (simplified)
+    const PER = p.stats.minutes > 0
+      ? (p.stats.points + p.stats.rebounds + p.stats.assists + p.stats.steals + p.stats.blocks
+         - (p.stats.fga - p.stats.fgm) - (p.stats.fta - p.stats.ftm) - p.stats.tov) / p.stats.minutes * 30
       : 0;
 
-    return { eFG, TS, USG, PER, ppg, rpg, apg, spg, bpg, tpm, fgPct, tpPct };
+    // ── Box Plus/Minus (BPM) — calibrated box-score approximation ──────
+    // Positive = above league average, negative = below. Star ≈ +5–8, avg ≈ 0, scrub ≈ -4.
+    const OBPM = (ppg - 11.0) * 0.23 + (apg - 2.2) * 0.58 - tovpg * 0.62 - (fgapg - fgmpg) * 0.14;
+    const DBPM = (spg - 0.85) * 1.40 + (bpg - 0.45) * 0.95 + (drebpg - 2.3) * 0.11 - pfpg * 0.05;
+    const BPM  = OBPM + DBPM;
+
+    // VORP — value above -2.0 replacement BPM, scaled by minutes
+    const VORP = (BPM - (-2.0)) * (p.stats.minutes / (48 * 82));
+
+    // Win Shares — derived from BPM (WS/48 calibrated: avg BPM=0 → WS/48≈0.100)
+    const WS48 = Math.max(0, (BPM + 2.0) / 42 + 0.100);
+    const WS   = p.stats.minutes > 0 ? WS48 * p.stats.minutes / 48 : 0;
+    // OWS/DWS split proportional to offensive vs defensive BPM components
+    const obpmPos = Math.max(0, OBPM + 2.0);
+    const dbpmPos = Math.max(0, DBPM + 2.0);
+    const bpmSum  = obpmPos + dbpmPos || 1;
+    const OWS = WS * (obpmPos / bpmSum);
+    const DWS = WS - OWS;
+
+    // Plus/Minus per 100 possessions (≈ per 48 min with ~100 poss/game)
+    const pmPer100 = mpg > 0 ? (p.stats.plusMinus / gp) / mpg * 48 : 0;
+
+    // On-Off (estimated as player's per-100 on-court PM; true lineup data unavailable)
+    const onOff = pmPer100;
+
+    return {
+      eFG, TS, USG, PER, ppg, rpg, apg, spg, bpg, tpm, fgPct, tpPct, ftPct,
+      fgmpg, fgapg, tpmpg, tpapg, ftmpg, ftapg, mpg,
+      OBPM, DBPM, BPM, VORP, WS48, WS, OWS, DWS, pmPer100, onOff,
+    };
   };
 
   const filteredLeaders = useMemo(() => {
@@ -221,7 +260,7 @@ const Stats: React.FC<StatsProps> = ({ league, onViewRoster, onManageTeam, onVie
             </thead>
             <tbody className="divide-y divide-slate-800/40">
               {sorted.map((p, idx) => {
-                const val = (p.adv as any)[statKey] || (p.stats as any)[statKey] / Math.max(1, p.stats.gamesPlayed);
+                const val = (p.adv as any)[statKey] ?? (p.stats as any)[statKey] / Math.max(1, p.stats.gamesPlayed) ?? 0;
                 return (
                   <tr key={p.id} className="hover:bg-slate-800/30 transition-all">
                     <td className="px-6 py-4 font-display font-bold text-slate-600">#{idx + 1}</td>
@@ -1618,22 +1657,39 @@ const Stats: React.FC<StatsProps> = ({ league, onViewRoster, onManageTeam, onVie
 
       {activeTab === 'leaderboards' && (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-8">
-          <LeaderTable statKey="ppg" label="Scoring" />
-          <LeaderTable statKey="rpg" label="Rebounding" />
-          <LeaderTable statKey="apg" label="Assists" />
-          <LeaderTable statKey="spg" label="Steals" />
-          <LeaderTable statKey="bpg" label="Blocks" />
+          <LeaderTable statKey="ppg"   label="Scoring" />
+          <LeaderTable statKey="rpg"   label="Rebounding" />
+          <LeaderTable statKey="apg"   label="Assists" />
+          <LeaderTable statKey="spg"   label="Steals" />
+          <LeaderTable statKey="bpg"   label="Blocks" />
           <LeaderTable statKey="fgPct" label="FG%" fmt={v => (v * 100).toFixed(1) + '%'} />
           <LeaderTable statKey="tpm"   label="3-Pointers Made" />
           <LeaderTable statKey="tpPct" label="3-Point %" fmt={v => (v * 100).toFixed(1) + '%'} />
+          <LeaderTable statKey="fgmpg" label="FG Made" fmt={v => v.toFixed(1)} />
+          <LeaderTable statKey="fgapg" label="FG Attempts" fmt={v => v.toFixed(1)} />
+          <LeaderTable statKey="tpapg" label="3PA" fmt={v => v.toFixed(1)} />
+          <LeaderTable statKey="ftmpg" label="FT Made" fmt={v => v.toFixed(1)} />
+          <LeaderTable statKey="ftapg" label="FT Attempts" fmt={v => v.toFixed(1)} />
+          <LeaderTable statKey="ftPct" label="FT%" fmt={v => (v * 100).toFixed(1) + '%'} />
+          <LeaderTable statKey="mpg"   label="Minutes" fmt={v => v.toFixed(1)} />
         </div>
       )}
 
       {activeTab === 'advanced' && (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
-           <LeaderTable statKey="PER" label="Efficiency (PER)" />
-           <LeaderTable statKey="TS" label="True Shooting" />
-           <LeaderTable statKey="eFG" label="eFG%" />
+          <LeaderTable statKey="PER"     label="Efficiency (PER)" />
+          <LeaderTable statKey="TS"      label="True Shooting %" fmt={v => (v * 100).toFixed(1) + '%'} />
+          <LeaderTable statKey="eFG"     label="eFG%" fmt={v => (v * 100).toFixed(1) + '%'} />
+          <LeaderTable statKey="WS"      label="Win Shares" fmt={v => v.toFixed(1)} />
+          <LeaderTable statKey="OWS"     label="Offensive Win Shares" fmt={v => v.toFixed(1)} />
+          <LeaderTable statKey="DWS"     label="Defensive Win Shares" fmt={v => v.toFixed(1)} />
+          <LeaderTable statKey="WS48"    label="WS/48" fmt={v => v.toFixed(3)} />
+          <LeaderTable statKey="BPM"     label="Box Plus/Minus" fmt={v => (v >= 0 ? '+' : '') + v.toFixed(1)} />
+          <LeaderTable statKey="OBPM"    label="Offensive BPM" fmt={v => (v >= 0 ? '+' : '') + v.toFixed(1)} />
+          <LeaderTable statKey="DBPM"    label="Defensive BPM" fmt={v => (v >= 0 ? '+' : '') + v.toFixed(1)} />
+          <LeaderTable statKey="VORP"    label="VORP" fmt={v => v.toFixed(1)} />
+          <LeaderTable statKey="pmPer100" label="±/100 Possessions" fmt={v => (v >= 0 ? '+' : '') + v.toFixed(1)} />
+          <LeaderTable statKey="onOff"   label="On-Off (Est.)" fmt={v => (v >= 0 ? '+' : '') + v.toFixed(1)} />
         </div>
       )}
 
