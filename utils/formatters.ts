@@ -4,9 +4,12 @@
  *   < $1,000,000 → "$XXXK"   (rounded to nearest $1K: $285K, $98K)
  */
 export function fmtSalary(amount: number): string {
-  if (amount >= 1_000_000) {
-    const m = amount / 1_000_000;
-    return `$${parseFloat(m.toFixed(2))}M`;
+  const neg = amount < 0;
+  const abs = Math.abs(amount);
+  const sign = neg ? '-' : '';
+  if (abs >= 1_000_000) {
+    const m = abs / 1_000_000;
+    return `${sign}$${parseFloat(m.toFixed(2))}M`;
   }
-  return `$${Math.round(amount / 1_000)}K`;
+  return `${sign}$${Math.round(abs / 1_000)}K`;
 }
