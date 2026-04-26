@@ -3580,7 +3580,7 @@ const App: React.FC = () => {
             ...p, isFreeAgent: true, inSeasonFA: true, contractYears: 0,
             desiredContract: {
               years: p.rating >= 70 ? 2 : 1,
-              salary: isWomensSkip ? (p.desiredContract?.salary || p.salary || 25_000) : computeMensMarketSalary(p.rating, newState.season ?? 2026),
+              salary: isWomensSkip ? (p.desiredContract?.salary || p.salary || 25_000) : computeMensMarketSalary(p.rating, state.season ?? 2026),
             },
           })));
           return { ...t, roster: sorted.slice(0, SKIP_MAX_ROSTER) };
@@ -3653,7 +3653,7 @@ const App: React.FC = () => {
         const undraftedRookies = (prev.prospects ?? [])
           .filter(p => !draftedIds.has(p.id) && !existingFAIds.has(p.id))
           .map(p => {
-            const rookieSal = isWomensLeagueRookie ? 600_000 : computeMensMarketSalary(p.rating, newState.season ?? 2026);
+            const rookieSal = isWomensLeagueRookie ? 600_000 : computeMensMarketSalary(p.rating, prev.season ?? 2026);
             return {
             ...p,
             isFreeAgent: true,
