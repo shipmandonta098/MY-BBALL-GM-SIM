@@ -250,12 +250,22 @@ const Finances: React.FC<FinancesProps> = ({ league, updateLeague }) => {
                 );
               })()}
             </div>
-            <div className="w-full md:w-64 bg-slate-950/50 rounded-3xl p-6 border border-slate-800/60 text-center">
-                <p className="text-[10px] text-slate-500 font-black uppercase mb-1">Projected Net</p>
-                <p className={`text-4xl font-display font-bold ${projectedNet > 0 ? 'text-emerald-400' : 'text-rose-500'}`}>
-                  {formatMoney(projectedNet)}
-                </p>
-                <p className="text-[9px] text-slate-600 font-bold uppercase mt-2">Cash Reserves: {formatMoney(userTeam.finances.cash)}</p>
+            <div className="w-full md:w-64 bg-slate-950/50 rounded-3xl p-6 border border-slate-800/60 text-center space-y-3">
+                <div>
+                  <p className="text-[10px] text-slate-500 font-black uppercase mb-1">Projected Net</p>
+                  <p className={`text-4xl font-display font-bold ${projectedNet > 0 ? 'text-emerald-400' : 'text-rose-500'}`}>
+                    {projectedNet >= 0 ? '+' : ''}{formatMoney(projectedNet)}
+                  </p>
+                  <p className="text-[9px] text-slate-600 font-bold uppercase mt-2">Cash: {formatMoney(userTeam.finances.cash)}</p>
+                </div>
+                {league.previousSeasonProfit !== undefined && (
+                  <div className="border-t border-slate-800 pt-3">
+                    <p className="text-[9px] text-slate-600 font-black uppercase mb-1">Last Season Actual</p>
+                    <p className={`text-xl font-display font-bold ${league.previousSeasonProfit >= 0 ? 'text-emerald-400' : 'text-rose-500'}`}>
+                      {league.previousSeasonProfit >= 0 ? '+' : ''}{formatMoney(league.previousSeasonProfit)}
+                    </p>
+                  </div>
+                )}
             </div>
           </div>
         </div>
@@ -454,14 +464,29 @@ const Finances: React.FC<FinancesProps> = ({ league, updateLeague }) => {
           </div>
         </div>
         {/* Net summary bar */}
-        <div className={`mt-8 p-6 rounded-2xl border flex items-center justify-between gap-6 ${projectedNet >= 0 ? 'bg-emerald-500/8 border-emerald-500/25' : 'bg-rose-500/8 border-rose-500/25'}`}>
+        <div className={`mt-8 p-5 rounded-2xl border flex flex-wrap items-center justify-between gap-4 ${projectedNet >= 0 ? 'bg-emerald-500/8 border-emerald-500/25' : 'bg-rose-500/8 border-rose-500/25'}`}>
           <div>
-            <p className="text-[10px] font-black uppercase tracking-widest text-slate-500 mb-1">Projected Annual Net</p>
-            <p className={`text-3xl font-display font-black ${projectedNet >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>{formatMoney(projectedNet)}</p>
+            <p className="text-[10px] font-black uppercase tracking-widest text-slate-500 mb-1">Projected Net Profit</p>
+            <p className={`text-3xl font-display font-black ${projectedNet >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
+              {projectedNet >= 0 ? '+' : ''}{formatMoney(projectedNet)}
+            </p>
+            <p className="text-[9px] text-slate-600 font-bold mt-1 font-mono">
+              {formatMoney(totalRevenue)} Revenue − {formatMoney(totalExpenses)} Expenses
+            </p>
           </div>
-          <div className="text-right">
-            <p className="text-[10px] font-black uppercase tracking-widest text-slate-500 mb-1">Cash Reserves</p>
-            <p className="text-xl font-display font-bold text-white">{formatMoney(userTeam.finances.cash)}</p>
+          <div className="flex items-center gap-6">
+            {league.previousSeasonProfit !== undefined && (
+              <div className="text-right">
+                <p className="text-[10px] font-black uppercase tracking-widest text-slate-500 mb-1">Last Season Actual</p>
+                <p className={`text-xl font-display font-bold ${league.previousSeasonProfit >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
+                  {league.previousSeasonProfit >= 0 ? '+' : ''}{formatMoney(league.previousSeasonProfit)}
+                </p>
+              </div>
+            )}
+            <div className="text-right">
+              <p className="text-[10px] font-black uppercase tracking-widest text-slate-500 mb-1">Cash Reserves</p>
+              <p className="text-xl font-display font-bold text-white">{formatMoney(userTeam.finances.cash)}</p>
+            </div>
           </div>
         </div>
       </div>

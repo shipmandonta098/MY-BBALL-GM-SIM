@@ -1865,7 +1865,7 @@ export const generateLeagueTeams = (genderRatio: number = 0, season: number = 20
     const draftCtx: DraftContext = { season, teamNames, usedPicks };
     const tier = (tierList[i] ?? 'average') as keyof typeof TIER_SLOT_FLOORS;
     const slotFloors = TIER_SLOT_FLOORS[tier];
-    let roster = Array.from({ length: 14 }).map((_, j) =>
+    let roster = Array.from({ length: 15 }).map((_, j) =>
       generatePlayer(`p-${i}-${j}`, [19, 38], genderRatio, draftCtx, season, slotFloors[j] ?? 68)
     );
 
