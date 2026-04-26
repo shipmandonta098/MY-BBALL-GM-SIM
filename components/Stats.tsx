@@ -3,6 +3,7 @@ import { LeagueState, Player, Team, Position } from '../types';
 import TeamBadge from './TeamBadge';
 import { PlayerLink } from '../context/NavigationContext';
 import Attendance from './Attendance';
+import { rawUPER, normalizePER, leagueAvgRawUPER } from '../utils/playerUtils';
 
 interface StatsProps {
   league: LeagueState;
@@ -132,8 +133,8 @@ const Stats: React.FC<StatsProps> = ({ league, onViewRoster, onManageTeam, onVie
         ast: ast / gp, stl: stl / gp, blk: blk / gp,
         tov: tov / gp, pf: pf / gp, pts: pts / gp, mov,
         // Advanced
-        eFGPct:      fga > 0 ? (fgm + 0.5 * threepm) / fga : 0,
-        tsPct:       (fga + 0.44 * fta) > 0 ? pts / (2 * (fga + 0.44 * fta)) : 0,
+        eFGPct:      fga > 0 ? Math.min(0.75, (fgm + 0.5 * threepm) / fga) : 0,
+        tsPct:       (fga + 0.44 * fta) > 0 ? Math.min(0.72, pts / (2 * (fga + 0.44 * fta))) : 0,
         pace:        (poss + oppPoss) / (2 * gp),
         ortg,
         drtg,
@@ -155,6 +156,12 @@ const Stats: React.FC<StatsProps> = ({ league, onViewRoster, onManageTeam, onVie
       };
     });
   }, [league.teams, league.history, statsSource]);
+
+  // League-average rawUPER for PER normalization (all roster players, min 50 minutes)
+  const lgAvgRaw = useMemo(
+    () => leagueAvgRawUPER(league.teams.flatMap(t => t.roster.map(r => r.stats))),
+    [league.teams],
+  );
 
   // Advanced Stats Calculation
   const calculateAdvanced = (p: Player) => {
@@ -179,18 +186,15 @@ const Stats: React.FC<StatsProps> = ({ league, onViewRoster, onManageTeam, onVie
     const tpPct = p.stats.threepa > 0 ? p.stats.threepm / p.stats.threepa : 0;
     const ftPct = p.stats.fta > 0 ? p.stats.ftm / p.stats.fta : 0;
 
-    // eFG% and TS%
-    const eFG = p.stats.fga > 0 ? (p.stats.fgm + 0.5 * p.stats.threepm) / p.stats.fga : 0;
-    const TS = (p.stats.fga + 0.44 * p.stats.fta) > 0 ? p.stats.points / (2 * (p.stats.fga + 0.44 * p.stats.fta)) : 0;
+    // eFG% and TS% — capped at realistic NBA-season maximums (small-sample stochastic noise can push these above 100% without the cap)
+    const eFG = p.stats.fga > 0 ? Math.min(0.75, (p.stats.fgm + 0.5 * p.stats.threepm) / p.stats.fga) : 0;
+    const TS = (p.stats.fga + 0.44 * p.stats.fta) > 0 ? Math.min(0.72, p.stats.points / (2 * (p.stats.fga + 0.44 * p.stats.fta))) : 0;
 
     // Usage%
     const USG = p.stats.minutes > 0 ? (p.stats.fga + 0.44 * p.stats.fta + p.stats.tov) / p.stats.minutes : 0;
 
-    // PER (simplified)
-    const PER = p.stats.minutes > 0
-      ? (p.stats.points + p.stats.rebounds + p.stats.assists + p.stats.steals + p.stats.blocks
-         - (p.stats.fga - p.stats.fgm) - (p.stats.fta - p.stats.ftm) - p.stats.tov) / p.stats.minutes * 30
-      : 0;
+    // PER — league-normalized so avg ≈ 15.0, stars 22–32, bench < 12
+    const PER = normalizePER(rawUPER(p.stats), lgAvgRaw);
 
     // ── Box Plus/Minus (BPM) — calibrated box-score approximation ──────
     // Positive = above league average, negative = below. Star ≈ +5–8, avg ≈ 0, scrub ≈ -4.
@@ -462,12 +466,12 @@ const Stats: React.FC<StatsProps> = ({ league, onViewRoster, onManageTeam, onVie
           const twomPg = twom / gpSafe;
           const twoaPg = twoa / gpSafe;
           // EFG%
-          const efg = fga > 0 ? (fgm + 0.5 * tpm) / fga : 0;
+          const efg = fga > 0 ? Math.min(0.75, (fgm + 0.5 * tpm) / fga) : 0;
           // Advanced
           const per = min > 0
             ? (pts + reb + ast + stl + blk - (fga - fgm) - (fta - ftm) - tov) / min * 30
             : 0;
-          const ts  = (fga + 0.44 * fta) > 0 ? pts / (2 * (fga + 0.44 * fta)) : 0;
+          const ts  = (fga + 0.44 * fta) > 0 ? Math.min(0.72, pts / (2 * (fga + 0.44 * fta))) : 0;
           const usg = min > 0 ? (fga + 0.44 * fta + tov) / min : 0;
           const bpm = gpSafe > 0 ? pm / gpSafe : 0;
           const vorp = bpm * (gpSafe / 82) * 2.7;
