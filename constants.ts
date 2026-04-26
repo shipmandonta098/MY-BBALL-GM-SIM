@@ -953,6 +953,18 @@ export const ageFromBirthdate = (birthdate: string, leagueYear: number): number 
   return birthYear > 0 ? Math.max(0, leagueYear - birthYear) : 0;
 };
 
+/**
+ * WNBA draft eligibility age floor.
+ * Domestic (U.S.) players must be ≥ 22; international players must be ≥ 20.
+ * Respects any user-configured minimum if it is higher.
+ *
+ * Pass `country` as resolved from `countryFromHometown()`.
+ */
+export const wnbaAgeFloor = (country: string, userMin: number = 0): number => {
+  const baseMin = country === 'United States' ? 22 : 20;
+  return Math.max(baseMin, userMin);
+};
+
 const randomBirthdate = (age: number, leagueYear: number): string => {
   const birthYear = leagueYear - age - (Math.random() < 0.5 ? 1 : 0);
   const month = Math.floor(Math.random() * 12) + 1;
@@ -1391,7 +1403,7 @@ export const generatePlayer = (id: string, ageRange: [number, number] = [19, 38]
 
   const firstNames = gender === 'Male' ? region.firstNamesMale : NAMES_FEMALE.first;
   const lastNames = gender === 'Male' ? region.lastNamesMale : NAMES_FEMALE.last;
-  
+
   const rand = Math.random();
   // Shifted distribution — avg ~77, includes G-League-caliber fringe players
   let baseRating = rand > 0.97 ? 91 + Math.floor(Math.random() * 8)  // 3%:  91–98 (stars)
@@ -1402,7 +1414,16 @@ export const generatePlayer = (id: string, ageRange: [number, number] = [19, 38]
   const rating = Math.min(99, Math.max(minRating, baseRating));
   const potential = Math.min(99, rating + Math.floor(Math.random() * 12));
   const pos = POSITIONS[Math.floor(Math.random() * POSITIONS.length)];
-  const age = Math.floor(Math.random() * (ageRange[1] - ageRange[0]) + ageRange[0]);
+
+  // WNBA age eligibility: domestic (U.S.) ≥ 22, international ≥ 20.
+  // Enforced here so every code path that calls generatePlayer automatically respects WNBA rules.
+  const isWomensGen = genderRatio === 100;
+  const playerCountry = region.id === 'usa' ? 'United States' : region.name;
+  const effectiveAgeMin = isWomensGen
+    ? wnbaAgeFloor(playerCountry, ageRange[0])
+    : ageRange[0];
+  const effectiveAgeMax = Math.max(effectiveAgeMin, ageRange[1]);
+  const age = effectiveAgeMin + Math.floor(Math.random() * (effectiveAgeMax - effectiveAgeMin + 1));
   const _leagueYear = leagueYear ?? new Date().getFullYear();
   
   const f = region.flavor;
@@ -1643,7 +1664,15 @@ export const generateProspects = (year: number, count: number = 100, genderRatio
     });
     const bAttrs = gender === 'Female' ? applyFemaleAttrCaps(bAttrsRaw) : bAttrsRaw;
 
-    const prospectAge = ageMin + Math.floor(Math.random() * (Math.max(ageMin, ageMax) - ageMin + 1));
+    // WNBA draft eligibility: domestic (U.S.) prospects must be ≥ 22; international ≥ 20.
+    // The caller's ageMin/ageMax is still honoured if it enforces a stricter floor.
+    const isWomensProspect = genderRatio === 100;
+    const prospectCountry = region.id === 'usa' ? 'United States' : region.name;
+    const effectiveProspectMin = isWomensProspect
+      ? wnbaAgeFloor(prospectCountry, ageMin)
+      : ageMin;
+    const effectiveProspectMax = Math.max(effectiveProspectMin, ageMax);
+    const prospectAge = effectiveProspectMin + Math.floor(Math.random() * (effectiveProspectMax - effectiveProspectMin + 1));
     const rawProspect = {
       id,
       name: `${firstNames[Math.floor(Math.random() * firstNames.length)]} ${lastNames[Math.floor(Math.random() * lastNames.length)]}`,
