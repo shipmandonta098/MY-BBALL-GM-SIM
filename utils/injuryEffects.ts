@@ -2,10 +2,16 @@ import { Player } from '../types';
 
 export type InjurySeverity = 'minor' | 'moderate' | 'severe';
 
+/** Tiers: 1–10 days = minor, 11–30 = moderate, 31+ = severe (includes season-ending). */
 export function getInjurySeverity(daysOut: number): InjurySeverity {
-  if (daysOut <= 7) return 'minor';
-  if (daysOut <= 21) return 'moderate';
+  if (daysOut <= 10) return 'minor';
+  if (daysOut <= 30) return 'moderate';
   return 'severe';
+}
+
+/** Whether this injury duration allows a play-through option (minor or moderate only). */
+export function canPlayThrough(daysOut: number): boolean {
+  return daysOut <= 30;
 }
 
 /** Compute a random OVR penalty for the given injury duration. Returns a positive number to subtract. */
@@ -14,6 +20,56 @@ export function calcInjuryOVRPenalty(daysOut: number): number {
   if (sev === 'minor')    return 3 + Math.floor(Math.random() * 6);   // 3–8
   if (sev === 'moderate') return 8 + Math.floor(Math.random() * 8);   // 8–15
   return 15 + Math.floor(Math.random() * 11);                          // 15–25
+}
+
+/**
+ * Extra OVR penalty applied on top of the base penalty when a player plays through.
+ * Minor: +5–8, Moderate: +8–12 additional.
+ */
+export function getPlayThroughOVRExtra(daysOut: number): number {
+  if (daysOut <= 10) return 5 + Math.floor(Math.random() * 4);   // +5–8
+  return 8 + Math.floor(Math.random() * 5);                       // +8–12
+}
+
+/**
+ * Roll whether an injury becomes career-threatening.
+ * Regular season: 1–3% per injury event. Playoffs: 4–8%.
+ * Boosted for severe injuries (31+ days) and age 30+.
+ */
+export function rollCareerEnding(daysOut: number, age: number, isPlayoffs: boolean): boolean {
+  let chance = isPlayoffs ? 0.04 : 0.01;
+  if (daysOut >= 31)  chance *= 2.0;  // severe injury baseline doubles the rate
+  if (daysOut >= 270) chance *= 1.5;  // ACL/Achilles — even higher
+  if (age >= 35)      chance *= 2.0;
+  else if (age >= 30) chance *= 1.4;
+  // Hard cap: ≤8% in playoffs, ≤3% regular season
+  chance = Math.min(chance, isPlayoffs ? 0.08 : 0.03);
+  return Math.random() < chance;
+}
+
+/**
+ * Roll whether playing through injury worsens it (escalates days remaining).
+ * Returns the new days-out value if worsened, null if no change.
+ * Minor→Moderate chance: 6% normal, 12% playoffs, 18% back-to-back.
+ * Moderate→Severe chance: 4% normal, 8% playoffs, 14% back-to-back.
+ */
+export function rollInjuryWorsening(
+  currentDays: number,
+  isPlayoffs: boolean,
+  isB2B: boolean,
+): number | null {
+  const sev = getInjurySeverity(currentDays);
+  if (sev === 'severe') return null; // can't worsen further via play-through
+
+  let base: number;
+  if (sev === 'minor')    base = isB2B ? 0.18 : isPlayoffs ? 0.12 : 0.06;
+  else                    base = isB2B ? 0.14 : isPlayoffs ? 0.08 : 0.04;
+
+  if (Math.random() >= base) return null;
+
+  // Escalate: minor → 15–25 days, moderate → 35–60 days
+  if (sev === 'minor')    return 15 + Math.floor(Math.random() * 11);
+  return 35 + Math.floor(Math.random() * 26);
 }
 
 function isPlayerCurrentlyInjured(p: Player): boolean {
@@ -48,7 +104,7 @@ export function calcTeamEffectiveOVR(roster: Player[]): number {
 
 /**
  * Roll for a permanent potential loss on injury recovery.
- * Only applies to moderate/severe injuries (8+ days).
+ * Only applies to moderate/severe injuries (11+ days).
  * Returns { loss, note } if a loss occurs, else null.
  */
 export function rollPotentialLoss(daysOut: number): { loss: number; note: string } | null {
@@ -57,7 +113,7 @@ export function rollPotentialLoss(daysOut: number): { loss: number; note: string
   if (daysOut >= 270)     { chance = 0.20; maxLoss = 5; }  // season-ending ACL/Achilles
   else if (daysOut >= 30) { chance = 0.15; maxLoss = 5; }  // severe 30+ days
   else if (daysOut >= 22) { chance = 0.10; maxLoss = 3; }  // severe 22–29 days
-  else if (daysOut >= 8)  { chance = 0.05; maxLoss = 2; }  // moderate
+  else if (daysOut >= 11) { chance = 0.05; maxLoss = 2; }  // moderate
   else return null;                                          // minor: no risk
 
   if (Math.random() >= chance) return null;
@@ -77,7 +133,6 @@ export function getTeamInjuryNote(roster: Player[]): string | null {
 
   const worst = [...injured].sort((a, b) => (b.injuryOVRPenalty ?? 0) - (a.injuryOVRPenalty ?? 0))[0];
   const lastName = worst.name.split(' ').slice(-1)[0];
-  // Approximate team-level drop: sum of penalties weighted by role (starters count more)
   const sortedAll = [...roster].sort((a, b) => b.rating - a.rating);
   let teamDrop = 0;
   injured.forEach(p => {

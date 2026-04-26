@@ -462,16 +462,20 @@ const Roster: React.FC<RosterProps> = ({ leagueTeams, userTeamId, initialTeamId,
                 <tr 
                   key={player.id} 
                   className={`group hover:bg-slate-800/40 transition-all cursor-pointer ${
-                    isPlayerSuspended(player) ? 'bg-red-950/25 border-l-2 border-red-500/40' :
-                    isPlayerInjured(player)   ? 'bg-rose-950/20 border-l-2 border-rose-500/30' : ''
+                    isPlayerSuspended(player)   ? 'bg-red-950/25 border-l-2 border-red-500/40' :
+                    player.isCareerEnding       ? 'bg-red-950/30 border-l-2 border-red-700/50' :
+                    player.isPlayingThrough     ? 'bg-orange-950/20 border-l-2 border-orange-500/30' :
+                    isPlayerInjured(player)     ? 'bg-rose-950/20 border-l-2 border-rose-500/30' : ''
                   }`}
                   onClick={() => onScout(player)}
                 >
                   <td className="px-8 py-6">
                     <div className="flex items-center gap-4">
                       <div className={`w-12 h-12 rounded-xl flex items-center justify-center font-display text-xl border ${
-                        isPlayerSuspended(player) ? 'bg-red-950/40 border-red-500/40 text-red-400' :
-                        isPlayerInjured(player)   ? 'bg-rose-950/40 border-rose-500/40 text-rose-400' :
+                        isPlayerSuspended(player)   ? 'bg-red-950/40 border-red-500/40 text-red-400' :
+                        player.isCareerEnding       ? 'bg-red-950/60 border-red-700/60 text-red-300' :
+                        player.isPlayingThrough     ? 'bg-orange-950/40 border-orange-500/40 text-orange-400' :
+                        isPlayerInjured(player)     ? 'bg-rose-950/40 border-rose-500/40 text-rose-400' :
                         'bg-slate-800 border-slate-700 text-slate-600'
                       }`}>
                         {player.name.charAt(0)}
@@ -518,6 +522,16 @@ const Roster: React.FC<RosterProps> = ({ leagueTeams, userTeamId, initialTeamId,
                               </span>
                             );
                             const eff = getEffectiveStatus(player, activeTeam.rotation);
+                            if (player.isPlayingThrough) return (
+                              <span className="text-[10px] font-black uppercase tracking-widest px-1.5 py-0.5 rounded bg-orange-500/10 text-orange-400 border border-orange-500/20 whitespace-nowrap">
+                                Playing Hurt ⚠️{player.injuryDaysLeft ? ` · ${player.injuryDaysLeft}d` : ''}
+                              </span>
+                            );
+                            if (player.isCareerEnding) return (
+                              <span className="text-[10px] font-black uppercase tracking-widest px-1.5 py-0.5 rounded bg-red-900/30 text-red-300 border border-red-700/40 whitespace-nowrap">
+                                ☠ Career Threat
+                              </span>
+                            );
                             if (eff === 'Injured') return (
                               <span className="text-[10px] font-black uppercase tracking-widest px-1.5 py-0.5 rounded bg-rose-500/10 text-rose-400 border border-rose-500/20 whitespace-nowrap">
                                 🤕 {player.injuryType ?? 'Injured'}{player.injuryDaysLeft ? ` · ${player.injuryDaysLeft}d` : ''}

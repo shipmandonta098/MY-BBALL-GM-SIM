@@ -384,6 +384,10 @@ export interface Player {
   injuryOVRPenalty?: number;
   /** Set when a moderate/severe injury permanently reduces potential on recovery. */
   potentialLossNote?: string;
+  /** GM activated play-through — player plays at reduced OVR with worsening risk. */
+  isPlayingThrough?: boolean;
+  /** Set when this injury is career-threatening; player is sidelined for the season. */
+  isCareerEnding?: boolean;
   /** Years (season numbers) in which this player was selected as an All-Star */
   allStarSelections?: number[];
   /** Years in which this player won the All-Star Game MVP award */

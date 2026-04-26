@@ -2,7 +2,7 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { Player, PlayerStatus, PersonalityTrait, Position, PlayerTendencies, TeamRotation, TrainingFocusArea } from '../types';
 import { getFlag, countryFromHometown, POS_ATTR_RANGES, PosAttrRangeKey, enforcePositionalBounds, FEMALE_ATTR_CAPS, NAMES_MALE, NAMES_FEMALE, COLLEGES_HIGH_MAJOR, COLLEGES_MID_MAJOR, ALL_HOMETOWNS, deriveComposites, deriveArchetype } from '../constants';
 import { fmtSalary } from '../utils/formatters';
-import { getEffectiveRating } from '../utils/injuryEffects';
+import { getEffectiveRating, canPlayThrough, getInjurySeverity } from '../utils/injuryEffects';
 
 const POS_RANGE_KEYS: PosAttrRangeKey[] = ['shooting', 'playmaking', 'defense', 'rebounding', 'athleticism'];
 
@@ -52,6 +52,8 @@ interface PlayerModalProps {
   devInterventionsMax?: number;
   /** Called when GM sets a new training focus for this player */
   onSetTrainingFocus?: (playerId: string, areas: TrainingFocusArea[], durationDays: number) => void;
+  /** Called when GM activates play-through for an injured player */
+  onPlayThroughInjury?: (playerId: string) => void;
 }
 
 const traitIcons: Record<PersonalityTrait, string> = {
@@ -92,6 +94,7 @@ const PlayerModal: React.FC<PlayerModalProps> = ({
   devInterventionsUsed = 0,
   devInterventionsMax = 4,
   onSetTrainingFocus,
+  onPlayThroughInjury,
 }) => {
   const [isEditing, setIsEditing] = React.useState(false);
   const [statsTab, setStatsTab] = useState<'season' | 'career' | 'advanced' | 'playoffs'>('season');
@@ -1154,28 +1157,84 @@ const PlayerModal: React.FC<PlayerModalProps> = ({
                 {(() => {
                   const effRating = getEffectiveRating(player);
                   const isInj = player.status === 'Injured' || (player.injuryDaysLeft != null && player.injuryDaysLeft > 0);
+                  const daysLeft = player.injuryDaysLeft ?? 0;
+                  const severity = isInj ? getInjurySeverity(daysLeft) : null;
+                  const showPlayThrough = isUserTeam && isInj && !player.isCareerEnding && !player.isPlayingThrough && daysLeft > 0 && canPlayThrough(daysLeft) && !!onPlayThroughInjury;
                   return (
-                    <div className="flex items-center gap-6">
-                      <div className="flex flex-col items-center gap-1">
-                        <span className="text-6xl font-display font-bold" style={{ color: isInj ? '#f43f5e' : 'white' }}>{effRating}</span>
-                        {isInj && player.injuryOVRPenalty != null && (
-                          <span className="text-[10px] font-black uppercase tracking-widest text-rose-400 bg-rose-500/10 border border-rose-500/20 rounded px-2 py-0.5 whitespace-nowrap">
-                            Injured  -{player.injuryOVRPenalty} OVR
-                          </span>
-                        )}
-                      </div>
-                      <div className="flex-1 space-y-2">
-                        <div className="flex justify-between text-[10px] font-black text-slate-500 uppercase tracking-widest">
-                          <span>Rating: {player.rating}{isInj && player.injuryOVRPenalty != null ? ` (Eff: ${effRating})` : ''}</span>
-                          <span>Potential: {player.potential}</span>
+                    <div className="space-y-4">
+                      <div className="flex items-center gap-6">
+                        <div className="flex flex-col items-center gap-1">
+                          <span className="text-6xl font-display font-bold" style={{ color: player.isCareerEnding ? '#7f1d1d' : isInj ? '#f43f5e' : 'white' }}>{effRating}</span>
+                          {player.isCareerEnding && (
+                            <span className="text-[10px] font-black uppercase tracking-widest text-red-300 bg-red-900/40 border border-red-700/60 rounded px-2 py-0.5 whitespace-nowrap animate-pulse">
+                              ☠ Career Threat — Season Ended
+                            </span>
+                          )}
+                          {!player.isCareerEnding && player.isPlayingThrough && (
+                            <span className="text-[10px] font-black uppercase tracking-widest text-orange-300 bg-orange-900/30 border border-orange-500/40 rounded px-2 py-0.5 whitespace-nowrap">
+                              Playing Hurt ⚠️ -{player.injuryOVRPenalty} OVR
+                            </span>
+                          )}
+                          {!player.isCareerEnding && !player.isPlayingThrough && isInj && player.injuryOVRPenalty != null && (
+                            <span className="text-[10px] font-black uppercase tracking-widest text-rose-400 bg-rose-500/10 border border-rose-500/20 rounded px-2 py-0.5 whitespace-nowrap">
+                              {severity === 'severe' ? '🚑' : severity === 'moderate' ? '🤕' : '🩹'} {severity} — -{player.injuryOVRPenalty} OVR
+                            </span>
+                          )}
                         </div>
-                        <div className="h-2 bg-slate-800 rounded-full overflow-hidden">
-                          <div className="h-full" style={{ width: `${effRating}%`, backgroundColor: isInj ? '#f43f5e' : '#f59e0b' }}></div>
+                        <div className="flex-1 space-y-2">
+                          <div className="flex justify-between text-[10px] font-black text-slate-500 uppercase tracking-widest">
+                            <span>Rating: {player.rating}{isInj && player.injuryOVRPenalty != null ? ` (Eff: ${effRating})` : ''}</span>
+                            <span>Potential: {player.potential}</span>
+                          </div>
+                          <div className="h-2 bg-slate-800 rounded-full overflow-hidden">
+                            <div className="h-full" style={{ width: `${effRating}%`, backgroundColor: player.isCareerEnding ? '#7f1d1d' : isInj ? '#f43f5e' : '#f59e0b' }}></div>
+                          </div>
+                          {player.potentialLossNote && (
+                            <p className="text-[9px] font-bold text-rose-400 mt-1">{player.potentialLossNote}</p>
+                          )}
+                          {isInj && daysLeft > 0 && daysLeft < 999 && (
+                            <p className="text-[9px] text-slate-500 font-bold">{daysLeft} day{daysLeft !== 1 ? 's' : ''} remaining · {player.injuryType ?? 'Injury'}</p>
+                          )}
                         </div>
-                        {player.potentialLossNote && (
-                          <p className="text-[9px] font-bold text-rose-400 mt-1">{player.potentialLossNote}</p>
-                        )}
                       </div>
+
+                      {/* Play Through Injury panel */}
+                      {showPlayThrough && (
+                        <div className="bg-orange-900/20 border border-orange-500/30 rounded-2xl p-4 space-y-3">
+                          <div className="flex items-start gap-2">
+                            <span className="text-base">⚠️</span>
+                            <div>
+                              <p className="text-[10px] font-black uppercase tracking-widest text-orange-400">
+                                Play Through Injury — {severity === 'moderate' ? 'High Risk' : 'Available'}
+                              </p>
+                              <p className="text-[10px] text-slate-400 mt-0.5 leading-relaxed">
+                                {severity === 'moderate'
+                                  ? 'Moderate injuries carry significant risk of worsening. Continued play could escalate to a severe or season-ending injury.'
+                                  : 'Minor injury — player can suit up at reduced OVR. Still carries worsening risk, especially in playoffs or back-to-backs.'}
+                              </p>
+                              <p className="text-[9px] text-orange-400/70 mt-1 font-bold">
+                                OVR drops an additional 5–12 points while playing hurt. Worsening chance: {severity === 'moderate' ? '4–14%' : '6–18%'} per game day.
+                              </p>
+                            </div>
+                          </div>
+                          <button
+                            onClick={() => onPlayThroughInjury!(player.id)}
+                            className="w-full py-2.5 rounded-xl bg-orange-500/20 border border-orange-500/40 text-orange-300 text-[10px] font-black uppercase tracking-widest hover:bg-orange-500/30 transition-all"
+                          >
+                            Activate Play Through Injury
+                          </button>
+                        </div>
+                      )}
+
+                      {/* Career-ending — no play-through available */}
+                      {player.isCareerEnding && (
+                        <div className="bg-red-900/20 border border-red-700/40 rounded-2xl p-4">
+                          <p className="text-[10px] font-black uppercase tracking-widest text-red-400 mb-1">Career-Threatening Injury</p>
+                          <p className="text-[10px] text-slate-400 leading-relaxed">
+                            This player cannot return this season. Their long-term future is uncertain. Potential has been permanently affected.
+                          </p>
+                        </div>
+                      )}
                     </div>
                   );
                 })()}
