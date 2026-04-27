@@ -85,11 +85,11 @@ export function getThreePointPercentage(attr: number): number {
     // Elite: 40% at 90 → 43% at 94
     base = 0.40 + ((a - 90) / 4) * 0.030;
   } else {
-    // God-tier: 43% at 95 → 46% at 100 (max for any player on volume)
-    base = 0.43 + ((a - 95) / 5) * 0.03;
+    // God-tier: 41% at 95 → 44% at 100 (realistic max for volume 3PT specialists)
+    base = 0.41 + ((a - 95) / 5) * 0.03;
   }
 
-  return Math.max(0.20, Math.min(0.48, base));
+  return Math.max(0.20, Math.min(0.44, base));
 }
 
 // ─── Rebound Chance Functions ────────────────────────────────────────────────
@@ -631,7 +631,7 @@ export function getMidRangePercentage(
   const bhBonus = ballHandling !== undefined ? (ballHandling - 50) / 200 * 0.05 : 0;
   const synergyBonus = Math.min(0.025, Math.max(-0.010, iqBonus + bhBonus));
 
-  return Math.max(0.32, Math.min(0.56, base + positionalTweak + synergyBonus));
+  return Math.max(0.32, Math.min(0.50, base + positionalTweak + synergyBonus));
 }
 
 // ─── Mid-Range Contest Modifier ───────────────────────────────────────────────
@@ -740,23 +740,23 @@ export function getLayupPercentage(attr: number, position?: string): number {
     // League-avg: 60 % at 70 → 65 % at 79
     base = 0.60 + ((a - 70) / 9) * 0.05;
   } else if (a <= 89) {
-    // Plus finisher: 65 % at 80 → 70 % at 89  (contact-seeker, elite burst)
-    base = 0.65 + ((a - 80) / 9) * 0.05;
+    // Plus finisher: 62 % at 80 → 66 % at 89  (contact-seeker, elite burst)
+    base = 0.62 + ((a - 80) / 9) * 0.04;
   } else if (a <= 94) {
-    // Elite: 70 % at 90 → 74 % at 94  (diminishing returns kick in hard)
-    base = 0.70 + ((a - 90) / 4) * 0.04;
+    // Elite: 66 % at 90 → 69 % at 94  (diminishing returns kick in hard)
+    base = 0.66 + ((a - 90) / 4) * 0.03;
   } else {
-    // God-mode: 74 % at 95 → 78 % at 100  (Shaq/Giannis-tier — near automatic)
-    base = 0.74 + ((a - 95) / 5) * 0.04;
+    // God-mode: 69 % at 95 → 72 % at 100  (Shaq/Giannis-tier, still faces help defense)
+    base = 0.69 + ((a - 95) / 5) * 0.03;
   }
 
   // Positional adjustment — bigs have natural rim advantages; guards face more help-D
   const positionalTweak =
-    position === 'C' || position === 'PF' ? +0.02 :
-    position === 'PG' || position === 'SG' ? -0.01 :
+    position === 'C' || position === 'PF' ? +0.01 :
+    position === 'PG' || position === 'SG' ? -0.02 :
     0; // SF neutral
 
-  return Math.max(0.43, Math.min(0.80, base + positionalTweak));
+  return Math.max(0.42, Math.min(0.73, base + positionalTweak));
 }
 
 // ─── Dunk Percentage ──────────────────────────────────────────────────────────
@@ -3267,13 +3267,13 @@ const simulatePlayerGameLine = (
     player.personalityTraits,
   ) - moraleTovMod);
 
-  // 3PA share influenced by pullUpThree tendency
-  const threePaShare = Math.max(0, Math.min(0.90,
+  // 3PA share influenced by pullUpThree tendency — max 55% of shots (even elite specialists)
+  const threePaShare = Math.max(0, Math.min(0.55,
     (player.attributes.shooting3pt / 100) * 0.5 + tm.threepaBoost));
   const threepa = Math.round(fga * threePaShare);
 
-  // Inside / mid split
-  const insideShare = Math.max(0, Math.min(0.70,
+  // Inside / mid split — capped at 50% to keep FGA distribution realistic
+  const insideShare = Math.max(0, Math.min(0.50,
     ((player.attributes.layups + player.attributes.dunks) / 2 / 100) * 0.3 + tm.insideBoost));
   const insFga  = Math.round(fga * insideShare);
   const midFga  = Math.max(0, fga - threepa - insFga);
@@ -3306,30 +3306,29 @@ const simulatePlayerGameLine = (
   const dunkWeight  = Math.min(0.20, player.attributes.dunks       / 100 * 0.20);
   const postWeight  = Math.min(0.25, player.attributes.postScoring / 100 * 0.25);
   const layupWeight = Math.max(0,    1 - dunkWeight - postWeight);
-  const fgPctIns    = layupBase * layupWeight + (dunkBase * 0.75) * dunkWeight + postBase * postWeight;
+  // dunkBase scaled by 0.60 (was 0.75): box-score "inside" includes many contested
+  // attempts where the defense has rotated — dunk success rate must reflect that.
+  const fgPctIns    = layupBase * layupWeight + (dunkBase * 0.60) * dunkWeight + postBase * postWeight;
 
   // Stochastic rounding: Math.floor(n*rate + rand()) gives correct expected
   // value (= n*rate) without the systematic upward bias of Math.round that
   // was locking season 3PT% leaders at 50% for high-base shooters.
-  const threeRate = Math.max(0.05, fgPct3 + fgPctBoost + fatigueMod + opponentPerimDefMod + moraleFgMod + (Math.random() * 0.06 - 0.03));
+  // Hard caps prevent single-game absurdities while still allowing hot nights.
+  // Season averages will be lower due to cold games balancing hot ones.
+  const threeRate = Math.max(0.05, Math.min(0.56, fgPct3 + fgPctBoost + fatigueMod + opponentPerimDefMod + moraleFgMod + (Math.random() * 0.06 - 0.03)));
   const threepm   = Math.min(threepa, Math.floor(threepa * threeRate + Math.random()));
-  const midRate   = Math.max(0.05, fgPctMid + fgPctBoost + fatigueMod + opponentMidDefMod + moraleFgMod + (Math.random() * 0.06 - 0.03));
+  const midRate   = Math.max(0.05, Math.min(0.52, fgPctMid + fgPctBoost + fatigueMod + opponentMidDefMod + moraleFgMod + (Math.random() * 0.06 - 0.03)));
   const midFgm    = Math.min(midFga,  Math.floor(midFga  * midRate   + Math.random()));
   // Inside FGM: interior + post defense mods both apply (weighted by post share).
-  // opponentInteriorDefMod suppresses drives/dunks; opponentPostDefMod suppresses
-  // post-ups.  Blend them proportionally to postWeight so a non-post player
-  // (postWeight≈0) is barely affected by post defense, and a pure post scorer
-  // (postWeight≈0.25) feels the full post-defense penalty.
   const blendedInsideMod = opponentInteriorDefMod * (1 - postWeight) + opponentPostDefMod * postWeight;
-  // Floor lowered to 0.30 (from 0.35): even poor finishers shouldn't make 35%+
-  // of their inside attempts after factoring in rim protection and fatigue.
-  const insRate   = Math.max(0.30, fgPctIns + fgPctBoost + fatigueMod + blendedInsideMod + moraleFgMod + (Math.random() * 0.06 - 0.03));
+  // Ceiling 0.72: even elite rim-runners face help defense over a full game.
+  const insRate   = Math.max(0.30, Math.min(0.72, fgPctIns + fgPctBoost + fatigueMod + blendedInsideMod + moraleFgMod + (Math.random() * 0.06 - 0.03)));
   const insFgm    = Math.min(insFga,  Math.floor(insFga  * insRate   + Math.random()));
   const fgm     = threepm + midFgm + insFgm;
 
   // FTA: scaled by strength and minutes. Cap random component to prevent outlier
   // games — NBA teams average 22 FTA, so per-player average should be ~2-3 FTA.
-  const fta = Math.round((player.attributes.strength / 100) * 3.5 * minFac + Math.random() * 1.5);
+  const fta = Math.round((player.attributes.strength / 100) * 2.5 * minFac + Math.random() * 0.8);
 
   // FT%: piecewise curve + positional tweak + situational modifiers.
   // ftBonus carries the home-court advantage from the call site; we also
@@ -3353,15 +3352,15 @@ const simulatePlayerGameLine = (
   // Independent per-player rebound formula — no normalization to teamReb.
   // posRebMult encodes positional rebounding rates (C highest, guards lowest).
   // Power-curve (squared) concentrates boards in high-rebounding players.
-  // 28.0 calibration: C at reb=90, 36 min → ~(0.90²)×1.00×0.75×28 ≈ 17 raw boards.
-  // Random noise ±3 allows natural game-to-game variance.
+  // 18.0 calibration: C at reb=90, 36 min → ~(0.90²)×1.00×0.75×18 ≈ 11 raw boards.
+  // Random noise ±2 allows natural game-to-game variance.
   const posRebMult =
     player.position === 'C'  ? 1.00 :
     player.position === 'PF' ? 0.72 :
     player.position === 'SF' ? 0.50 : 0.32;
   const totalReb = Math.max(0, Math.round(
-    Math.pow(player.attributes.rebounding / 100, 2) * posRebMult * minFac * 28.0
-    + (Math.random() * 6 - 3),
+    Math.pow(player.attributes.rebounding / 100, 2) * posRebMult * minFac * 18.0
+    + (Math.random() * 4 - 2),
   ));
   // ORB/DRB split: use position-based base (bigs ~27% of their boards are ORBs,
   // guards ~19%) + small attribute modifier. This replaces orbChance/drbChance
@@ -3402,14 +3401,14 @@ const simulatePlayerGameLine = (
   // PGs naturally run more pick-and-roll/transition — their high BH + playmaking raises this.
   // Pure scorers with low BH/playmaking won't inflate their own assist totals.
   const posPlayBase =
-    player.position === 'PG' ? 0.34 : player.position === 'SG' ? 0.22 :
-    player.position === 'SF' ? 0.16 : player.position === 'PF' ? 0.12 : 0.09;
+    player.position === 'PG' ? 0.26 : player.position === 'SG' ? 0.17 :
+    player.position === 'SF' ? 0.13 : player.position === 'PF' ? 0.09 : 0.07;
   const handlerFrac = Math.max(0.05,
     posPlayBase
     + ((player.attributes.ballHandling ?? 60) - 65) / 160
     + ((player.attributes.playmaking   ?? 60) - 65) / 220
   );
-  const adjAstShare = Math.max(0.01, astEff * handlerFrac * minFac * 1.10 * (1 + tm.astBoost) * contextMult);
+  const adjAstShare = Math.max(0.01, astEff * handlerFrac * minFac * 0.85 * (1 + tm.astBoost) * contextMult);
   const ast = Math.max(0, Math.round(teamAst * adjAstShare));
 
   // STL: getStealChance × 80 steal-opportunities per 48 min × minutes fraction.
@@ -3745,7 +3744,7 @@ export const simulateGame = (
   const distributeToPlayers = (team: Team, totalPts: number, isHome: boolean, isGT: boolean) => {
     const roster      = team.roster;
     const totalRating = roster.reduce((acc, p) => acc + p.rating, 0);
-    const teamFga     = Math.round(statPace * 1.10);
+    const teamFga     = Math.round(statPace * 0.87);
     // teamReb: ~42–52 boards/team at NBA pace. 0.50 coefficient (was 0.44) accounts
     // for offensive boards — each missed shot is a rebound opportunity for either team.
     // No artificial cap — fast-paced games with many missed shots can yield 60+ team boards.
@@ -3755,7 +3754,7 @@ export const simulateGame = (
     // players exceeds 1.0 by ~1.48×, causing reported team assists to balloon to 45+.
     // New coefficient (0.46) brings the raw target to ~22-26 for typical 105-125 pt games,
     // matching the 2024-25 NBA range of 22-26 team assists per game.
-    const teamAst     = Math.round((totalPts / 2.2) * 0.46);
+    const teamAst     = Math.round((totalPts / 2.2) * 0.40);
 
     // Opponent defensive averages — computed once per team, applied to every player's box score.
     // Uses top-8 rotation players as the sample (starters + primary bench).
