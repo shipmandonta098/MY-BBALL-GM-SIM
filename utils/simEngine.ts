@@ -939,18 +939,37 @@ export function getRimProtectionMod(
 /**
  * Maps a player's freeThrow attribute (0–100) to a base FT%.
  *
- * Near-linear mapping so attribute directly reflects shooting ability:
- *   attr  50 → ~50 %  (hack-a candidate — misses roughly half)
- *   attr  70 → ~70 %  (below-avg; teams will sometimes foul intentionally)
- *   attr  95 → ~95 %  (elite: near-automatic)
+ * Piecewise calibration — realistic NBA tiers:
+ *   attr   0–50 → 45–66 %  (hack-a range; Shaq-tier to below-avg bigs)
+ *   attr  51–70 → 66–77 %  (below-avg → league average)
+ *   attr  71–85 → 77–85 %  (above-avg; reliable in clutch)
+ *   attr  86–100→ 85–91 %  (elite: SGA / prime KD territory)
  *
- * Per-game variance (±3 %, or ±5 % for Streaky) is applied at the call site via
- * getFreeThrowNoiseWidth(), so season averages regress naturally to base.
+ * Per-game noise (±3 %, ±5 % for Streaky) applied at call site.
+ * Season average for an attr-95 guard: ~89–91 %, rarely above 92 %.
  *
- * Hard clamp: [0.30, 0.97]
+ * Hard clamp: [0.45, 0.94]
  */
-export function getFreeThrowPercentage(attr: number, _position?: string): number {
-  return Math.max(0.30, Math.min(0.97, attr / 100));
+export function getFreeThrowPercentage(attr: number, position?: string): number {
+  const a = Math.max(0, Math.min(100, attr));
+
+  let base: number;
+  if (a <= 50) {
+    base = 0.45 + (a / 50) * 0.21;           // 45 % → 66 % at 50
+  } else if (a <= 70) {
+    base = 0.66 + ((a - 50) / 20) * 0.11;    // 66 % → 77 % at 70
+  } else if (a <= 85) {
+    base = 0.77 + ((a - 70) / 15) * 0.08;    // 77 % → 85 % at 85
+  } else {
+    base = 0.85 + ((a - 85) / 15) * 0.06;    // 85 % → 91 % at 100
+  }
+
+  const positionalTweak =
+    position === 'PG' || position === 'SG' || position === 'SF' ? +0.008 :
+    position === 'C'  || position === 'PF'                      ? -0.012 :
+    0;
+
+  return Math.max(0.45, Math.min(0.94, base + positionalTweak));
 }
 
 // ─── Free Throw Situational Modifier ─────────────────────────────────────────
@@ -3400,9 +3419,12 @@ const simulatePlayerGameLine = (
     clutchTendency:    player.tendencies?.situationalTendencies?.clutchShotTaker,
   });
   const ftNoise   = getFreeThrowNoiseWidth(player.personalityTraits);
-  const ftPct     = Math.max(0.30, Math.min(0.97,
+  const ftPct     = Math.max(0.45, Math.min(0.94,
     ftBasePct + ftSitMod + (Math.random() * 2 * ftNoise - ftNoise)));
-  const ftm = Math.min(fta, Math.round(fta * ftPct));
+  // Simulate each attempt individually — avoids Math.round always rounding
+  // small FTA counts up to 100 % (e.g. round(2 × 0.87) = 2 every time).
+  let ftm = 0;
+  for (let i = 0; i < fta; i++) { if (Math.random() < ftPct) ftm++; }
   const pts = midFgm * 2 + insFgm * 2 + threepm * 3 + ftm;
 
   // Independent per-player rebound formula — no normalization to teamReb.
@@ -4193,7 +4215,8 @@ export const simulateGame = (
         const ftPct      = s.fta  > 0 ? s.ftm  / s.fta  : 0.75;
         // Allocate pts: ~25% FT, ~20% 3pt, rest 2pt
         const cFta       = Math.max(0, Math.round(cPts * 0.25));
-        const cFtm       = Math.max(0, Math.round(cFta * ftPct));
+        let cFtm = 0;
+        for (let i = 0; i < cFta; i++) { if (Math.random() < ftPct) cFtm++; }
         const cThreepa   = Math.max(0, Math.round(cPts * 0.20 / 3));
         const cThreepm   = Math.max(0, Math.round(cThreepa * threePct));
         const rem        = Math.max(0, cPts - cFtm - cThreepm * 3);
