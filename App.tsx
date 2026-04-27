@@ -4584,7 +4584,7 @@ const App: React.FC = () => {
           <div className="w-16 h-16 border-4 border-slate-700 border-t-amber-500 rounded-full animate-spin" />
           <div className="text-center">
             <p className="font-display font-bold text-2xl uppercase tracking-widest text-white mb-2">
-              Advancing to {(league?.season ?? 2025) + 1} Preseason
+              Advancing to {league?.season ?? 2026} Preseason
             </p>
             <p className="text-slate-500 text-sm">Generating schedule &amp; applying development…</p>
           </div>
