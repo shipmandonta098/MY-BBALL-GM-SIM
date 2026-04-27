@@ -407,7 +407,7 @@ export function getAssistEfficiency(
  *    95   │  3.75 % │  4.25 % │ 3.45 %
  *   100   │  4.50 % │  5.00 % │ 4.20 %
  *
- * Tuning: STL_OPP_SCALE in simulatePlayerGameLine (default 65) controls the
+ * Tuning: STL_OPP_SCALE in simulatePlayerGameLine (default 48) controls the
  * number of steal opportunities per 48 min; raise/lower it to shift team totals.
  */
 export function getStealChance(attr: number, position?: string, defIQ?: number): number {
@@ -463,7 +463,7 @@ export function getStealChance(attr: number, position?: string, defIQ?: number):
  *    95   │  8.25 % │  9.75 % │  7.25 %
  *   100   │  9.00 % │ 10.00 % │  8.00 %
  *
- * Tuning: BLK_OPP_SCALE in simulatePlayerGameLine (default 50) controls the
+ * Tuning: BLK_OPP_SCALE in simulatePlayerGameLine (default 35) controls the
  * number of block opportunities per 48 min; raise/lower to shift team totals.
  */
 export function getBlockChance(attr: number, position?: string, defIQ?: number): number {
@@ -3344,7 +3344,9 @@ const simulatePlayerGameLine = (
   const fatigueMod = minutes > 32 ? -((minutes - 32) * 0.0035) : 0;
 
   const adjUsage = Math.max(0.02, usageShare * (1 + tm.usageBoost));
-  const fga      = Math.max(0, Math.round(teamFga * adjUsage * (minutes / 32)));
+  // Cap at 22 FGA: prevents star usage-share inflation from producing 30+ FGA games
+  // that would drive season PPG above 32. NBA leaders take 19–22 FGA/game at peak usage.
+  const fga      = Math.min(22, Math.max(0, Math.round(teamFga * adjUsage * (minutes / 32))));
 
   // TO% computed early: drives both the TOV stat and the AST efficiency penalty.
   // Uses getTurnoverPercentage() — piecewise curve calibrated to NBA 2025-26.
@@ -3449,16 +3451,17 @@ const simulatePlayerGameLine = (
   // Independent per-player rebound formula — no normalization to teamReb.
   // posRebMult encodes positional rebounding rates (C highest, guards lowest).
   // Power-curve (squared) concentrates boards in high-rebounding players.
-  // 28.0 calibration: C at reb=90, 36 min → ~(0.90²)×1.00×0.75×28 ≈ 17 raw boards.
-  // Random noise ±3 allows natural game-to-game variance.
+  // 19.5 calibration: C at reb=90, 36 min → ~(0.90²)×1.00×0.75×19.5 ≈ 11.9 boards.
+  // Targets: elite C ≈ 12–14 RPG, elite PF ≈ 9–11, SF ≈ 6–8, guards ≈ 3–5.
+  // Random noise ±2.5 provides organic game-to-game variance.
   const posRebMult =
     player.position === 'C'  ? 1.00 :
     player.position === 'PF' ? 0.72 :
     player.position === 'SF' ? 0.50 : 0.32;
-  const totalReb = Math.max(0, Math.round(
-    Math.pow(player.attributes.rebounding / 100, 2) * posRebMult * minFac * 28.0
-    + (Math.random() * 6 - 3),
-  ));
+  const totalReb = Math.min(22, Math.max(0, Math.round(
+    Math.pow(player.attributes.rebounding / 100, 2) * posRebMult * minFac * 19.5
+    + (Math.random() * 5 - 2.5),
+  )));
   // ORB/DRB split: use position-based base (bigs ~27% of their boards are ORBs,
   // guards ~19%) + small attribute modifier. This replaces orbChance/drbChance
   // ratio which produced unrealistic 45-55% ORB splits for bigs.
@@ -3473,9 +3476,8 @@ const simulatePlayerGameLine = (
 
   // ── Assist calculation ────────────────────────────────────────────────────
   // Primary efficiency: passing + playmaking + ball handling + IQ + kick-out tendency.
-  // No artificial ceiling — elite playmakers are allowed to reach 12–18+ on
-  // exceptional nights; the math naturally constrains realistic totals since
-  // teamAst ≈ 22–28 and adjAstShare < 1.0 for all but the rarest performances.
+  // adjAstShare capped at 0.42 so even an elite PG never exceeds ~10 APG season avg
+  // (teamAst 24 × 0.42 = 10.1). Per-game cap of 18 prevents freak stat-padding games.
   const kickOutTendency = player.tendencies?.kickOutPasser ?? 50;
   const astEff = getAssistEfficiency(
     player.attributes.passing,
@@ -3505,27 +3507,31 @@ const simulatePlayerGameLine = (
     + ((player.attributes.ballHandling ?? 60) - 65) / 160
     + ((player.attributes.playmaking   ?? 60) - 65) / 220
   );
-  const adjAstShare = Math.max(0.01, astEff * handlerFrac * minFac * 1.10 * (1 + tm.astBoost) * contextMult);
-  const ast = Math.max(0, Math.round(teamAst * adjAstShare));
+  const adjAstShare = Math.min(0.42, Math.max(0.01, astEff * handlerFrac * minFac * 1.10 * (1 + tm.astBoost) * contextMult));
+  // ±1 noise adds organic game-to-game fluctuation (some 6-ast nights, some 14-ast nights)
+  const ast = Math.min(18, Math.max(0, Math.round(teamAst * adjAstShare + (Math.random() * 2 - 1))));
 
-  // STL: getStealChance × 80 steal-opportunities per 48 min × minutes fraction.
+  // STL: getStealChance × 48 steal-opportunities per 48 min × minutes fraction.
+  // Reduced from 80 → 48 so league leaders average 1.5–2.5 SPG (NBA realistic range).
   // stlBoost from defensive tendencies (pass-denial, gambles, helpDefender).
   // Stamina: fatigued defenders lose a step — up to 15 % reduction at stamina=40.
-  // No artificial per-player cap — elite thieves can reach 5–7 STL on exceptional nights.
-  const STL_OPP_SCALE = 80;
+  // Hard cap at 5 STL/game; wider noise (1.5) creates organic nightly variance.
+  const STL_OPP_SCALE = 48;
   const stlBase    = getStealChance(player.attributes.steals, player.position, player.attributes.defensiveIQ)
     * STL_OPP_SCALE * minFac * (1 + tm.stlBoost) * (1 + moraleEffMod);
   const stlFatigue = Math.max(0, (65 - (player.attributes.stamina ?? 70)) / 100 * 0.15);
-  const stl        = Math.max(0, Math.floor(stlBase * (1 - stlFatigue) + Math.random() * 0.8));
+  const stl        = Math.min(5, Math.max(0, Math.floor(stlBase * (1 - stlFatigue) + Math.random() * 1.5)));
 
-  // BLK: getBlockChance × 65 block-opportunities per 48 min × minutes fraction.
+  // BLK: getBlockChance × 35 block-opportunities per 48 min × minutes fraction.
+  // Reduced from 65 → 35 so league leaders average 2.5–3.5 BPG (NBA realistic range).
+  // Wemby-tier (blocks=97+): ~3.5 BPG; solid rim protector (blocks=85): ~2.0 BPG.
   // blkBoost from helpDefender/physicality tendencies; stamina reduction for tired bigs.
-  // No artificial per-player cap — elite rim protectors can reach 7–10 BLK on dominant nights.
-  const BLK_OPP_SCALE = 65;
+  // Hard cap at 7 BLK/game; wider noise (1.5) creates organic nightly variance.
+  const BLK_OPP_SCALE = 35;
   const blkBase    = getBlockChance(player.attributes.blocks, player.position, player.attributes.defensiveIQ)
     * BLK_OPP_SCALE * minFac * (1 + tm.blkBoost) * (1 + moraleEffMod);
   const blkFatigue = Math.max(0, (65 - (player.attributes.stamina ?? 70)) / 100 * 0.12);
-  const blk        = Math.max(0, Math.floor(blkBase * (1 - blkFatigue) + Math.random() * 0.8));
+  const blk        = Math.min(7, Math.max(0, Math.floor(blkBase * (1 - blkFatigue) + Math.random() * 1.5)));
   const pf  = Math.min(6, Math.round((Math.floor(Math.random() * 4 * minFac + 1)) * (1 + tm.foulRisk)));
 
   // TOV: scaled by position-based touch multiplier so ball-handlers accrue
