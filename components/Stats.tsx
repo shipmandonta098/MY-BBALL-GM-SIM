@@ -196,17 +196,24 @@ const Stats: React.FC<StatsProps> = ({ league, onViewRoster, onManageTeam, onVie
     // PER — league-normalized so avg ≈ 15.0, stars 22–32, bench < 12
     const PER = normalizePER(rawUPER(p.stats), lgAvgRaw);
 
-    // ── Box Plus/Minus (BPM) — calibrated box-score approximation ──────
-    // Positive = above league average, negative = below. Star ≈ +5–8, avg ≈ 0, scrub ≈ -4.
-    const OBPM = (ppg - 11.0) * 0.23 + (apg - 2.2) * 0.58 - tovpg * 0.62 - (fgapg - fgmpg) * 0.14;
-    const DBPM = (spg - 0.85) * 1.40 + (bpg - 0.45) * 0.95 + (drebpg - 2.3) * 0.11 - pfpg * 0.05;
-    const BPM  = OBPM + DBPM;
+    // ── Box Plus/Minus (BPM) ────────────────────────────────────────────
+    // OBPM: APG weight reduced 0.58→0.50 to stop elite pass/score combos from
+    //   inflating past realistic bounds. PPG/TOV/miss weights unchanged.
+    const OBPM = (ppg - 11.0) * 0.23 + (apg - 2.2) * 0.50 - tovpg * 0.62 - (fgapg - fgmpg) * 0.14;
+    // DBPM: SPG 1.40→1.05, BPG 0.95→0.72, dreb 0.11→0.09 — keeps elite
+    //   defenders in the realistic +2 to +5 range; hard cap at +5.5.
+    const DBPM = Math.min(5.5,
+      (spg - 0.85) * 1.05 + (bpg - 0.45) * 0.72 + (drebpg - 2.3) * 0.09 - pfpg * 0.04
+    );
+    // Hard clamp: even the best real player rarely exceeds +12 BPM.
+    const BPM = Math.min(12, Math.max(-8, OBPM + DBPM));
 
-    // VORP — value above -2.0 replacement BPM, scaled by minutes
-    const VORP = (BPM - (-2.0)) * (p.stats.minutes / (48 * 82));
+    // VORP — scaled by 0.75 to align with capped BPM values
+    const VORP = (BPM - (-2.0)) * (p.stats.minutes / (48 * 82)) * 0.75;
 
-    // Win Shares — derived from BPM (WS/48 calibrated: avg BPM=0 → WS/48≈0.100)
-    const WS48 = Math.max(0, (BPM + 2.0) / 42 + 0.100);
+    // Win Shares — WS/48 divisor raised 42→80 so top WS/48 lands 0.22–0.29.
+    //   BPM +10 starter → WS48 ≈ 0.250; BPM +7 starter → WS48 ≈ 0.213.
+    const WS48 = Math.max(0, (BPM + 2.0) / 80 + 0.100);
     const WS   = p.stats.minutes > 0 ? WS48 * p.stats.minutes / 48 : 0;
     // OWS/DWS split proportional to offensive vs defensive BPM components
     const obpmPos = Math.max(0, OBPM + 2.0);
@@ -215,8 +222,11 @@ const Stats: React.FC<StatsProps> = ({ league, onViewRoster, onManageTeam, onVie
     const OWS = WS * (obpmPos / bpmSum);
     const DWS = WS - OWS;
 
-    // Plus/Minus per 100 possessions (≈ per 48 min with ~100 poss/game)
-    const pmPer100 = mpg > 0 ? (p.stats.plusMinus / gp) / mpg * 48 : 0;
+    // ±/100 Possessions — gate at 10 MPG so garbage-time specialists
+    //   (2 min/game, +15 PM) can't inflate to +138. Hard cap ±22.
+    const pmPer100 = mpg >= 10
+      ? Math.max(-22, Math.min(22, (p.stats.plusMinus / gp) / mpg * 48))
+      : 0;
 
     // On-Off (estimated as player's per-100 on-court PM; true lineup data unavailable)
     const onOff = pmPer100;
@@ -1701,15 +1711,24 @@ const Stats: React.FC<StatsProps> = ({ league, onViewRoster, onManageTeam, onVie
           <LeaderTable statKey="PER"     label="Efficiency (PER)" />
           <LeaderTable statKey="TS"      label="True Shooting %" fmt={v => (v * 100).toFixed(1) + '%'} />
           <LeaderTable statKey="eFG"     label="eFG%" fmt={v => (v * 100).toFixed(1) + '%'} />
-          <LeaderTable statKey="WS"      label="Win Shares" fmt={v => v.toFixed(1)} />
-          <LeaderTable statKey="OWS"     label="Offensive Win Shares" fmt={v => v.toFixed(1)} />
-          <LeaderTable statKey="DWS"     label="Defensive Win Shares" fmt={v => v.toFixed(1)} />
-          <LeaderTable statKey="WS48"    label="WS/48" fmt={v => v.toFixed(3)} />
-          <LeaderTable statKey="BPM"     label="Box Plus/Minus" fmt={v => (v >= 0 ? '+' : '') + v.toFixed(1)} />
-          <LeaderTable statKey="OBPM"    label="Offensive BPM" fmt={v => (v >= 0 ? '+' : '') + v.toFixed(1)} />
-          <LeaderTable statKey="DBPM"    label="Defensive BPM" fmt={v => (v >= 0 ? '+' : '') + v.toFixed(1)} />
-          <LeaderTable statKey="VORP"    label="VORP" fmt={v => v.toFixed(1)} />
-          <LeaderTable statKey="pmPer100" label="±/100 Possessions" fmt={v => (v >= 0 ? '+' : '') + v.toFixed(1)} />
+          <LeaderTable statKey="WS"      label="Win Shares" fmt={v => v.toFixed(1)}
+            minAttemptsFilter={p => p.stats.minutes / Math.max(1, p.stats.gamesPlayed) >= 12} />
+          <LeaderTable statKey="OWS"     label="Offensive Win Shares" fmt={v => v.toFixed(1)}
+            minAttemptsFilter={p => p.stats.minutes / Math.max(1, p.stats.gamesPlayed) >= 12} />
+          <LeaderTable statKey="DWS"     label="Defensive Win Shares" fmt={v => v.toFixed(1)}
+            minAttemptsFilter={p => p.stats.minutes / Math.max(1, p.stats.gamesPlayed) >= 12} />
+          <LeaderTable statKey="WS48"    label="WS/48" fmt={v => v.toFixed(3)}
+            minAttemptsFilter={p => p.stats.minutes / Math.max(1, p.stats.gamesPlayed) >= 15} />
+          <LeaderTable statKey="BPM"     label="Box Plus/Minus" fmt={v => (v >= 0 ? '+' : '') + v.toFixed(1)}
+            minAttemptsFilter={p => p.stats.minutes / Math.max(1, p.stats.gamesPlayed) >= 15} />
+          <LeaderTable statKey="OBPM"    label="Offensive BPM" fmt={v => (v >= 0 ? '+' : '') + v.toFixed(1)}
+            minAttemptsFilter={p => p.stats.minutes / Math.max(1, p.stats.gamesPlayed) >= 15} />
+          <LeaderTable statKey="DBPM"    label="Defensive BPM" fmt={v => (v >= 0 ? '+' : '') + v.toFixed(1)}
+            minAttemptsFilter={p => p.stats.minutes / Math.max(1, p.stats.gamesPlayed) >= 15} />
+          <LeaderTable statKey="VORP"    label="VORP" fmt={v => v.toFixed(1)}
+            minAttemptsFilter={p => p.stats.minutes / Math.max(1, p.stats.gamesPlayed) >= 12} />
+          <LeaderTable statKey="pmPer100" label="±/100 Possessions" fmt={v => (v >= 0 ? '+' : '') + v.toFixed(1)}
+            minAttemptsFilter={p => p.stats.minutes / Math.max(1, p.stats.gamesPlayed) >= 15} />
           <LeaderTable statKey="onOff"   label="On-Off (Est.)" fmt={v => (v >= 0 ? '+' : '') + v.toFixed(1)} />
         </div>
       )}
