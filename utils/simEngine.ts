@@ -3425,9 +3425,25 @@ const simulatePlayerGameLine = (
   const insFgm    = Math.min(insFga,  Math.floor(insFga  * insRate   + Math.random()));
   const fgm     = threepm + midFgm + insFgm;
 
-  // FTA: scaled by strength and minutes. Cap random component to prevent outlier
-  // games — NBA teams average 22 FTA, so per-player average should be ~2-3 FTA.
-  const fta = Math.round((player.attributes.strength / 100) * 3.5 * minFac + Math.random() * 1.5);
+  // FTA: driven by Draw Foul tendency, drive/post aggressiveness, and team scheme.
+  // ftaRate = FTA generated per FGA attempt (NBA average ≈ 0.25; elite drawers 0.40-0.55).
+  //   drawFoul 90 → base ≈ 0.38  |  drawFoul 50 → base ≈ 0.15  |  drawFoul 20 → base ≈ 0.05
+  //   driveToBasket 80 → +0.036  |  postUp 80 → +0.030
+  //   Grit and Grind ×1.20 (interior emphasis)  |  Pace & Space / Showtime ×1.08 (drive lanes)
+  const ot_fta      = player.tendencies?.offensiveTendencies;
+  const drawFoulTend = ot_fta?.drawFoul      ?? 50;
+  const driveTend    = ot_fta?.driveToBasket ?? 50;
+  const postTend     = ot_fta?.postUp        ?? 50;
+  const drawFoulBase = 0.05 + Math.max(0, drawFoulTend - 20) / 100 * 0.33;
+  const driveBonus   = Math.max(0, driveTend - 50) / 100 * 0.12;
+  const postBonus    = Math.max(0, postTend  - 50) / 100 * 0.10;
+  const schemeFtaMult =
+    scheme === 'Grit and Grind' ? 1.20 :
+    scheme === 'Pace and Space' ? 1.08 :
+    scheme === 'Showtime'       ? 1.08 :
+    1.0;
+  const ftaRate = Math.min(0.60, (drawFoulBase + driveBonus + postBonus) * schemeFtaMult);
+  const fta = Math.max(0, Math.round(fga * ftaRate * (0.85 + Math.random() * 0.30)));
 
   // FT%: piecewise curve + positional tweak + situational modifiers.
   // ftBonus carries the home-court advantage from the call site; we also
