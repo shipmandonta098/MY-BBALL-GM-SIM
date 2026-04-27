@@ -55,6 +55,14 @@ interface PlayerModalProps {
   onSetTrainingFocus?: (playerId: string, areas: TrainingFocusArea[], durationDays: number) => void;
   /** Called when GM activates play-through for an injured player */
   onPlayThroughInjury?: (playerId: string) => void;
+  /** Called when GM extends this player's contract (offseason or expiring) */
+  onExtend?: (playerId: string, years: number, salary: number) => void;
+  /** True when the league is in offseason phase */
+  isOffseason?: boolean;
+  /** True in WNBA-only mode — affects salary display scale */
+  isWomensLeague?: boolean;
+  /** Max allowable extension salary (e.g. max player salary from contract rules) */
+  maxExtensionSalary?: number;
 }
 
 const traitIcons: Record<PersonalityTrait, string> = {
@@ -96,6 +104,10 @@ const PlayerModal: React.FC<PlayerModalProps> = ({
   devInterventionsMax = 4,
   onSetTrainingFocus,
   onPlayThroughInjury,
+  onExtend,
+  isOffseason = false,
+  isWomensLeague = false,
+  maxExtensionSalary,
 }) => {
   const [isEditing, setIsEditing] = React.useState(false);
   const [statsTab, setStatsTab] = useState<'season' | 'career' | 'advanced' | 'playoffs'>('season');
@@ -103,6 +115,9 @@ const PlayerModal: React.FC<PlayerModalProps> = ({
   const [focusDraft, setFocusDraft] = useState<TrainingFocusArea[]>([]);
   const [focusDuration, setFocusDuration] = useState<30 | 60 | 90>(60);
   const [vsTeamId, setVsTeamId] = useState<string>('all');
+  const [showExtendPanel, setShowExtendPanel] = useState(false);
+  const [extendYears, setExtendYears] = useState(2);
+  const [extendSalary, setExtendSalary] = useState(player.salary || (isWomensLeague ? 75_000 : 5_000_000));
 
   const ALL_FOCUS_AREAS: TrainingFocusArea[] = [
     'Shooting / 3PT', 'Playmaking / Passing', 'Defense / Rebounding',
@@ -2541,27 +2556,37 @@ const PlayerModal: React.FC<PlayerModalProps> = ({
                    </div>
                  )}
               </div>
-              {draftLocked ? (
-                <div className="flex flex-col items-end gap-1">
+              <div className="flex items-center gap-4 flex-wrap">
+                {onExtend && !draftLocked && (isOffseason || player.contractYears <= 1) && (
                   <button
-                    disabled
-                    className="px-10 py-5 bg-slate-800/50 text-slate-600 border border-slate-700/50 font-display font-bold uppercase rounded-2xl cursor-not-allowed opacity-60"
-                    title="Roster moves are locked during the draft"
+                    onClick={() => { setExtendSalary(player.salary || (isWomensLeague ? 75_000 : 5_000_000)); setExtendYears(2); setShowExtendPanel(true); }}
+                    className="px-10 py-5 bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 hover:text-emerald-300 border border-emerald-500/30 font-display font-bold uppercase rounded-2xl transition-all"
                   >
-                    Waive Player
+                    Extend Contract
                   </button>
-                  <span className="text-[10px] text-amber-500/70 font-bold uppercase tracking-widest">
-                    🔒 Locked · Draft in Progress
-                  </span>
-                </div>
-              ) : (
-                <button
-                   onClick={() => onRelease(player.id)}
-                   className="px-10 py-5 bg-rose-500/10 hover:bg-rose-500 text-rose-500 hover:text-white border border-rose-500/20 font-display font-bold uppercase rounded-2xl transition-all"
-                >
-                   Waive Player
-                </button>
-              )}
+                )}
+                {draftLocked ? (
+                  <div className="flex flex-col items-end gap-1">
+                    <button
+                      disabled
+                      className="px-10 py-5 bg-slate-800/50 text-slate-600 border border-slate-700/50 font-display font-bold uppercase rounded-2xl cursor-not-allowed opacity-60"
+                      title="Roster moves are locked during the draft"
+                    >
+                      Waive Player
+                    </button>
+                    <span className="text-[10px] text-amber-500/70 font-bold uppercase tracking-widest">
+                      🔒 Locked · Draft in Progress
+                    </span>
+                  </div>
+                ) : (
+                  <button
+                     onClick={() => onRelease(player.id)}
+                     className="px-10 py-5 bg-rose-500/10 hover:bg-rose-500 text-rose-500 hover:text-white border border-rose-500/20 font-display font-bold uppercase rounded-2xl transition-all"
+                  >
+                     Waive Player
+                  </button>
+                )}
+              </div>
               {player.isSuspended && (player.suspensionGames ?? 0) > 0 && !player.suspensionAppealed && onAppealSuspension && (
                 <button
                   onClick={() => onAppealSuspension(player.id)}
@@ -2577,6 +2602,82 @@ const PlayerModal: React.FC<PlayerModalProps> = ({
                 </span>
               )}
            </div>
+        )}
+
+        {/* ── Contract Extension Panel ─────────────────────────────────────────── */}
+        {showExtendPanel && (
+          <div className="absolute inset-0 z-[100] bg-slate-950/95 backdrop-blur-sm rounded-[3rem] flex flex-col p-10 overflow-y-auto animate-in fade-in duration-200">
+            <div className="flex items-center justify-between mb-8">
+              <div>
+                <h2 className="text-2xl font-display font-bold uppercase text-white tracking-tight">Extend Contract</h2>
+                <p className="text-xs text-slate-500 mt-1">{player.name} · Current: {player.contractYears} yr{player.contractYears !== 1 ? 's' : ''} @ {fmtSalary(player.salary)}/yr</p>
+              </div>
+              <button onClick={() => setShowExtendPanel(false)} className="p-3 bg-slate-800 hover:bg-slate-700 rounded-full text-slate-400 transition-colors">
+                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12" /></svg>
+              </button>
+            </div>
+
+            {player.desiredContract && (
+              <div className="mb-6 p-5 bg-slate-900 border border-slate-700 rounded-2xl flex items-center gap-4">
+                <span className="text-2xl">🤝</span>
+                <div>
+                  <p className="text-[10px] text-slate-500 uppercase tracking-widest mb-0.5">Player Asking Price</p>
+                  <p className="text-white font-bold">{player.desiredContract.years} yr{player.desiredContract.years !== 1 ? 's' : ''} · {fmtSalary(player.desiredContract.salary)}/yr</p>
+                </div>
+              </div>
+            )}
+
+            <div className="grid grid-cols-2 gap-6 mb-6">
+              <div className="space-y-3">
+                <label className="text-[10px] font-black uppercase text-slate-500 tracking-widest">Contract Length</label>
+                <div className="flex gap-2 flex-wrap">
+                  {[1, 2, 3, 4, 5].map(y => (
+                    <button
+                      key={y}
+                      onClick={() => setExtendYears(y)}
+                      className={`flex-1 py-3 rounded-xl border text-sm font-bold transition-all ${extendYears === y ? 'bg-amber-500 border-amber-500 text-slate-950' : 'bg-slate-900 border-slate-700 text-slate-400 hover:border-amber-500/50'}`}
+                    >
+                      {y} Yr{y > 1 ? 's' : ''}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              <div className="space-y-3">
+                <label className="text-[10px] font-black uppercase text-slate-500 tracking-widest">
+                  Annual Salary
+                  {maxExtensionSalary && <span className="ml-2 text-emerald-600 normal-case font-bold">max {fmtSalary(maxExtensionSalary)}</span>}
+                </label>
+                <input
+                  type="number"
+                  min={isWomensLeague ? 25_000 : 1_000_000}
+                  step={isWomensLeague ? 5_000 : 100_000}
+                  value={extendSalary}
+                  onChange={e => setExtendSalary(Math.max(0, parseInt(e.target.value) || 0))}
+                  className={`w-full bg-slate-950 border rounded-xl px-4 py-3 text-white font-bold focus:outline-none focus:border-amber-500/50 ${maxExtensionSalary && extendSalary > maxExtensionSalary ? 'border-rose-500/50' : 'border-slate-700'}`}
+                />
+                {maxExtensionSalary && extendSalary > maxExtensionSalary && (
+                  <p className="text-rose-400 text-xs font-bold">Exceeds max player salary</p>
+                )}
+                <p className="text-xs text-slate-500">{fmtSalary(extendSalary)}/yr · {extendYears} yr total: {fmtSalary(extendSalary * extendYears)}</p>
+              </div>
+            </div>
+
+            <div className="flex gap-4 mt-auto">
+              <button
+                onClick={() => setShowExtendPanel(false)}
+                className="flex-1 py-4 bg-slate-800 hover:bg-slate-700 text-slate-300 font-display font-bold uppercase rounded-2xl transition-all"
+              >
+                Cancel
+              </button>
+              <button
+                disabled={!!(maxExtensionSalary && extendSalary > maxExtensionSalary)}
+                onClick={() => { if (onExtend) { onExtend(player.id, extendYears, extendSalary); setShowExtendPanel(false); } }}
+                className="flex-1 py-4 bg-emerald-600 hover:bg-emerald-500 disabled:bg-slate-700 disabled:text-slate-500 disabled:cursor-not-allowed text-white font-display font-bold uppercase rounded-2xl transition-all shadow-lg shadow-emerald-900/30"
+              >
+                Confirm Extension
+              </button>
+            </div>
+          </div>
         )}
 
         {/* ── Training Focus Panel ─────────────────────────────────────────────── */}

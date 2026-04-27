@@ -757,66 +757,101 @@ export function runAIGMOffseason(
     const hc = t.staff.headCoach;
 
     // ── 3a. COACH EXTENSIONS ─────────────────────────────────
-    // AI GMs extend a performing coach when his deal has 1 year left and
-    // the team is winning. Loyalist GMs are the most eager to extend;
-    // Win Now GMs extend quickly if contending; Rebuilders wait for results.
+    // AI GMs extend a performing coach when deal has ≤1 year left and team is winning.
+    // Loyalist GMs most eager; Win Now extend quickly if contending; Rebuilders wait.
     if (hc && !hc.isInterim && hc.contractYears <= 1 && winPct >= 0.50) {
       const extendBase = winPct >= 0.65 ? 0.80 : winPct >= 0.55 ? 0.55 : 0.30;
       const extendBonus =
-        personality === 'Loyalist'       ? 0.20 :
-        personality === 'Win Now'        ? 0.12 :
-        personality === 'Balanced'       ? 0.05 : 0;
+        personality === 'Loyalist'  ? 0.20 :
+        personality === 'Win Now'   ? 0.12 :
+        personality === 'Balanced'  ? 0.05 : 0;
       if (Math.random() < extendBase + extendBonus) {
         const newYears = 2 + Math.floor(Math.random() * 2); // 2–3 year extension
         const raise = 1.05 + Math.random() * 0.10;          // 5–15% salary increase
-        const newSalary = Math.round((hc.salary || 3_000_000) * raise);
+        const baseSal = hc.salary || (isWomensLeague ? 300_000 : 3_000_000);
+        const newSalary = Math.round(baseSal * raise);
         const extCoach = { ...hc, contractYears: newYears, salary: newSalary };
-        // Update the coach in state immediately; roster update follows at line 812
         s = {
           ...s,
           teams: s.teams.map(tm =>
-            tm.id === t.id
-              ? { ...tm, staff: { ...tm.staff, headCoach: extCoach } }
-              : tm
+            tm.id === t.id ? { ...tm, staff: { ...tm.staff, headCoach: extCoach } } : tm
           ),
         };
-        const salaryM = (newSalary / 1_000_000).toFixed(1);
+        const salaryStr = isWomensLeague
+          ? `$${Math.round(newSalary / 1_000)}K/yr`
+          : `$${(newSalary / 1_000_000).toFixed(1)}M/yr`;
         const winsStr = `${wins}-${losses}`;
-        const templates = [
-          `${t.name} have extended Head Coach ${hc.name} with a ${newYears}-year deal worth $${salaryM}M/yr. The front office rewards a ${winsStr} season with long-term stability.`,
-          `${hc.name} is staying in ${t.name} — the organization locked him up with a ${newYears}-year extension. A ${winsStr} record made this an easy call.`,
-          `${t.name} and Head Coach ${hc.name} agree to a ${newYears}-year extension. The ${winsStr} campaign earned him a new deal and a salary bump.`,
+        const extTemplates = [
+          `${t.name} have extended Head Coach ${hc.name} with a ${newYears}-year deal worth ${salaryStr}. The front office rewards a ${winsStr} season with long-term stability.`,
+          `${hc.name} is staying in ${t.name} — the organization locked them up with a ${newYears}-year extension. A ${winsStr} record made this an easy call.`,
+          `${t.name} and Head Coach ${hc.name} agree to a ${newYears}-year extension. The ${winsStr} campaign earned a new deal and a salary bump.`,
         ];
         newsItems.push(makeNewsItem(
           'hiring',
           `${t.abbreviation} COACH EXTENDED`,
-          templates[Math.floor(Math.random() * templates.length)],
+          extTemplates[Math.floor(Math.random() * extTemplates.length)],
           s.currentDay, t.id,
         ));
-        txs.push(makeTransaction(s, 'hiring', [t.id], `${t.name} extended Head Coach ${hc.name} (${newYears} yrs / $${salaryM}M/yr).`));
+        txs.push(makeTransaction(s, 'hiring', [t.id], `${t.name} extended Head Coach ${hc.name} (${newYears} yrs / ${salaryStr}).`));
       }
     }
 
-    if (hc && winPct < 0.35) {
-      // Fire threshold by personality
-      const fireChance = personality === 'Win Now' ? 0.85 : personality === 'Loyalist' ? 0.25 : 0.5;
-      if (Math.random() < fireChance) {
+    // ── 3b. COACH FIRING ─────────────────────────────────────
+    // WNBA: higher turnover (~25–40%/offseason). NBA: moderate (~20–30%).
+    // Tiered by win%: < 30% brutal, < 40% poor, < 50% missed playoffs, barely winning + weak coach.
+    if (hc) {
+      const avgCoachRating = Math.round(
+        (hc.ratingOffense + hc.ratingDefense + hc.ratingDevelopment + hc.ratingMotivation + hc.ratingClutch) / 5
+      );
+      const youngPlayers = t.roster.filter(p => (p.age ?? 25) <= 24).length;
+      const weakDevPenalty = youngPlayers >= 3 && hc.ratingDevelopment < 55 ? 0.10 : 0;
+
+      let baseFireChance: number;
+      if (winPct < 0.30) {
+        baseFireChance = isWomensLeague ? 0.90 : 0.75;
+      } else if (winPct < 0.40) {
+        baseFireChance = isWomensLeague ? 0.60 : 0.45;
+      } else if (winPct < 0.50) {
+        // Missed playoffs (proxy)
+        baseFireChance = isWomensLeague ? 0.30 : 0.15;
+      } else if (winPct < 0.55 && avgCoachRating < 65 && hc.contractYears <= 1) {
+        // Barely winning with a low-quality coach on expiring deal
+        baseFireChance = isWomensLeague ? 0.20 : 0.08;
+      } else {
+        baseFireChance = 0;
+      }
+
+      const fireMultiplier =
+        personality === 'Win Now'   ? 1.30 :
+        personality === 'Loyalist'  ? (hc.isInterim ? 1.00 : 0.45) :
+        personality === 'Analytics' ? 1.10 :
+        1.0;
+
+      const finalFireChance = Math.min(0.95, (baseFireChance + weakDevPenalty) * fireMultiplier);
+
+      if (finalFireChance > 0 && Math.random() < finalFireChance) {
+        const winsStr = `${wins}-${losses}`;
+        const fireReason =
+          winPct < 0.30 ? `dismal ${winsStr} record` :
+          winPct < 0.40 ? `disappointing ${winsStr} season` :
+          winPct < 0.50 ? `failure to reach the playoffs (${winsStr})` :
+          `underperformance despite a ${winsStr} record`;
+
         newsItems.push(makeNewsItem(
           'firing',
           `${t.abbreviation} COACH FIRED`,
           (() => {
-            const templates = [
-              `${hc.name} is out in ${t.name} after a ${wins}-${losses} season. The front office decided a change was necessary to move forward.`,
-              `${t.name} fire Head Coach ${hc.name} following a disappointing ${wins}-${losses} campaign. A national search begins immediately.`,
-              `After going ${wins}-${losses}, ${hc.name} will not return as Head Coach of ${t.name}. The organization is pivoting in a new direction.`,
+            const fireTemplates = [
+              `${hc.name} is out in ${t.name} following a ${fireReason}. The front office decided a change was necessary.`,
+              `${t.name} fire Head Coach ${hc.name} after a ${fireReason}. A national search begins immediately.`,
+              `After a ${fireReason}, ${hc.name} will not return as Head Coach of ${t.name}. The organization is pivoting.`,
             ];
-            return templates[Math.floor(Math.random() * templates.length)];
+            return fireTemplates[Math.floor(Math.random() * fireTemplates.length)];
           })(),
           s.currentDay, t.id, undefined, true
         ));
         txs.push(makeTransaction(s, 'firing', [t.id], `${t.name} fired Head Coach ${hc.name}.`));
 
-        // Hire a new coach based on personality (offseason — permanent hire, no interim needed)
         const preferredBadge: CoachBadge = getPreferredCoachBadge(personality);
         const newCoach = generateCoach(`ai-coach-${Date.now()}-${t.id}`, 'C', s.settings.coachGenderRatio);
         const hiredCoach: typeof newCoach = { ...newCoach, badges: [preferredBadge, ...newCoach.badges.slice(0, 1)], isInterim: false };
@@ -834,12 +869,12 @@ export function runAIGMOffseason(
           'hiring',
           `${t.abbreviation} NEW COACH`,
           (() => {
-            const templates = [
-              `${t.name} introduce ${hiredCoach.name} as their new Head Coach. He inherits a roster ready to be molded.`,
-              `${hiredCoach.name} is the new Head Coach of ${t.name}. The hire signals a clear shift in philosophy for the organization.`,
-              `${t.name} make it official — ${hiredCoach.name} takes the reins. He'll lead his first practice with the squad this week.`,
+            const hireTemplates = [
+              `${t.name} introduce ${hiredCoach.name} as their new Head Coach. They inherit a roster ready to be molded.`,
+              `${hiredCoach.name} is the new Head Coach of ${t.name}. The hire signals a clear shift in philosophy.`,
+              `${t.name} make it official — ${hiredCoach.name} takes the reins. They'll lead their first practice this week.`,
             ];
-            return templates[Math.floor(Math.random() * templates.length)];
+            return hireTemplates[Math.floor(Math.random() * hireTemplates.length)];
           })(),
           s.currentDay, t.id, undefined, false
         ));

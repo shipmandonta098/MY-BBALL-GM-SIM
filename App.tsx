@@ -3840,8 +3840,76 @@ const App: React.FC = () => {
     }
   };
 
+  const handleExtendPlayer = (playerId: string, years: number, salary: number) => {
+    if (!league) return;
+    const userTeam = league.teams.find(t => t.id === league.userTeamId);
+    if (!userTeam) return;
+    const player = userTeam.roster.find(p => p.id === playerId);
+    if (!player) return;
+    const isWomens = (league.settings.playerGenderRatio ?? 0) === 100;
+    const salaryStr = isWomens
+      ? `$${Math.round(salary / 1_000)}K/yr`
+      : `$${(salary / 1_000_000).toFixed(1)}M/yr`;
+    const updatedPlayer = { ...player, salary, contractYears: years };
+    const updatedTeams = league.teams.map(t =>
+      t.id === league.userTeamId
+        ? { ...t, roster: t.roster.map(p => p.id === playerId ? updatedPlayer : p) }
+        : t
+    );
+    const txns = recordTransaction(league, 'signing', [userTeam.id],
+      `${userTeam.name} extended ${player.name} (${years} yr${years > 1 ? 's' : ''} / ${salaryStr}).`,
+      [playerId], salary
+    );
+    const newsItem = {
+      id: `extend-player-${Date.now()}`,
+      category: 'transaction' as const,
+      headline: `${player.name.split(' ').pop()?.toUpperCase()} EXTENDED`,
+      content: `${userTeam.name} and ${player.name} agree to a ${years}-year extension worth ${salaryStr}. The ${player.rating} OVR ${player.position} is locked in for the foreseeable future.`,
+      timestamp: league.currentDay,
+      realTimestamp: Date.now(),
+      teamId: userTeam.id,
+      playerId,
+      isBreaking: false,
+    };
+    setLeague({ ...league, teams: updatedTeams, transactions: txns, newsFeed: [newsItem, ...league.newsFeed].slice(0, 2000) });
+    if (selectedPlayer?.id === playerId) setSelectedPlayer(updatedPlayer);
+  };
+
+  const handleExtendCoach = (coachId: string, years: number, salary: number) => {
+    if (!league) return;
+    const userTeam = league.teams.find(t => t.id === league.userTeamId);
+    if (!userTeam) return;
+    const staffEntries = Object.entries(userTeam.staff) as [string, Coach | null][];
+    const [staffRole, coach] = staffEntries.find(([, c]) => c?.id === coachId) ?? [];
+    if (!staffRole || !coach) return;
+    const isWomens = (league.settings.playerGenderRatio ?? 0) === 100;
+    const salaryStr = isWomens
+      ? `$${Math.round(salary / 1_000)}K/yr`
+      : `$${(salary / 1_000_000).toFixed(1)}M/yr`;
+    const updatedCoach = { ...coach, salary, contractYears: years };
+    const updatedStaff = { ...userTeam.staff, [staffRole]: updatedCoach };
+    const updatedTeams = league.teams.map(t =>
+      t.id === league.userTeamId ? { ...t, staff: updatedStaff } : t
+    );
+    const txns = recordTransaction(league, 'hiring', [userTeam.id],
+      `${userTeam.name} extended Head Coach ${coach.name} (${years} yr${years > 1 ? 's' : ''} / ${salaryStr}).`
+    );
+    const newsItem = {
+      id: `extend-coach-${Date.now()}`,
+      category: 'hiring' as const,
+      headline: `${userTeam.abbreviation} COACH EXTENDED`,
+      content: `${userTeam.name} and Head Coach ${coach.name} agree to a ${years}-year extension worth ${salaryStr}. The front office commits to long-term stability on the sideline.`,
+      timestamp: league.currentDay,
+      realTimestamp: Date.now(),
+      teamId: userTeam.id,
+      isBreaking: false,
+    };
+    setLeague({ ...league, teams: updatedTeams, transactions: txns, newsFeed: [newsItem, ...league.newsFeed].slice(0, 2000) });
+    if (selectedCoach?.id === coachId) setSelectedCoach(updatedCoach);
+  };
+
   const handleViewPlayer = (player: Player | Prospect) => setSelectedPlayer(player as Player);
-  
+
   const handleWatchLive = (gameId: string) => {
     if (!league) return;
     const game = league.schedule.find(g => g.id === gameId)
@@ -4352,6 +4420,10 @@ const App: React.FC = () => {
             devInterventionsMax={4}
             onSetTrainingFocus={handleSetTrainingFocus}
             onPlayThroughInjury={handlePlayThroughInjury}
+            onExtend={handleExtendPlayer}
+            isOffseason={league.isOffseason}
+            isWomensLeague={(league.settings.playerGenderRatio ?? 0) === 100}
+            maxExtensionSalary={getContractRules(league).maxPlayerSalary}
             isCurrentAllStar={isCurrentAllStar}
             currentAllStarRole={currentAllStarRole}
             careerAwards={careerAwards}
@@ -4380,7 +4452,7 @@ const App: React.FC = () => {
         }
         coachAwards.sort((a, b) => b.year - a.year);
         return (
-         <CoachModal coach={selectedCoach} onClose={() => setSelectedCoach(null)} onScout={handleGenerateCoachIntelligence} scoutingReport={coachScoutingReport} godMode={league.settings.godMode} onUpdateCoach={handleUpdateCoach} careerAwards={coachAwards} isUserTeam={(Object.values(userTeam.staff) as (Coach | null)[]).some(s => s?.id === selectedCoach.id)} onFire={(id) => {
+         <CoachModal coach={selectedCoach} onClose={() => setSelectedCoach(null)} onScout={handleGenerateCoachIntelligence} scoutingReport={coachScoutingReport} godMode={league.settings.godMode} onUpdateCoach={handleUpdateCoach} careerAwards={coachAwards} isUserTeam={(Object.values(userTeam.staff) as (Coach | null)[]).some(s => s?.id === selectedCoach.id)} onExtend={handleExtendCoach} isOffseason={league.isOffseason} isWomensLeague={(league.settings.playerGenderRatio ?? 0) === 100} onFire={(id) => {
                const firingCoach = (Object.values(userTeam.staff) as (Coach | null)[]).find(s => s?.id === id);
                const oldCoachName = firingCoach?.name ?? 'staff member';
                const isFiringHC = userTeam.staff.headCoach?.id === id;
