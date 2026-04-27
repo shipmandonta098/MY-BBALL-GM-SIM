@@ -28,6 +28,36 @@ const SCHEME_DEFAULT_PACE: Record<CoachScheme, number> = {
   'Showtime':       93,  // 114–120 poss
 };
 
+// ─── Playbook Shot-Distribution Multipliers ──────────────────────────────────
+/**
+ * Per-scheme multipliers baked into the per-player box-score path.
+ *
+ * threePaShareMult — scales the fraction of FGA that are three-pointers.
+ * insideShareMult  — scales the fraction of FGA that are at-rim attempts.
+ * fgPct3Delta      — additive shift to 3PT%; positive = system creates better 3PT looks.
+ * fgPctInsDelta    — additive shift to inside FG%; post-systems get cleaner entry reads.
+ * fgPctMidDelta    — additive shift to mid-range FG%; ball-movement systems create elbow looks.
+ *
+ * Design: a Pace-and-Space team fires ~28% more threes and ~32% fewer post/inside
+ * attempts vs. Balanced, while Grit-and-Grind does the opposite.  The FG% deltas
+ * are small but visible over an 82-game season (a 3PT specialist in P&S will shoot
+ * ~1.8 pp higher from three than the same player in Balanced).
+ */
+const PLAYBOOK_SHOT_MODS: Record<CoachScheme, {
+  threePaShareMult: number;
+  insideShareMult:  number;
+  fgPct3Delta:      number;
+  fgPctInsDelta:    number;
+  fgPctMidDelta:    number;
+}> = {
+  'Balanced':       { threePaShareMult: 1.00, insideShareMult: 1.00, fgPct3Delta:  0.000, fgPctInsDelta:  0.000, fgPctMidDelta:  0.000 },
+  'Pace and Space': { threePaShareMult: 1.28, insideShareMult: 0.68, fgPct3Delta: +0.018, fgPctInsDelta: -0.018, fgPctMidDelta: -0.010 },
+  'Grit and Grind': { threePaShareMult: 0.62, insideShareMult: 1.38, fgPct3Delta: -0.018, fgPctInsDelta: +0.020, fgPctMidDelta: +0.010 },
+  'Triangle':       { threePaShareMult: 0.88, insideShareMult: 1.02, fgPct3Delta: -0.005, fgPctInsDelta: +0.005, fgPctMidDelta: +0.015 },
+  'Small Ball':     { threePaShareMult: 1.18, insideShareMult: 0.85, fgPct3Delta: +0.010, fgPctInsDelta: +0.010, fgPctMidDelta: +0.005 },
+  'Showtime':       { threePaShareMult: 1.12, insideShareMult: 1.18, fgPct3Delta: +0.005, fgPctInsDelta: +0.022, fgPctMidDelta:  0.000 },
+};
+
 // ─── Attribute → Expected 3P% ─────────────────────────────────────────────────
 /**
  * Maps a shooting3pt attribute (0–100) to an expected per-shot 3P% (decimal).
@@ -2632,6 +2662,60 @@ const computeTendencyModifiers = (p: Player): TendencyModifiers => {
   };
 };
 
+// ─── Playbook–Tendency Mismatch Penalty ──────────────────────────────────────
+/**
+ * Returns an effective morale penalty (0 to −15) when a player's dominant
+ * offensive tendencies conflict with the team's active scheme.
+ *
+ * The penalty is applied to the player's morale for the duration of the game,
+ * which suppresses FG% (via moraleFgMod), raises TOV rate (via moraleTovMod),
+ * and dims defensive effort (via moraleEffMod) — all visible in the box score.
+ *
+ * Penalty scaling: each point a tendency exceeds the mismatch threshold
+ * contributes (excess / 5) × weight points of penalty, capped at −15.
+ *
+ * Key mismatches:
+ *   postUp > 55  in Pace and Space  → up to −12   (ball-stopper stalls motion)
+ *   pullUpThree > 60  in Grit&Grind → up to −10   (shooter can't find clean looks)
+ *   isoHeavy > 55  in Triangle      → up to −12   (iso ball kills ball movement)
+ *   postUp > 60  in Small Ball      → up to −10   (slow post clogs fast lanes)
+ *   transitionHunter > 65 in G&G    → up to −8    (not enough fast-break chances)
+ */
+const calcPlaybookMismatch = (player: Player, scheme: CoachScheme): number => {
+  const ot = player.tendencies?.offensiveTendencies;
+  if (!ot) return 0;
+
+  // Returns 0–10 penalty proportional to how far a tendency exceeds its threshold.
+  const excess = (val: number, threshold: number, weight: number): number =>
+    val <= threshold ? 0 : Math.min(10, ((val - threshold) / 5) * weight);
+
+  let penalty = 0;
+  switch (scheme) {
+    case 'Pace and Space':
+      penalty += excess(ot.postUp          ?? 50, 55, 1.2); // post-heavy player stalls spacing
+      penalty += excess(ot.isoHeavy        ?? 50, 60, 0.8); // iso ball-stopper disrupts motion
+      break;
+    case 'Grit and Grind':
+      penalty += excess(ot.pullUpThree     ?? 50, 60, 1.0); // shooter can't find 3PT looks
+      penalty += excess(ot.transitionHunter ?? 50, 65, 0.8); // transition hunter vs. half-court grind
+      penalty += excess(ot.spotUp          ?? 50, 65, 0.6); // spot-up guy loses corner touches
+      break;
+    case 'Triangle':
+      penalty += excess(ot.isoHeavy        ?? 50, 55, 1.2); // iso breaks Triangle ball movement
+      break;
+    case 'Small Ball':
+      penalty += excess(ot.postUp          ?? 50, 60, 1.0); // post player clogs small-ball lanes
+      break;
+    case 'Showtime':
+      penalty += excess(ot.postUp          ?? 50, 60, 0.8); // post-up stalls the fast break
+      break;
+    default:
+      break; // Balanced: no tendency mismatches
+  }
+
+  return -Math.min(15, Math.round(penalty));
+};
+
 // ─── Cinematic PBP Narrator ─────────────────────────────────────────────────
 const _pick = <T>(arr: T[]): T => arr[Math.floor(Math.random() * arr.length)];
 const _defLn = (p: Player | undefined) => p ? (p.name.split(' ').at(-1) ?? p.name) : 'the defender';
@@ -3237,14 +3321,21 @@ const simulatePlayerGameLine = (
   morale = 75,                 // player morale (0-100); affects FG%, TOV, STL, BLK
   teammateSpacing = 75,        // avg shooting3pt of teammates; high = more kick-out opportunities
   teammateShootingEff = 0.48,  // implied team FG% for this game; hot teams get more AST
+  scheme: CoachScheme = 'Balanced', // team's active playbook scheme
+  playbookMismatch = 0,        // effective morale penalty (0 to -15) from tendency-scheme conflict
 ): GamePlayerLine => {
   // Morale modifiers: centered at 75 so an average player is neutral.
   // Critical (<50): FG -3%, TOV +25%, effort -15% | High (>85): FG +2%, effort +10%
-  const moraleNorm = (morale - 75) / 75; // [-1, +0.33] range
+  // playbookMismatch (0 to -15) is folded into effective morale before the norm so
+  // a post-heavy player in Pace and Space takes a visible FG%/TOV hit this game.
+  const effectiveMorale = Math.max(0, Math.min(100, morale + playbookMismatch));
+  const moraleNorm = (effectiveMorale - 75) / 75; // [-1, +0.33] range
   const moraleFgMod  = moraleNorm *  0.025;  // ±2.5% FG at extremes
   const moraleTovMod = moraleNorm * -0.15;   // low morale → more turnovers (inverted: -15% rate boost)
   const moraleEffMod = moraleNorm *  0.10;   // ±10% effort (steals/blocks)
   const fgPctBoost = varRoll / 100 * 0.4; // variance → small FG% delta
+  // Playbook shot-distribution multipliers for this game (scheme-driven).
+  const pbMults = PLAYBOOK_SHOT_MODS[scheme] ?? PLAYBOOK_SHOT_MODS['Balanced'];
   const tm     = computeTendencyModifiers(player);
   const minFac = minutes / 48;
 
@@ -3267,14 +3358,16 @@ const simulatePlayerGameLine = (
     player.personalityTraits,
   ) - moraleTovMod);
 
-  // 3PA share influenced by pullUpThree tendency
+  // 3PA share: tendency-driven base × playbook multiplier.
+  // Pace and Space (×1.28) pumps up three-point volume; Grit and Grind (×0.62) suppresses it.
   const threePaShare = Math.max(0, Math.min(0.90,
-    (player.attributes.shooting3pt / 100) * 0.5 + tm.threepaBoost));
+    ((player.attributes.shooting3pt / 100) * 0.5 + tm.threepaBoost) * pbMults.threePaShareMult));
   const threepa = Math.round(fga * threePaShare);
 
-  // Inside / mid split
+  // Inside / mid split: inside share scaled by playbook multiplier.
+  // Grit and Grind (×1.38) creates more post/drive looks; Pace and Space (×0.68) pulls players out.
   const insideShare = Math.max(0, Math.min(0.70,
-    ((player.attributes.layups + player.attributes.dunks) / 2 / 100) * 0.3 + tm.insideBoost));
+    (((player.attributes.layups + player.attributes.dunks) / 2 / 100) * 0.3 + tm.insideBoost) * pbMults.insideShareMult));
   const insFga  = Math.round(fga * insideShare);
   const midFga  = Math.max(0, fga - threepa - insFga);
 
@@ -3311,9 +3404,12 @@ const simulatePlayerGameLine = (
   // Stochastic rounding: Math.floor(n*rate + rand()) gives correct expected
   // value (= n*rate) without the systematic upward bias of Math.round that
   // was locking season 3PT% leaders at 50% for high-base shooters.
-  const threeRate = Math.max(0.05, fgPct3 + fgPctBoost + fatigueMod + opponentPerimDefMod + moraleFgMod + (Math.random() * 0.06 - 0.03));
+  // pbMults.*Delta: additive FG% shifts driven by playbook.
+  // Pace and Space opens up cleaner 3PT looks (+1.8 pp) but fewer post entries (−1.8 pp);
+  // Grit and Grind generates better interior reads (+2.0 pp) but contested 3s (−1.8 pp).
+  const threeRate = Math.max(0.05, fgPct3 + fgPctBoost + fatigueMod + opponentPerimDefMod + moraleFgMod + pbMults.fgPct3Delta + (Math.random() * 0.06 - 0.03));
   const threepm   = Math.min(threepa, Math.floor(threepa * threeRate + Math.random()));
-  const midRate   = Math.max(0.05, fgPctMid + fgPctBoost + fatigueMod + opponentMidDefMod + moraleFgMod + (Math.random() * 0.06 - 0.03));
+  const midRate   = Math.max(0.05, fgPctMid + fgPctBoost + fatigueMod + opponentMidDefMod + moraleFgMod + pbMults.fgPctMidDelta + (Math.random() * 0.06 - 0.03));
   const midFgm    = Math.min(midFga,  Math.floor(midFga  * midRate   + Math.random()));
   // Inside FGM: interior + post defense mods both apply (weighted by post share).
   // opponentInteriorDefMod suppresses drives/dunks; opponentPostDefMod suppresses
@@ -3323,7 +3419,7 @@ const simulatePlayerGameLine = (
   const blendedInsideMod = opponentInteriorDefMod * (1 - postWeight) + opponentPostDefMod * postWeight;
   // Floor lowered to 0.30 (from 0.35): even poor finishers shouldn't make 35%+
   // of their inside attempts after factoring in rim protection and fatigue.
-  const insRate   = Math.max(0.30, fgPctIns + fgPctBoost + fatigueMod + blendedInsideMod + moraleFgMod + (Math.random() * 0.06 - 0.03));
+  const insRate   = Math.max(0.30, fgPctIns + fgPctBoost + fatigueMod + blendedInsideMod + moraleFgMod + pbMults.fgPctInsDelta + (Math.random() * 0.06 - 0.03));
   const insFgm    = Math.min(insFga,  Math.floor(insFga  * insRate   + Math.random()));
   const fgm     = threepm + midFgm + insFgm;
 
@@ -3846,7 +3942,11 @@ export const simulateGame = (
       const ftBonus    = isHome ? 0.03 : 0;
       const varRoll    = playerVariance.get(p.id) ?? 0;
       const usageShare = usageShares[i];
-      const line = simulatePlayerGameLine(p, totalPts, teamFga, teamReb, teamAst, mins, usageShare, varRoll, ftBonus, oppPerimDefMod, oppInteriorDefMod, oppMidDefMod, oppPostDefMod, p.morale ?? 75, teamAvg3pt, impliedFgPct);
+      // Tendency-scheme mismatch: post-heavy player in Pace and Space, iso ball-hog
+      // in Triangle, etc. — converts to effective morale penalty (0 to -15).
+      const scheme         = team.activeScheme ?? 'Balanced';
+      const mismatchPenalty = calcPlaybookMismatch(p, scheme);
+      const line = simulatePlayerGameLine(p, totalPts, teamFga, teamReb, teamAst, mins, usageShare, varRoll, ftBonus, oppPerimDefMod, oppInteriorDefMod, oppMidDefMod, oppPostDefMod, p.morale ?? 75, teamAvg3pt, impliedFgPct, scheme, mismatchPenalty);
       return { ...line, techs: 0, flagrants: 0, ejected: false };
     });
 
