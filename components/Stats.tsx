@@ -239,12 +239,21 @@ const Stats: React.FC<StatsProps> = ({ league, onViewRoster, onManageTeam, onVie
     else if (compareList.length < 4) setCompareList(prev => [...prev, id]);
   };
 
-  const LeaderTable = ({ statKey, label, fmt }: { statKey: string; label: string; fmt?: (v: number) => string }) => {
-    const sorted = [...filteredLeaders].sort((a, b) => {
-      const aVal = (a.adv as any)[statKey] ?? (a.stats as any)[statKey] / Math.max(1, a.stats.gamesPlayed) ?? 0;
-      const bVal = (b.adv as any)[statKey] ?? (b.stats as any)[statKey] / Math.max(1, b.stats.gamesPlayed) ?? 0;
-      return bVal - aVal;
-    }).slice(0, 25);
+  const LeaderTable = ({ statKey, label, fmt, minAttemptsFilter }: {
+    statKey: string;
+    label: string;
+    fmt?: (v: number) => string;
+    // Optional per-player predicate to enforce minimum attempt thresholds.
+    // Players who don't meet it are excluded from this leaderboard entirely.
+    minAttemptsFilter?: (p: typeof filteredLeaders[0]) => boolean;
+  }) => {
+    const sorted = [...filteredLeaders]
+      .filter(p => !minAttemptsFilter || minAttemptsFilter(p))
+      .sort((a, b) => {
+        const aVal = (a.adv as any)[statKey] ?? (a.stats as any)[statKey] / Math.max(1, a.stats.gamesPlayed) ?? 0;
+        const bVal = (b.adv as any)[statKey] ?? (b.stats as any)[statKey] / Math.max(1, b.stats.gamesPlayed) ?? 0;
+        return bVal - aVal;
+      }).slice(0, 25);
 
     return (
       <div className="bg-slate-900 border border-slate-800 rounded-3xl overflow-hidden shadow-2xl">
@@ -1666,15 +1675,18 @@ const Stats: React.FC<StatsProps> = ({ league, onViewRoster, onManageTeam, onVie
           <LeaderTable statKey="apg"   label="Assists" />
           <LeaderTable statKey="spg"   label="Steals" />
           <LeaderTable statKey="bpg"   label="Blocks" />
-          <LeaderTable statKey="fgPct" label="FG%" fmt={v => (v * 100).toFixed(1) + '%'} />
+          <LeaderTable statKey="fgPct" label="FG%" fmt={v => (v * 100).toFixed(1) + '%'}
+            minAttemptsFilter={p => p.stats.fga >= p.stats.gamesPlayed * 3} />
           <LeaderTable statKey="tpm"   label="3-Pointers Made" />
-          <LeaderTable statKey="tpPct" label="3-Point %" fmt={v => (v * 100).toFixed(1) + '%'} />
+          <LeaderTable statKey="tpPct" label="3-Point %" fmt={v => (v * 100).toFixed(1) + '%'}
+            minAttemptsFilter={p => p.stats.threepa >= p.stats.gamesPlayed * 1.5} />
           <LeaderTable statKey="fgmpg" label="FG Made" fmt={v => v.toFixed(1)} />
           <LeaderTable statKey="fgapg" label="FG Attempts" fmt={v => v.toFixed(1)} />
           <LeaderTable statKey="tpapg" label="3PA" fmt={v => v.toFixed(1)} />
           <LeaderTable statKey="ftmpg" label="FT Made" fmt={v => v.toFixed(1)} />
           <LeaderTable statKey="ftapg" label="FT Attempts" fmt={v => v.toFixed(1)} />
-          <LeaderTable statKey="ftPct" label="FT%" fmt={v => (v * 100).toFixed(1) + '%'} />
+          <LeaderTable statKey="ftPct" label="FT%" fmt={v => (v * 100).toFixed(1) + '%'}
+            minAttemptsFilter={p => p.stats.fta >= p.stats.gamesPlayed * 1.5} />
           <LeaderTable statKey="mpg"   label="Minutes" fmt={v => v.toFixed(1)} />
         </div>
       )}

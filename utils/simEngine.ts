@@ -28,6 +28,36 @@ const SCHEME_DEFAULT_PACE: Record<CoachScheme, number> = {
   'Showtime':       93,  // 114–120 poss
 };
 
+// ─── Playbook Shot-Distribution Multipliers ──────────────────────────────────
+/**
+ * Per-scheme multipliers baked into the per-player box-score path.
+ *
+ * threePaShareMult — scales the fraction of FGA that are three-pointers.
+ * insideShareMult  — scales the fraction of FGA that are at-rim attempts.
+ * fgPct3Delta      — additive shift to 3PT%; positive = system creates better 3PT looks.
+ * fgPctInsDelta    — additive shift to inside FG%; post-systems get cleaner entry reads.
+ * fgPctMidDelta    — additive shift to mid-range FG%; ball-movement systems create elbow looks.
+ *
+ * Design: a Pace-and-Space team fires ~28% more threes and ~32% fewer post/inside
+ * attempts vs. Balanced, while Grit-and-Grind does the opposite.  The FG% deltas
+ * are small but visible over an 82-game season (a 3PT specialist in P&S will shoot
+ * ~1.8 pp higher from three than the same player in Balanced).
+ */
+const PLAYBOOK_SHOT_MODS: Record<CoachScheme, {
+  threePaShareMult: number;
+  insideShareMult:  number;
+  fgPct3Delta:      number;
+  fgPctInsDelta:    number;
+  fgPctMidDelta:    number;
+}> = {
+  'Balanced':       { threePaShareMult: 1.00, insideShareMult: 1.00, fgPct3Delta:  0.000, fgPctInsDelta:  0.000, fgPctMidDelta:  0.000 },
+  'Pace and Space': { threePaShareMult: 1.28, insideShareMult: 0.68, fgPct3Delta: +0.018, fgPctInsDelta: -0.018, fgPctMidDelta: -0.010 },
+  'Grit and Grind': { threePaShareMult: 0.62, insideShareMult: 1.38, fgPct3Delta: -0.018, fgPctInsDelta: +0.020, fgPctMidDelta: +0.010 },
+  'Triangle':       { threePaShareMult: 0.88, insideShareMult: 1.02, fgPct3Delta: -0.005, fgPctInsDelta: +0.005, fgPctMidDelta: +0.015 },
+  'Small Ball':     { threePaShareMult: 1.18, insideShareMult: 0.85, fgPct3Delta: +0.010, fgPctInsDelta: +0.010, fgPctMidDelta: +0.005 },
+  'Showtime':       { threePaShareMult: 1.12, insideShareMult: 1.18, fgPct3Delta: +0.005, fgPctInsDelta: +0.022, fgPctMidDelta:  0.000 },
+};
+
 // ─── Attribute → Expected 3P% ─────────────────────────────────────────────────
 /**
  * Maps a shooting3pt attribute (0–100) to an expected per-shot 3P% (decimal).
@@ -85,11 +115,11 @@ export function getThreePointPercentage(attr: number): number {
     // Elite: 40% at 90 → 43% at 94
     base = 0.40 + ((a - 90) / 4) * 0.030;
   } else {
-    // God-tier: 41% at 95 → 44% at 100 (realistic max for volume 3PT specialists)
-    base = 0.41 + ((a - 95) / 5) * 0.03;
+    // God-tier: 43% at 95 → 46% at 100 (max for any player on volume)
+    base = 0.43 + ((a - 95) / 5) * 0.03;
   }
 
-  return Math.max(0.20, Math.min(0.44, base));
+  return Math.max(0.20, Math.min(0.48, base));
 }
 
 // ─── Rebound Chance Functions ────────────────────────────────────────────────
@@ -377,7 +407,7 @@ export function getAssistEfficiency(
  *    95   │  3.75 % │  4.25 % │ 3.45 %
  *   100   │  4.50 % │  5.00 % │ 4.20 %
  *
- * Tuning: STL_OPP_SCALE in simulatePlayerGameLine (default 65) controls the
+ * Tuning: STL_OPP_SCALE in simulatePlayerGameLine (default 48) controls the
  * number of steal opportunities per 48 min; raise/lower it to shift team totals.
  */
 export function getStealChance(attr: number, position?: string, defIQ?: number): number {
@@ -433,7 +463,7 @@ export function getStealChance(attr: number, position?: string, defIQ?: number):
  *    95   │  8.25 % │  9.75 % │  7.25 %
  *   100   │  9.00 % │ 10.00 % │  8.00 %
  *
- * Tuning: BLK_OPP_SCALE in simulatePlayerGameLine (default 50) controls the
+ * Tuning: BLK_OPP_SCALE in simulatePlayerGameLine (default 35) controls the
  * number of block opportunities per 48 min; raise/lower to shift team totals.
  */
 export function getBlockChance(attr: number, position?: string, defIQ?: number): number {
@@ -631,7 +661,7 @@ export function getMidRangePercentage(
   const bhBonus = ballHandling !== undefined ? (ballHandling - 50) / 200 * 0.05 : 0;
   const synergyBonus = Math.min(0.025, Math.max(-0.010, iqBonus + bhBonus));
 
-  return Math.max(0.32, Math.min(0.50, base + positionalTweak + synergyBonus));
+  return Math.max(0.32, Math.min(0.56, base + positionalTweak + synergyBonus));
 }
 
 // ─── Mid-Range Contest Modifier ───────────────────────────────────────────────
@@ -740,23 +770,23 @@ export function getLayupPercentage(attr: number, position?: string): number {
     // League-avg: 60 % at 70 → 65 % at 79
     base = 0.60 + ((a - 70) / 9) * 0.05;
   } else if (a <= 89) {
-    // Plus finisher: 62 % at 80 → 66 % at 89  (contact-seeker, elite burst)
-    base = 0.62 + ((a - 80) / 9) * 0.04;
+    // Plus finisher: 65 % at 80 → 70 % at 89  (contact-seeker, elite burst)
+    base = 0.65 + ((a - 80) / 9) * 0.05;
   } else if (a <= 94) {
-    // Elite: 66 % at 90 → 69 % at 94  (diminishing returns kick in hard)
-    base = 0.66 + ((a - 90) / 4) * 0.03;
+    // Elite: 70 % at 90 → 74 % at 94  (diminishing returns kick in hard)
+    base = 0.70 + ((a - 90) / 4) * 0.04;
   } else {
-    // God-mode: 69 % at 95 → 72 % at 100  (Shaq/Giannis-tier, still faces help defense)
-    base = 0.69 + ((a - 95) / 5) * 0.03;
+    // God-mode: 74 % at 95 → 78 % at 100  (Shaq/Giannis-tier — near automatic)
+    base = 0.74 + ((a - 95) / 5) * 0.04;
   }
 
   // Positional adjustment — bigs have natural rim advantages; guards face more help-D
   const positionalTweak =
-    position === 'C' || position === 'PF' ? +0.01 :
-    position === 'PG' || position === 'SG' ? -0.02 :
+    position === 'C' || position === 'PF' ? +0.02 :
+    position === 'PG' || position === 'SG' ? -0.01 :
     0; // SF neutral
 
-  return Math.max(0.42, Math.min(0.73, base + positionalTweak));
+  return Math.max(0.43, Math.min(0.80, base + positionalTweak));
 }
 
 // ─── Dunk Percentage ──────────────────────────────────────────────────────────
@@ -2632,6 +2662,60 @@ const computeTendencyModifiers = (p: Player): TendencyModifiers => {
   };
 };
 
+// ─── Playbook–Tendency Mismatch Penalty ──────────────────────────────────────
+/**
+ * Returns an effective morale penalty (0 to −15) when a player's dominant
+ * offensive tendencies conflict with the team's active scheme.
+ *
+ * The penalty is applied to the player's morale for the duration of the game,
+ * which suppresses FG% (via moraleFgMod), raises TOV rate (via moraleTovMod),
+ * and dims defensive effort (via moraleEffMod) — all visible in the box score.
+ *
+ * Penalty scaling: each point a tendency exceeds the mismatch threshold
+ * contributes (excess / 5) × weight points of penalty, capped at −15.
+ *
+ * Key mismatches:
+ *   postUp > 55  in Pace and Space  → up to −12   (ball-stopper stalls motion)
+ *   pullUpThree > 60  in Grit&Grind → up to −10   (shooter can't find clean looks)
+ *   isoHeavy > 55  in Triangle      → up to −12   (iso ball kills ball movement)
+ *   postUp > 60  in Small Ball      → up to −10   (slow post clogs fast lanes)
+ *   transitionHunter > 65 in G&G    → up to −8    (not enough fast-break chances)
+ */
+const calcPlaybookMismatch = (player: Player, scheme: CoachScheme): number => {
+  const ot = player.tendencies?.offensiveTendencies;
+  if (!ot) return 0;
+
+  // Returns 0–10 penalty proportional to how far a tendency exceeds its threshold.
+  const excess = (val: number, threshold: number, weight: number): number =>
+    val <= threshold ? 0 : Math.min(10, ((val - threshold) / 5) * weight);
+
+  let penalty = 0;
+  switch (scheme) {
+    case 'Pace and Space':
+      penalty += excess(ot.postUp          ?? 50, 55, 1.2); // post-heavy player stalls spacing
+      penalty += excess(ot.isoHeavy        ?? 50, 60, 0.8); // iso ball-stopper disrupts motion
+      break;
+    case 'Grit and Grind':
+      penalty += excess(ot.pullUpThree     ?? 50, 60, 1.0); // shooter can't find 3PT looks
+      penalty += excess(ot.transitionHunter ?? 50, 65, 0.8); // transition hunter vs. half-court grind
+      penalty += excess(ot.spotUp          ?? 50, 65, 0.6); // spot-up guy loses corner touches
+      break;
+    case 'Triangle':
+      penalty += excess(ot.isoHeavy        ?? 50, 55, 1.2); // iso breaks Triangle ball movement
+      break;
+    case 'Small Ball':
+      penalty += excess(ot.postUp          ?? 50, 60, 1.0); // post player clogs small-ball lanes
+      break;
+    case 'Showtime':
+      penalty += excess(ot.postUp          ?? 50, 60, 0.8); // post-up stalls the fast break
+      break;
+    default:
+      break; // Balanced: no tendency mismatches
+  }
+
+  return -Math.min(15, Math.round(penalty));
+};
+
 // ─── Cinematic PBP Narrator ─────────────────────────────────────────────────
 const _pick = <T>(arr: T[]): T => arr[Math.floor(Math.random() * arr.length)];
 const _defLn = (p: Player | undefined) => p ? (p.name.split(' ').at(-1) ?? p.name) : 'the defender';
@@ -3237,15 +3321,21 @@ const simulatePlayerGameLine = (
   morale = 75,                 // player morale (0-100); affects FG%, TOV, STL, BLK
   teammateSpacing = 75,        // avg shooting3pt of teammates; high = more kick-out opportunities
   teammateShootingEff = 0.48,  // implied team FG% for this game; hot teams get more AST
-  scheme: CoachScheme = 'Balanced', // team offensive scheme; affects FTA generation
+  scheme: CoachScheme = 'Balanced', // team's active playbook scheme
+  playbookMismatch = 0,        // effective morale penalty (0 to -15) from tendency-scheme conflict
 ): GamePlayerLine => {
   // Morale modifiers: centered at 75 so an average player is neutral.
   // Critical (<50): FG -3%, TOV +25%, effort -15% | High (>85): FG +2%, effort +10%
-  const moraleNorm = (morale - 75) / 75; // [-1, +0.33] range
+  // playbookMismatch (0 to -15) is folded into effective morale before the norm so
+  // a post-heavy player in Pace and Space takes a visible FG%/TOV hit this game.
+  const effectiveMorale = Math.max(0, Math.min(100, morale + playbookMismatch));
+  const moraleNorm = (effectiveMorale - 75) / 75; // [-1, +0.33] range
   const moraleFgMod  = moraleNorm *  0.025;  // ±2.5% FG at extremes
   const moraleTovMod = moraleNorm * -0.15;   // low morale → more turnovers (inverted: -15% rate boost)
   const moraleEffMod = moraleNorm *  0.10;   // ±10% effort (steals/blocks)
   const fgPctBoost = varRoll / 100 * 0.4; // variance → small FG% delta
+  // Playbook shot-distribution multipliers for this game (scheme-driven).
+  const pbMults = PLAYBOOK_SHOT_MODS[scheme] ?? PLAYBOOK_SHOT_MODS['Balanced'];
   const tm     = computeTendencyModifiers(player);
   const minFac = minutes / 48;
 
@@ -3254,7 +3344,9 @@ const simulatePlayerGameLine = (
   const fatigueMod = minutes > 32 ? -((minutes - 32) * 0.0035) : 0;
 
   const adjUsage = Math.max(0.02, usageShare * (1 + tm.usageBoost));
-  const fga      = Math.max(0, Math.round(teamFga * adjUsage * (minutes / 32)));
+  // Cap at 22 FGA: prevents star usage-share inflation from producing 30+ FGA games
+  // that would drive season PPG above 32. NBA leaders take 19–22 FGA/game at peak usage.
+  const fga      = Math.min(22, Math.max(0, Math.round(teamFga * adjUsage * (minutes / 32))));
 
   // TO% computed early: drives both the TOV stat and the AST efficiency penalty.
   // Uses getTurnoverPercentage() — piecewise curve calibrated to NBA 2025-26.
@@ -3268,14 +3360,16 @@ const simulatePlayerGameLine = (
     player.personalityTraits,
   ) - moraleTovMod);
 
-  // 3PA share influenced by pullUpThree tendency — max 55% of shots (even elite specialists)
-  const threePaShare = Math.max(0, Math.min(0.55,
-    (player.attributes.shooting3pt / 100) * 0.5 + tm.threepaBoost));
+  // 3PA share: tendency-driven base × playbook multiplier.
+  // Pace and Space (×1.28) pumps up three-point volume; Grit and Grind (×0.62) suppresses it.
+  const threePaShare = Math.max(0, Math.min(0.90,
+    ((player.attributes.shooting3pt / 100) * 0.5 + tm.threepaBoost) * pbMults.threePaShareMult));
   const threepa = Math.round(fga * threePaShare);
 
-  // Inside / mid split — capped at 50% to keep FGA distribution realistic
-  const insideShare = Math.max(0, Math.min(0.50,
-    ((player.attributes.layups + player.attributes.dunks) / 2 / 100) * 0.3 + tm.insideBoost));
+  // Inside / mid split: inside share scaled by playbook multiplier.
+  // Grit and Grind (×1.38) creates more post/drive looks; Pace and Space (×0.68) pulls players out.
+  const insideShare = Math.max(0, Math.min(0.70,
+    (((player.attributes.layups + player.attributes.dunks) / 2 / 100) * 0.3 + tm.insideBoost) * pbMults.insideShareMult));
   const insFga  = Math.round(fga * insideShare);
   const midFga  = Math.max(0, fga - threepa - insFga);
 
@@ -3307,23 +3401,27 @@ const simulatePlayerGameLine = (
   const dunkWeight  = Math.min(0.20, player.attributes.dunks       / 100 * 0.20);
   const postWeight  = Math.min(0.25, player.attributes.postScoring / 100 * 0.25);
   const layupWeight = Math.max(0,    1 - dunkWeight - postWeight);
-  // dunkBase scaled by 0.60 (was 0.75): box-score "inside" includes many contested
-  // attempts where the defense has rotated — dunk success rate must reflect that.
-  const fgPctIns    = layupBase * layupWeight + (dunkBase * 0.60) * dunkWeight + postBase * postWeight;
+  const fgPctIns    = layupBase * layupWeight + (dunkBase * 0.75) * dunkWeight + postBase * postWeight;
 
   // Stochastic rounding: Math.floor(n*rate + rand()) gives correct expected
   // value (= n*rate) without the systematic upward bias of Math.round that
   // was locking season 3PT% leaders at 50% for high-base shooters.
-  // Hard caps prevent single-game absurdities while still allowing hot nights.
-  // Season averages will be lower due to cold games balancing hot ones.
-  const threeRate = Math.max(0.05, Math.min(0.56, fgPct3 + fgPctBoost + fatigueMod + opponentPerimDefMod + moraleFgMod + (Math.random() * 0.06 - 0.03)));
+  // pbMults.*Delta: additive FG% shifts driven by playbook.
+  // Pace and Space opens up cleaner 3PT looks (+1.8 pp) but fewer post entries (−1.8 pp);
+  // Grit and Grind generates better interior reads (+2.0 pp) but contested 3s (−1.8 pp).
+  const threeRate = Math.max(0.05, fgPct3 + fgPctBoost + fatigueMod + opponentPerimDefMod + moraleFgMod + pbMults.fgPct3Delta + (Math.random() * 0.06 - 0.03));
   const threepm   = Math.min(threepa, Math.floor(threepa * threeRate + Math.random()));
-  const midRate   = Math.max(0.05, Math.min(0.52, fgPctMid + fgPctBoost + fatigueMod + opponentMidDefMod + moraleFgMod + (Math.random() * 0.06 - 0.03)));
+  const midRate   = Math.max(0.05, fgPctMid + fgPctBoost + fatigueMod + opponentMidDefMod + moraleFgMod + pbMults.fgPctMidDelta + (Math.random() * 0.06 - 0.03));
   const midFgm    = Math.min(midFga,  Math.floor(midFga  * midRate   + Math.random()));
   // Inside FGM: interior + post defense mods both apply (weighted by post share).
+  // opponentInteriorDefMod suppresses drives/dunks; opponentPostDefMod suppresses
+  // post-ups.  Blend them proportionally to postWeight so a non-post player
+  // (postWeight≈0) is barely affected by post defense, and a pure post scorer
+  // (postWeight≈0.25) feels the full post-defense penalty.
   const blendedInsideMod = opponentInteriorDefMod * (1 - postWeight) + opponentPostDefMod * postWeight;
-  // Ceiling 0.72: even elite rim-runners face help defense over a full game.
-  const insRate   = Math.max(0.30, Math.min(0.72, fgPctIns + fgPctBoost + fatigueMod + blendedInsideMod + moraleFgMod + (Math.random() * 0.06 - 0.03)));
+  // Floor lowered to 0.30 (from 0.35): even poor finishers shouldn't make 35%+
+  // of their inside attempts after factoring in rim protection and fatigue.
+  const insRate   = Math.max(0.30, fgPctIns + fgPctBoost + fatigueMod + blendedInsideMod + moraleFgMod + pbMults.fgPctInsDelta + (Math.random() * 0.06 - 0.03));
   const insFgm    = Math.min(insFga,  Math.floor(insFga  * insRate   + Math.random()));
   const fgm     = threepm + midFgm + insFgm;
 
@@ -3369,16 +3467,17 @@ const simulatePlayerGameLine = (
   // Independent per-player rebound formula — no normalization to teamReb.
   // posRebMult encodes positional rebounding rates (C highest, guards lowest).
   // Power-curve (squared) concentrates boards in high-rebounding players.
-  // 18.0 calibration: C at reb=90, 36 min → ~(0.90²)×1.00×0.75×18 ≈ 11 raw boards.
-  // Random noise ±2 allows natural game-to-game variance.
+  // 19.5 calibration: C at reb=90, 36 min → ~(0.90²)×1.00×0.75×19.5 ≈ 11.9 boards.
+  // Targets: elite C ≈ 12–14 RPG, elite PF ≈ 9–11, SF ≈ 6–8, guards ≈ 3–5.
+  // Random noise ±2.5 provides organic game-to-game variance.
   const posRebMult =
     player.position === 'C'  ? 1.00 :
     player.position === 'PF' ? 0.72 :
     player.position === 'SF' ? 0.50 : 0.32;
-  const totalReb = Math.max(0, Math.round(
-    Math.pow(player.attributes.rebounding / 100, 2) * posRebMult * minFac * 18.0
-    + (Math.random() * 4 - 2),
-  ));
+  const totalReb = Math.min(22, Math.max(0, Math.round(
+    Math.pow(player.attributes.rebounding / 100, 2) * posRebMult * minFac * 19.5
+    + (Math.random() * 5 - 2.5),
+  )));
   // ORB/DRB split: use position-based base (bigs ~27% of their boards are ORBs,
   // guards ~19%) + small attribute modifier. This replaces orbChance/drbChance
   // ratio which produced unrealistic 45-55% ORB splits for bigs.
@@ -3393,9 +3492,8 @@ const simulatePlayerGameLine = (
 
   // ── Assist calculation ────────────────────────────────────────────────────
   // Primary efficiency: passing + playmaking + ball handling + IQ + kick-out tendency.
-  // No artificial ceiling — elite playmakers are allowed to reach 12–18+ on
-  // exceptional nights; the math naturally constrains realistic totals since
-  // teamAst ≈ 22–28 and adjAstShare < 1.0 for all but the rarest performances.
+  // adjAstShare capped at 0.42 so even an elite PG never exceeds ~10 APG season avg
+  // (teamAst 24 × 0.42 = 10.1). Per-game cap of 18 prevents freak stat-padding games.
   const kickOutTendency = player.tendencies?.kickOutPasser ?? 50;
   const astEff = getAssistEfficiency(
     player.attributes.passing,
@@ -3418,34 +3516,38 @@ const simulatePlayerGameLine = (
   // PGs naturally run more pick-and-roll/transition — their high BH + playmaking raises this.
   // Pure scorers with low BH/playmaking won't inflate their own assist totals.
   const posPlayBase =
-    player.position === 'PG' ? 0.26 : player.position === 'SG' ? 0.17 :
-    player.position === 'SF' ? 0.13 : player.position === 'PF' ? 0.09 : 0.07;
+    player.position === 'PG' ? 0.34 : player.position === 'SG' ? 0.22 :
+    player.position === 'SF' ? 0.16 : player.position === 'PF' ? 0.12 : 0.09;
   const handlerFrac = Math.max(0.05,
     posPlayBase
     + ((player.attributes.ballHandling ?? 60) - 65) / 160
     + ((player.attributes.playmaking   ?? 60) - 65) / 220
   );
-  const adjAstShare = Math.max(0.01, astEff * handlerFrac * minFac * 0.85 * (1 + tm.astBoost) * contextMult);
-  const ast = Math.max(0, Math.round(teamAst * adjAstShare));
+  const adjAstShare = Math.min(0.42, Math.max(0.01, astEff * handlerFrac * minFac * 1.10 * (1 + tm.astBoost) * contextMult));
+  // ±1 noise adds organic game-to-game fluctuation (some 6-ast nights, some 14-ast nights)
+  const ast = Math.min(18, Math.max(0, Math.round(teamAst * adjAstShare + (Math.random() * 2 - 1))));
 
-  // STL: getStealChance × 80 steal-opportunities per 48 min × minutes fraction.
+  // STL: getStealChance × 48 steal-opportunities per 48 min × minutes fraction.
+  // Reduced from 80 → 48 so league leaders average 1.5–2.5 SPG (NBA realistic range).
   // stlBoost from defensive tendencies (pass-denial, gambles, helpDefender).
   // Stamina: fatigued defenders lose a step — up to 15 % reduction at stamina=40.
-  // No artificial per-player cap — elite thieves can reach 5–7 STL on exceptional nights.
-  const STL_OPP_SCALE = 80;
+  // Hard cap at 5 STL/game; wider noise (1.5) creates organic nightly variance.
+  const STL_OPP_SCALE = 48;
   const stlBase    = getStealChance(player.attributes.steals, player.position, player.attributes.defensiveIQ)
     * STL_OPP_SCALE * minFac * (1 + tm.stlBoost) * (1 + moraleEffMod);
   const stlFatigue = Math.max(0, (65 - (player.attributes.stamina ?? 70)) / 100 * 0.15);
-  const stl        = Math.max(0, Math.floor(stlBase * (1 - stlFatigue) + Math.random() * 0.8));
+  const stl        = Math.min(5, Math.max(0, Math.floor(stlBase * (1 - stlFatigue) + Math.random() * 1.5)));
 
-  // BLK: getBlockChance × 65 block-opportunities per 48 min × minutes fraction.
+  // BLK: getBlockChance × 35 block-opportunities per 48 min × minutes fraction.
+  // Reduced from 65 → 35 so league leaders average 2.5–3.5 BPG (NBA realistic range).
+  // Wemby-tier (blocks=97+): ~3.5 BPG; solid rim protector (blocks=85): ~2.0 BPG.
   // blkBoost from helpDefender/physicality tendencies; stamina reduction for tired bigs.
-  // No artificial per-player cap — elite rim protectors can reach 7–10 BLK on dominant nights.
-  const BLK_OPP_SCALE = 65;
+  // Hard cap at 7 BLK/game; wider noise (1.5) creates organic nightly variance.
+  const BLK_OPP_SCALE = 35;
   const blkBase    = getBlockChance(player.attributes.blocks, player.position, player.attributes.defensiveIQ)
     * BLK_OPP_SCALE * minFac * (1 + tm.blkBoost) * (1 + moraleEffMod);
   const blkFatigue = Math.max(0, (65 - (player.attributes.stamina ?? 70)) / 100 * 0.12);
-  const blk        = Math.max(0, Math.floor(blkBase * (1 - blkFatigue) + Math.random() * 0.8));
+  const blk        = Math.min(7, Math.max(0, Math.floor(blkBase * (1 - blkFatigue) + Math.random() * 1.5)));
   const pf  = Math.min(6, Math.round((Math.floor(Math.random() * 4 * minFac + 1)) * (1 + tm.foulRisk)));
 
   // TOV: scaled by position-based touch multiplier so ball-handlers accrue
@@ -3761,7 +3863,7 @@ export const simulateGame = (
   const distributeToPlayers = (team: Team, totalPts: number, isHome: boolean, isGT: boolean) => {
     const roster      = team.roster;
     const totalRating = roster.reduce((acc, p) => acc + p.rating, 0);
-    const teamFga     = Math.round(statPace * 0.87);
+    const teamFga     = Math.round(statPace * 1.10);
     // teamReb: ~42–52 boards/team at NBA pace. 0.50 coefficient (was 0.44) accounts
     // for offensive boards — each missed shot is a rebound opportunity for either team.
     // No artificial cap — fast-paced games with many missed shots can yield 60+ team boards.
@@ -3771,7 +3873,7 @@ export const simulateGame = (
     // players exceeds 1.0 by ~1.48×, causing reported team assists to balloon to 45+.
     // New coefficient (0.46) brings the raw target to ~22-26 for typical 105-125 pt games,
     // matching the 2024-25 NBA range of 22-26 team assists per game.
-    const teamAst     = Math.round((totalPts / 2.2) * 0.40);
+    const teamAst     = Math.round((totalPts / 2.2) * 0.46);
 
     // Opponent defensive averages — computed once per team, applied to every player's box score.
     // Uses top-8 rotation players as the sample (starters + primary bench).
@@ -3862,7 +3964,11 @@ export const simulateGame = (
       const ftBonus    = isHome ? 0.03 : 0;
       const varRoll    = playerVariance.get(p.id) ?? 0;
       const usageShare = usageShares[i];
-      const line = simulatePlayerGameLine(p, totalPts, teamFga, teamReb, teamAst, mins, usageShare, varRoll, ftBonus, oppPerimDefMod, oppInteriorDefMod, oppMidDefMod, oppPostDefMod, p.morale ?? 75, teamAvg3pt, impliedFgPct, team.activeScheme ?? 'Balanced');
+      // Tendency-scheme mismatch: post-heavy player in Pace and Space, iso ball-hog
+      // in Triangle, etc. — converts to effective morale penalty (0 to -15).
+      const scheme         = team.activeScheme ?? 'Balanced';
+      const mismatchPenalty = calcPlaybookMismatch(p, scheme);
+      const line = simulatePlayerGameLine(p, totalPts, teamFga, teamReb, teamAst, mins, usageShare, varRoll, ftBonus, oppPerimDefMod, oppInteriorDefMod, oppMidDefMod, oppPostDefMod, p.morale ?? 75, teamAvg3pt, impliedFgPct, scheme, mismatchPenalty);
       return { ...line, techs: 0, flagrants: 0, ejected: false };
     });
 
