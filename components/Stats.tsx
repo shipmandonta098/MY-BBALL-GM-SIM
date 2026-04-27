@@ -229,8 +229,13 @@ const Stats: React.FC<StatsProps> = ({ league, onViewRoster, onManageTeam, onVie
   };
 
   const filteredLeaders = useMemo(() => {
+    const seen = new Set<string>();
     return allPlayers
-      .filter(p => p.stats.gamesPlayed >= minGames && p.name.toLowerCase().includes(searchTerm.toLowerCase()))
+      .filter(p => {
+        if (seen.has(p.id)) return false;
+        seen.add(p.id);
+        return p.stats.gamesPlayed >= minGames && p.name.toLowerCase().includes(searchTerm.toLowerCase());
+      })
       .map(p => ({ ...p, adv: calculateAdvanced(p) }));
   }, [allPlayers, minGames, searchTerm]);
 
@@ -1686,7 +1691,7 @@ const Stats: React.FC<StatsProps> = ({ league, onViewRoster, onManageTeam, onVie
           <LeaderTable statKey="ftmpg" label="FT Made" fmt={v => v.toFixed(1)} />
           <LeaderTable statKey="ftapg" label="FT Attempts" fmt={v => v.toFixed(1)} />
           <LeaderTable statKey="ftPct" label="FT%" fmt={v => (v * 100).toFixed(1) + '%'}
-            minAttemptsFilter={p => p.stats.fta >= p.stats.gamesPlayed * 1.5} />
+            minAttemptsFilter={p => p.stats.fta / Math.max(1, p.stats.gamesPlayed) >= 2.0} />
           <LeaderTable statKey="mpg"   label="Minutes" fmt={v => v.toFixed(1)} />
         </div>
       )}

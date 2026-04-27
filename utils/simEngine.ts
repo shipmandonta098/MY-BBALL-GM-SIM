@@ -937,76 +937,20 @@ export function getRimProtectionMod(
 
 // ─── Free Throw Percentage ────────────────────────────────────────────────────
 /**
- * Maps a player's freeThrow attribute (0–100) to a base FT%, calibrated to
- * 2025-26 NBA data (league avg ≈ 78.3 %; team range 75–83.2 %).
+ * Maps a player's freeThrow attribute (0–100) to a base FT%.
  *
- * Piecewise curve (base before position/situational adjustments):
- *   0–59  → 60–72 %  (hack-a viable; bigs who can't shoot, scared rookies)
- *   60–69 → 72–76 %  (below-avg; shaky but playable — not worth intentional fouling)
- *   70–79 → 76–80 %  (league-avg range — most rotation players live here)
- *   80–89 → 80–86 %  (plus; clutch-reliable, teams can draw fouls without fear)
- *   90–94 → 86–90 %  (elite: Kawhi / SGA tier — high volume AND high %)
- *   95–100→ 90–94 %  (god-tier: Steph Curry .931 — nearly automatic)
+ * Near-linear mapping so attribute directly reflects shooting ability:
+ *   attr  50 → ~50 %  (hack-a candidate — misses roughly half)
+ *   attr  70 → ~70 %  (below-avg; teams will sometimes foul intentionally)
+ *   attr  95 → ~95 %  (elite: near-automatic)
  *
- * Diminishing returns design: each segment's slope narrows at the top so the
- * model never implies "100 attr = 100%" — even Steph misses ~7 % of FTs.
+ * Per-game variance (±3 %, or ±5 % for Streaky) is applied at the call site via
+ * getFreeThrowNoiseWidth(), so season averages regress naturally to base.
  *
- * Positional adjustment:
- *   PG / SG / SF → +1.0 %  (guards drill the mechanics; better form from reps)
- *   C  / PF      → −1.5 %  (bigs with good attr still face slight mechanical cap)
- *
- * Hard clamp: [0.55, 0.96]
- *   Floor: even the worst FT shooter makes more than half.
- *   Ceiling: no one is historically above 96 % on real volume.
- *
- * Calibration target: unweighted league sim avg ≈ 78 %.
- *   Top individual players at 85–90 attr land in the 82–87 % band.
- *
- * Output table (base, guard position):
- *   attr  50 → 67.0 %
- *   attr  65 → 74.5 %
- *   attr  75 → 78.0 %
- *   attr  88 → 84.4 %
- *   attr  95 → 89.0 %
- *   attr 100 → 92.0 %
- *
- * Tunables:
- *   • Shift breakpoint values to raise/lower league-wide avg.
- *   • Widen positionalTweak gap for more position-driven spread.
- *   • Pair with getFreeThrowSituationalMod() for in-game pressure effects.
+ * Hard clamp: [0.30, 0.97]
  */
-export function getFreeThrowPercentage(attr: number, position?: string): number {
-  const a = Math.max(0, Math.min(100, attr));
-
-  let base: number;
-  if (a <= 59) {
-    // Hack-a tier: 60 % at 0 → 72 % at 59  (slow climb — these guys just can't shoot)
-    base = 0.60 + (a / 59) * 0.12;
-  } else if (a <= 69) {
-    // Below-avg: 72 % at 60 → 76 % at 69
-    base = 0.72 + ((a - 60) / 9) * 0.04;
-  } else if (a <= 79) {
-    // League-avg: 76 % at 70 → 80 % at 79
-    base = 0.76 + ((a - 70) / 9) * 0.04;
-  } else if (a <= 89) {
-    // Plus shooter: 80 % at 80 → 86 % at 89  (slope steepens — these reps add up)
-    base = 0.80 + ((a - 80) / 9) * 0.06;
-  } else if (a <= 94) {
-    // Elite: 86 % at 90 → 90 % at 94  (diminishing returns kick in hard)
-    base = 0.86 + ((a - 90) / 4) * 0.04;
-  } else {
-    // God-tier: 90 % at 95 → 94 % at 100  (Curry / prime Nash territory)
-    base = 0.90 + ((a - 95) / 5) * 0.04;
-  }
-
-  // Positional: guards repeat the motion thousands more times; bigs have
-  // mechanical ceilings even when the attribute is strong.
-  const positionalTweak =
-    position === 'PG' || position === 'SG' || position === 'SF' ? +0.010 :
-    position === 'C'  || position === 'PF'                      ? -0.015 :
-    0;
-
-  return Math.max(0.55, Math.min(0.96, base + positionalTweak));
+export function getFreeThrowPercentage(attr: number, _position?: string): number {
+  return Math.max(0.30, Math.min(0.97, attr / 100));
 }
 
 // ─── Free Throw Situational Modifier ─────────────────────────────────────────
@@ -3425,24 +3369,21 @@ const simulatePlayerGameLine = (
   const insFgm    = Math.min(insFga,  Math.floor(insFga  * insRate   + Math.random()));
   const fgm     = threepm + midFgm + insFgm;
 
-  // FTA: driven by Draw Foul tendency, drive/post aggressiveness, and team scheme.
-  // ftaRate = FTA generated per FGA attempt (NBA average ≈ 0.25; elite drawers 0.40-0.55).
-  //   drawFoul 90 → base ≈ 0.38  |  drawFoul 50 → base ≈ 0.15  |  drawFoul 20 → base ≈ 0.05
-  //   driveToBasket 80 → +0.036  |  postUp 80 → +0.030
-  //   Grit and Grind ×1.20 (interior emphasis)  |  Pace & Space / Showtime ×1.08 (drive lanes)
+  // FTA: linear scale off drawFoul attribute so volumes match real NBA tiers.
+  //   drawFoul 90, 15 FGA → ~7–10 FTA  |  drawFoul 50, 10 FGA → ~3–5 FTA  |  drawFoul 25, 6 FGA → ~1–2 FTA
   const ot_fta      = player.tendencies?.offensiveTendencies;
   const drawFoulTend = ot_fta?.drawFoul      ?? 50;
   const driveTend    = ot_fta?.driveToBasket ?? 50;
   const postTend     = ot_fta?.postUp        ?? 50;
-  const drawFoulBase = 0.05 + Math.max(0, drawFoulTend - 20) / 100 * 0.33;
-  const driveBonus   = Math.max(0, driveTend - 50) / 100 * 0.12;
-  const postBonus    = Math.max(0, postTend  - 50) / 100 * 0.10;
+  const drawFoulBase = drawFoulTend / 100 * 0.65;
+  const driveBonus   = Math.max(0, driveTend - 50) / 100 * 0.10;
+  const postBonus    = Math.max(0, postTend  - 50) / 100 * 0.08;
   const schemeFtaMult =
     scheme === 'Grit and Grind' ? 1.20 :
     scheme === 'Pace and Space' ? 1.08 :
     scheme === 'Showtime'       ? 1.08 :
     1.0;
-  const ftaRate = Math.min(0.60, (drawFoulBase + driveBonus + postBonus) * schemeFtaMult);
+  const ftaRate = Math.min(0.75, (drawFoulBase + driveBonus + postBonus) * schemeFtaMult);
   const fta = Math.max(0, Math.round(fga * ftaRate * (0.85 + Math.random() * 0.30)));
 
   // FT%: piecewise curve + positional tweak + situational modifiers.
@@ -3459,7 +3400,7 @@ const simulatePlayerGameLine = (
     clutchTendency:    player.tendencies?.situationalTendencies?.clutchShotTaker,
   });
   const ftNoise   = getFreeThrowNoiseWidth(player.personalityTraits);
-  const ftPct     = Math.max(0.50, Math.min(0.98,
+  const ftPct     = Math.max(0.30, Math.min(0.97,
     ftBasePct + ftSitMod + (Math.random() * 2 * ftNoise - ftNoise)));
   const ftm = Math.min(fta, Math.round(fta * ftPct));
   const pts = midFgm * 2 + insFgm * 2 + threepm * 3 + ftm;
