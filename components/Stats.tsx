@@ -133,8 +133,8 @@ const Stats: React.FC<StatsProps> = ({ league, onViewRoster, onManageTeam, onVie
         ast: ast / gp, stl: stl / gp, blk: blk / gp,
         tov: tov / gp, pf: pf / gp, pts: pts / gp, mov,
         // Advanced
-        eFGPct:      fga > 0 ? Math.min(0.75, (fgm + 0.5 * threepm) / fga) : 0,
-        tsPct:       (fga + 0.44 * fta) > 0 ? Math.min(0.72, pts / (2 * (fga + 0.44 * fta))) : 0,
+        eFGPct:      fga > 0 ? Math.min(0.65, (fgm + 0.5 * threepm) / fga) : 0,
+        tsPct:       (fga + 0.44 * fta) > 0 ? Math.min(0.70, pts / (2 * (fga + 0.44 * fta))) : 0,
         pace:        (poss + oppPoss) / (2 * gp),
         ortg,
         drtg,
@@ -186,9 +186,11 @@ const Stats: React.FC<StatsProps> = ({ league, onViewRoster, onManageTeam, onVie
     const tpPct = p.stats.threepa > 0 ? p.stats.threepm / p.stats.threepa : 0;
     const ftPct = p.stats.fta > 0 ? p.stats.ftm / p.stats.fta : 0;
 
-    // eFG% and TS% — capped at realistic NBA-season maximums (small-sample stochastic noise can push these above 100% without the cap)
-    const eFG = p.stats.fga > 0 ? Math.min(0.75, (p.stats.fgm + 0.5 * p.stats.threepm) / p.stats.fga) : 0;
-    const TS = (p.stats.fga + 0.44 * p.stats.fta) > 0 ? Math.min(0.72, p.stats.points / (2 * (p.stats.fga + 0.44 * p.stats.fta))) : 0;
+    // eFG% and TS% — hard caps at realistic NBA maxima.
+    // eFG: best real seasons ~0.66 (Gobert rim-finishing, Curry 3-heavy); cap 0.65.
+    // TS:  Curry's best season was 0.672; elite sim player ≤ 0.70.
+    const eFG = p.stats.fga > 0 ? Math.min(0.65, (p.stats.fgm + 0.5 * p.stats.threepm) / p.stats.fga) : 0;
+    const TS = (p.stats.fga + 0.44 * p.stats.fta) > 0 ? Math.min(0.70, p.stats.points / (2 * (p.stats.fga + 0.44 * p.stats.fta))) : 0;
 
     // Usage%
     const USG = p.stats.minutes > 0 ? (p.stats.fga + 0.44 * p.stats.fta + p.stats.tov) / p.stats.minutes : 0;
@@ -211,16 +213,18 @@ const Stats: React.FC<StatsProps> = ({ league, onViewRoster, onManageTeam, onVie
     // VORP — scaled by 0.75 to align with capped BPM values
     const VORP = (BPM - (-2.0)) * (p.stats.minutes / (48 * 82)) * 0.75;
 
-    // Win Shares — WS/48 divisor raised 42→80 so top WS/48 lands 0.22–0.29.
-    //   BPM +10 starter → WS48 ≈ 0.250; BPM +7 starter → WS48 ≈ 0.213.
-    const WS48 = Math.max(0, (BPM + 2.0) / 80 + 0.100);
-    const WS   = p.stats.minutes > 0 ? WS48 * p.stats.minutes / 48 : 0;
-    // OWS/DWS split proportional to offensive vs defensive BPM components
+    // Win Shares — divisor tuned so top WS/48 lands 0.22–0.29.
+    //   BPM +8 starter  → WS48 ≈ 0.254; BPM +10 → WS48 ≈ 0.285 (cap 0.290).
+    //   Full-season leader at 38 MPG: OWS ≤ 11.5, DWS ≤ 9.5, total 16–20.
+    const WS48 = Math.max(0, Math.min(0.290, (BPM + 2.0) / 65 + 0.100));
+    const WS_raw = p.stats.minutes > 0 ? WS48 * p.stats.minutes / 48 : 0;
+    // OWS/DWS — split proportional to BPM components, then individually capped.
     const obpmPos = Math.max(0, OBPM + 2.0);
     const dbpmPos = Math.max(0, DBPM + 2.0);
     const bpmSum  = obpmPos + dbpmPos || 1;
-    const OWS = WS * (obpmPos / bpmSum);
-    const DWS = WS - OWS;
+    const OWS = Math.min(11.5, WS_raw * (obpmPos / bpmSum));
+    const DWS = Math.min(9.5,  WS_raw * (dbpmPos / bpmSum));
+    const WS  = OWS + DWS;
 
     // ±/100 Possessions — gate at 10 MPG so garbage-time specialists
     //   (2 min/game, +15 PM) can't inflate to +138. Hard cap ±22.
@@ -489,13 +493,13 @@ const Stats: React.FC<StatsProps> = ({ league, onViewRoster, onManageTeam, onVie
           const twoPct = twoa > 0 ? twom / twoa : 0;
           const twomPg = twom / gpSafe;
           const twoaPg = twoa / gpSafe;
-          // EFG%
-          const efg = fga > 0 ? Math.min(0.75, (fgm + 0.5 * tpm) / fga) : 0;
-          // Advanced
+          // EFG% — cap mirrors calculateAdvanced (0.65 max)
+          const efg = fga > 0 ? Math.min(0.65, (fgm + 0.5 * tpm) / fga) : 0;
+          // Advanced — per cap 32 matches normalizePER ceiling; TS cap 0.70
           const per = min > 0
-            ? (pts + reb + ast + stl + blk - (fga - fgm) - (fta - ftm) - tov) / min * 30
+            ? Math.min(32, (pts + reb + ast + stl + blk - (fga - fgm) - (fta - ftm) - tov) / min * 30)
             : 0;
-          const ts  = (fga + 0.44 * fta) > 0 ? Math.min(0.72, pts / (2 * (fga + 0.44 * fta))) : 0;
+          const ts  = (fga + 0.44 * fta) > 0 ? Math.min(0.70, pts / (2 * (fga + 0.44 * fta))) : 0;
           const usg = min > 0 ? (fga + 0.44 * fta + tov) / min : 0;
           const bpm = gpSafe > 0 ? pm / gpSafe : 0;
           const vorp = bpm * (gpSafe / 82) * 2.7;
@@ -1708,9 +1712,12 @@ const Stats: React.FC<StatsProps> = ({ league, onViewRoster, onManageTeam, onVie
 
       {activeTab === 'advanced' && (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
-          <LeaderTable statKey="PER"     label="Efficiency (PER)" />
-          <LeaderTable statKey="TS"      label="True Shooting %" fmt={v => (v * 100).toFixed(1) + '%'} />
-          <LeaderTable statKey="eFG"     label="eFG%" fmt={v => (v * 100).toFixed(1) + '%'} />
+          <LeaderTable statKey="PER"     label="Efficiency (PER)"
+            minAttemptsFilter={p => p.stats.fga >= p.stats.gamesPlayed * 2} />
+          <LeaderTable statKey="TS"      label="True Shooting %" fmt={v => (v * 100).toFixed(1) + '%'}
+            minAttemptsFilter={p => p.stats.fga >= p.stats.gamesPlayed * 3} />
+          <LeaderTable statKey="eFG"     label="eFG%" fmt={v => (v * 100).toFixed(1) + '%'}
+            minAttemptsFilter={p => p.stats.fga >= p.stats.gamesPlayed * 3} />
           <LeaderTable statKey="WS"      label="Win Shares" fmt={v => v.toFixed(1)}
             minAttemptsFilter={p => p.stats.minutes / Math.max(1, p.stats.gamesPlayed) >= 12} />
           <LeaderTable statKey="OWS"     label="Offensive Win Shares" fmt={v => v.toFixed(1)}

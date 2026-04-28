@@ -33,8 +33,8 @@ export function rawUPER(s: PlayerStats): number {
 export const MIN_PER_MINUTES = 50; // minimum total minutes to qualify for lgAvg
 export function normalizePER(raw: number, lgAvgRaw: number): number {
   if (raw <= 0) return 0;
-  if (lgAvgRaw <= 0) return Math.min(35, raw * 25); // hard fallback, should not happen
-  return Math.min(40, (raw / lgAvgRaw) * 15.0);
+  if (lgAvgRaw <= 0) return Math.min(32, raw * 25); // hard fallback, should not happen
+  return Math.min(32, (raw / lgAvgRaw) * 15.0);
 }
 
 /**
