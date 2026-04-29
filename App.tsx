@@ -2004,8 +2004,8 @@ const App: React.FC = () => {
     if (usePreseason) {
       const allPreseasonDone = (newState.preseasonSchedule ?? []).every(g => g.played);
       if (allPreseasonDone) {
-        // Cut AI team rosters to 15 (final roster) — release excess to FA pool
-        const MAX_ROSTER = 15;
+        // Cut AI team rosters to league max (WNBA: 12, NBA: 15) — release excess to FA pool
+        const MAX_ROSTER = newState.settings.maxRosterSize ?? 15;
         const releasedCuts: typeof newState.freeAgents = [];
         const postCutTeams = newState.teams.map(t => {
           if (t.id === newState.userTeamId) return t; // user manages own cuts
@@ -3568,8 +3568,8 @@ const App: React.FC = () => {
           state = await finalizePreseasonGameResult(state, game.id, result);
         }
 
-        // Apply the same 15-man roster cuts that happen when preseason finishes naturally
-        const SKIP_MAX_ROSTER = 15;
+        // Apply the same roster cuts that happen when preseason finishes naturally
+        const SKIP_MAX_ROSTER = state.settings.maxRosterSize ?? 15;
         const skipCuts: typeof state.freeAgents = [];
         const teamsAfterCut = state.teams.map(t => {
           if (t.id === state.userTeamId) return t;

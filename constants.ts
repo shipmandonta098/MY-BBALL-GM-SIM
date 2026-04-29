@@ -2222,6 +2222,10 @@ export interface HistoricalFinancials {
   draftRounds?: number;
   draftClassSize?: 'Small' | 'Normal' | 'Large';
   tradableDraftPickSeasons?: number;
+  /** WNBA active roster floor */
+  minRosterSize?: number;
+  /** WNBA active roster ceiling */
+  maxRosterSize?: number;
 }
 
 interface EraEntry {
@@ -2432,6 +2436,7 @@ const WNBA_ERA_TABLE: EraEntry[] = [
       luxuryTaxMultiplier: 1.0,
       maxContractYears: 2, maxPlayerSalaryPct: 25, birdRights: false,
       draftRounds: 3, draftClassSize: 'Small', tradableDraftPickSeasons: 1,
+      minRosterSize: 10, maxRosterSize: 12,
       note: 'WNBA founded 1997. NBA-subsidized, minimal salaries. Max $50K/yr. 3-round draft.',
     },
   },
@@ -2444,6 +2449,7 @@ const WNBA_ERA_TABLE: EraEntry[] = [
       luxuryTaxMultiplier: 1.0,
       maxContractYears: 2, maxPlayerSalaryPct: 25, birdRights: false,
       draftRounds: 3, draftClassSize: 'Small', tradableDraftPickSeasons: 1,
+      minRosterSize: 10, maxRosterSize: 12,
       note: 'Early WNBA era — minimal salaries. Team cap grows slowly to ~$550K.',
     },
   },
@@ -2456,6 +2462,7 @@ const WNBA_ERA_TABLE: EraEntry[] = [
       luxuryTaxMultiplier: 1.0,
       maxContractYears: 3, maxPlayerSalaryPct: 25, birdRights: false,
       draftRounds: 3, draftClassSize: 'Small', tradableDraftPickSeasons: 2,
+      minRosterSize: 10, maxRosterSize: 12,
       note: '2003 CBA: rookie salary scale introduced. Cap ~$700K–$800K. Max contracts now 3 years.',
     },
   },
@@ -2468,6 +2475,7 @@ const WNBA_ERA_TABLE: EraEntry[] = [
       luxuryTaxMultiplier: 1.0,
       maxContractYears: 3, maxPlayerSalaryPct: 25, birdRights: false,
       draftRounds: 3, draftClassSize: 'Small', tradableDraftPickSeasons: 2,
+      minRosterSize: 10, maxRosterSize: 12,
       note: 'Cap inches toward $900K. Growth largely flat. No luxury tax system.',
     },
   },
@@ -2480,6 +2488,7 @@ const WNBA_ERA_TABLE: EraEntry[] = [
       luxuryTaxMultiplier: 1.0,
       maxContractYears: 4, maxPlayerSalaryPct: 30, birdRights: false,
       draftRounds: 3, draftClassSize: 'Normal', tradableDraftPickSeasons: 2,
+      minRosterSize: 10, maxRosterSize: 12,
       note: 'Cap crosses $1M. Player activism pushes for better conditions. Max contracts now 4 years.',
     },
   },
@@ -2492,6 +2501,7 @@ const WNBA_ERA_TABLE: EraEntry[] = [
       luxuryTaxMultiplier: 1.0,
       maxContractYears: 4, maxPlayerSalaryPct: 30, birdRights: true,
       draftRounds: 3, draftClassSize: 'Normal', tradableDraftPickSeasons: 3,
+      minRosterSize: 11, maxRosterSize: 12,
       note: '2020 CBA: biggest pay jump in WNBA history at the time. Bird Rights introduced. Cap ~$1.8M.',
     },
   },
@@ -2504,6 +2514,7 @@ const WNBA_ERA_TABLE: EraEntry[] = [
       luxuryTaxMultiplier: 1.0,
       maxContractYears: 5, maxPlayerSalaryPct: 30, birdRights: true,
       draftRounds: 3, draftClassSize: 'Normal', tradableDraftPickSeasons: 3,
+      minRosterSize: 11, maxRosterSize: 12,
       note: 'January 2025 CBA: historic salary jump. Max 5-year deals. Team cap surges to ~$2.2M.',
     },
   },
@@ -2516,6 +2527,7 @@ const WNBA_ERA_TABLE: EraEntry[] = [
       luxuryTaxMultiplier: 1.5,
       maxContractYears: 5, maxPlayerSalaryPct: 35, birdRights: true,
       draftRounds: 3, draftClassSize: 'Normal', tradableDraftPickSeasons: 4,
+      minRosterSize: 11, maxRosterSize: 12,
       note: 'Projected from 2026 CBA negotiations. Major growth expected as WNBA viewership surges.',
     },
   },
@@ -2524,6 +2536,15 @@ const WNBA_ERA_TABLE: EraEntry[] = [
 export const getWNBAHistoricalFinancials = (year: number): HistoricalFinancials => {
   const entry = WNBA_ERA_TABLE.find(e => year >= e.from && year <= e.to);
   return entry ? entry.f : WNBA_ERA_TABLE[WNBA_ERA_TABLE.length - 1].f;
+};
+
+/** Returns the historically-correct WNBA active roster limits for a given year. */
+export const getWNBARosterRules = (year: number): { minRosterSize: number; maxRosterSize: number } => {
+  const h = getWNBAHistoricalFinancials(year);
+  return {
+    minRosterSize: h.minRosterSize ?? (year >= 2020 ? 11 : 10),
+    maxRosterSize: h.maxRosterSize ?? 12,
+  };
 };
 
 /**

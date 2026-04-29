@@ -1,7 +1,7 @@
 
 import React, { useState, useEffect } from 'react';
 import { LeagueSettings } from '../types';
-import { getHistoricalFinancials, getWNBAHistoricalFinancials, getEraMaxPlayerSalary } from '../constants';
+import { getHistoricalFinancials, getWNBAHistoricalFinancials, getEraMaxPlayerSalary, getWNBARosterRules } from '../constants';
 import { computeMensMarketSalary } from '../utils/contractRules';
 import { fmtSalary } from '../utils/formatters';
 import NumericInput from './NumericInput';
@@ -280,6 +280,14 @@ const LeagueConfiguration: React.FC<LeagueConfigurationProps> = ({ onConfirm, on
       if (h.draftRounds)            setDraftRounds(h.draftRounds);
       if (h.draftClassSize)         setDraftClassSize(h.draftClassSize);
       if (h.tradableDraftPickSeasons !== undefined) setTradableDraftPickSeasons(h.tradableDraftPickSeasons);
+      // Auto-load WNBA historical roster limits
+      const rosterRules = getWNBARosterRules(year);
+      setMinRosterSize(rosterRules.minRosterSize);
+      setMaxRosterSize(rosterRules.maxRosterSize);
+    } else {
+      // Reset to standard NBA defaults when switching back from women's
+      setMinRosterSize(10);
+      setMaxRosterSize(18);
     }
   }, [year, historicalOverride, isWomensLeague]);
 
@@ -489,12 +497,14 @@ const LeagueConfiguration: React.FC<LeagueConfigurationProps> = ({ onConfirm, on
           const h = isWomensLeague ? getWNBAHistoricalFinancials(year) : getHistoricalFinancials(year);
           const noCap = h.salaryCap === 0;
           const isFutureWNBA = isWomensLeague && year >= 2026;
+          const rosterRules = isWomensLeague ? getWNBARosterRules(year) : null;
+          const rosterTag = rosterRules ? ` · Roster ${rosterRules.minRosterSize}–${rosterRules.maxRosterSize}` : '';
           const bannerLabel = historicalOverride
             ? '✏ Custom Financials'
             : isWomensLeague
               ? isFutureWNBA
-                ? `📅 Historical values loaded for ${year} — Future WNBA Projection · Hard Cap · No Luxury Tax`
-                : `📅 Historical values loaded for ${year} — WNBA Era · Hard Cap · No Luxury Tax`
+                ? `📅 WNBA HISTORICAL VALUES LOADED — Future Projection · Hard Cap · No Luxury Tax${rosterTag}`
+                : `📅 WNBA HISTORICAL VALUES LOADED — ${h.era}${rosterTag}`
               : `📅 Historical values loaded for ${year}`;
           const accentColor = isWomensLeague ? 'text-violet-400' : 'text-amber-500';
           const borderColor = historicalOverride
