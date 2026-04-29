@@ -3288,6 +3288,7 @@ const simulatePlayerGameLine = (
   playbookMismatch = 0,        // effective morale penalty (0 to -15) from tendency-scheme conflict
   explosiveMod = 0,            // 0 = normal | 0.5 = big night (33–45 pts) | 1.0 = historic (46–60+)
   coldMod = 0,                 // 0 = normal | 0.5 = cold night | 1.0 = ice cold
+  isWNBA = false,              // WNBA mode: tighter FGA caps, lower 3PT%, no historic 50+ nights
 ): GamePlayerLine => {
   // Morale modifiers: centered at 75 so an average player is neutral.
   // Critical (<50): FG -3%, TOV +25%, effort -15% | High (>85): FG +2%, effort +10%
@@ -3311,7 +3312,8 @@ const simulatePlayerGameLine = (
   const adjUsage = Math.max(0.02, usageShare * (1 + tm.usageBoost));
   // Hot/Cold-night scalars: explosiveMod drives big/historic nights; coldMod drives cold/ice-cold.
   // Hot and cold are mutually exclusive — only one will be non-zero per player per game.
-  const hotFgaCap     = explosiveMod >= 1.0 ? 35 : explosiveMod >= 0.5 ? 29 : coldMod >= 1.0 ? 14 : coldMod >= 0.5 ? 18 : 22;
+  // WNBA: max big night FGA cap 22 (vs 29), historic cap 26 (vs 35) — no 50-60 pt games.
+  const hotFgaCap     = explosiveMod >= 1.0 ? (isWNBA ? 26 : 35) : explosiveMod >= 0.5 ? (isWNBA ? 22 : 29) : coldMod >= 1.0 ? (isWNBA ? 11 : 14) : coldMod >= 0.5 ? (isWNBA ? 14 : 18) : (isWNBA ? 18 : 22);
   const hotUsageMul   = explosiveMod >= 1.0 ? 1.40 : explosiveMod >= 0.5 ? 1.20 : coldMod >= 1.0 ? 0.65 : coldMod >= 0.5 ? 0.82 : 1.0;
   const hotFgPctBoost = explosiveMod >= 1.0 ? 0.08 : explosiveMod >= 0.5 ? 0.045 : coldMod >= 1.0 ? -0.08 : coldMod >= 0.5 ? -0.045 : 0;
   const fga      = Math.min(hotFgaCap, Math.max(0, Math.round(teamFga * adjUsage * hotUsageMul * (minutes / 32))));
@@ -3377,7 +3379,9 @@ const simulatePlayerGameLine = (
   // pbMults.*Delta: additive FG% shifts driven by playbook.
   // Pace and Space opens up cleaner 3PT looks (+1.8 pp) but fewer post entries (−1.8 pp);
   // Grit and Grind generates better interior reads (+2.0 pp) but contested 3s (−1.8 pp).
-  const threeRate = Math.max(0.05, fgPct3 + fgPctBoost + hotFgPctBoost + fatigueMod + opponentPerimDefMod + moraleFgMod + pbMults.fgPct3Delta + (Math.random() * 0.06 - 0.03));
+  // WNBA 3PT% target 33-38% vs NBA 36-40%; apply -2.5% base adjustment.
+  const wnba3PtAdj = isWNBA ? -0.025 : 0;
+  const threeRate = Math.max(0.05, fgPct3 + fgPctBoost + hotFgPctBoost + fatigueMod + opponentPerimDefMod + moraleFgMod + pbMults.fgPct3Delta + wnba3PtAdj + (Math.random() * 0.06 - 0.03));
   const threepm   = Math.min(threepa, Math.floor(threepa * threeRate + Math.random()));
   const midRate   = Math.max(0.05, fgPctMid + fgPctBoost + hotFgPctBoost + fatigueMod + opponentMidDefMod + moraleFgMod + pbMults.fgPctMidDelta + (Math.random() * 0.06 - 0.03));
   const midFgm    = Math.min(midFga,  Math.floor(midFga  * midRate   + Math.random()));
@@ -3554,7 +3558,7 @@ export const simulateGame = (
   homeB2B = false,
   awayB2B = false,
   rivalryLevel = 'Ice Cold',
-  settings?: Pick<LeagueSettings, 'injuryFrequency' | 'homeCourt' | 'b2bFrequency' | 'quarterLength'>,
+  settings?: Pick<LeagueSettings, 'injuryFrequency' | 'homeCourt' | 'b2bFrequency' | 'quarterLength' | 'wnbaStatRealism'>,
 ): GameResult => {
   // ── Settings-driven constants ──────────────────────────────────────────────
   const quarterLength = settings?.quarterLength ?? 12; // minutes per quarter
@@ -3564,6 +3568,17 @@ export const simulateGame = (
   const injuryMultiplier = injuryMult[settings?.injuryFrequency ?? 'Medium'] ?? 1.0;
   const b2bMap: Record<string, number> = { None: 1.0, Low: 0.97, Realistic: 0.93, High: 0.90, Brutal: 0.87 };
   const b2bPenalty = b2bMap[settings?.b2bFrequency ?? 'Realistic'] ?? 0.93;
+
+  // ── WNBA Mode detection ────────────────────────────────────────────────────
+  // Explicit setting takes precedence; otherwise auto-detect from roster gender.
+  // When active, scales all outputs to WNBA 2024-26 targets:
+  //   PPG ~82, FG% 43.5-47.5%, 3P% 33-38%, FT% 76-82%, APG 18-23, RPG 32-38.
+  const combinedRoster = [...home.roster, ...away.roster];
+  const isWNBA: boolean = settings?.wnbaStatRealism ??
+    combinedRoster.filter(p => p.gender === 'Female').length > combinedRoster.length * 0.5;
+  // pppScale: WNBA avg 82 PPG / NBA avg 112 PPG ≈ 0.73. 0.77 is gentler to
+  // avoid over-correcting when pace is already slightly lower in WNBA games.
+  const pppScale = isWNBA ? 0.77 : 1.0;
 
   // ── 1. Player Variance Rolls (tip-off) ────────────────────────────────────
   const playerVariance = new Map<string, number>();
@@ -3626,10 +3641,10 @@ export const simulateGame = (
     if (isB2B) ppp *= b2bPenalty;
     return ppp + (Math.random() * SCORE_VARIANCE * 2 - SCORE_VARIANCE);
   };
-  const homePPP = calcBasePPP(homeBaseOff, homeDef, homeB2B)
-    + getStreakRegression(home) + teamMoraleMod(home);
-  const awayPPP = calcBasePPP(awayBaseOff, awayDef, awayB2B)
-    + getStreakRegression(away) + teamMoraleMod(away);
+  const homePPP = (calcBasePPP(homeBaseOff, homeDef, homeB2B)
+    + getStreakRegression(home) + teamMoraleMod(home)) * pppScale;
+  const awayPPP = (calcBasePPP(awayBaseOff, awayDef, awayB2B)
+    + getStreakRegression(away) + teamMoraleMod(away)) * pppScale;
 
   // ── 4. Pace / Possession Engine ───────────────────────────────────────────
   // Each team has their own pace rating (with coach badge effects).
@@ -3753,8 +3768,13 @@ export const simulateGame = (
     let aQScore = Math.round(awayQPoss * qPaceFactor * (awayPPP + awayOff) + (Math.random() * 12 - 6));
 
     // ── Scoring Bounds Validation ─────────────────────────────────────────
-    const { lo: qLo, hi: qHi } = getQuarterScoringBounds(homeQPoss, qGamePace);
-    const aBounds = getQuarterScoringBounds(awayQPoss, qGamePace);
+    // In WNBA mode, scale bounds by pppScale so the soft-clamp doesn't push
+    // WNBA scores back up toward NBA levels.
+    const hBoundsRaw = getQuarterScoringBounds(homeQPoss, qGamePace);
+    const aBoundsRaw = getQuarterScoringBounds(awayQPoss, qGamePace);
+    const qLo = Math.round(hBoundsRaw.lo * pppScale);
+    const qHi = Math.round(hBoundsRaw.hi * pppScale);
+    const aBounds = { lo: Math.round(aBoundsRaw.lo * pppScale), hi: Math.round(aBoundsRaw.hi * pppScale) };
 
     // Score cooldown/spark: clamp unrealistic outliers with soft correction
     if (hQScore > qHi + 5) {
@@ -3861,17 +3881,13 @@ export const simulateGame = (
   const distributeToPlayers = (team: Team, totalPts: number, isHome: boolean, isGT: boolean) => {
     const roster      = team.roster;
     const totalRating = roster.reduce((acc, p) => acc + p.rating, 0);
-    const teamFga     = Math.round(statPace * 1.10);
-    // teamReb: ~42–52 boards/team at NBA pace. 0.50 coefficient (was 0.44) accounts
-    // for offensive boards — each missed shot is a rebound opportunity for either team.
-    // No artificial cap — fast-paced games with many missed shots can yield 60+ team boards.
-    const teamReb     = Math.round(statPace * 0.50);
-    // NBA reality: ~60% of FGM are assisted; FGM ≈ pts / 2.2.
-    // Old coefficient (0.6) applied to estimated FGM, but the share-sum across all
-    // players exceeds 1.0 by ~1.48×, causing reported team assists to balloon to 45+.
-    // New coefficient (0.46) brings the raw target to ~22-26 for typical 105-125 pt games,
-    // matching the 2024-25 NBA range of 22-26 team assists per game.
-    const teamAst     = Math.round((totalPts / 2.2) * 0.46);
+    // WNBA FGA: ~75-80 per team vs NBA ~88-95. Coefficient 0.80 vs 1.10.
+    const teamFga     = Math.round(statPace * (isWNBA ? 0.80 : 1.10));
+    // WNBA boards: ~32-38 per team vs NBA ~42-52. Coefficient 0.35 vs 0.50.
+    const teamReb     = Math.round(statPace * (isWNBA ? 0.35 : 0.50));
+    // Assists: WNBA ~20 APG. With totalPts~82: (82/2.2)*0.54 ≈ 20 ✓
+    // NBA: (112/2.2)*0.46 ≈ 23 ✓ (2024-25 range 22-26)
+    const teamAst     = Math.round((totalPts / 2.2) * (isWNBA ? 0.54 : 0.46));
 
     // Opponent defensive averages — computed once per team, applied to every player's box score.
     // Uses top-8 rotation players as the sample (starters + primary bench).
@@ -3993,10 +4009,11 @@ export const simulateGame = (
                              + Math.max(0, defVulnMod * 0.06)
                              + (['Hot', 'Red Hot'].includes(rivalryLevel) ? 0.04 : 0)
                              + ((isoTend - 50) / 100 * 0.07);
-          // ~10–28 % chance of a big night for qualifying stars
-          const bigProb      = Math.max(0, Math.min(0.28, 0.07 + starScore * 0.21 + ctxBonus));
-          // ~0.005–0.15 % chance of a historic night (targets 1–2 per full season league-wide)
-          const historicProb = Math.max(0, Math.min(0.0015, 0.00005 + starScore * 0.00145));
+          // WNBA: cap big nights lower (~10-22 pts FGA headroom), no historic 50+ games
+          const bigProbCap   = isWNBA ? 0.16 : 0.28;
+          const bigProb      = Math.max(0, Math.min(bigProbCap, 0.07 + starScore * 0.21 + ctxBonus));
+          // WNBA: historic nights (35+ pts) are ~3x rarer; NBA targets 1–2 per season league-wide
+          const historicProb = isWNBA ? 0 : Math.max(0, Math.min(0.0015, 0.00005 + starScore * 0.00145));
           const r = Math.random();
           explosiveMod = r < historicProb ? 1.0 : r < historicProb + bigProb ? 0.5 : 0;
         }
@@ -4021,7 +4038,7 @@ export const simulateGame = (
         coldMod = r < baseIceColdProb ? 1.0 : r < baseIceColdProb + baseColdProb ? 0.5 : 0;
       }
 
-      const line = simulatePlayerGameLine(p, totalPts, teamFga, teamReb, teamAst, mins, usageShare, varRoll, ftBonus, oppPerimDefMod, oppInteriorDefMod, oppMidDefMod, oppPostDefMod, p.morale ?? 75, teamAvg3pt, impliedFgPct, scheme, mismatchPenalty, explosiveMod, coldMod);
+      const line = simulatePlayerGameLine(p, totalPts, teamFga, teamReb, teamAst, mins, usageShare, varRoll, ftBonus, oppPerimDefMod, oppInteriorDefMod, oppMidDefMod, oppPostDefMod, p.morale ?? 75, teamAvg3pt, impliedFgPct, scheme, mismatchPenalty, explosiveMod, coldMod, isWNBA);
       return { ...line, techs: 0, flagrants: 0, ejected: false };
     });
 
@@ -4036,32 +4053,38 @@ export const simulateGame = (
   totalHome = homePlayerStats.reduce((s, p) => s + p.pts, 0);
   totalAway = awayPlayerStats.reduce((s, p) => s + p.pts, 0);
 
-  // ── Hot-Night PBP: God Mode flavor text for 30+ pt explosive performances ─────
+  // ── Hot-Night PBP: God Mode flavor text for explosive scoring performances ───
+  // WNBA thresholds: 35+ legendary, 28+ explosive, 22+ impressive (vs NBA 50/40/30).
   const injectHotNightPBP = (stats: typeof homePlayerStats, teamRef: Team) => {
     const lastName = (name: string) => name.split(' ').at(-1) ?? name;
     const rndTime  = () => `${Math.floor(Math.random() * 9) + 1}:${String(Math.floor(Math.random() * 60)).padStart(2, '0')}`;
+    const hotFloor   = isWNBA ? 22 : 30;
+    const bigTier    = isWNBA ? 28 : 40;
+    const epicTier   = isWNBA ? 35 : 50;
     for (const line of stats) {
-      if (line.dnp || line.pts < 30) continue;
+      if (line.dnp || line.pts < hotFloor) continue;
       const player = teamRef.roster.find(pl => pl.id === line.playerId);
       if (!player) continue;
       const n   = lastName(player.name);
       const q34 = Math.floor(Math.random() * 2) + 3;
-      if (line.pts >= 50) {
-        pbp.push({ time: rndTime(), text: `HISTORIC NIGHT — ${n} has ${line.pts} POINTS! The crowd will be talking about this one for years!`, type: 'score' as const, quarter: 4 });
-        pbp.push({ time: '2:00',    text: `${n} puts on an all-time CLINIC — ${line.fgm}/${line.fga} FG, ${line.ftm}/${line.fta} FT. Legendary.`,   type: 'score' as const, quarter: 4 });
-      } else if (line.pts >= 40) {
+      if (line.pts >= epicTier) {
+        pbp.push({ time: rndTime(), text: `LEGENDARY NIGHT — ${n} has ${line.pts} POINTS! The crowd will be talking about this one for years!`, type: 'score' as const, quarter: 4 });
+        pbp.push({ time: '2:00',    text: `${n} puts on an all-time CLINIC — ${line.fgm}/${line.fga} FG, ${line.ftm}/${line.fta} FT. Absolutely electric.`, type: 'score' as const, quarter: 4 });
+      } else if (line.pts >= bigTier) {
         pbp.push({ time: rndTime(), text: `${n} EXPLODES for ${line.pts} — one of the best individual scoring nights of the season!`, type: 'score' as const, quarter: q34 });
       } else {
         pbp.push({ time: rndTime(), text: `${n} is TAKING OVER — ${line.pts} points and the defense has no answer!`, type: 'score' as const, quarter: q34 });
       }
       // God Mode scoring run sub-events
-      if (line.threepm >= 7) {
+      const threeBombThresh = isWNBA ? 5 : 7;
+      const threeHotThresh  = isWNBA ? 4 : 5;
+      if (line.threepm >= threeBombThresh) {
         pbp.push({ time: rndTime(), text: `${n} AGAIN from three — ${line.threepm} bombs tonight! Someone call the fire department!`, type: 'score' as const, quarter: q34 });
-      } else if (line.threepm >= 5) {
-        pbp.push({ time: rndTime(), text: `${n} drains another three — ${line.threepm} from downtown. He is UNCONSCIOUS right now!`, type: 'score' as const, quarter: 3 });
+      } else if (line.threepm >= threeHotThresh) {
+        pbp.push({ time: rndTime(), text: `${n} drains another three — ${line.threepm} from downtown. UNCONSCIOUS right now!`, type: 'score' as const, quarter: 3 });
       }
-      if (line.pts >= 40 && line.fgm >= 14) {
-        pbp.push({ time: '3:30', text: `${n} going on a SCORING RUN — ${line.fgm}-${line.fga} from the field tonight. Where do you even guard him?`, type: 'info' as const, quarter: 4 });
+      if (line.pts >= bigTier && line.fgm >= (isWNBA ? 10 : 14)) {
+        pbp.push({ time: '3:30', text: `${n} going on a SCORING RUN — ${line.fgm}-${line.fga} from the field tonight. Where do you even guard her?`, type: 'info' as const, quarter: 4 });
       }
     }
   };
