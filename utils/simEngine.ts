@@ -297,11 +297,11 @@ export function getTurnoverPercentage(
     // Average: 21 % at 60 → 15 % at 80
     base = 0.21 - ((bh - 60) / 20) * 0.06;
   } else if (bh <= 94) {
-    // Plus → elite: 15 % at 80 → 10 % at 94
-    base = 0.15 - ((bh - 80) / 14) * 0.05;
+    // Plus → elite: 18 % at 80 → 13 % at 94 (raised +3 pp to lift team floor)
+    base = 0.18 - ((bh - 80) / 14) * 0.05;
   } else {
-    // God-tier: 10 % at 95 → 8.5 % at 100
-    base = 0.10 - ((bh - 95) / 5) * 0.015;
+    // God-tier: 13 % at 95 → 12 % at 100 (raised from 10/8.5 to ensure realistic team min)
+    base = 0.13 - ((bh - 95) / 5) * 0.01;
   }
 
   // ── Passing: vision vs. ball-security balance ─────────────────────────────
@@ -341,7 +341,7 @@ export function getTurnoverPercentage(
     if (personalityTraits.includes('Friendly/Team First')) base *= 0.90; // careful ball-mover
   }
 
-  return Math.max(0.08, Math.min(0.30, base));
+  return Math.max(0.13, Math.min(0.32, base));
 }
 
 /**
@@ -3524,7 +3524,11 @@ const simulatePlayerGameLine = (
     player.position === 'SG' ? 1.4 :
     player.position === 'SF' ? 1.25 : 1.05;
   const tovNoise = (Math.random() - 0.5) * 0.06;
-  const tov      = Math.max(0, Math.round((toRate + tovNoise) * fga * touchMul));
+  // estPoss: shot-based touches + 0.05 per minute for non-shot possessions
+  // (dribble handoffs, secondary ball-handling, inbound situations).
+  // The minutes term ensures bench players with low FGA still generate realistic TOV.
+  const estPoss  = fga * touchMul + minutes * 0.05;
+  const tov      = Math.max(0, Math.round((toRate + tovNoise) * estPoss));
 
   return {
     playerId: player.id, name: player.name, min: minutes,
@@ -4151,6 +4155,38 @@ export const simulateGame = (
 
   homePlayerStats = assignPlusMinuses(homePlayerStats, margin);
   awayPlayerStats = assignPlusMinuses(awayPlayerStats, -margin);
+
+  // ── Team TOV hard caps: floor 10 / ceiling 18 per game ───────────────────────
+  // Ensures season averages stay in the 9.8–17.8 realistic range regardless of
+  // attribute distribution.  Floor deficit is spread across the highest-minute
+  // active players (+1 each); ceiling excess is scaled down proportionally.
+  const clampTeamTov = (lines: typeof homePlayerStats): typeof homePlayerStats => {
+    const TOV_FLOOR   = 10;
+    const TOV_CEILING = 18;
+    const total = lines.reduce((s, p) => s + (p.tov ?? 0), 0);
+    if (total >= TOV_FLOOR && total <= TOV_CEILING) return lines;
+
+    if (total > TOV_CEILING) {
+      const scale = TOV_CEILING / total;
+      return lines.map(p => ({ ...p, tov: Math.round((p.tov ?? 0) * scale) }));
+    }
+
+    // Below floor: add 1 TOV to each top-minute active player until floor is met
+    let deficit = TOV_FLOOR - total;
+    const result = lines.map(p => ({ ...p }));
+    const ranked = result
+      .map((p, idx) => ({ idx, min: p.min ?? 0 }))
+      .filter(x => x.min > 0 && !lines[x.idx].dnp)
+      .sort((a, b) => b.min - a.min);
+    for (const { idx } of ranked) {
+      if (deficit <= 0) break;
+      result[idx].tov = (result[idx].tov ?? 0) + 1;
+      deficit--;
+    }
+    return result;
+  };
+  homePlayerStats = clampTeamTov(homePlayerStats);
+  awayPlayerStats = clampTeamTov(awayPlayerStats);
 
   // ── Simulation Symmetry Check (dev console only — never affects sim math) ──
   // Logs a warning if one team's FG% is 8%+ better than the opponent in this game.
