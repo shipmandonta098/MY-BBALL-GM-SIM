@@ -330,7 +330,7 @@ const Settings: React.FC<SettingsProps> = ({ league, updateLeague, onRegenerateS
       league:     ['playoffFormat','playoffSeeding','playInTournament','homeCourt','tradeDeadline','hardCapAtDeadline','maxContractYears','rookieScaleContracts','maxPlayerSalaryPct','birdRights','draftRounds','draftClassSize','internationalProspects','draftLottery','scheduledExpansion','expansionTeamCount','expansionDraftRules','expansionEnabled','divisionGames','conferenceGames','tradeDeadlineFraction','splitByConference','guaranteedPerDivision','reseedRounds','ownerPatienceLevel','luxuryTaxMultiplier','budgetThreshold','tradeSalaryMatchPct','seasonLength','minRosterSize','maxRosterSize','draftType','customLotterySelections','tradableDraftPickSeasons','prospectAgeMin','prospectAgeMax','minPayroll','luxuryTaxThreshold','salaryCapType','pick1SalaryPct','roundsAboveMin','canRefuseAfterRookie'],
       gameplay:   ['fatigueImpact','b2bPenalty','loadManagement','injuryDuration','practiceInjuries','careerEndingInjuries','teamChemistry','chemistryImpact','personalityClashPenalties','playerMorale','moraleAffectsAttributes','tradeRequestThreshold'],
       sliders:    ['sliderLayup','sliderMidRange','slider3pt','sliderFreeThrow','sliderFastBreak','sliderPostUp','sliderPickRoll','sliderSteal','sliderBlock','sliderFoul','sliderHelpDefense','sliderPerimeterDefense','sliderTimeout','sliderSubstitution','sliderTechFoul','sliderFlagrantFoul','sliderInjuryMultiplier'],
-      simulation: ['pbpDetailLevel','aiDecisionSpeed','blowoutFrequency','comebackFrequency','overtimeFrequency','globalPaceOverride','shotClockLength','scoringEra','threePtFrequency','simBlockFrequency','turnoverFrequency'],
+      simulation: ['pbpDetailLevel','aiDecisionSpeed','blowoutFrequency','comebackFrequency','overtimeFrequency','globalPaceOverride','shotClockLength','scoringEra','threePtFrequency','simBlockFrequency','turnoverFrequency','wnbaStatRealism'],
       godmode:    ['editAnyPlayer','editAnyTeam','forceGameOutcomes','manipulateStandings','freeAgentMarketControl','draftClassEditor'],
     };
     for (const k of tabMap[activeTab]) {
@@ -1234,6 +1234,27 @@ const Settings: React.FC<SettingsProps> = ({ league, updateLeague, onRegenerateS
             <SelectField label="Turnover Frequency" value={s.turnoverFrequency ?? 'Medium'}
               options={['Low','Medium','High']}
               onChange={v => updateSettings({ turnoverFrequency: v as any }, 'Turnover Frequency')} />
+
+            <div className="col-span-full border-t border-slate-800 pt-4">
+              <h4 className="text-[10px] font-black uppercase text-slate-500 tracking-widest mb-3">
+                League Mode
+              </h4>
+              <div className="flex items-start gap-4 bg-slate-800/50 rounded-xl p-4">
+                <button
+                  onClick={() => updateSettings({ wnbaStatRealism: !(s.wnbaStatRealism ?? ((s.playerGenderRatio ?? 0) === 100)) }, 'WNBA Stat Realism')}
+                  className={`relative w-11 h-6 rounded-full transition-colors flex-shrink-0 mt-0.5 ${(s.wnbaStatRealism ?? ((s.playerGenderRatio ?? 0) === 100)) ? 'bg-amber-500' : 'bg-slate-700'}`}
+                >
+                  <span className={`absolute top-0.5 left-0.5 w-5 h-5 bg-white rounded-full transition-transform ${(s.wnbaStatRealism ?? ((s.playerGenderRatio ?? 0) === 100)) ? 'translate-x-5' : ''}`} />
+                </button>
+                <div>
+                  <p className="text-sm font-semibold text-white">WNBA Stat Realism</p>
+                  <p className="text-xs text-slate-400 mt-0.5">
+                    Scales simulation outputs to WNBA 2024-26 targets — team PPG 78-86, FG% 43.5-47.5%, 3P% 33-38%, FT% 76-82%, APG 18-23, RPG 32-38.
+                    Individual scoring capped at 28-35 pts for stars. Auto-enabled when league gender is set to 100% Women.
+                  </p>
+                </div>
+              </div>
+            </div>
           </div>
         )}
 

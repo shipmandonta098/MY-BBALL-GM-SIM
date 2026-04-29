@@ -723,6 +723,9 @@ export interface LeagueSettings {
   sliderFlagrantFoul?: number;
   sliderInjuryMultiplier?: number;
 
+  // ── WNBA Stat Realism ─────────────────────────────────────────────────────
+  wnbaStatRealism?: boolean; // auto-applied when playerGenderRatio=100; scales PPG/FGA/REB/AST to WNBA targets
+
   // ── Season Structure additions ────────────────────────────────────────────
   divisionGames?: number;          // default 16
   conferenceGames?: number;        // default 36
