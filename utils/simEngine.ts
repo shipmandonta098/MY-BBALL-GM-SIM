@@ -3286,6 +3286,7 @@ const simulatePlayerGameLine = (
   teammateShootingEff = 0.48,  // implied team FG% for this game; hot teams get more AST
   scheme: CoachScheme = 'Balanced', // team's active playbook scheme
   playbookMismatch = 0,        // effective morale penalty (0 to -15) from tendency-scheme conflict
+  explosiveMod = 0,            // 0 = normal | 0.5 = big night (33–45 pts) | 1.0 = historic (46–60+)
 ): GamePlayerLine => {
   // Morale modifiers: centered at 75 so an average player is neutral.
   // Critical (<50): FG -3%, TOV +25%, effort -15% | High (>85): FG +2%, effort +10%
@@ -3307,9 +3308,11 @@ const simulatePlayerGameLine = (
   const fatigueMod = minutes > 32 ? -((minutes - 32) * 0.0035) : 0;
 
   const adjUsage = Math.max(0.02, usageShare * (1 + tm.usageBoost));
-  // Cap at 22 FGA: prevents star usage-share inflation from producing 30+ FGA games
-  // that would drive season PPG above 32. NBA leaders take 19–22 FGA/game at peak usage.
-  const fga      = Math.min(22, Math.max(0, Math.round(teamFga * adjUsage * (minutes / 32))));
+  // Hot-night scalars: explosiveMod 0.5 = big game, 1.0 = historic
+  const hotFgaCap     = explosiveMod >= 1.0 ? 35 : explosiveMod >= 0.5 ? 29 : 22;
+  const hotUsageMul   = explosiveMod >= 1.0 ? 1.40 : explosiveMod >= 0.5 ? 1.20 : 1.0;
+  const hotFgPctBoost = explosiveMod >= 1.0 ? 0.08 : explosiveMod >= 0.5 ? 0.045 : 0;
+  const fga      = Math.min(hotFgaCap, Math.max(0, Math.round(teamFga * adjUsage * hotUsageMul * (minutes / 32))));
 
   // TO% computed early: drives both the TOV stat and the AST efficiency penalty.
   // Uses getTurnoverPercentage() — piecewise curve calibrated to NBA 2025-26.
@@ -3372,9 +3375,9 @@ const simulatePlayerGameLine = (
   // pbMults.*Delta: additive FG% shifts driven by playbook.
   // Pace and Space opens up cleaner 3PT looks (+1.8 pp) but fewer post entries (−1.8 pp);
   // Grit and Grind generates better interior reads (+2.0 pp) but contested 3s (−1.8 pp).
-  const threeRate = Math.max(0.05, fgPct3 + fgPctBoost + fatigueMod + opponentPerimDefMod + moraleFgMod + pbMults.fgPct3Delta + (Math.random() * 0.06 - 0.03));
+  const threeRate = Math.max(0.05, fgPct3 + fgPctBoost + hotFgPctBoost + fatigueMod + opponentPerimDefMod + moraleFgMod + pbMults.fgPct3Delta + (Math.random() * 0.06 - 0.03));
   const threepm   = Math.min(threepa, Math.floor(threepa * threeRate + Math.random()));
-  const midRate   = Math.max(0.05, fgPctMid + fgPctBoost + fatigueMod + opponentMidDefMod + moraleFgMod + pbMults.fgPctMidDelta + (Math.random() * 0.06 - 0.03));
+  const midRate   = Math.max(0.05, fgPctMid + fgPctBoost + hotFgPctBoost + fatigueMod + opponentMidDefMod + moraleFgMod + pbMults.fgPctMidDelta + (Math.random() * 0.06 - 0.03));
   const midFgm    = Math.min(midFga,  Math.floor(midFga  * midRate   + Math.random()));
   // Inside FGM: interior + post defense mods both apply (weighted by post share).
   // opponentInteriorDefMod suppresses drives/dunks; opponentPostDefMod suppresses
@@ -3384,7 +3387,7 @@ const simulatePlayerGameLine = (
   const blendedInsideMod = opponentInteriorDefMod * (1 - postWeight) + opponentPostDefMod * postWeight;
   // Floor lowered to 0.30 (from 0.35): even poor finishers shouldn't make 35%+
   // of their inside attempts after factoring in rim protection and fatigue.
-  const insRate   = Math.max(0.30, fgPctIns + fgPctBoost + fatigueMod + blendedInsideMod + moraleFgMod + pbMults.fgPctInsDelta + (Math.random() * 0.06 - 0.03));
+  const insRate   = Math.max(0.30, fgPctIns + fgPctBoost + hotFgPctBoost + fatigueMod + blendedInsideMod + moraleFgMod + pbMults.fgPctInsDelta + (Math.random() * 0.06 - 0.03));
   const insFgm    = Math.min(insFga,  Math.floor(insFga  * insRate   + Math.random()));
   const fgm     = threepm + midFgm + insFgm;
 
@@ -3935,7 +3938,34 @@ export const simulateGame = (
       // in Triangle, etc. — converts to effective morale penalty (0 to -15).
       const scheme         = team.activeScheme ?? 'Balanced';
       const mismatchPenalty = calcPlaybookMismatch(p, scheme);
-      const line = simulatePlayerGameLine(p, totalPts, teamFga, teamReb, teamAst, mins, usageShare, varRoll, ftBonus, oppPerimDefMod, oppInteriorDefMod, oppMidDefMod, oppPostDefMod, p.morale ?? 75, teamAvg3pt, impliedFgPct, scheme, mismatchPenalty);
+
+      // ── Explosive Night roll ───────────────────────────────────────────────
+      // Stars get a per-game chance to go off: big (33–45 pts) or historic (46–60+).
+      // Factors: star score (OVR + scoring attrs), home court, weak opponent defense,
+      // rivalry pressure, and ISO-heavy tendency all raise the probability.
+      let explosiveMod = 0;
+      if (!isGT && p.rating >= 78) {
+        const avgScoring = (p.attributes.shooting ?? 70) * 0.5
+                         + (p.attributes.athleticism ?? 70) * 0.3
+                         + (p.attributes.offensiveIQ  ?? 70) * 0.2;
+        if (avgScoring >= 68) {
+          const starScore    = Math.max(0, Math.min(1, (p.rating - 78) / 19)); // 0 at OVR 78, 1.0 at OVR 97
+          const isoTend      = p.tendencies?.offensiveTendencies?.isoHeavy ?? 50;
+          const defVulnMod   = -(oppPerimDefMod + oppInteriorDefMod) * 0.5;    // positive = softer defense
+          const ctxBonus     = (isHome ? 0.02 : 0)
+                             + Math.max(0, defVulnMod * 0.06)
+                             + (['Hot', 'Red Hot'].includes(rivalryLevel) ? 0.04 : 0)
+                             + ((isoTend - 50) / 100 * 0.07);
+          // ~10–28 % chance of a big night for qualifying stars
+          const bigProb      = Math.max(0, Math.min(0.28, 0.07 + starScore * 0.21 + ctxBonus));
+          // ~0.005–0.15 % chance of a historic night (targets 1–2 per full season league-wide)
+          const historicProb = Math.max(0, Math.min(0.0015, 0.00005 + starScore * 0.00145));
+          const r = Math.random();
+          explosiveMod = r < historicProb ? 1.0 : r < historicProb + bigProb ? 0.5 : 0;
+        }
+      }
+
+      const line = simulatePlayerGameLine(p, totalPts, teamFga, teamReb, teamAst, mins, usageShare, varRoll, ftBonus, oppPerimDefMod, oppInteriorDefMod, oppMidDefMod, oppPostDefMod, p.morale ?? 75, teamAvg3pt, impliedFgPct, scheme, mismatchPenalty, explosiveMod);
       return { ...line, techs: 0, flagrants: 0, ejected: false };
     });
 
@@ -3949,6 +3979,38 @@ export const simulateGame = (
 
   totalHome = homePlayerStats.reduce((s, p) => s + p.pts, 0);
   totalAway = awayPlayerStats.reduce((s, p) => s + p.pts, 0);
+
+  // ── Hot-Night PBP: God Mode flavor text for 30+ pt explosive performances ─────
+  const injectHotNightPBP = (stats: typeof homePlayerStats, teamRef: Team) => {
+    const lastName = (name: string) => name.split(' ').at(-1) ?? name;
+    const rndTime  = () => `${Math.floor(Math.random() * 9) + 1}:${String(Math.floor(Math.random() * 60)).padStart(2, '0')}`;
+    for (const line of stats) {
+      if (line.dnp || line.pts < 30) continue;
+      const player = teamRef.roster.find(pl => pl.id === line.playerId);
+      if (!player) continue;
+      const n   = lastName(player.name);
+      const q34 = Math.floor(Math.random() * 2) + 3;
+      if (line.pts >= 50) {
+        pbp.push({ time: rndTime(), text: `HISTORIC NIGHT — ${n} has ${line.pts} POINTS! The crowd will be talking about this one for years!`, type: 'score' as const, quarter: 4 });
+        pbp.push({ time: '2:00',    text: `${n} puts on an all-time CLINIC — ${line.fgm}/${line.fga} FG, ${line.ftm}/${line.fta} FT. Legendary.`,   type: 'score' as const, quarter: 4 });
+      } else if (line.pts >= 40) {
+        pbp.push({ time: rndTime(), text: `${n} EXPLODES for ${line.pts} — one of the best individual scoring nights of the season!`, type: 'score' as const, quarter: q34 });
+      } else {
+        pbp.push({ time: rndTime(), text: `${n} is TAKING OVER — ${line.pts} points and the defense has no answer!`, type: 'score' as const, quarter: q34 });
+      }
+      // God Mode scoring run sub-events
+      if (line.threepm >= 7) {
+        pbp.push({ time: rndTime(), text: `${n} AGAIN from three — ${line.threepm} bombs tonight! Someone call the fire department!`, type: 'score' as const, quarter: q34 });
+      } else if (line.threepm >= 5) {
+        pbp.push({ time: rndTime(), text: `${n} drains another three — ${line.threepm} from downtown. He is UNCONSCIOUS right now!`, type: 'score' as const, quarter: 3 });
+      }
+      if (line.pts >= 40 && line.fgm >= 14) {
+        pbp.push({ time: '3:30', text: `${n} going on a SCORING RUN — ${line.fgm}-${line.fga} from the field tonight. Where do you even guard him?`, type: 'info' as const, quarter: 4 });
+      }
+    }
+  };
+  injectHotNightPBP(homePlayerStats, home);
+  injectHotNightPBP(awayPlayerStats, away);
 
   // ── 8. Chippy / tech rolls + flagrant 2 + suspension triggers ──────────────
   let isChippy = false;
