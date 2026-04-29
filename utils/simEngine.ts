@@ -3287,6 +3287,7 @@ const simulatePlayerGameLine = (
   scheme: CoachScheme = 'Balanced', // team's active playbook scheme
   playbookMismatch = 0,        // effective morale penalty (0 to -15) from tendency-scheme conflict
   explosiveMod = 0,            // 0 = normal | 0.5 = big night (33–45 pts) | 1.0 = historic (46–60+)
+  coldMod = 0,                 // 0 = normal | 0.5 = cold night | 1.0 = ice cold
 ): GamePlayerLine => {
   // Morale modifiers: centered at 75 so an average player is neutral.
   // Critical (<50): FG -3%, TOV +25%, effort -15% | High (>85): FG +2%, effort +10%
@@ -3308,10 +3309,11 @@ const simulatePlayerGameLine = (
   const fatigueMod = minutes > 32 ? -((minutes - 32) * 0.0035) : 0;
 
   const adjUsage = Math.max(0.02, usageShare * (1 + tm.usageBoost));
-  // Hot-night scalars: explosiveMod 0.5 = big game, 1.0 = historic
-  const hotFgaCap     = explosiveMod >= 1.0 ? 35 : explosiveMod >= 0.5 ? 29 : 22;
-  const hotUsageMul   = explosiveMod >= 1.0 ? 1.40 : explosiveMod >= 0.5 ? 1.20 : 1.0;
-  const hotFgPctBoost = explosiveMod >= 1.0 ? 0.08 : explosiveMod >= 0.5 ? 0.045 : 0;
+  // Hot/Cold-night scalars: explosiveMod drives big/historic nights; coldMod drives cold/ice-cold.
+  // Hot and cold are mutually exclusive — only one will be non-zero per player per game.
+  const hotFgaCap     = explosiveMod >= 1.0 ? 35 : explosiveMod >= 0.5 ? 29 : coldMod >= 1.0 ? 14 : coldMod >= 0.5 ? 18 : 22;
+  const hotUsageMul   = explosiveMod >= 1.0 ? 1.40 : explosiveMod >= 0.5 ? 1.20 : coldMod >= 1.0 ? 0.65 : coldMod >= 0.5 ? 0.82 : 1.0;
+  const hotFgPctBoost = explosiveMod >= 1.0 ? 0.08 : explosiveMod >= 0.5 ? 0.045 : coldMod >= 1.0 ? -0.08 : coldMod >= 0.5 ? -0.045 : 0;
   const fga      = Math.min(hotFgaCap, Math.max(0, Math.round(teamFga * adjUsage * hotUsageMul * (minutes / 32))));
 
   // TO% computed early: drives both the TOV stat and the AST efficiency penalty.
@@ -3440,8 +3442,9 @@ const simulatePlayerGameLine = (
     player.position === 'C'  ? 1.00 :
     player.position === 'PF' ? 0.72 :
     player.position === 'SF' ? 0.50 : 0.32;
+  const coldRebMul = coldMod >= 1.0 ? 0.80 : coldMod >= 0.5 ? 0.90 : 1.0;
   const totalReb = Math.min(22, Math.max(0, Math.round(
-    Math.pow(player.attributes.rebounding / 100, 2) * posRebMult * minFac * 19.5
+    Math.pow(player.attributes.rebounding / 100, 2) * posRebMult * minFac * 19.5 * coldRebMul
     + (Math.random() * 5 - 2.5),
   )));
   // ORB/DRB split: use position-based base (bigs ~27% of their boards are ORBs,
@@ -3489,7 +3492,8 @@ const simulatePlayerGameLine = (
     + ((player.attributes.ballHandling ?? 60) - 65) / 160
     + ((player.attributes.playmaking   ?? 60) - 65) / 220
   );
-  const adjAstShare = Math.min(0.42, Math.max(0.01, astEff * handlerFrac * minFac * 1.10 * (1 + tm.astBoost) * contextMult));
+  const coldAstMul  = coldMod >= 1.0 ? 0.55 : coldMod >= 0.5 ? 0.75 : 1.0;
+  const adjAstShare = Math.min(0.42, Math.max(0.01, astEff * handlerFrac * minFac * 1.10 * (1 + tm.astBoost) * contextMult * coldAstMul));
   // ±1 noise adds organic game-to-game fluctuation (some 6-ast nights, some 14-ast nights)
   const ast = Math.min(18, Math.max(0, Math.round(teamAst * adjAstShare + (Math.random() * 2 - 1))));
 
@@ -3664,6 +3668,16 @@ export const simulateGame = (
 
   let garbageTime = false;
 
+  // Coach-dependent garbage time threshold: dev-minded coaches pull starters earlier
+  // to protect them and develop the bench; win-now coaches ride starters longer.
+  const getGtThreshold = (t: Team) => {
+    const dev = t.staff.headCoach?.ratingDevelopment ?? 50;
+    return dev >= 72 ? 18 : dev >= 52 ? 22 : 28;
+  };
+  const homeGtThreshold = getGtThreshold(home);
+  const awayGtThreshold = getGtThreshold(away);
+  let garbageTimePBPFired = false;
+
   for (let q = 1; q <= 4; q++) {
     const scoreDiff    = runningHome - runningAway;
     const absScoreDiff = Math.abs(scoreDiff);
@@ -3676,7 +3690,10 @@ export const simulateGame = (
       awayQStreak = Math.round(awayQStreak * 0.3);
     }
 
-    garbageTime = q === 4 && absScoreDiff >= 30;
+    // Leading team's coach decides when to empty the bench.
+    // Dev coaches (threshold 18) pull starters at a closer margin; win-now (28) ride them longer.
+    const activeGtThreshold = scoreDiff > 0 ? homeGtThreshold : awayGtThreshold;
+    garbageTime = q === 4 && absScoreDiff >= activeGtThreshold;
 
     // Per-quarter possessions with ±3 random variance
     const homeQPoss = Math.max(18, baseQPoss[q] + (Math.floor(Math.random() * 7) - 3));
@@ -3783,8 +3800,19 @@ export const simulateGame = (
       const cn = trailing.staff.headCoach?.name?.split(' ').at(-1) ?? 'The coach';
       pbp.push({ time: '6:00', text: `${cn} calls a timeout — trying to stop the bleeding`, type: 'info', quarter: q });
     }
-    if (garbageTime) {
-      pbp.push({ time: '6:00', text: `Garbage time — benches emptying in the ${home.name} vs ${away.name} matchup`, type: 'info', quarter: q });
+    if (garbageTime && !garbageTimePBPFired) {
+      garbageTimePBPFired = true;
+      const leading  = scoreDiff > 0 ? home : away;
+      const trailing = scoreDiff > 0 ? away : home;
+      const coachLast = leading.staff.headCoach?.name?.split(' ').at(-1) ?? 'The coach';
+      const benchMobLines = [
+        `${coachLast} empties the bench — starters take a rest with a ${absScoreDiff}-point lead!`,
+        `Bench mob time! ${leading.name} up ${absScoreDiff} — the backups are getting their run.`,
+        `${coachLast} goes deep into the rotation. No sense risking the starters with this margin.`,
+        `${leading.name} up ${absScoreDiff} — reserves hit the floor! Coach showing confidence in the depth.`,
+      ];
+      pbp.push({ time: '8:00', text: benchMobLines[Math.floor(Math.random() * benchMobLines.length)], type: 'info', quarter: q });
+      pbp.push({ time: '6:30', text: `${trailing.name} starters still grinding, but ${leading.name}'s bench mob is holding the fort.`, type: 'info', quarter: q });
     }
     if (q === 4 && Math.abs(runningHome - runningAway) <= 5) {
       pbp.push({ time: '4:00', text: `We have a BALL GAME! ${Math.abs(runningHome - runningAway) <= 2 ? "Anyone's game with 4 minutes left!" : 'One possession game down the stretch!'}`, type: 'info', quarter: q });
@@ -3928,8 +3956,17 @@ export const simulateGame = (
         mins = Math.round(mins * quarterLengthScale);
       }
       if (isGT) {
-        if (i < 5) mins = Math.max(Math.round(20 * quarterLengthScale), mins - Math.round(10 * quarterLengthScale));
-        else if (i < 9) mins = Math.min(Math.round(30 * quarterLengthScale), mins + Math.round(8 * quarterLengthScale));
+        const isLeading = isHome ? totalHome > totalAway : totalAway > totalHome;
+        if (i < 5) {
+          // Starters rest: cut their minutes. Leading team pulls them earlier.
+          mins = Math.max(Math.round(20 * quarterLengthScale), mins - Math.round(10 * quarterLengthScale));
+        } else if (i < 9) {
+          // Primary bench soaks up starter minutes
+          mins = Math.min(Math.round(30 * quarterLengthScale), mins + Math.round(8 * quarterLengthScale));
+        } else if (isLeading) {
+          // Deep bench (10th+ man) gets garbage time run when team is ahead
+          mins = Math.round(6 * quarterLengthScale) + Math.round(Math.random() * 4 * quarterLengthScale);
+        }
       }
       const ftBonus    = isHome ? 0.03 : 0;
       const varRoll    = playerVariance.get(p.id) ?? 0;
@@ -3965,7 +4002,26 @@ export const simulateGame = (
         }
       }
 
-      const line = simulatePlayerGameLine(p, totalPts, teamFga, teamReb, teamAst, mins, usageShare, varRoll, ftBonus, oppPerimDefMod, oppInteriorDefMod, oppMidDefMod, oppPostDefMod, p.morale ?? 75, teamAvg3pt, impliedFgPct, scheme, mismatchPenalty, explosiveMod);
+      // ── Cold Night roll ────────────────────────────────────────────────────
+      // Every player can go ice cold. Mutually exclusive with explosive night.
+      // Factors: strong opponent defense, B2B fatigue, low morale, Streaky trait.
+      let coldMod = 0;
+      if (!isGT && explosiveMod === 0) {
+        const isB2B = isHome ? homeB2B : awayB2B;
+        const oppDefStr  = (oppPerimDefMod + oppInteriorDefMod) * 0.5; // negative = strong defense
+        const defPenalty = Math.max(0, -oppDefStr * 4);                // 0–0.12 extra cold chance
+        const b2bPenalty = isB2B ? 0.04 : 0;
+        const moralePenalty = Math.max(0, (50 - (p.morale ?? 75)) / 100 * 0.06);
+        const traits = p.personalityTraits ?? [];
+        const isStreaky = traits.includes('Streaky');
+        const isPro     = traits.includes('Professional');
+        const baseIceColdProb = (isStreaky ? 0.04 : isPro ? 0.01 : 0.02) + defPenalty + b2bPenalty + moralePenalty;
+        const baseColdProb    = (isStreaky ? 0.12 : isPro ? 0.04 : 0.08) + defPenalty * 0.5 + b2bPenalty + moralePenalty;
+        const r = Math.random();
+        coldMod = r < baseIceColdProb ? 1.0 : r < baseIceColdProb + baseColdProb ? 0.5 : 0;
+      }
+
+      const line = simulatePlayerGameLine(p, totalPts, teamFga, teamReb, teamAst, mins, usageShare, varRoll, ftBonus, oppPerimDefMod, oppInteriorDefMod, oppMidDefMod, oppPostDefMod, p.morale ?? 75, teamAvg3pt, impliedFgPct, scheme, mismatchPenalty, explosiveMod, coldMod);
       return { ...line, techs: 0, flagrants: 0, ejected: false };
     });
 
@@ -4011,6 +4067,35 @@ export const simulateGame = (
   };
   injectHotNightPBP(homePlayerStats, home);
   injectHotNightPBP(awayPlayerStats, away);
+
+  // ── Cold-Night PBP: flavor text for ice-cold shooting performances ─────────
+  const injectColdNightPBP = (stats: typeof homePlayerStats, teamRef: Team) => {
+    const lastName = (name: string) => name.split(' ').at(-1) ?? name;
+    const rndTime  = () => `${Math.floor(Math.random() * 9) + 1}:${String(Math.floor(Math.random() * 60)).padStart(2, '0')}`;
+    for (const line of stats) {
+      if (line.dnp || line.min < 18) continue;
+      const player = teamRef.roster.find(pl => pl.id === line.playerId);
+      if (!player) continue;
+      const expected = (player.rating / 100) * 30;
+      const fgPct = line.fgm / Math.max(1, line.fga);
+      const isIceCold = line.fga >= 7 && fgPct < 0.25;
+      const isCold    = line.pts <= expected * 0.45 && player.rating >= 70;
+      if (!isIceCold && !isCold) continue;
+      const n         = lastName(player.name);
+      const q         = Math.floor(Math.random() * 2) + 2;
+      const fgPctStr  = `${line.fgm}/${line.fga}`;
+      if (isIceCold && line.fga >= 10) {
+        pbp.push({ time: rndTime(), text: `${n} is ICE COLD tonight — ${fgPctStr} from the field. The shots just aren't falling.`, type: 'info' as const, quarter: q });
+        pbp.push({ time: rndTime(), text: `${n} can't find his rhythm — defense is making life difficult every single possession.`, type: 'info' as const, quarter: q });
+      } else if (isIceCold) {
+        pbp.push({ time: rndTime(), text: `${n} can't buy a bucket tonight — ${fgPctStr} FG. The defense is locking him up completely.`, type: 'info' as const, quarter: q });
+      } else {
+        pbp.push({ time: rndTime(), text: `${n} is having a quiet night — ${line.pts} points on ${fgPctStr} shooting. Nowhere near his usual form.`, type: 'info' as const, quarter: q });
+      }
+    }
+  };
+  injectColdNightPBP(homePlayerStats, home);
+  injectColdNightPBP(awayPlayerStats, away);
 
   // ── 8. Chippy / tech rolls + flagrant 2 + suspension triggers ──────────────
   let isChippy = false;
