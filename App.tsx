@@ -144,6 +144,7 @@ const App: React.FC = () => {
   leagueRef.current = league;
   const [isSeasonTransitioning, setIsSeasonTransitioning] = useState(false);
   const [setupFromLoad, setSetupFromLoad] = useState(false);
+  const [isFranchiseSetup, setIsFranchiseSetup] = useState(false);
 
   // Offseason grade modal state
   const [offseasonGradeData, setOffseasonGradeData] = useState<OffseasonGradeData | null>(null);
@@ -730,8 +731,10 @@ const App: React.FC = () => {
     setPendingTeamId(null);
     setSetupFromLoad(false);
     setActiveTab('dashboard');
+    setIsFranchiseSetup(true);
     setStatus('game');
     db.leagues.put(updatedWithAI).catch(err => console.error('Save error:', err));
+    setTimeout(() => setIsFranchiseSetup(false), 600);
   };
 
   const handleResign = () => {
@@ -4202,6 +4205,21 @@ const App: React.FC = () => {
   }
   // Safety net already handles redirect via useEffect above; never shown in practice
   if (!league || !league.userTeamId) return null;
+
+  if (isFranchiseSetup) {
+    return (
+      <div className="fixed inset-0 z-[300] flex flex-col items-center justify-center bg-slate-950 animate-in fade-in duration-300">
+        <div className="space-y-6 text-center">
+          <div
+            className="w-16 h-16 border-4 border-slate-700 rounded-full animate-spin mx-auto"
+            style={{ borderTopColor: league.teams.find(t => t.id === league.userTeamId)?.primaryColor ?? '#f59e0b' }}
+          />
+          <p className="text-slate-200 font-display font-bold uppercase tracking-widest text-lg">Setting up your franchise...</p>
+          <p className="text-slate-600 text-[11px] uppercase tracking-widest">Preparing roster · Building schedule · Assigning staff</p>
+        </div>
+      </div>
+    );
+  }
 
   const userTeam = league.teams.find(t => t.id === league.userTeamId)!;
 

@@ -59,9 +59,12 @@ const CircularGauge = ({ value, label, color, size = 80 }: { value: number, labe
 };
 
 const Dashboard: React.FC<DashboardProps> = ({ league, news, onSimulate, onScout, scoutingReport, setActiveTab, onViewRoster, onManageTeam, onAdvanceToRegularSeason, onOpenOffseasonAlerts }) => {
-  const userTeam = league.teams.find(t => t.id === league.userTeamId)!;
+  const userTeam = league.teams.find(t => t.id === league.userTeamId);
+  if (!userTeam) return null;
   const opponents = league.teams.filter(t => t.id !== userTeam.id);
-  const nextOpponent = opponents[league.currentDay % opponents.length];
+  const nextOpponent = opponents.length > 0 ? opponents[league.currentDay % opponents.length] : null;
+  const safeHistory = league.history ?? [];
+  const safeSchedule = league.schedule ?? [];
 
   const winPct = (userTeam.wins / (userTeam.wins + userTeam.losses || 1)).toFixed(3);
   const teamOvr = calcTeamEffectiveOVR(userTeam.roster);
@@ -69,7 +72,7 @@ const Dashboard: React.FC<DashboardProps> = ({ league, news, onSimulate, onScout
   const teamMorale = Math.round(userTeam.roster.reduce((acc, p) => acc + p.morale, 0) / userTeam.roster.length);
   
   // Advanced Stats Calculation
-  const teamHistory = league.history.filter(h => h.homeTeamId === userTeam.id || h.awayTeamId === userTeam.id);
+  const teamHistory = safeHistory.filter(h => h.homeTeamId === userTeam.id || h.awayTeamId === userTeam.id);
   const seasonStats = teamHistory.reduce((acc, game) => {
     const isHome = game.homeTeamId === userTeam.id;
     const teamLines = isHome ? game.homePlayerStats : game.awayPlayerStats;
@@ -94,26 +97,28 @@ const Dashboard: React.FC<DashboardProps> = ({ league, news, onSimulate, onScout
   const ftRate = (seasonStats.fta / (seasonStats.fga || 1) * 100).toFixed(1);
 
   // SOS Calculation
-  const last10Games = league.history
+  const last10Games = safeHistory
     .filter(g => g.homeTeamId === userTeam.id || g.awayTeamId === userTeam.id)
     .sort((a, b) => b.date - a.date)
     .slice(0, 10);
-  const last10AvgOvr = last10Games.length > 0 
+  const last10AvgOvr = last10Games.length > 0
     ? Math.round(last10Games.reduce((acc, g) => {
         const oppId = g.homeTeamId === userTeam.id ? g.awayTeamId : g.homeTeamId;
-        const opp = league.teams.find(t => t.id === oppId)!;
+        const opp = league.teams.find(t => t.id === oppId);
+        if (!opp || !opp.roster.length) return acc;
         return acc + (opp.roster.reduce((s, p) => s + p.rating, 0) / opp.roster.length);
       }, 0) / last10Games.length)
     : 0;
 
-  const next10Games = league.schedule
+  const next10Games = safeSchedule
     .filter(g => !g.played && (g.homeTeamId === userTeam.id || g.awayTeamId === userTeam.id))
     .sort((a, b) => a.day - b.day)
     .slice(0, 10);
   const next10AvgOvr = next10Games.length > 0
     ? Math.round(next10Games.reduce((acc, g) => {
         const oppId = g.homeTeamId === userTeam.id ? g.awayTeamId : g.homeTeamId;
-        const opp = league.teams.find(t => t.id === oppId)!;
+        const opp = league.teams.find(t => t.id === oppId);
+        if (!opp || !opp.roster.length) return acc;
         return acc + (opp.roster.reduce((s, p) => s + p.rating, 0) / opp.roster.length);
       }, 0) / next10Games.length)
     : 0;
@@ -135,7 +140,7 @@ const Dashboard: React.FC<DashboardProps> = ({ league, news, onSimulate, onScout
   if (expiringSoon > 0) alerts.push({ text: `${expiringSoon} contracts expiring soon`, type: 'warning' });
   
   const totalSalary = userTeam.roster.reduce((s, p) => s + p.salary, 0);
-  if (totalSalary > league.settings.salaryCap) alerts.push({ text: "Over salary cap!", type: 'danger' });
+  if (league.settings?.salaryCap && totalSalary > league.settings.salaryCap) alerts.push({ text: "Over salary cap!", type: 'danger' });
   
   const lowMorale = userTeam.roster.filter(p => p.morale < 50).length;
   const moderateMorale = userTeam.roster.filter(p => p.morale >= 50 && p.morale < 65).length;
@@ -210,14 +215,14 @@ const Dashboard: React.FC<DashboardProps> = ({ league, news, onSimulate, onScout
           <div className="relative z-10 flex flex-col md:flex-row items-center justify-between gap-12">
             <div className="flex items-center gap-8">
               <div className="text-center">
-                <div 
+                <div
                   className="w-24 h-24 bg-slate-800 rounded-2xl flex items-center justify-center border border-slate-700 mb-2 cursor-pointer hover:border-amber-500 transition-colors"
                   style={{ borderColor: userTeam.primaryColor }}
                   onClick={() => onManageTeam(userTeam.id)}
                 >
                   <TeamBadge team={userTeam} size="xl" />
                 </div>
-                <p 
+                <p
                   className="font-display font-bold text-lg uppercase cursor-pointer hover:text-amber-500 transition-colors"
                   onClick={() => onManageTeam(userTeam.id)}
                 >
@@ -225,18 +230,19 @@ const Dashboard: React.FC<DashboardProps> = ({ league, news, onSimulate, onScout
                 </p>
                 <p className="text-xs text-slate-500 font-bold tracking-widest">{userTeam.wins}-{userTeam.losses}</p>
               </div>
-              
+
               <div className="text-4xl font-display font-black text-slate-700 italic">VS</div>
-              
+
+              {nextOpponent ? (
               <div className="text-center">
-                <div 
+                <div
                   className="w-24 h-24 bg-slate-800 rounded-2xl flex items-center justify-center border border-slate-700 mb-2 cursor-pointer hover:border-amber-500 transition-colors"
                   style={{ borderColor: nextOpponent.primaryColor }}
                   onClick={() => onManageTeam(nextOpponent.id)}
                 >
                   <TeamBadge team={nextOpponent} size="xl" />
                 </div>
-                <p 
+                <p
                   className="font-display font-bold text-lg uppercase cursor-pointer hover:text-amber-500 transition-colors"
                   onClick={() => onManageTeam(nextOpponent.id)}
                 >
@@ -244,14 +250,24 @@ const Dashboard: React.FC<DashboardProps> = ({ league, news, onSimulate, onScout
                 </p>
                 <p className="text-xs text-slate-500 font-bold tracking-widest">{nextOpponent.wins}-{nextOpponent.losses}</p>
               </div>
+              ) : (
+              <div className="text-center">
+                <div className="w-24 h-24 bg-slate-800 rounded-2xl flex items-center justify-center border border-slate-700 mb-2">
+                  <span className="text-slate-600 font-bold text-xs uppercase">TBD</span>
+                </div>
+                <p className="font-display font-bold text-lg uppercase text-slate-600">Opponent TBD</p>
+              </div>
+              )}
             </div>
 
             <div className="flex-1 space-y-4 max-w-sm">
               <div>
                 <h3 className="text-xs font-black uppercase tracking-[0.3em] mb-1" style={{ color: userTeam.primaryColor }}>Game Preview</h3>
                 <p className="text-slate-300 text-sm leading-relaxed">
-                  The <span className="text-white font-bold">{userTeam.city} {userTeam.name}</span> face off against the <span className="text-white font-bold">{nextOpponent.name}</span> in a crucial {userTeam.conference} matchup. 
-                  Win Probability: <span className="text-emerald-400 font-bold">{teamOvr > calcTeamEffectiveOVR(nextOpponent.roster) ? '68%' : '42%'}</span>.
+                  {nextOpponent
+                    ? <>The <span className="text-white font-bold">{userTeam.city} {userTeam.name}</span> face off against the <span className="text-white font-bold">{nextOpponent.name}</span> in a crucial {userTeam.conference} matchup. Win Probability: <span className="text-emerald-400 font-bold">{teamOvr > calcTeamEffectiveOVR(nextOpponent.roster) ? '68%' : '42%'}</span>.</>
+                    : <>The <span className="text-white font-bold">{userTeam.city} {userTeam.name}</span> are gearing up for the season.</>
+                  }
                 </p>
               </div>
               <div className="flex gap-3">
@@ -262,12 +278,14 @@ const Dashboard: React.FC<DashboardProps> = ({ league, news, onSimulate, onScout
                 >
                   Tip Off Now
                 </button>
-                <button 
+                {nextOpponent && (
+                <button
                    onClick={() => onViewRoster(nextOpponent.id)}
                    className="px-6 py-3 bg-slate-800 hover:bg-slate-700 text-slate-300 font-display font-bold uppercase rounded-xl transition-all"
                 >
                   Scout Roster
                 </button>
+                )}
               </div>
             </div>
           </div>
@@ -412,9 +430,9 @@ const Dashboard: React.FC<DashboardProps> = ({ league, news, onSimulate, onScout
 
       {/* Attendance Summary Card */}
       {(() => {
-        const { homeGames, avgAttendance, capacityPct } = teamSeasonAttendance(userTeam, league.schedule);
+        const { homeGames, avgAttendance, capacityPct } = teamSeasonAttendance(userTeam, safeSchedule);
         const allRanked = [...league.teams]
-          .map(t => ({ id: t.id, avg: teamSeasonAttendance(t, league.schedule).avgAttendance }))
+          .map(t => ({ id: t.id, avg: teamSeasonAttendance(t, safeSchedule).avgAttendance }))
           .sort((a, b) => b.avg - a.avg);
         const rank = allRanked.findIndex(r => r.id === userTeam.id) + 1;
         const fmt = (n: number) => n.toLocaleString('en-US');
