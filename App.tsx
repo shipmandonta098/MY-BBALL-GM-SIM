@@ -143,6 +143,7 @@ const App: React.FC = () => {
   const leagueRef = React.useRef<LeagueState | null>(null);
   leagueRef.current = league;
   const [isSeasonTransitioning, setIsSeasonTransitioning] = useState(false);
+  const [setupFromLoad, setSetupFromLoad] = useState(false);
 
   // Offseason grade modal state
   const [offseasonGradeData, setOffseasonGradeData] = useState<OffseasonGradeData | null>(null);
@@ -638,9 +639,15 @@ const App: React.FC = () => {
       };
     }
     setLeague(savedLeague);
-    setRosterTeamId(savedLeague.userTeamId);
-    setStatus('game');
-    setActiveTab('dashboard');
+    if (!savedLeague.userTeamId) {
+      setSetupFromLoad(true);
+      setStatus('setup');
+    } else {
+      setSetupFromLoad(false);
+      setRosterTeamId(savedLeague.userTeamId);
+      setStatus('game');
+      setActiveTab('dashboard');
+    }
   };
 
   const handleDeleteSave = async (id: string) => {
@@ -702,6 +709,7 @@ const App: React.FC = () => {
     setLeague(updatedWithAI);
     setRosterTeamId(teamId);
     setPendingTeamId(null);
+    setSetupFromLoad(false);
     await db.leagues.put(updatedWithAI);
     setStatus('game');
   };
@@ -4104,7 +4112,7 @@ const App: React.FC = () => {
     return <TeamSelection
       teams={league.teams}
       onSelectTeam={handleSelectTeam}
-      onBack={() => setStatus('config')}
+      onBack={() => { setSetupFromLoad(false); setStatus(setupFromLoad ? 'title' : 'config'); }}
       onEditTeam={(teamId, updates) => {
         setLeague(prev => prev ? { ...prev, teams: prev.teams.map(t => t.id === teamId ? { ...t, ...updates } : t) } : prev);
       }}
