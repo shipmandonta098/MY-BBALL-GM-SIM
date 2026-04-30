@@ -22,31 +22,39 @@ const Schedule: React.FC<ScheduleProps> = ({ league, onSimulate, onScout, onWatc
   const listRef = useRef<HTMLDivElement>(null);
   const didAutoGenRef = useRef(false);
 
-  const selectedTeam = useMemo(() => 
-    league.teams.find(t => t.id === selectedTeamId) || league.teams.find(t => t.id === league.userTeamId)!
+  // Null-safe aliases — old saves may be missing these fields
+  const safeSchedule = league.schedule  ?? [];
+  const safeHistory  = league.history   ?? [];
+
+  const selectedTeam = useMemo(() =>
+    league.teams.find(t => t.id === selectedTeamId) ||
+    league.teams.find(t => t.id === league.userTeamId) ||
+    league.teams[0]
   , [league.teams, selectedTeamId, league.userTeamId]);
 
-  const teamSchedule = useMemo(() => 
-    league.schedule
-      .filter(g => g.homeTeamId === selectedTeam.id || g.awayTeamId === selectedTeam.id)
-      .sort((a, b) => a.day - b.day)
-  , [league.schedule, selectedTeam.id]);
+  const selectedTeamId_ = selectedTeam?.id ?? '';
 
-  const dailySchedule = useMemo(() => 
-    league.schedule
+  const teamSchedule = useMemo(() =>
+    safeSchedule
+      .filter(g => g.homeTeamId === selectedTeamId_ || g.awayTeamId === selectedTeamId_)
+      .sort((a, b) => a.day - b.day)
+  , [safeSchedule, selectedTeamId_]);
+
+  const dailySchedule = useMemo(() =>
+    safeSchedule
       .filter(g => g.day === selectedDay)
       .sort((a, b) => (a.gameNumber || 0) - (b.gameNumber || 0))
-  , [league.schedule, selectedDay]);
+  , [safeSchedule, selectedDay]);
 
   const stats = useMemo(() => {
     const played = teamSchedule.filter(g => g.played);
-    const homeLeft = teamSchedule.filter(g => !g.played && g.homeTeamId === selectedTeam.id).length;
-    const awayLeft = teamSchedule.filter(g => !g.played && g.awayTeamId === selectedTeam.id).length;
-    
+    const homeLeft = teamSchedule.filter(g => !g.played && g.homeTeamId === selectedTeamId_).length;
+    const awayLeft = teamSchedule.filter(g => !g.played && g.awayTeamId === selectedTeamId_).length;
+
     let b2bsTotal = 0;
     let b2bsPlayed = 0;
     teamSchedule.forEach(g => {
-      const isSelectedHome = g.homeTeamId === selectedTeam.id;
+      const isSelectedHome = g.homeTeamId === selectedTeamId_;
       if (isSelectedHome ? g.homeB2B : g.awayB2B) {
         b2bsTotal++;
         if (g.played) b2bsPlayed++;
@@ -62,18 +70,18 @@ const Schedule: React.FC<ScheduleProps> = ({ league, onSimulate, onScout, onWatc
       b2bsLeft: Math.max(0, b2bsTotal - b2bsPlayed),
       b2bsTotal
     };
-  }, [teamSchedule, selectedTeam.id]);
+  }, [teamSchedule, selectedTeamId_]);
 
   const nextFiveDifficulty = useMemo(() => {
     const upcoming = teamSchedule.filter(g => !g.played).slice(0, 5);
     return upcoming.map(g => {
-      const oppId = g.homeTeamId === selectedTeam.id ? g.awayTeamId : g.homeTeamId;
+      const oppId = g.homeTeamId === selectedTeamId_ ? g.awayTeamId : g.homeTeamId;
       const opp = league.teams.find(t => t.id === oppId);
       if (!opp || !opp.roster.length) return 50;
       const oppOvr = Math.round(opp.roster.reduce((acc, p) => acc + p.rating, 0) / opp.roster.length);
       return Math.min(100, (oppOvr - 65) * 3);
     });
-  }, [teamSchedule, league.teams, selectedTeam.id]);
+  }, [teamSchedule, league.teams, selectedTeamId_]);
 
   useEffect(() => {
     if (viewMode === 'team') {
@@ -87,11 +95,15 @@ const Schedule: React.FC<ScheduleProps> = ({ league, onSimulate, onScout, onWatc
     }
   }, [teamSchedule, viewMode]);
 
-  // Auto-generate schedule if missing (e.g. small league bug or load from old save)
+  // Auto-generate schedule if missing or stale (no games for user's team)
   useEffect(() => {
-    if (!didAutoGenRef.current && league.schedule.length === 0 && onRegenerateSchedule) {
-      didAutoGenRef.current = true;
-      onRegenerateSchedule();
+    if (!didAutoGenRef.current && onRegenerateSchedule) {
+      const scheduleEmpty   = safeSchedule.length === 0;
+      const noGamesForTeam  = teamSchedule.length === 0 && safeSchedule.length > 0;
+      if (scheduleEmpty || noGamesForTeam) {
+        didAutoGenRef.current = true;
+        onRegenerateSchedule();
+      }
     }
   }, []); // intentionally empty — fire once on mount only
 
@@ -153,7 +165,7 @@ const Schedule: React.FC<ScheduleProps> = ({ league, onSimulate, onScout, onWatc
     if (!homeTeam || !awayTeam || !focusTeam) return null;
     const opp = isHome ? awayTeam : homeTeam;
 
-    const result = game.played ? league.history.find(h => h.id === game.id) : null;
+    const result = game.played ? safeHistory.find(h => h.id === game.id) : null;
     const spread  = calcSpread(homeTeam, awayTeam);
     // From focus-team perspective
     const focusFavored  = isHome ? spread.homeFavored : !spread.homeFavored;
@@ -470,7 +482,7 @@ const Schedule: React.FC<ScheduleProps> = ({ league, onSimulate, onScout, onWatc
                 </h2>
                 <div className="flex items-center gap-4 mt-1">
                   <span className="text-slate-400 text-xs">
-                    {selectedTeamId === league.userTeamId ? 'Your' : selectedTeam.abbreviation} Record:{' '}
+                    {selectedTeamId === league.userTeamId ? 'Your' : (selectedTeam?.abbreviation ?? '')} Record:{' '}
                     <span className="text-white font-black">{focusPreRecord.wins}–{focusPreRecord.losses}</span>
                   </span>
                   <span className="text-slate-600 text-xs">•</span>
@@ -510,7 +522,7 @@ const Schedule: React.FC<ScheduleProps> = ({ league, onSimulate, onScout, onWatc
           <div className="bg-slate-900 border border-slate-800 rounded-[2rem] p-6 shadow-xl">
             <h3 className="text-[10px] font-black uppercase tracking-[0.3em] text-slate-500 mb-5 pb-3 border-b border-slate-800 flex items-center gap-2">
               <span className="w-2 h-2 rounded-full bg-amber-500 inline-block" />
-              {selectedTeamId === league.userTeamId ? 'Your' : selectedTeam.name} Preseason Schedule
+              {selectedTeamId === league.userTeamId ? 'Your' : (selectedTeam?.name ?? '')} Preseason Schedule
             </h3>
             <div className="space-y-3">
               {focusTeamPreseasonGames.map((game, idx) => {
@@ -744,9 +756,10 @@ const Schedule: React.FC<ScheduleProps> = ({ league, onSimulate, onScout, onWatc
               <div className="overflow-x-auto pb-1">
                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 min-w-0">
                   {dailySchedule.map(game => {
-                    const home = league.teams.find(t => t.id === game.homeTeamId)!;
-                    const away = league.teams.find(t => t.id === game.awayTeamId)!;
-                    const result = game.played ? league.history.find(h => h.id === game.id) : null;
+                    const home = league.teams.find(t => t.id === game.homeTeamId);
+                    const away = league.teams.find(t => t.id === game.awayTeamId);
+                    if (!home || !away) return null;
+                    const result = game.played ? safeHistory.find(h => h.id === game.id) : null;
                     const isUserGame = game.homeTeamId === league.userTeamId || game.awayTeamId === league.userTeamId;
                     const sp = calcSpread(home, away);
                     return (
@@ -912,7 +925,7 @@ const Schedule: React.FC<ScheduleProps> = ({ league, onSimulate, onScout, onWatc
               style={{ borderTopColor: league.teams.find(t => t.id === league.userTeamId)?.primaryColor ?? '#f59e0b' }}
             />
             <p className="text-slate-400 font-bold uppercase tracking-widest text-sm">
-              {league.schedule.length === 0 ? 'Generating schedule...' : 'No games scheduled for this team.'}
+              {safeSchedule.length === 0 ? 'Generating schedule...' : 'No games scheduled for this team.'}
             </p>
             {onRegenerateSchedule && (
               <button
