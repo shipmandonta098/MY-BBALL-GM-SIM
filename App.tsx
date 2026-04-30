@@ -168,6 +168,21 @@ const App: React.FC = () => {
     }
   }, [status, refreshSaves]);
 
+  // Safety net: if we end up with no team selected outside of setup/title/config,
+  // snap back to a valid screen instead of showing a blank page.
+  useEffect(() => {
+    if (status === 'owner_welcome' && (!league || !pendingTeamId)) {
+      setPendingTeamId(null);
+      setStatus(league ? 'setup' : 'title');
+    }
+    if ((status === 'game' || status === 'setup') && !league) {
+      setStatus('title');
+    }
+    if (status === 'game' && league && !league.userTeamId) {
+      setStatus('setup');
+    }
+  }, [status, league, pendingTeamId]);
+
   useEffect(() => {
     if (status === 'game' && league) {
       const leagueToSave = { ...league, lastUpdated: Date.now() };
@@ -637,6 +652,10 @@ const App: React.FC = () => {
       savedLeague.gmProfile = {
         name: 'User GM', avatarSeed: 'default', reputation: 50, eoyWins: [], totalSeasons: 0, milestones: []
       };
+    } else {
+      // Normalize fields added after initial release
+      if (!savedLeague.gmProfile.milestones) savedLeague.gmProfile = { ...savedLeague.gmProfile, milestones: [] };
+      if (!savedLeague.gmProfile.eoyWins)    savedLeague.gmProfile = { ...savedLeague.gmProfile, eoyWins: [] };
     }
     setLeague(savedLeague);
     if (!savedLeague.userTeamId) {
@@ -696,7 +715,7 @@ const App: React.FC = () => {
     if (!league || !pendingTeamId) return;
     const teamId = pendingTeamId;
     const team   = league.teams.find(t => t.id === teamId)!;
-    const updatedMilestones = [...league.gmProfile.milestones, {
+    const updatedMilestones = [...(league.gmProfile.milestones ?? []), {
       id: `hired-${Date.now()}`, year: league.season, day: league.currentDay,
       text: `Named General Manager of the ${team.city} ${team.name}.`, type: 'signing',
     }];
@@ -717,9 +736,10 @@ const App: React.FC = () => {
 
   const handleResign = () => {
     if (!league) return;
-    // Clear the userTeamId so team selection screen shows; preserve all other state
     const updated = { ...league, userTeamId: '', lastUpdated: Date.now() };
     setLeague(updated);
+    setPendingTeamId(null);
+    setSetupFromLoad(false);
     db.leagues.put(updated);
     setStatus('setup');
   };
@@ -4180,6 +4200,7 @@ const App: React.FC = () => {
       canAddTeam={!!nextExpansion}
     />;
   }
+  // Safety net already handles redirect via useEffect above; never shown in practice
   if (!league || !league.userTeamId) return null;
 
   const userTeam = league.teams.find(t => t.id === league.userTeamId)!;
