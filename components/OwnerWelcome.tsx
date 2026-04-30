@@ -5,6 +5,7 @@ interface OwnerWelcomeProps {
   team: Team;
   season: number;
   onContinue: () => void;
+  onBack?: () => void;
 }
 
 // ── Deterministic owner name from team id ─────────────────────────────────────
@@ -167,7 +168,7 @@ function personalityBadge(team: Team): { label: string; color: string } {
 }
 
 // ── Component ─────────────────────────────────────────────────────────────────
-const OwnerWelcome: React.FC<OwnerWelcomeProps> = ({ team, season, onContinue }) => {
+const OwnerWelcome: React.FC<OwnerWelcomeProps> = ({ team, season, onContinue, onBack }) => {
   const ownerName = ownerNameFromTeam(team);
   const badge     = personalityBadge(team);
   const msg       = buildMessage(team, season);
@@ -185,6 +186,19 @@ const OwnerWelcome: React.FC<OwnerWelcomeProps> = ({ team, season, onContinue })
       />
 
       <div className="relative w-full max-w-2xl my-auto animate-in fade-in slide-in-from-bottom-4 duration-700">
+
+        {/* Back button — top-left */}
+        {onBack && (
+          <button
+            onClick={onBack}
+            className="absolute -top-2 left-0 flex items-center gap-1.5 text-slate-500 hover:text-slate-200 text-[11px] font-black uppercase tracking-widest transition-colors group"
+          >
+            <svg className="w-3.5 h-3.5 transition-transform group-hover:-translate-x-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M15 19l-7-7 7-7" />
+            </svg>
+            Team Selection
+          </button>
+        )}
 
         {/* Season badge */}
         <p className="text-center text-[10px] font-black uppercase tracking-[0.5em] text-slate-600 mb-8">
@@ -254,16 +268,26 @@ const OwnerWelcome: React.FC<OwnerWelcomeProps> = ({ team, season, onContinue })
             </div>
 
             {/* CTA */}
-            <button
-              onClick={onContinue}
-              className="w-full py-4 font-display font-black uppercase text-slate-950 rounded-2xl transition-all active:scale-[0.98] shadow-xl text-base"
-              style={{
-                background: `linear-gradient(135deg, ${team.primaryColor}, ${team.secondaryColor || team.primaryColor})`,
-                boxShadow: `0 8px 32px ${team.primaryColor}40`,
-              }}
-            >
-              Accept Position &amp; Begin →
-            </button>
+            <div className="space-y-3">
+              <button
+                onClick={onContinue}
+                className="w-full py-4 font-display font-black uppercase text-slate-950 rounded-2xl transition-all active:scale-[0.98] shadow-xl text-base"
+                style={{
+                  background: `linear-gradient(135deg, ${team.primaryColor}, ${team.secondaryColor || team.primaryColor})`,
+                  boxShadow: `0 8px 32px ${team.primaryColor}40`,
+                }}
+              >
+                Accept Position &amp; Begin →
+              </button>
+              {onBack && (
+                <button
+                  onClick={onBack}
+                  className="w-full py-3 font-display font-bold uppercase text-slate-400 hover:text-white text-sm rounded-2xl border border-slate-700 hover:border-slate-500 bg-transparent transition-all active:scale-[0.98]"
+                >
+                  ← Back to Team Selection
+                </button>
+              )}
+            </div>
 
           </div>
         </div>

@@ -4103,6 +4103,7 @@ const App: React.FC = () => {
         team={welcomeTeam}
         season={league.season}
         onContinue={handleOwnerWelcomeContinue}
+        onBack={() => { setPendingTeamId(null); setStatus('setup'); }}
       />
     );
   }
