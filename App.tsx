@@ -692,7 +692,7 @@ const App: React.FC = () => {
   };
 
   // Step 2: user clicks "Accept Position" → actually start the game
-  const handleOwnerWelcomeContinue = async () => {
+  const handleOwnerWelcomeContinue = () => {
     if (!league || !pendingTeamId) return;
     const teamId = pendingTeamId;
     const team   = league.teams.find(t => t.id === teamId)!;
@@ -710,8 +710,9 @@ const App: React.FC = () => {
     setRosterTeamId(teamId);
     setPendingTeamId(null);
     setSetupFromLoad(false);
-    await db.leagues.put(updatedWithAI);
+    setActiveTab('dashboard');
     setStatus('game');
+    db.leagues.put(updatedWithAI).catch(err => console.error('Save error:', err));
   };
 
   const handleResign = () => {
