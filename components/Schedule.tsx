@@ -527,7 +527,8 @@ const Schedule: React.FC<ScheduleProps> = ({ league, onSimulate, onScout, onWatc
             <div className="space-y-3">
               {focusTeamPreseasonGames.map((game, idx) => {
                 const isHome    = game.homeTeamId === selectedTeamId;
-                const opp       = league.teams.find(t => t.id === (isHome ? game.awayTeamId : game.homeTeamId))!;
+                const opp       = league.teams.find(t => t.id === (isHome ? game.awayTeamId : game.homeTeamId));
+                if (!opp) return null;
                 const result    = getPreseasonResult(game.id);
                 const userScore = result ? (isHome ? result.homeScore : result.awayScore) : null;
                 const oppScore  = result ? (isHome ? result.awayScore : result.homeScore) : null;
@@ -582,9 +583,9 @@ const Schedule: React.FC<ScheduleProps> = ({ league, onSimulate, onScout, onWatc
                           </div>
                           <button
                             onClick={() => {
-                              const homeTeam = league.teams.find(t => t.id === game.homeTeamId)!;
-                              const awayTeam = league.teams.find(t => t.id === game.awayTeamId)!;
-                              onViewBoxScore(result, homeTeam, awayTeam);
+                              const homeTeam = league.teams.find(t => t.id === game.homeTeamId);
+                              const awayTeam = league.teams.find(t => t.id === game.awayTeamId);
+                              if (homeTeam && awayTeam) onViewBoxScore(result, homeTeam, awayTeam);
                             }}
                             className="px-3 py-1.5 bg-amber-500/10 hover:bg-amber-500 text-amber-500 hover:text-slate-950 text-[9px] font-black uppercase tracking-widest rounded-lg border border-amber-500/20 transition-all whitespace-nowrap"
                           >
