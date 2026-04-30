@@ -605,6 +605,8 @@ const App: React.FC = () => {
       showAdvancedStats: true,
       franchiseName: name,
       startingYear: year,
+      // Auto-enable single-year labels for women's leagues and pre-1950 historical starts
+      singleYearSeason: genderRatio === 100 || year <= 1949,
       ...partialSettings
     };
 
@@ -4143,6 +4145,7 @@ const App: React.FC = () => {
       <OwnerWelcome
         team={welcomeTeam}
         season={league.season}
+        singleYear={!!(league.settings.singleYearSeason ?? ((league.settings.playerGenderRatio ?? 0) === 100 || (league.settings.startingYear ?? 9999) <= 1949))}
         onContinue={handleOwnerWelcomeContinue}
         onBack={() => { setPendingTeamId(null); setStatus('setup'); }}
       />

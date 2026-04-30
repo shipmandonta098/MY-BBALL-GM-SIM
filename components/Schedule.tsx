@@ -1,6 +1,7 @@
 import React, { useState, useMemo, useEffect, useRef } from 'react';
 import { LeagueState, Team, ScheduleGame, Player, RivalryStats, GameResult } from '../types';
 import TeamBadge from './TeamBadge';
+import { formatSeasonLabel } from '../utils/formatters';
 
 interface ScheduleProps {
   league: LeagueState;
@@ -674,19 +675,24 @@ const Schedule: React.FC<ScheduleProps> = ({ league, onSimulate, onScout, onWatc
         <div className="absolute top-0 right-0 w-80 h-80 bg-amber-500/5 blur-[100px] rounded-full -mr-40 -mt-40"></div>
         
         <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-6 mb-8 relative z-10">
-          <div className="flex bg-slate-950 p-1 rounded-2xl border border-slate-800">
-            <button 
-              onClick={() => setViewMode('team')}
-              className={`px-6 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all ${viewMode === 'team' ? 'bg-amber-500 text-slate-950' : 'text-slate-500 hover:text-slate-300'}`}
-            >
-              Team Schedule
-            </button>
-            <button 
-              onClick={() => setViewMode('league')}
-              className={`px-6 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all ${viewMode === 'league' ? 'bg-amber-500 text-slate-950' : 'text-slate-500 hover:text-slate-300'}`}
-            >
-              League Schedule
-            </button>
+          <div className="flex items-center gap-4">
+            <div className="flex bg-slate-950 p-1 rounded-2xl border border-slate-800">
+              <button
+                onClick={() => setViewMode('team')}
+                className={`px-6 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all ${viewMode === 'team' ? 'bg-amber-500 text-slate-950' : 'text-slate-500 hover:text-slate-300'}`}
+              >
+                Team Schedule
+              </button>
+              <button
+                onClick={() => setViewMode('league')}
+                className={`px-6 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all ${viewMode === 'league' ? 'bg-amber-500 text-slate-950' : 'text-slate-500 hover:text-slate-300'}`}
+              >
+                League Schedule
+              </button>
+            </div>
+            <span className="hidden md:inline-block px-3 py-1 bg-slate-800 border border-slate-700 rounded-full text-[10px] font-black uppercase tracking-widest text-slate-400">
+              {formatSeasonLabel(league.season, league.settings)}
+            </span>
           </div>
 
           {viewMode === 'team' ? (

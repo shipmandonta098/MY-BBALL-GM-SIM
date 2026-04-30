@@ -1,9 +1,11 @@
 import React from 'react';
 import { Team } from '../types';
+import { formatSeasonLabel } from '../utils/formatters';
 
 interface OwnerWelcomeProps {
   team: Team;
   season: number;
+  singleYear?: boolean;
   onContinue: () => void;
   onBack?: () => void;
 }
@@ -168,10 +170,11 @@ function personalityBadge(team: Team): { label: string; color: string } {
 }
 
 // ── Component ─────────────────────────────────────────────────────────────────
-const OwnerWelcome: React.FC<OwnerWelcomeProps> = ({ team, season, onContinue, onBack }) => {
-  const ownerName = ownerNameFromTeam(team);
-  const badge     = personalityBadge(team);
-  const msg       = buildMessage(team, season);
+const OwnerWelcome: React.FC<OwnerWelcomeProps> = ({ team, season, singleYear, onContinue, onBack }) => {
+  const ownerName  = ownerNameFromTeam(team);
+  const badge      = personalityBadge(team);
+  const msg        = buildMessage(team, season);
+  const seasonSettings = { singleYearSeason: singleYear };
 
   // Initials for avatar
   const parts    = ownerName.split(' ');
@@ -202,7 +205,7 @@ const OwnerWelcome: React.FC<OwnerWelcomeProps> = ({ team, season, onContinue, o
 
         {/* Season badge */}
         <p className="text-center text-[10px] font-black uppercase tracking-[0.5em] text-slate-600 mb-8">
-          {season}–{season + 1} Season · New GM Hire
+          {formatSeasonLabel(season, seasonSettings)} · New GM Hire
         </p>
 
         <div className="bg-slate-900 border border-slate-800 rounded-[2.5rem] overflow-hidden shadow-2xl">
@@ -293,7 +296,7 @@ const OwnerWelcome: React.FC<OwnerWelcomeProps> = ({ team, season, onContinue, o
         </div>
 
         <p className="text-center text-[10px] text-slate-700 mt-6 font-bold uppercase tracking-widest">
-          {team.city} {team.name} · {season}–{season + 1}
+          {team.city} {team.name} · {formatSeasonLabel(season, seasonSettings, true)}
         </p>
       </div>
     </div>

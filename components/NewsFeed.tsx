@@ -1,6 +1,7 @@
 import React, { useState, useMemo } from 'react';
 import { LeagueState, NewsItem, NewsCategory, Team, Player } from '../types';
 import TeamBadge from './TeamBadge';
+import { formatSeasonLabel } from '../utils/formatters';
 
 const STOCK_DOMAINS = ['picsum.photos', 'placeholder.com', 'unsplash.com', 'via.placeholder'];
 const isValidLogo = (url?: string) => !!url && !STOCK_DOMAINS.some(d => url.includes(d));
@@ -113,7 +114,7 @@ const NewsFeed: React.FC<NewsFeedProps> = ({ league, onViewPlayer, onViewRoster,
     }
   };
 
-  const seasonLabel = `${league.season}–${String(league.season + 1).slice(-2)} Season`;
+  const seasonLabel = formatSeasonLabel(league.season, league.settings);
 
   return (
     <div className="max-w-2xl mx-auto space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-500 pb-32">
