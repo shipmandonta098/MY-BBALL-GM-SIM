@@ -2052,7 +2052,9 @@ export const generateSeasonSchedule = (
           maxPairGames[key] = oocPP + (oocExtraPairs.has(key) ? 1 : 0);
         }
       } else {
-        maxPairGames[key] = 1;
+        // Small league: allow multiple matchups per pair so each team reaches numGames
+        const opponentCount = Math.max(1, teams.length - 1);
+        maxPairGames[key] = Math.ceil(numGames / opponentCount);
       }
     }
   }
@@ -2074,7 +2076,10 @@ export const generateSeasonSchedule = (
           count = oocPP + (oocExtraPairs.has(key) ? 1 : 0);
         }
       } else {
-        count = 1;
+        // Small league: seed the pool with floor(numGames / opponents) games per pair;
+        // the greedy fill below tops up any remaining slots up to the maxPairGames cap.
+        const opponentCount = Math.max(1, teams.length - 1);
+        count = Math.max(1, Math.floor(numGames / opponentCount));
       }
       for (let c = 0; c < count; c++) {
         if (teamGamesCountTotal[t1.id] < numGames && teamGamesCountTotal[t2.id] < numGames) {

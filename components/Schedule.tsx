@@ -11,14 +11,16 @@ interface ScheduleProps {
   onManageTeam?: (teamId: string) => void;
   onAdvanceToRegularSeason?: () => void;
   onViewAllStar?: () => void;
+  onRegenerateSchedule?: () => void;
 }
 
-const Schedule: React.FC<ScheduleProps> = ({ league, onSimulate, onScout, onWatchLive, onViewBoxScore, onManageTeam, onAdvanceToRegularSeason, onViewAllStar }) => {
+const Schedule: React.FC<ScheduleProps> = ({ league, onSimulate, onScout, onWatchLive, onViewBoxScore, onManageTeam, onAdvanceToRegularSeason, onViewAllStar, onRegenerateSchedule }) => {
   const [viewMode, setViewMode] = useState<'team' | 'league'>('team');
   const [selectedTeamId, setSelectedTeamId] = useState<string>(league.userTeamId);
   const [selectedDay, setSelectedDay] = useState<number>(league.currentDay);
   
   const listRef = useRef<HTMLDivElement>(null);
+  const didAutoGenRef = useRef(false);
 
   const selectedTeam = useMemo(() => 
     league.teams.find(t => t.id === selectedTeamId) || league.teams.find(t => t.id === league.userTeamId)!
@@ -66,7 +68,8 @@ const Schedule: React.FC<ScheduleProps> = ({ league, onSimulate, onScout, onWatc
     const upcoming = teamSchedule.filter(g => !g.played).slice(0, 5);
     return upcoming.map(g => {
       const oppId = g.homeTeamId === selectedTeam.id ? g.awayTeamId : g.homeTeamId;
-      const opp = league.teams.find(t => t.id === oppId)!;
+      const opp = league.teams.find(t => t.id === oppId);
+      if (!opp || !opp.roster.length) return 50;
       const oppOvr = Math.round(opp.roster.reduce((acc, p) => acc + p.rating, 0) / opp.roster.length);
       return Math.min(100, (oppOvr - 65) * 3);
     });
@@ -83,6 +86,14 @@ const Schedule: React.FC<ScheduleProps> = ({ league, onSimulate, onScout, onWatc
       }
     }
   }, [teamSchedule, viewMode]);
+
+  // Auto-generate schedule if missing (e.g. small league bug or load from old save)
+  useEffect(() => {
+    if (!didAutoGenRef.current && league.schedule.length === 0 && onRegenerateSchedule) {
+      didAutoGenRef.current = true;
+      onRegenerateSchedule();
+    }
+  }, []); // intentionally empty — fire once on mount only
 
   // ── Betting line / spread calculator ─────────────────────────────────────
   // Line expressed from home team perspective: negative = home favored.
@@ -136,9 +147,10 @@ const Schedule: React.FC<ScheduleProps> = ({ league, onSimulate, onScout, onWatc
   const GameCard = ({ game, index, focusTeamId }: { game: ScheduleGame, index: number, focusTeamId?: string }) => {
     const displayTeamId = focusTeamId || game.homeTeamId;
     const isHome = game.homeTeamId === displayTeamId;
-    const homeTeam = league.teams.find(t => t.id === game.homeTeamId)!;
-    const awayTeam = league.teams.find(t => t.id === game.awayTeamId)!;
-    const focusTeam = league.teams.find(t => t.id === displayTeamId)!;
+    const homeTeam = league.teams.find(t => t.id === game.homeTeamId);
+    const awayTeam = league.teams.find(t => t.id === game.awayTeamId);
+    const focusTeam = league.teams.find(t => t.id === displayTeamId);
+    if (!homeTeam || !awayTeam || !focusTeam) return null;
     const opp = isHome ? awayTeam : homeTeam;
 
     const result = game.played ? league.history.find(h => h.id === game.id) : null;
@@ -332,7 +344,7 @@ const Schedule: React.FC<ScheduleProps> = ({ league, onSimulate, onScout, onWatc
                     </h3>
                   </div>
                   <p className="text-xs text-slate-500 font-bold uppercase tracking-widest">
-                    OVR: {Math.round(opp.roster.reduce((s,p)=>s+p.rating,0)/opp.roster.length)} • {opp.wins}-{opp.losses}
+                    OVR: {opp.roster.length > 0 ? Math.round(opp.roster.reduce((s,p)=>s+p.rating,0)/opp.roster.length) : '—'} • {opp.wins}-{opp.losses}
                   </p>
                 </div>
               </div>
@@ -893,6 +905,25 @@ const Schedule: React.FC<ScheduleProps> = ({ league, onSimulate, onScout, onWatc
             </React.Fragment>
           );
         })}
+        {viewMode === 'team' && teamSchedule.length === 0 && (
+          <div className="py-20 text-center space-y-5">
+            <div
+              className="w-12 h-12 border-4 border-slate-700 rounded-full animate-spin mx-auto"
+              style={{ borderTopColor: league.teams.find(t => t.id === league.userTeamId)?.primaryColor ?? '#f59e0b' }}
+            />
+            <p className="text-slate-400 font-bold uppercase tracking-widest text-sm">
+              {league.schedule.length === 0 ? 'Generating schedule...' : 'No games scheduled for this team.'}
+            </p>
+            {onRegenerateSchedule && (
+              <button
+                onClick={onRegenerateSchedule}
+                className="px-6 py-2.5 bg-slate-800 hover:bg-slate-700 border border-slate-700 hover:border-slate-500 text-slate-300 text-[10px] font-black uppercase tracking-widest rounded-xl transition-all"
+              >
+                Regenerate Schedule
+              </button>
+            )}
+          </div>
+        )}
         {viewMode === 'league' && dailySchedule.length === 0 && (
           <div className="py-20 text-center">
             <p className="text-slate-500 font-medium uppercase tracking-widest">No games scheduled for Day {selectedDay}</p>

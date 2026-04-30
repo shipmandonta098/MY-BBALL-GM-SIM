@@ -737,6 +737,23 @@ const App: React.FC = () => {
     setTimeout(() => setIsFranchiseSetup(false), 600);
   };
 
+  const handleRegenerateSchedule = useCallback(() => {
+    const cur = leagueRef.current;
+    if (!cur) return;
+    const played = cur.schedule.filter(g => g.played).length;
+    if (played > 0 && played < cur.schedule.length) return;
+    const newSchedule = generateSeasonSchedule(
+      cur.teams,
+      cur.settings.seasonLength,
+      cur.settings.divisionGames,
+      cur.settings.conferenceGames,
+    );
+    if (!newSchedule || newSchedule.length === 0) return;
+    const updated = { ...cur, schedule: newSchedule, currentDay: 1, lastUpdated: Date.now() };
+    setLeague(prev => prev ? { ...prev, schedule: newSchedule, currentDay: 1 } : null);
+    db.leagues.put(updated).catch(console.error);
+  }, []);
+
   const handleResign = () => {
     if (!league) return;
     const updated = { ...league, userTeamId: '', lastUpdated: Date.now() };
@@ -4356,7 +4373,7 @@ const App: React.FC = () => {
             )
           )}
           {activeTab === 'standings' && <Standings teams={league.teams} userTeamId={league.userTeamId} seasonLength={league.settings.seasonLength ?? 82} playoffFormat={league.settings.playoffFormat ?? 16} season={league.season} isPlayoffs={!!league.playoffBracket} onViewRoster={handleViewRoster} onManageTeam={handleManageTeam} rivalryHistory={league.rivalryHistory} previousSeasonStandings={league.previousSeasonStandings} previousSeasonYear={league.previousSeasonYear} />}
-          {activeTab === 'schedule' && <Schedule league={league} onSimulate={handleSimulate} onScout={handleViewPlayer} onWatchLive={handleWatchLive} onViewBoxScore={(res, home, away) => setViewingBoxScore({ result: res, home, away })} onManageTeam={handleManageTeam} onAdvanceToRegularSeason={handleAdvanceToRegularSeason} onViewAllStar={() => setActiveTab('allstar')} />}
+          {activeTab === 'schedule' && <Schedule league={league} onSimulate={handleSimulate} onScout={handleViewPlayer} onWatchLive={handleWatchLive} onViewBoxScore={(res, home, away) => setViewingBoxScore({ result: res, home, away })} onManageTeam={handleManageTeam} onAdvanceToRegularSeason={handleAdvanceToRegularSeason} onViewAllStar={() => setActiveTab('allstar')} onRegenerateSchedule={handleRegenerateSchedule} />}
           {activeTab === 'draft' && <Draft league={league} updateLeague={updateLeagueState} onScout={handleScoutPlayer} scoutingReport={scoutingReport} onNavigateToFreeAgency={() => setActiveTab('free_agency')} />}
           {activeTab === 'coaching' && <Coaching league={league} updateLeague={updateLeagueState} godMode={league.settings.godMode} />}
           {activeTab === 'stats' && <Stats league={league} onViewRoster={handleViewRoster} onManageTeam={handleManageTeam} onViewPlayer={p => setSelectedPlayer(p)} />}
