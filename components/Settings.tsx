@@ -49,7 +49,7 @@ const DEFAULT_SETTINGS: Partial<LeagueSettings> = {
   teamChemistry: true, chemistryImpact: 'Medium', personalityClashPenalties: true,
   playerMorale: true, moraleAffectsAttributes: true, tradeRequestThreshold: 'Medium',
   pbpDetailLevel: 'Full', aiDecisionSpeed: 'Normal',
-  blowoutFrequency: 'Realistic', comebackFrequency: 'Realistic', overtimeFrequency: 'Realistic',
+  blowoutFrequency: 'Realistic', comebackFrequency: 'Realistic', overtimeFrequency: 'Realistic', upsetFrequency: 'Realistic',
   globalPaceOverride: 0, shotClockLength: 24, scoringEra: 'Modern',
   threePtFrequency: 'Medium', simBlockFrequency: 'Medium', turnoverFrequency: 'Medium',
   sliderLayup: 50, sliderMidRange: 50, slider3pt: 50, sliderFreeThrow: 50,
@@ -330,7 +330,7 @@ const Settings: React.FC<SettingsProps> = ({ league, updateLeague, onRegenerateS
       league:     ['playoffFormat','playoffSeeding','playInTournament','homeCourt','tradeDeadline','hardCapAtDeadline','maxContractYears','rookieScaleContracts','maxPlayerSalaryPct','birdRights','draftRounds','draftClassSize','internationalProspects','draftLottery','scheduledExpansion','expansionTeamCount','expansionDraftRules','expansionEnabled','divisionGames','conferenceGames','tradeDeadlineFraction','splitByConference','guaranteedPerDivision','reseedRounds','ownerPatienceLevel','luxuryTaxMultiplier','budgetThreshold','tradeSalaryMatchPct','seasonLength','minRosterSize','maxRosterSize','draftType','customLotterySelections','tradableDraftPickSeasons','prospectAgeMin','prospectAgeMax','minPayroll','luxuryTaxThreshold','salaryCapType','pick1SalaryPct','roundsAboveMin','canRefuseAfterRookie'],
       gameplay:   ['fatigueImpact','b2bPenalty','loadManagement','injuryDuration','practiceInjuries','careerEndingInjuries','teamChemistry','chemistryImpact','personalityClashPenalties','playerMorale','moraleAffectsAttributes','tradeRequestThreshold'],
       sliders:    ['sliderLayup','sliderMidRange','slider3pt','sliderFreeThrow','sliderFastBreak','sliderPostUp','sliderPickRoll','sliderSteal','sliderBlock','sliderFoul','sliderHelpDefense','sliderPerimeterDefense','sliderTimeout','sliderSubstitution','sliderTechFoul','sliderFlagrantFoul','sliderInjuryMultiplier'],
-      simulation: ['pbpDetailLevel','aiDecisionSpeed','blowoutFrequency','comebackFrequency','overtimeFrequency','globalPaceOverride','shotClockLength','scoringEra','threePtFrequency','simBlockFrequency','turnoverFrequency','wnbaStatRealism','singleYearSeason'],
+      simulation: ['pbpDetailLevel','aiDecisionSpeed','blowoutFrequency','comebackFrequency','overtimeFrequency','upsetFrequency','globalPaceOverride','shotClockLength','scoringEra','threePtFrequency','simBlockFrequency','turnoverFrequency','wnbaStatRealism','singleYearSeason'],
       godmode:    ['editAnyPlayer','editAnyTeam','forceGameOutcomes','manipulateStandings','freeAgentMarketControl','draftClassEditor'],
     };
     for (const k of tabMap[activeTab]) {
@@ -1211,6 +1211,9 @@ const Settings: React.FC<SettingsProps> = ({ league, updateLeague, onRegenerateS
             <SelectField label="Overtime Frequency" value={s.overtimeFrequency ?? 'Realistic'}
               options={['Low','Medium','High','Realistic']}
               onChange={v => updateSettings({ overtimeFrequency: v as any }, 'Overtime Frequency')} />
+            <SelectField label="Upset Frequency" value={s.upsetFrequency ?? 'Realistic'}
+              options={['Low','Medium','Realistic','High']}
+              onChange={v => updateSettings({ upsetFrequency: v as any }, 'Upset Frequency')} />
 
             {/* Pace Enforcement */}
             <SectionHeader title="Pace Enforcement" sub="Set global pace override to 0 to use individual team pace" />
