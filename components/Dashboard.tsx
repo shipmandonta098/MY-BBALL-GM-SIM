@@ -67,6 +67,12 @@ const Dashboard: React.FC<DashboardProps> = ({ league, news, onSimulate, onScout
   const safeSchedule = league.schedule ?? [];
 
   const winPct = (userTeam.wins / (userTeam.wins + userTeam.losses || 1)).toFixed(3);
+  const vsW = userTeam.vsAbove500W ?? 0;
+  const vsL = userTeam.vsAbove500L ?? 0;
+  const vsGames = vsW + vsL;
+  const vsPct = vsGames > 0 ? vsW / vsGames : null;
+  const vsRecord = vsGames > 0 ? `${vsW}-${vsL}` : '—';
+  const vsColor = vsPct === null ? 'text-slate-500' : vsPct >= 0.5 ? 'text-emerald-400' : vsPct >= 0.4 ? 'text-amber-400' : 'text-rose-400';
   const teamOvr = calcTeamEffectiveOVR(userTeam.roster);
   const teamOvrInjuryNote = getTeamInjuryNote(userTeam.roster);
   const teamMorale = Math.round(userTeam.roster.reduce((acc, p) => acc + p.morale, 0) / userTeam.roster.length);
@@ -331,6 +337,18 @@ const Dashboard: React.FC<DashboardProps> = ({ league, news, onSimulate, onScout
                 <span className={`text-sm font-bold ${userTeam.streak >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
                   {userTeam.streak >= 0 ? `W${userTeam.streak}` : `L${Math.abs(userTeam.streak)}`}
                 </span>
+             </div>
+             <div className="flex justify-between items-center border-t border-slate-800 pt-3 mt-1" title="Record against teams with .500 or better win% at time of game">
+                <div>
+                  <span className="text-xs font-bold text-slate-400 uppercase">vs .500+ Teams</span>
+                  <p className="text-[9px] text-slate-600 font-bold uppercase mt-0.5">Contender test</p>
+                </div>
+                <div className="text-right">
+                  <span className={`text-sm font-mono font-bold ${vsColor}`}>{vsRecord}</span>
+                  {vsPct !== null && (
+                    <p className={`text-[10px] font-black ${vsColor}`}>({vsPct.toFixed(3)})</p>
+                  )}
+                </div>
              </div>
           </div>
         </div>

@@ -490,6 +490,8 @@ export interface Team {
   homeLosses: number;
   roadWins: number; roadLosses: number;
   confWins: number; confLosses: number;
+  vsAbove500W?: number; // wins vs teams at .500 or better (at time of game)
+  vsAbove500L?: number; // losses vs teams at .500 or better
   lastTen: ('W' | 'L')[];
   budget: number;
   logo: string;
@@ -726,6 +728,7 @@ export interface LeagueSettings {
   // ── WNBA Stat Realism ─────────────────────────────────────────────────────
   wnbaStatRealism?: boolean; // auto-applied when playerGenderRatio=100; scales PPG/FGA/REB/AST to WNBA targets
   singleYearSeason?: boolean; // show "1997 Season" instead of "1997–98 Season"; auto for women's leagues & pre-1950
+  upsetFrequency?: 'Low' | 'Medium' | 'High' | 'Realistic'; // how often weaker teams beat stronger ones
 
   // ── Season Structure additions ────────────────────────────────────────────
   divisionGames?: number;          // default 16

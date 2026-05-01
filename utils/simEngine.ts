@@ -3558,7 +3558,7 @@ export const simulateGame = (
   homeB2B = false,
   awayB2B = false,
   rivalryLevel = 'Ice Cold',
-  settings?: Pick<LeagueSettings, 'injuryFrequency' | 'homeCourt' | 'b2bFrequency' | 'quarterLength' | 'wnbaStatRealism'>,
+  settings?: Pick<LeagueSettings, 'injuryFrequency' | 'homeCourt' | 'b2bFrequency' | 'quarterLength' | 'wnbaStatRealism' | 'upsetFrequency'>,
 ): GameResult => {
   // ── Settings-driven constants ──────────────────────────────────────────────
   const quarterLength = settings?.quarterLength ?? 12; // minutes per quarter
@@ -3568,6 +3568,10 @@ export const simulateGame = (
   const injuryMultiplier = injuryMult[settings?.injuryFrequency ?? 'Medium'] ?? 1.0;
   const b2bMap: Record<string, number> = { None: 1.0, Low: 0.97, Realistic: 0.93, High: 0.90, Brutal: 0.87 };
   const b2bPenalty = b2bMap[settings?.b2bFrequency ?? 'Realistic'] ?? 0.93;
+  // How much the rating gap drives the outcome. Lower slope → more upsets.
+  // Low=0.40 (dominant favorites), Medium=0.30, Realistic=0.25, High=0.15 (frequent upsets)
+  const slopeMap: Record<string, number> = { Low: 0.40, Medium: 0.30, Realistic: 0.25, High: 0.15 };
+  const ratingSlope = slopeMap[settings?.upsetFrequency ?? 'Realistic'] ?? 0.25;
 
   // ── WNBA Mode detection ────────────────────────────────────────────────────
   // Explicit setting takes precedence; otherwise auto-detect from roster gender.
@@ -3634,10 +3638,9 @@ export const simulateGame = (
   };
 
   const calcBasePPP = (off: number, def: number, isB2B: boolean) => {
-    // Slope 0.25 (was 0.5): rating gap matters less → more realistic upset frequency.
-    // With slope 0.5 a 12-pt rating gap → 6 PPP pts → elite teams win 85-93%.
-    // With slope 0.25 a 12-pt rating gap → 3 PPP pts → elite teams win 70-78%.
-    let ppp = BASE_PPP + (off - def) / 100 * 0.25;
+    // ratingSlope is driven by upsetFrequency setting (0.15–0.40).
+    // Lower slope → rating gap matters less → more upsets.
+    let ppp = BASE_PPP + (off - def) / 100 * ratingSlope;
     if (isB2B) ppp *= b2bPenalty;
     return ppp + (Math.random() * SCORE_VARIANCE * 2 - SCORE_VARIANCE);
   };
@@ -3669,6 +3672,15 @@ export const simulateGame = (
   const quarterDetails: QuarterDetail[] = [];
   let runningHome = 0, runningAway = 0;
   let homeQStreak = 0, awayQStreak = 0;
+
+  // Pre-game favorite identification for upset PBP commentary.
+  // Uses net expected rating advantage (home court included) before any randomness.
+  const homeNetRating = homeBaseOff - homeDef + homeCourtAdv * 100;
+  const awayNetRating = awayBaseOff - awayDef;
+  const favoriteIsHome = homeNetRating >= awayNetRating;
+  const favoriteTeam   = favoriteIsHome ? home : away;
+  const underdogTeam   = favoriteIsHome ? away : home;
+  const preGameRatingGap = Math.abs(homeNetRating - awayNetRating);
 
   const pbp: PlayByPlayEvent[] = [
     { time: '12:00', text: 'Game Tip-off', type: 'info', quarter: 1 },
@@ -3836,6 +3848,22 @@ export const simulateGame = (
     }
     if (q === 4 && Math.abs(runningHome - runningAway) <= 5) {
       pbp.push({ time: '4:00', text: `We have a BALL GAME! ${Math.abs(runningHome - runningAway) <= 2 ? "Anyone's game with 4 minutes left!" : 'One possession game down the stretch!'}`, type: 'info', quarter: q });
+    }
+
+    // Upset drama commentary — fires when the expected underdog is leading late
+    if (preGameRatingGap >= 8) {
+      const underdogLeadMargin = favoriteIsHome ? runningAway - runningHome : runningHome - runningAway;
+      if (q === 2 && underdogLeadMargin >= 5) {
+        pbp.push({ time: '0:01', text: `HUGE UPSET BREWING! ${underdogTeam.name} has the heavily-favored ${favoriteTeam.name} on the ropes at halftime!`, type: 'info', quarter: 2 });
+      }
+      if (q === 3 && underdogLeadMargin >= 5) {
+        const upsetMsgs = [
+          `Nobody saw THIS coming — ${underdogTeam.name} is defying the odds tonight!`,
+          `Role players stepping up HUGE for ${underdogTeam.name}!`,
+          `${underdogTeam.name} playing the game of their lives — one quarter away from a MASSIVE upset!`,
+        ];
+        pbp.push({ time: '0:01', text: upsetMsgs[Math.floor(Math.random() * upsetMsgs.length)], type: 'info', quarter: 3 });
+      }
     }
 
     // ── BUG 4 FIX: Starters always open Q1 and Q3 ────────────────────────
