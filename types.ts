@@ -490,6 +490,8 @@ export interface Team {
   homeLosses: number;
   roadWins: number; roadLosses: number;
   confWins: number; confLosses: number;
+  vsAbove500W?: number; // wins vs teams at .500 or better (at time of game)
+  vsAbove500L?: number; // losses vs teams at .500 or better
   lastTen: ('W' | 'L')[];
   budget: number;
   logo: string;

@@ -139,6 +139,7 @@ const Standings: React.FC<StandingsProps> = ({
               <th className="px-6 py-4 text-center">Conf</th>
               <th className="px-6 py-4 text-center">Home</th>
               <th className="px-6 py-4 text-center">Road</th>
+              <th className="px-6 py-4 text-center">vs .500+</th>
               <th className="px-6 py-4 text-center">L10</th>
               <th className="px-6 py-4 text-center">Streak</th>
             </tr>
@@ -199,6 +200,21 @@ const Standings: React.FC<StandingsProps> = ({
                 <td className="px-6 py-5 text-center font-mono text-xs text-slate-500">{t.confWins || 0}-{t.confLosses || 0}</td>
                 <td className="px-6 py-5 text-center font-mono text-xs text-slate-500">{t.homeWins || 0}-{t.homeLosses || 0}</td>
                 <td className="px-6 py-5 text-center font-mono text-xs text-slate-500">{t.roadWins || 0}-{t.roadLosses || 0}</td>
+                <td className="px-6 py-5 text-center">
+                  {(() => {
+                    const vW = t.vsAbove500W ?? 0;
+                    const vL = t.vsAbove500L ?? 0;
+                    const vGames = vW + vL;
+                    const vPct = vGames > 0 ? vW / vGames : null;
+                    const col = vPct === null ? 'text-slate-600' : vPct >= 0.5 ? 'text-emerald-400' : vPct >= 0.4 ? 'text-amber-400' : 'text-rose-400';
+                    return (
+                      <div title="Record vs teams at .500 or better">
+                        <div className={`font-mono text-xs font-bold ${col}`}>{vGames > 0 ? `${vW}-${vL}` : '—'}</div>
+                        {vPct !== null && <div className={`text-[9px] font-black ${col} mt-0.5`}>({vPct.toFixed(3)})</div>}
+                      </div>
+                    );
+                  })()}
+                </td>
                 <td className="px-6 py-5 text-center">
                   <div className="flex justify-center gap-0.5">
                     {t.lastTen.map((res: string, i: number) => (

@@ -1493,6 +1493,9 @@ const App: React.FC = () => {
       const isHome = t.id === homeTeam.id;
       const isConfGame = t.conference === opp.conference;
       const lastTen = [...(t.lastTen || []), isWinner ? 'W' : 'L'].slice(-10) as ('W' | 'L')[];
+      // Check opponent's pre-game win% to determine if they qualify as a .500+ opponent
+      const oppGames = opp.wins + opp.losses;
+      const oppIsAbove500 = oppGames > 0 && opp.wins / oppGames >= 0.5;
       
       if (t.id === homeTeam.id || t.id === awayTeam.id) {
          let patienceDelta = 0;
@@ -1512,7 +1515,7 @@ const App: React.FC = () => {
            patienceDelta *= patienceFactor;
          }
          return {
-          ...t, wins: isWinner ? t.wins + 1 : t.wins, losses: isWinner ? t.losses : t.losses + 1, homeWins: isHome && isWinner ? t.homeWins + 1 : t.homeWins, homeLosses: isHome && !isWinner ? t.homeLosses + 1 : t.homeLosses, roadWins: !isHome && isWinner ? t.roadWins + 1 : t.roadWins, roadLosses: !isHome && !isWinner ? t.roadLosses + 1 : t.roadLosses, confWins: isConfGame && isWinner ? (t.confWins || 0) + 1 : (t.confWins || 0), confLosses: isConfGame && !isWinner ? (t.confLosses || 0) + 1 : (t.confLosses || 0), lastTen, streak: isWinner ? (t.streak >= 0 ? t.streak + 1 : 1) : (t.streak <= 0 ? t.streak - 1 : -1), finances: { ...t.finances, ownerPatience: state.settings.ownerMeterEnabled ? Math.min(100, Math.max(0, t.finances.ownerPatience + patienceDelta)) : 100, cash: t.finances.cash + (isHome ? 250000 : 0) }
+          ...t, wins: isWinner ? t.wins + 1 : t.wins, losses: isWinner ? t.losses : t.losses + 1, homeWins: isHome && isWinner ? t.homeWins + 1 : t.homeWins, homeLosses: isHome && !isWinner ? t.homeLosses + 1 : t.homeLosses, roadWins: !isHome && isWinner ? t.roadWins + 1 : t.roadWins, roadLosses: !isHome && !isWinner ? t.roadLosses + 1 : t.roadLosses, confWins: isConfGame && isWinner ? (t.confWins || 0) + 1 : (t.confWins || 0), confLosses: isConfGame && !isWinner ? (t.confLosses || 0) + 1 : (t.confLosses || 0), vsAbove500W: oppIsAbove500 && isWinner ? (t.vsAbove500W ?? 0) + 1 : (t.vsAbove500W ?? 0), vsAbove500L: oppIsAbove500 && !isWinner ? (t.vsAbove500L ?? 0) + 1 : (t.vsAbove500L ?? 0), lastTen, streak: isWinner ? (t.streak >= 0 ? t.streak + 1 : 1) : (t.streak <= 0 ? t.streak - 1 : -1), finances: { ...t.finances, ownerPatience: state.settings.ownerMeterEnabled ? Math.min(100, Math.max(0, t.finances.ownerPatience + patienceDelta)) : 100, cash: t.finances.cash + (isHome ? 250000 : 0) }
         };
       }
       return t;
@@ -3425,7 +3428,7 @@ const App: React.FC = () => {
       });
       // Remove expired contracts from roster (they become free agents)
       const retained = rosterWithProg.filter(p => p.contractYears > 1);
-      return { ...t, roster: retained.map(p => ({ ...p, contractYears: p.contractYears - 1 })), prevSeasonWins: t.wins, prevSeasonLosses: t.losses, wins: 0, losses: 0, lastTen: [] };
+      return { ...t, roster: retained.map(p => ({ ...p, contractYears: p.contractYears - 1 })), prevSeasonWins: t.wins, prevSeasonLosses: t.losses, wins: 0, losses: 0, vsAbove500W: 0, vsAbove500L: 0, lastTen: [] };
     });
 
     // Build dev report for user team from pre/post snapshot
