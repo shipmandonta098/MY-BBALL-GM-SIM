@@ -492,6 +492,9 @@ export interface Team {
   confWins: number; confLosses: number;
   vsAbove500W?: number; // wins vs teams at .500 or better (at time of game)
   vsAbove500L?: number; // losses vs teams at .500 or better
+  valuation?: number;            // franchise market value in $ (computed each offseason)
+  prevSeasonValuation?: number;  // prior season's value for YoY comparison
+  valuationBreakdown?: { revenue: number; market: number; performance: number; starPower: number; brand: number };
   lastTen: ('W' | 'L')[];
   budget: number;
   logo: string;

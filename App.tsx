@@ -13,6 +13,7 @@ import { assignAIPersonalities, runAIGMOffseason, aiGMTradeDeadlineAction, aiGMI
 import { db } from './db';
 import { NavigationProvider } from './context/NavigationContext';
 import { generateOffseasonAlerts } from './utils/offseasonAlerts';
+import { calcFranchiseValuation } from './utils/valuationEngine';
 import OffseasonAlertsModal from './components/OffseasonAlertsModal';
 import OwnerReactionModal from './components/OwnerReactionModal';
 import { calcReleaseReaction, OwnerReaction } from './utils/ownerReactionEngine';
@@ -3428,7 +3429,18 @@ const App: React.FC = () => {
       });
       // Remove expired contracts from roster (they become free agents)
       const retained = rosterWithProg.filter(p => p.contractYears > 1);
-      return { ...t, roster: retained.map(p => ({ ...p, contractYears: p.contractYears - 1 })), prevSeasonWins: t.wins, prevSeasonLosses: t.losses, wins: 0, losses: 0, vsAbove500W: 0, vsAbove500L: 0, lastTen: [] };
+
+      // Compute end-of-season franchise valuation before resetting wins/losses
+      const champCount = (tempState.championshipHistory ?? []).filter(c => c.championId === t.id).length;
+      const prevMadePlayoffs = (prevStandings ?? []).find(s => s.teamId === t.id)?.madePlayoffs ?? false;
+      const { value: newValuation, breakdown: newBreakdown } = calcFranchiseValuation(t, {
+        isWNBA: (tempState.settings.playerGenderRatio ?? 0) === 100,
+        champCount,
+        prevMadePlayoffs,
+        seasonLength: tempState.settings.seasonLength ?? 82,
+      });
+
+      return { ...t, roster: retained.map(p => ({ ...p, contractYears: p.contractYears - 1 })), prevSeasonWins: t.wins, prevSeasonLosses: t.losses, wins: 0, losses: 0, vsAbove500W: 0, vsAbove500L: 0, lastTen: [], prevSeasonValuation: t.valuation, valuation: newValuation, valuationBreakdown: newBreakdown };
     });
 
     // Build dev report for user team from pre/post snapshot

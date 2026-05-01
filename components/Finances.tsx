@@ -4,6 +4,7 @@ import { LeagueState, Team, Player, Coach } from '../types';
 import { STAFF_CONFIG, getStaffTierIndex, StaffType } from '../constants';
 import { fmtSalary } from '../utils/formatters';
 import { getContractRules } from '../utils/contractRules';
+import { calcFranchiseValuation, fmtValuation, fmtValuationDelta } from '../utils/valuationEngine';
 
 interface FinancesProps {
   league: LeagueState;
@@ -59,6 +60,24 @@ const Finances: React.FC<FinancesProps> = ({ league, updateLeague }) => {
   // Women's leagues have no luxury tax
   const totalExpenses = payroll + staffPayroll + staffAnnualCosts + (isWomens ? 0 : luxuryTax) + operationalExpenses;
   const projectedNet = totalRevenue - totalExpenses;
+
+  // ── Franchise Valuation (live estimate) ────────────────────────────────────
+  // Uses stored season-end snapshot when available; recomputes live otherwise.
+  const champCount = (league.championshipHistory ?? []).filter(c => c.championId === userTeam.id).length;
+  const prevMadePlayoffs = (league.previousSeasonStandings ?? []).find(s => s.teamId === userTeam.id)?.madePlayoffs ?? false;
+  const liveValuation = useMemo(() => calcFranchiseValuation(userTeam, {
+    isWNBA,
+    champCount,
+    prevMadePlayoffs,
+    seasonLength: league.settings.seasonLength ?? 82,
+  }), [userTeam, isWNBA, champCount, prevMadePlayoffs, league.settings.seasonLength]);
+
+  // If we have an end-of-season snapshot, prefer it; otherwise show live estimate
+  const displayValuation = userTeam.valuation ?? liveValuation.value;
+  const displayBreakdown = userTeam.valuationBreakdown ?? liveValuation.breakdown;
+  const prevValuation    = userTeam.prevSeasonValuation;
+  const valuationDelta   = prevValuation != null ? displayValuation - prevValuation : null;
+  const isLiveEstimate   = userTeam.valuation == null;
 
   const formatMoney = fmtSalary;
 
@@ -182,6 +201,73 @@ const Finances: React.FC<FinancesProps> = ({ league, updateLeague }) => {
 
   return (
     <div className="space-y-8 animate-in fade-in duration-500 pb-40">
+
+      {/* ── Franchise Valuation ──────────────────────────────────────────────── */}
+      <div className="relative overflow-hidden bg-slate-900 border border-slate-800 rounded-[2.5rem] p-8 shadow-2xl">
+        {/* Ambient glow */}
+        <div className="absolute inset-0 pointer-events-none"
+          style={{ background: `radial-gradient(ellipse at top right, ${userTeam.primaryColor}18 0%, transparent 70%)` }} />
+
+        <div className="relative z-10 flex flex-col md:flex-row gap-8 items-start md:items-center justify-between">
+          {/* Left: main value display */}
+          <div>
+            <div className="flex items-center gap-3 mb-1">
+              <h3 className="text-[10px] font-black uppercase tracking-[0.4em] text-slate-500">Franchise Valuation</h3>
+              {isLiveEstimate && (
+                <span className="text-[8px] font-black uppercase tracking-widest px-2 py-0.5 rounded-full bg-slate-800 border border-slate-700 text-slate-500">
+                  Est.
+                </span>
+              )}
+            </div>
+            <div className="flex items-baseline gap-4">
+              <span className="text-5xl font-display font-black text-white">
+                {fmtValuation(displayValuation)}
+              </span>
+              {valuationDelta !== null && (
+                <div className={`flex items-center gap-1 text-base font-black ${valuationDelta >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
+                  <span>{valuationDelta >= 0 ? '▲' : '▼'}</span>
+                  <span>{fmtValuationDelta(valuationDelta)}</span>
+                  <span className="text-[10px] text-slate-500 font-bold uppercase tracking-widest ml-1">YoY</span>
+                </div>
+              )}
+            </div>
+            {prevValuation != null && (
+              <p className="text-[10px] text-slate-600 font-bold uppercase mt-1">
+                Last season: {fmtValuation(prevValuation)}
+              </p>
+            )}
+            <p className="text-[9px] text-slate-600 mt-2 font-bold uppercase tracking-widest">
+              {isLiveEstimate ? 'Updates each offseason · Live estimate shown' : 'Updated end of last offseason'}
+            </p>
+          </div>
+
+          {/* Right: breakdown bars */}
+          <div className="w-full md:w-80 space-y-2.5">
+            <p className="text-[9px] font-black uppercase tracking-widest text-slate-500 mb-3">Value Breakdown</p>
+            {([
+              { label: 'Revenue',     pct: displayBreakdown.revenue,     color: 'bg-emerald-500' },
+              { label: 'Market',      pct: displayBreakdown.market,      color: 'bg-blue-500'    },
+              { label: 'Performance', pct: displayBreakdown.performance, color: 'bg-amber-500'   },
+              { label: 'Star Power',  pct: displayBreakdown.starPower,   color: 'bg-violet-500'  },
+              { label: 'Brand',       pct: displayBreakdown.brand,       color: 'bg-rose-400'    },
+            ] as const).map(({ label, pct, color }) => (
+              <div key={label}>
+                <div className="flex justify-between items-center mb-0.5">
+                  <span className="text-[9px] font-bold text-slate-500 uppercase tracking-widest">{label}</span>
+                  <span className="text-[10px] font-black text-slate-400">{pct}%</span>
+                </div>
+                <div className="h-1.5 bg-slate-800 rounded-full overflow-hidden">
+                  <div className={`h-full ${color} rounded-full transition-all duration-700`} style={{ width: `${pct}%` }} />
+                </div>
+              </div>
+            ))}
+            <p className="text-[8px] text-slate-700 font-bold mt-2 italic">
+              Revenue {displayBreakdown.revenue}% · Market {displayBreakdown.market}% · Performance {displayBreakdown.performance}% · Stars {displayBreakdown.starPower}% · Brand {displayBreakdown.brand}%
+            </p>
+          </div>
+        </div>
+      </div>
+
       {/* Header Info: Owner Meter & Budget Vitals */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         <div className="lg:col-span-2 bg-slate-900 border border-slate-800 rounded-[2.5rem] p-8 shadow-2xl relative overflow-hidden">
