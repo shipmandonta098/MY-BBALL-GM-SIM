@@ -3567,6 +3567,25 @@ const App: React.FC = () => {
       isBreaking: true
     });
 
+    // ── Auto-trigger expansion draft after every Finals ────────────────────
+    tempState.newsFeed.unshift({
+      id: `expansion-incoming-${Date.now()}`,
+      category: 'league',
+      headline: 'EXPANSION DRAFT INCOMING',
+      content: 'New franchises are joining the league! Head to the Expansion tab to set up the new teams and run the draft before the Draft Lottery.',
+      timestamp: tempState.currentDay,
+      realTimestamp: Date.now() + 1,
+      isBreaking: true
+    });
+    tempState.expansionDraft = {
+      active: true,
+      phase: 'setup',
+      protectedPlayerIds: {},
+      expansionTeamIds: [],
+      draftLog: [],
+      pendingTeams: [],
+    };
+
     // ── Attach owner review data (shown as overlay on the draft page) ──
     tempState.ownerApproval    = ownerAfter;
     tempState.fanApproval      = fanAfter;
@@ -3574,7 +3593,7 @@ const App: React.FC = () => {
     tempState.ownerReviewData  = reviewData;
 
     setLeague(tempState);
-    setActiveTab('draft');
+    setActiveTab('expansion');
     } catch (err) {
       console.error('handleStartOffseason error:', err);
     } finally {
