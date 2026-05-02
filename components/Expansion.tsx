@@ -40,7 +40,7 @@ const fmt = (n: number) =>
 // ─── Component ────────────────────────────────────────────────────────────────
 const Expansion: React.FC<ExpansionProps> = ({ league, updateLeague, onScout }) => {
   const s = league.settings;
-  const teamCount  = s.expansionTeamCount ?? 2;
+  const teamCount  = s.expansionTeamCount ?? 1;
   const rules      = s.expansionDraftRules ?? 'Standard';
   const maxProtected = rules === 'Protected' ? 11 : rules === 'Open' ? 0 : 8;
   const draftState = league.expansionDraft;
@@ -361,45 +361,117 @@ const Expansion: React.FC<ExpansionProps> = ({ league, updateLeague, onScout }) 
   }
 
   // ══════════════════════════════════════════════════════════════════════════
-  // SCREEN 1: Expansion not yet triggered (waiting for Finals to end)
+  // SCREEN 1: Unlocked — configure and launch
   // ══════════════════════════════════════════════════════════════════════════
   if (!draftState?.active) {
     return (
       <div className="space-y-8 animate-in fade-in duration-500 pb-40">
         <PageHeader
           title="Expansion Draft"
-          sub="New franchises join automatically after each season's Finals"
-          badge="Pending"
+          sub={`Ready to add ${teamCount} new franchise${teamCount > 1 ? 's' : ''} — ${rules} protection rules`}
+          badge="Expansion Ready"
         />
-        <div className="bg-slate-900 border border-slate-800 rounded-3xl p-12 text-center space-y-6">
-          <div className="w-20 h-20 bg-indigo-900/40 border border-indigo-700/40 rounded-full flex items-center justify-center mx-auto">
-            <svg className="w-10 h-10 text-indigo-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.5" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
-            </svg>
+
+        {/* Info cards */}
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
+          {[
+            {
+              icon: (
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2"
+                  d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z" />
+              ),
+              label: 'New Teams',
+              value: String(teamCount),
+              sub: `franchise${teamCount > 1 ? 's' : ''} joining`,
+            },
+            {
+              icon: (
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2"
+                  d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z" />
+              ),
+              label: 'Protected Spots',
+              value: String(maxProtected),
+              sub: `players per team (${rules})`,
+            },
+            {
+              icon: (
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2"
+                  d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
+              ),
+              label: 'Draft Picks',
+              value: String(PICKS_PER_EXPANSION_TEAM * teamCount),
+              sub: `total (${PICKS_PER_EXPANSION_TEAM} per team)`,
+            },
+          ].map(card => (
+            <div key={card.label} className="bg-slate-900 border border-slate-800 rounded-3xl p-6 flex items-center gap-5">
+              <div className="w-12 h-12 bg-orange-500/10 rounded-2xl flex items-center justify-center shrink-0">
+                <svg className="w-6 h-6 text-orange-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  {card.icon}
+                </svg>
+              </div>
+              <div>
+                <p className="text-3xl font-display font-black text-white">{card.value}</p>
+                <p className="text-[10px] font-black uppercase text-slate-500 tracking-widest leading-tight">{card.label}</p>
+                <p className="text-[10px] text-slate-600 mt-0.5">{card.sub}</p>
+              </div>
+            </div>
+          ))}
+        </div>
+
+        {/* Team count selector */}
+        <div className="bg-slate-900 border border-slate-800 rounded-3xl p-6 flex flex-col sm:flex-row sm:items-center gap-4">
+          <div className="flex-1">
+            <p className="text-xs font-black uppercase tracking-[0.3em] text-slate-400">Expansion Teams</p>
+            <p className="text-[11px] text-slate-600 mt-0.5">How many new franchises will join next season?</p>
           </div>
-          <div>
-            <p className="text-2xl font-display font-bold uppercase text-indigo-300 tracking-wide mb-2">
-              Awaiting Finals
-            </p>
-            <p className="text-slate-500 text-sm max-w-md mx-auto">
-              The Expansion Draft unlocks automatically when the Finals conclude. Two new franchises will join before the Draft Lottery.
-            </p>
+          <div className="flex gap-2">
+            {([1, 2, 4] as const).map(n => (
+              <button
+                key={n}
+                onClick={() => updateLeague({ settings: { ...s, expansionTeamCount: n } })}
+                className={`w-14 h-10 rounded-xl font-display font-black text-sm transition-all ${
+                  teamCount === n
+                    ? 'bg-orange-500 text-slate-950 shadow-lg shadow-orange-500/30'
+                    : 'bg-slate-800 text-slate-400 hover:bg-slate-700 hover:text-slate-200'
+                }`}
+              >
+                {n}
+              </button>
+            ))}
           </div>
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 max-w-xl mx-auto text-left">
+        </div>
+
+        {/* Steps overview */}
+        <div className="bg-slate-900 border border-slate-800 rounded-3xl p-8">
+          <h3 className="text-xs font-black uppercase tracking-[0.4em] text-orange-500 mb-6">Expansion Process</h3>
+          <div className="grid grid-cols-1 sm:grid-cols-4 gap-4">
             {[
-              { n: '1', t: 'Finals End', d: 'Champion is crowned, season concludes' },
-              { n: '2', t: 'Expansion Opens', d: 'This tab unlocks — set up new teams & run draft' },
-              { n: '3', t: 'Draft Lottery', d: 'Expansion teams pick last; regular draft proceeds' },
-            ].map(step => (
-              <div key={step.n} className="bg-slate-950 border border-slate-800 rounded-2xl p-4 flex gap-3">
-                <span className="text-2xl font-display font-black text-slate-700">{step.n}</span>
+              { step: '01', title: 'Team Setup', desc: 'Name, colors & identity for each new franchise' },
+              { step: '02', title: 'Protection Phase', desc: `Each team protects up to ${maxProtected} players` },
+              { step: '03', title: 'Expansion Draft', desc: 'New teams select from unprotected pool' },
+              { step: '04', title: 'League Joins', desc: 'Teams added to standings & next season schedule' },
+            ].map(item => (
+              <div key={item.step} className="flex gap-4 p-4 bg-slate-950 rounded-2xl border border-slate-800">
+                <span className="text-3xl font-display font-black text-slate-700 leading-none">{item.step}</span>
                 <div>
-                  <p className="font-bold text-slate-300 text-sm">{step.t}</p>
-                  <p className="text-slate-600 text-xs mt-0.5">{step.d}</p>
+                  <p className="font-bold text-slate-200 text-sm">{item.title}</p>
+                  <p className="text-slate-600 text-xs mt-1">{item.desc}</p>
                 </div>
               </div>
             ))}
           </div>
+        </div>
+
+        <div className="flex justify-center">
+          <button
+            onClick={handleStartExpansion}
+            className="px-12 py-5 bg-orange-500 hover:bg-orange-400 active:scale-95 text-slate-950 font-display font-black uppercase text-lg rounded-2xl shadow-2xl shadow-orange-500/30 transition-all flex items-center gap-3"
+          >
+            <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M13 10V3L4 14h7v7l9-11h-7z" />
+            </svg>
+            Launch Expansion
+          </button>
         </div>
       </div>
     );

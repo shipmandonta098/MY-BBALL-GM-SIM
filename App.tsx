@@ -3239,6 +3239,9 @@ const App: React.FC = () => {
     // It is cleared when the new season schedule begins (handleAdvanceToRegularSeason)
     tempState.draftPhase = 'lottery';
     tempState.offseasonDay = 0;
+
+    // Automatically unlock expansion after every Finals — default to 1 new team
+    tempState.settings = { ...tempState.settings, expansionEnabled: true, expansionTeamCount: 1 };
     
     const rookieSetting = tempState.settings.rookieProgressionRate || 'Normal';
     const rookieMultiplier = rookieSetting === 'Slow' ? 0.7 : rookieSetting === 'Fast' ? 1.3 : 1.0;
@@ -3567,24 +3570,16 @@ const App: React.FC = () => {
       isBreaking: true
     });
 
-    // ── Auto-trigger expansion draft after every Finals ────────────────────
     tempState.newsFeed.unshift({
-      id: `expansion-incoming-${Date.now()}`,
-      category: 'league',
-      headline: 'EXPANSION DRAFT INCOMING',
-      content: 'New franchises are joining the league! Head to the Expansion tab to set up the new teams and run the draft before the Draft Lottery.',
+      id: `expansion-approved-${Date.now()}`,
+      category: 'expansion',
+      headline: 'EXPANSION APPROVED',
+      content: 'League Expansion Approved — One new franchise will join next season!',
       timestamp: tempState.currentDay,
       realTimestamp: Date.now() + 1,
-      isBreaking: true
+      isBreaking: true,
+      seasonYear: tempState.season,
     });
-    tempState.expansionDraft = {
-      active: true,
-      phase: 'setup',
-      protectedPlayerIds: {},
-      expansionTeamIds: [],
-      draftLog: [],
-      pendingTeams: [],
-    };
 
     // ── Attach owner review data (shown as overlay on the draft page) ──
     tempState.ownerApproval    = ownerAfter;

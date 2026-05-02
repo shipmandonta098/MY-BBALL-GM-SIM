@@ -43,7 +43,7 @@ const DEFAULT_SETTINGS: Partial<LeagueSettings> = {
   draftType: 'NBA 1994', customLotterySelections: 4,
   customLotteryChances: [140,140,140,125,105,90,75,60,45,30,20,15,10,5,5],
   tradableDraftPickSeasons: 4, prospectAgeMin: 19, prospectAgeMax: 22,
-  scheduledExpansion: 'Off', expansionTeamCount: 2, expansionDraftRules: 'Standard',
+  scheduledExpansion: 'Off', expansionTeamCount: 1, expansionDraftRules: 'Standard',
   fatigueImpact: 'Medium', b2bPenalty: 'Mild', loadManagement: true,
   injuryDuration: 'Realistic', practiceInjuries: false, careerEndingInjuries: true,
   teamChemistry: true, chemistryImpact: 'Medium', personalityClashPenalties: true,
@@ -129,7 +129,6 @@ const SEARCH_INDEX: { tab: SettingsTab; label: string }[] = [
   { tab: 'league', label: 'Draft Type' }, { tab: 'league', label: 'Custom Lottery Selections' },
   { tab: 'league', label: 'Custom Lottery Chances' }, { tab: 'league', label: 'Tradable Draft Pick Seasons' },
   { tab: 'league', label: 'Prospect Age Min' }, { tab: 'league', label: 'Prospect Age Max' },
-  { tab: 'league', label: 'Enable Expansion' }, { tab: 'league', label: 'Expansion Team Count' },
   { tab: 'league', label: 'Expansion Draft Rules' },
   { tab: 'league', label: 'Division Games' }, { tab: 'league', label: 'Conference Games' },
   { tab: 'league', label: 'Trade Deadline Fraction' }, { tab: 'league', label: 'Split By Conference' },
@@ -991,7 +990,7 @@ const Settings: React.FC<SettingsProps> = ({ league, updateLeague, onRegenerateS
 
             {/* Expansion */}
             <SectionHeader title="Expansion"
-              sub="Expansion automatically triggers after each season's Finals. 2 new franchises join and an Expansion Draft runs before the regular Draft Lottery." />
+              sub="Expansion automatically unlocks after the Finals each season. Configure team count and draft rules in the Expansion tab." />
             <SelectField label="Expansion Draft Rules" value={s.expansionDraftRules ?? 'Standard'}
               options={['Standard (8 protected)','Protected (11 protected)','Open (0 protected)']}
               onChange={v => updateSettings({ expansionDraftRules: v.split(' ')[0] as any }, 'Expansion Draft Rules')} />
