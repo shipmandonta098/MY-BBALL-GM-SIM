@@ -866,6 +866,154 @@ export const EXPANSION_TEAM_POOL = [
   { city: "San Diego", name: "Sails", conf: "Western", div: "Pacific", market: "Medium", primary: "#002D62", secondary: "#FEC524" },
 ];
 
+export interface ExpansionCityOption {
+  city: string;
+  state: string;
+  country: 'USA' | 'Canada' | 'Mexico';
+  marketSize: 'Large' | 'Medium' | 'Small';
+  population: number;
+  expansionFee: number;
+  suggestedName: string;
+  suggestedNames: string[];
+  primaryColor: string;
+  secondaryColor: string;
+  conf: 'Eastern' | 'Western';
+  div: string;
+  highlight?: boolean;
+}
+
+export const EXPANSION_CITY_DB: ExpansionCityOption[] = [
+  // ── Large markets ──────────────────────────────────────────────────────────
+  {
+    city: 'Seattle', state: 'WA', country: 'USA', marketSize: 'Large',
+    population: 4.0, expansionFee: 130,
+    suggestedName: 'SuperSonics', suggestedNames: ['SuperSonics', 'Storm', 'Kraken', 'Emeralds', 'Cascades'],
+    primaryColor: '#00471B', secondaryColor: '#FEE123',
+    conf: 'Western', div: 'Northwest', highlight: true,
+  },
+  {
+    city: 'Mexico City', state: 'MX', country: 'Mexico', marketSize: 'Large',
+    population: 21.6, expansionFee: 150,
+    suggestedName: 'Aztecs', suggestedNames: ['Aztecs', 'Dragons', 'Condors', 'Jaguars', 'Toros'],
+    primaryColor: '#006341', secondaryColor: '#CE1126',
+    conf: 'Western', div: 'Southwest', highlight: true,
+  },
+  {
+    city: 'Montreal', state: 'QC', country: 'Canada', marketSize: 'Large',
+    population: 4.2, expansionFee: 120,
+    suggestedName: 'Express', suggestedNames: ['Express', 'Royals', 'Nordiques', 'Cavaliers', 'Storm'],
+    primaryColor: '#003DA5', secondaryColor: '#E31837',
+    conf: 'Eastern', div: 'Atlantic', highlight: true,
+  },
+  // ── Medium markets ─────────────────────────────────────────────────────────
+  {
+    city: 'Las Vegas', state: 'NV', country: 'USA', marketSize: 'Medium',
+    population: 2.3, expansionFee: 125,
+    suggestedName: 'Royals', suggestedNames: ['Royals', 'Aces', 'Neon', 'Scorpions', 'Desert Wolves'],
+    primaryColor: '#702963', secondaryColor: '#FFD700',
+    conf: 'Western', div: 'Pacific', highlight: true,
+  },
+  {
+    city: 'Vancouver', state: 'BC', country: 'Canada', marketSize: 'Medium',
+    population: 2.6, expansionFee: 110,
+    suggestedName: 'Grizzlies', suggestedNames: ['Grizzlies', 'Orcas', 'Voyageurs', 'Cascades', 'Ravens'],
+    primaryColor: '#041E42', secondaryColor: '#00843D',
+    conf: 'Western', div: 'Pacific',
+  },
+  {
+    city: 'Tampa', state: 'FL', country: 'USA', marketSize: 'Medium',
+    population: 3.2, expansionFee: 100,
+    suggestedName: 'Bay', suggestedNames: ['Bay', 'Lightning', 'Armada', 'Suncoast', 'Tides'],
+    primaryColor: '#002868', secondaryColor: '#BF0A30',
+    conf: 'Eastern', div: 'Southeast',
+  },
+  {
+    city: 'St. Louis', state: 'MO', country: 'USA', marketSize: 'Medium',
+    population: 2.8, expansionFee: 95,
+    suggestedName: 'Arch', suggestedNames: ['Arch', 'Blues', 'Pioneers', 'Cardinals', 'Gateway'],
+    primaryColor: '#002F6C', secondaryColor: '#BA0C2F',
+    conf: 'Eastern', div: 'Central',
+  },
+  {
+    city: 'San Diego', state: 'CA', country: 'USA', marketSize: 'Medium',
+    population: 3.3, expansionFee: 105,
+    suggestedName: 'Sails', suggestedNames: ['Sails', 'Waves', 'Surf', 'Tides', 'Bay'],
+    primaryColor: '#002D62', secondaryColor: '#FEC524',
+    conf: 'Western', div: 'Pacific',
+  },
+  {
+    city: 'Pittsburgh', state: 'PA', country: 'USA', marketSize: 'Medium',
+    population: 2.4, expansionFee: 90,
+    suggestedName: 'Steel', suggestedNames: ['Steel', 'Rivers', 'Forge', 'Iron', 'Bridges'],
+    primaryColor: '#FFB612', secondaryColor: '#101820',
+    conf: 'Eastern', div: 'Atlantic',
+  },
+  {
+    city: 'Baltimore', state: 'MD', country: 'USA', marketSize: 'Medium',
+    population: 2.9, expansionFee: 92,
+    suggestedName: 'Ravens', suggestedNames: ['Ravens', 'Crabs', 'Harbor', 'Chesapeake', 'Iron'],
+    primaryColor: '#241773', secondaryColor: '#9E7C0C',
+    conf: 'Eastern', div: 'Atlantic',
+  },
+  {
+    city: 'Kansas City', state: 'MO', country: 'USA', marketSize: 'Medium',
+    population: 2.2, expansionFee: 88,
+    suggestedName: 'Stampede', suggestedNames: ['Stampede', 'Chiefs', 'Storm', 'Thunder', 'Royals'],
+    primaryColor: '#E31837', secondaryColor: '#FFB81C',
+    conf: 'Eastern', div: 'Central',
+  },
+  {
+    city: 'Nashville', state: 'TN', country: 'USA', marketSize: 'Medium',
+    population: 2.0, expansionFee: 85,
+    suggestedName: 'Sounds', suggestedNames: ['Sounds', 'Predators', 'Rhythm', 'Stars', 'Boots'],
+    primaryColor: '#041E42', secondaryColor: '#FFB81C',
+    conf: 'Eastern', div: 'Southeast',
+  },
+  // ── Small markets ──────────────────────────────────────────────────────────
+  {
+    city: 'Cincinnati', state: 'OH', country: 'USA', marketSize: 'Small',
+    population: 1.7, expansionFee: 78,
+    suggestedName: 'Bengals', suggestedNames: ['Bengals', 'Reds', 'River City', 'Cyclones', 'Ohio'],
+    primaryColor: '#FB4F14', secondaryColor: '#000000',
+    conf: 'Eastern', div: 'Central',
+  },
+  {
+    city: 'Raleigh', state: 'NC', country: 'USA', marketSize: 'Small',
+    population: 1.4, expansionFee: 75,
+    suggestedName: 'Oaks', suggestedNames: ['Oaks', 'Hurricanes', 'Triangle', 'Pines', 'Storm'],
+    primaryColor: '#CC0000', secondaryColor: '#000000',
+    conf: 'Eastern', div: 'Southeast',
+  },
+  {
+    city: 'Columbus', state: 'OH', country: 'USA', marketSize: 'Small',
+    population: 2.1, expansionFee: 80,
+    suggestedName: 'Crew', suggestedNames: ['Crew', 'Bucks', 'Ohio Express', 'Blue Jackets', 'Forge'],
+    primaryColor: '#002F6C', secondaryColor: '#FFD700',
+    conf: 'Eastern', div: 'Central',
+  },
+  {
+    city: 'Louisville', state: 'KY', country: 'USA', marketSize: 'Small',
+    population: 1.4, expansionFee: 72,
+    suggestedName: 'Cardinals', suggestedNames: ['Cardinals', 'Bats', 'Sluggers', 'Thunder', 'River Kings'],
+    primaryColor: '#AD0000', secondaryColor: '#000000',
+    conf: 'Eastern', div: 'Southeast',
+  },
+  {
+    city: 'Jacksonville', state: 'FL', country: 'USA', marketSize: 'Small',
+    population: 1.6, expansionFee: 74,
+    suggestedName: 'Jaguars', suggestedNames: ['Jaguars', 'Armada', 'Tides', 'Surf', 'River Cats'],
+    primaryColor: '#006778', secondaryColor: '#9F792C',
+    conf: 'Eastern', div: 'Southeast',
+  },
+  {
+    city: 'Buffalo', state: 'NY', country: 'USA', marketSize: 'Small',
+    population: 1.2, expansionFee: 70,
+    suggestedName: 'Sabres', suggestedNames: ['Sabres', 'Blizzard', 'Bills', 'Thunder', 'Niagara'],
+    primaryColor: '#00338D', secondaryColor: '#FCB514',
+    conf: 'Eastern', div: 'Atlantic',
+  },
+];
+
 export const getRandomGender = (ratio: number): Gender => {
   return Math.random() * 100 < ratio ? 'Female' : 'Male';
 };
