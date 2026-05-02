@@ -84,22 +84,6 @@ const Expansion: React.FC<ExpansionProps> = ({ league, updateLeague, onScout }) 
       .sort((a, b) => b.rating - a.rating);
   }, [league.teams, draftState]);
 
-  // ── action: start expansion ────────────────────────────────────────────────
-  const handleStartExpansion = useCallback(() => {
-    updateLeague({
-      expansionDraft: {
-        active: true,
-        phase: 'setup',
-        protectedPlayerIds: {},
-        expansionTeamIds: [],
-        draftLog: [],
-        pendingTeams: [],
-      },
-    });
-    setForms(Array.from({ length: teamCount }, () => ({ ...BLANK_FORM })));
-    setFormPage(0);
-  }, [teamCount, updateLeague]);
-
   // ── action: finalize team setup → move to protection ──────────────────────
   const handleFinalizeSetup = useCallback(() => {
     if (!draftState) return;
@@ -494,7 +478,7 @@ const Expansion: React.FC<ExpansionProps> = ({ league, updateLeague, onScout }) 
   }
 
   // ══════════════════════════════════════════════════════════════════════════
-  // SCREEN 3: Setup phase — configure new team(s)
+  // SCREEN 2: Setup phase — configure new team(s)
   // ══════════════════════════════════════════════════════════════════════════
   if (draftState.phase === 'setup') {
     const form = forms[formPage] ?? { ...BLANK_FORM };

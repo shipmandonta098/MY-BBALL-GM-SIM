@@ -43,7 +43,7 @@ const DEFAULT_SETTINGS: Partial<LeagueSettings> = {
   draftType: 'NBA 1994', customLotterySelections: 4,
   customLotteryChances: [140,140,140,125,105,90,75,60,45,30,20,15,10,5,5],
   tradableDraftPickSeasons: 4, prospectAgeMin: 19, prospectAgeMax: 22,
-  scheduledExpansion: 'Off', expansionTeamCount: 1, expansionDraftRules: 'Standard', expansionEnabled: false,
+  scheduledExpansion: 'Off', expansionTeamCount: 1, expansionDraftRules: 'Standard',
   fatigueImpact: 'Medium', b2bPenalty: 'Mild', loadManagement: true,
   injuryDuration: 'Realistic', practiceInjuries: false, careerEndingInjuries: true,
   teamChemistry: true, chemistryImpact: 'Medium', personalityClashPenalties: true,
@@ -994,6 +994,14 @@ const Settings: React.FC<SettingsProps> = ({ league, updateLeague, onRegenerateS
             <SelectField label="Expansion Draft Rules" value={s.expansionDraftRules ?? 'Standard'}
               options={['Standard (8 protected)','Protected (11 protected)','Open (0 protected)']}
               onChange={v => updateSettings({ expansionDraftRules: v.split(' ')[0] as any }, 'Expansion Draft Rules')} />
+            <div className="md:col-span-2 flex items-center gap-3 bg-indigo-500/10 border border-indigo-500/30 rounded-2xl p-4">
+              <svg className="w-5 h-5 text-indigo-400 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+              </svg>
+              <p className="text-xs text-indigo-300 font-bold">
+                Expansion is <span className="text-indigo-200 uppercase tracking-widest">automatic</span> — the Expansion tab unlocks after the Finals each season. Use the rules selector above to control protection counts.
+              </p>
+            </div>
 
             {/* Export */}
             <div className="md:col-span-2 flex gap-3 pt-2">
