@@ -425,6 +425,43 @@ export interface Player {
     offeringTeamId: string;
     offeringTeamName: string;
   } | null;
+  /** Season number this player officially retired (set at end-of-season processing) */
+  yearRetired?: number;
+  /** Cached HOF probability 0-100 (recomputed each season) */
+  hofProbability?: number;
+}
+
+export interface HofInductee {
+  /** Matches the retired player's original id */
+  id: string;
+  name: string;
+  position: Position;
+  gender: Gender;
+  height: string;
+  jerseyNumber: number;
+  yearInducted: number;
+  yearRetired: number;
+  /** All team abbreviations this player appeared on (career) */
+  teams: string[];
+  /** Primary franchise (most seasons or most championships with) */
+  primaryTeam: string;
+  primaryTeamId: string;
+  careerGP: number;
+  careerSeasons: number;
+  careerPPG: number;
+  careerRPG: number;
+  careerAPG: number;
+  careerSPG: number;
+  careerBPG: number;
+  careerFGPct: number;
+  careerHighs: { points: number; rebounds: number; assists: number; steals: number; blocks: number; threepm: number };
+  awardsCount: {
+    mvp: number; dpoy: number; roy: number; allNba: number; allNbaFirst: number;
+    championships: number; allStarSelections: number; finalsMyp: number;
+  };
+  hofScore: number;
+  /** Flavour blurb shown on the HOF card */
+  inductionNote: string;
 }
 
 export interface Prospect extends Omit<Player, 'stats' | 'status' | 'morale' | 'salary' | 'contractYears'> {
@@ -898,6 +935,10 @@ export interface LeagueState {
       logoUrl: string;
     }[];
   };
+  /** All-time retired players (removed from FA pool after retirement age). */
+  retiredPlayers?: Player[];
+  /** Hall of Fame inductees — appended each offseason. */
+  hallOfFame?: HofInductee[];
   /** Populated when the human roster OVR ranks top-3 at season start (advisory only). */
   humanOvrAlert?: string;
   /** Preseason exhibition games — separate from regular-season schedule. No standings impact. */
