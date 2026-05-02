@@ -3588,7 +3588,7 @@ const App: React.FC = () => {
     tempState.ownerReviewData  = reviewData;
 
     setLeague(tempState);
-    setActiveTab('expansion');
+    setActiveTab('draft');
     } catch (err) {
       console.error('handleStartOffseason error:', err);
     } finally {
