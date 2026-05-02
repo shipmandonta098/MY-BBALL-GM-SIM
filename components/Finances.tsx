@@ -81,24 +81,55 @@ const Finances: React.FC<FinancesProps> = ({ league, updateLeague }) => {
 
   const formatMoney = fmtSalary;
 
+  // ── Grade & approval/morale impact tables ────────────────────────────────
+  const TIER_GRADES = ['F', 'C', 'B', 'A−', 'A+'] as const;
+  const GRADE_STYLE = [
+    { text: 'text-rose-500',    bg: 'bg-rose-500/15',    border: 'border-rose-500/30'    }, // F
+    { text: 'text-orange-400',  bg: 'bg-orange-500/10',  border: 'border-orange-400/30'  }, // C
+    { text: 'text-amber-400',   bg: 'bg-amber-400/10',   border: 'border-amber-400/30'   }, // B
+    { text: 'text-emerald-400', bg: 'bg-emerald-500/10', border: 'border-emerald-500/30' }, // A−
+    { text: 'text-emerald-300', bg: 'bg-emerald-400/15', border: 'border-emerald-400/40' }, // A+
+  ] as const;
+  // Absolute impact at each tier. On upgrade, delta = values[newIdx] - values[oldIdx].
+  const STAFF_IMPACTS: Record<StaffType, { label: string; values: readonly [number,number,number,number,number] }> = {
+    scouting:   { label: 'Owner Approval', values: [-5,  8, 15, 22, 30] },
+    medical:    { label: 'Player Morale',  values: [-8, 10, 15, 20, 25] },
+    facilities: { label: 'Player Morale',  values: [-6, 12, 18, 24, 30] },
+  };
+
+  const [toastMsg, setToastMsg] = useState<string | null>(null);
+
   const handleUpgrade = (type: StaffType) => {
     const cfg = STAFF_CONFIG[type];
     const budgetKey = type === 'medical' ? 'health' : type;
     const currentLevel = (userTeam.finances.budgets as any)[budgetKey] ?? 20;
     const currentIdx = getStaffTierIndex(currentLevel);
-    if (currentIdx >= 4) return; // already max
+    if (currentIdx >= 4) return;
     const nextTier = cfg.tiers[currentIdx + 1];
-    if (userTeam.finances.cash < nextTier.upgradeCost) return; // insufficient funds
+    if (userTeam.finances.cash < nextTier.upgradeCost) return;
+    const impact = STAFF_IMPACTS[type];
+    const delta  = impact.values[currentIdx + 1] - impact.values[currentIdx];
     const updatedFinances = {
       ...userTeam.finances,
       cash: userTeam.finances.cash - nextTier.upgradeCost,
-      budgets: {
-        ...userTeam.finances.budgets,
-        [budgetKey]: nextTier.level,
-      }
+      budgets: { ...userTeam.finances.budgets, [budgetKey]: nextTier.level },
     };
-    const updatedTeams = league.teams.map(t => t.id === userTeam.id ? { ...t, finances: updatedFinances } : t);
-    updateLeague({ teams: updatedTeams });
+    const leagueUpdates: Partial<typeof league> = {};
+    if (type === 'scouting') {
+      leagueUpdates.ownerApproval = Math.min(100, Math.max(0, (league.ownerApproval ?? 55) + delta));
+    }
+    const updatedTeams = league.teams.map(t => {
+      if (t.id !== userTeam.id) return t;
+      const base = { ...t, finances: updatedFinances };
+      if (type === 'medical' || type === 'facilities') {
+        return { ...base, roster: t.roster.map(p => ({ ...p, morale: Math.min(100, Math.max(0, (p.morale ?? 75) + delta)) })) };
+      }
+      return base;
+    });
+    updateLeague({ teams: updatedTeams, ...leagueUpdates });
+    const sign = delta >= 0 ? '+' : '';
+    setToastMsg(`${cfg.label} → ${nextTier.name}  ·  ${impact.label} ${sign}${delta}`);
+    setTimeout(() => setToastMsg(null), 3500);
   };
 
   const handlePriceChange = (key: 'ticketPrice' | 'concessionPrice', val: number) => {
@@ -108,66 +139,99 @@ const Finances: React.FC<FinancesProps> = ({ league, updateLeague }) => {
   };
 
   const TIER_COLORS = ['text-slate-500', 'text-sky-400', 'text-emerald-400', 'text-amber-400', 'text-rose-400'];
-  const TIER_BG    = ['bg-slate-800/50', 'bg-sky-500/10', 'bg-emerald-500/10', 'bg-amber-500/10', 'bg-rose-500/10'];
   const TIER_BORDER= ['border-slate-700', 'border-sky-500/30', 'border-emerald-500/30', 'border-amber-500/30', 'border-rose-500/30'];
 
   const StaffUpgradeCard = ({ type }: { type: StaffType }) => {
-    const cfg = STAFF_CONFIG[type];
-    const budgetKey = type === 'medical' ? 'health' : type;
+    const cfg        = STAFF_CONFIG[type];
+    const budgetKey  = type === 'medical' ? 'health' : type;
     const currentLevel = (userTeam.finances.budgets as any)[budgetKey] ?? 20;
     const currentIdx = getStaffTierIndex(currentLevel);
     const currentTier = cfg.tiers[currentIdx];
-    const nextTier = currentIdx < 4 ? cfg.tiers[currentIdx + 1] : null;
-    const canAfford = nextTier ? userTeam.finances.cash >= nextTier.upgradeCost : false;
+    const nextTier   = currentIdx < 4 ? cfg.tiers[currentIdx + 1] : null;
+    const canAfford  = nextTier ? userTeam.finances.cash >= nextTier.upgradeCost : false;
     const [showTooltip, setShowTooltip] = useState(false);
+
+    const grade   = TIER_GRADES[currentIdx];
+    const gs      = GRADE_STYLE[currentIdx];
+    const impact  = STAFF_IMPACTS[type];
+    const impactVal = impact.values[currentIdx];
+    const impactSign = impactVal >= 0 ? '+' : '';
+    const nextDelta  = nextTier ? impact.values[currentIdx + 1] - impactVal : null;
 
     return (
       <div className={`relative bg-slate-950/40 border ${TIER_BORDER[currentIdx]} rounded-2xl p-5 space-y-4 transition-all`}>
-        {/* Header */}
+
+        {/* Header row: icon + label + grade badge */}
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2">
             <span className="text-xl">{cfg.icon}</span>
             <h4 className="text-xs font-black uppercase tracking-widest text-slate-300">{cfg.label}</h4>
           </div>
-          <button
-            type="button"
-            onMouseEnter={() => setShowTooltip(true)}
-            onMouseLeave={() => setShowTooltip(false)}
-            className="text-slate-500 hover:text-slate-300 transition-colors text-sm"
-          >ⓘ</button>
+          <div className="flex items-center gap-2">
+            {/* Grade badge */}
+            <div className={`px-2.5 py-1 rounded-lg border text-base font-display font-black leading-none ${gs.text} ${gs.bg} ${gs.border}`}>
+              {grade}
+            </div>
+            <button
+              type="button"
+              onMouseEnter={() => setShowTooltip(true)}
+              onMouseLeave={() => setShowTooltip(false)}
+              className="text-slate-500 hover:text-slate-300 transition-colors text-sm"
+            >ⓘ</button>
+          </div>
         </div>
 
         {/* Tooltip */}
         {showTooltip && (
-          <div className="absolute top-12 right-4 z-20 bg-slate-900 border border-slate-700 rounded-xl p-3 text-[10px] text-slate-300 w-56 shadow-2xl">
+          <div className="absolute top-12 right-4 z-20 bg-slate-900 border border-slate-700 rounded-xl p-3 text-[10px] text-slate-300 w-64 shadow-2xl">
             {cfg.tiers.map((tier, i) => (
-              <div key={i} className={`flex gap-2 mb-1.5 ${i === currentIdx ? 'font-bold text-white' : 'text-slate-500'}`}>
+              <div key={i} className={`flex justify-between gap-2 mb-1.5 ${i === currentIdx ? 'font-bold text-white' : 'text-slate-500'}`}>
                 <span className={`font-black ${TIER_COLORS[i]}`}>{tier.name}:</span>
-                <span>{tier.effect}</span>
+                <span className="text-right">{tier.effect}</span>
               </div>
             ))}
+            <div className="border-t border-slate-700 mt-2 pt-2 space-y-1">
+              {cfg.tiers.map((_, i) => {
+                const v = impact.values[i]; const s = v >= 0 ? '+' : '';
+                return (
+                  <div key={i} className={`flex justify-between text-[9px] ${i === currentIdx ? 'font-bold text-white' : 'text-slate-600'}`}>
+                    <span>{TIER_GRADES[i]}</span>
+                    <span className={v >= 0 ? 'text-emerald-400' : 'text-rose-400'}>{impact.label}: {s}{v}</span>
+                  </div>
+                );
+              })}
+            </div>
           </div>
         )}
 
-        {/* Tier pips */}
+        {/* Tier progress pips */}
         <div className="flex gap-1.5">
           {cfg.tiers.map((_, i) => (
-            <div
-              key={i}
-              className={`flex-1 h-1.5 rounded-full transition-all ${i <= currentIdx ? TIER_COLORS[currentIdx].replace('text-', 'bg-') : 'bg-slate-800'}`}
-            />
+            <div key={i} className={`flex-1 h-1.5 rounded-full transition-all ${i <= currentIdx ? TIER_COLORS[currentIdx].replace('text-', 'bg-') : 'bg-slate-800'}`} />
           ))}
         </div>
 
-        {/* Current tier badge */}
-        <div className={`inline-flex items-center gap-2 px-3 py-1.5 rounded-lg ${TIER_BG[currentIdx]} border ${TIER_BORDER[currentIdx]}`}>
-          <span className={`text-[10px] font-black uppercase tracking-widest ${TIER_COLORS[currentIdx]}`}>
-            {currentTier.name}
-          </span>
+        {/* Tier name + grade inline */}
+        <div className="flex items-center gap-2 flex-wrap">
+          <div className={`inline-flex items-center px-3 py-1.5 rounded-lg border ${gs.bg} ${gs.border}`}>
+            <span className={`text-[10px] font-black uppercase tracking-widest ${gs.text}`}>{currentTier.name}</span>
+          </div>
+          <span className={`text-[10px] font-black uppercase tracking-widest ${gs.text}`}>Grade: {grade}</span>
         </div>
 
-        {/* Effect preview */}
-        <p className="text-[10px] text-slate-500 leading-relaxed">{currentTier.effect}</p>
+        {/* Effect + approval/morale impact */}
+        <div className="space-y-1.5">
+          <p className="text-[10px] text-slate-500 leading-relaxed">{currentTier.effect}</p>
+          <div className={`flex items-center gap-1.5 text-[10px] font-black uppercase tracking-widest ${impactVal >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
+            <span>{impactVal >= 0 ? '▲' : '▼'}</span>
+            <span>{impact.label}: {impactSign}{impactVal}</span>
+          </div>
+          {nextTier && nextDelta !== null && (
+            <p className="text-[9px] text-slate-600 font-bold">
+              Upgrade unlocks: {nextDelta >= 0 ? '+' : ''}{nextDelta} {impact.label}
+            </p>
+          )}
+        </div>
 
         {/* Upgrade button */}
         {nextTier ? (
@@ -186,12 +250,11 @@ const Finances: React.FC<FinancesProps> = ({ league, updateLeague }) => {
               : `Need ${fmtSalary(nextTier.upgradeCost)} to upgrade`}
           </button>
         ) : (
-          <div className="w-full py-2.5 rounded-xl text-[10px] font-black uppercase tracking-widest text-center bg-rose-500/10 border border-rose-500/20 text-rose-400">
-            Max Tier Reached
+          <div className="w-full py-2.5 rounded-xl text-[10px] font-black uppercase tracking-widest text-center bg-emerald-500/10 border border-emerald-500/20 text-emerald-400">
+            ★ Max Tier Reached
           </div>
         )}
 
-        {/* Annual cost note */}
         <p className="text-[9px] text-slate-600 font-bold text-center">
           Annual cost: {fmtSalary(currentTier.annualCost)}/yr
         </p>
@@ -201,6 +264,16 @@ const Finances: React.FC<FinancesProps> = ({ league, updateLeague }) => {
 
   return (
     <div className="space-y-8 animate-in fade-in duration-500 pb-40">
+
+      {/* ── Upgrade toast notification ────────────────────────────────────────── */}
+      {toastMsg && (
+        <div className="fixed bottom-8 left-1/2 -translate-x-1/2 z-[300] animate-in slide-in-from-bottom-4 duration-300">
+          <div className="flex items-center gap-3 px-5 py-3 rounded-2xl bg-slate-900 border border-emerald-500/40 shadow-2xl shadow-emerald-500/10 text-sm font-black text-emerald-400 uppercase tracking-widest whitespace-nowrap">
+            <span className="text-base">✓</span>
+            {toastMsg}
+          </div>
+        </div>
+      )}
 
       {/* ── Franchise Valuation ──────────────────────────────────────────────── */}
       <div className="relative overflow-hidden bg-slate-900 border border-slate-800 rounded-[2.5rem] p-8 shadow-2xl">
