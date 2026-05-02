@@ -3239,6 +3239,9 @@ const App: React.FC = () => {
     // It is cleared when the new season schedule begins (handleAdvanceToRegularSeason)
     tempState.draftPhase = 'lottery';
     tempState.offseasonDay = 0;
+
+    // Automatically unlock expansion after every Finals — default to 1 new team
+    tempState.settings = { ...tempState.settings, expansionEnabled: true, expansionTeamCount: 1 };
     
     const rookieSetting = tempState.settings.rookieProgressionRate || 'Normal';
     const rookieMultiplier = rookieSetting === 'Slow' ? 0.7 : rookieSetting === 'Fast' ? 1.3 : 1.0;
@@ -3565,6 +3568,17 @@ const App: React.FC = () => {
       timestamp: tempState.currentDay,
       realTimestamp: Date.now(),
       isBreaking: true
+    });
+
+    tempState.newsFeed.unshift({
+      id: `expansion-approved-${Date.now()}`,
+      category: 'expansion',
+      headline: 'EXPANSION APPROVED',
+      content: 'League Expansion Approved — One new franchise will join next season!',
+      timestamp: tempState.currentDay,
+      realTimestamp: Date.now() + 1,
+      isBreaking: true,
+      seasonYear: tempState.season,
     });
 
     // ── Attach owner review data (shown as overlay on the draft page) ──

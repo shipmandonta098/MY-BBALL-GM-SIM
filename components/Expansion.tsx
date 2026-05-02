@@ -40,8 +40,7 @@ const fmt = (n: number) =>
 // ─── Component ────────────────────────────────────────────────────────────────
 const Expansion: React.FC<ExpansionProps> = ({ league, updateLeague, onScout }) => {
   const s = league.settings;
-  const enabled    = s.expansionEnabled ?? false;
-  const teamCount  = s.expansionTeamCount ?? 2;
+  const teamCount  = s.expansionTeamCount ?? 1;
   const rules      = s.expansionDraftRules ?? 'Standard';
   const maxProtected = rules === 'Protected' ? 11 : rules === 'Open' ? 0 : 8;
   const draftState = league.expansionDraft;
@@ -378,57 +377,7 @@ const Expansion: React.FC<ExpansionProps> = ({ league, updateLeague, onScout }) 
   }
 
   // ══════════════════════════════════════════════════════════════════════════
-  // SCREEN 1: Not enabled
-  // ══════════════════════════════════════════════════════════════════════════
-  if (!enabled) {
-    return (
-      <div className="space-y-8 animate-in fade-in duration-500 pb-40">
-        <PageHeader
-          title="Expansion Draft"
-          sub="Add a new franchise to your league"
-          badge="Feature Disabled"
-        />
-        <div className="bg-slate-900 border border-slate-800 rounded-3xl p-12 text-center space-y-6">
-          <div className="w-20 h-20 bg-slate-800 rounded-full flex items-center justify-center mx-auto">
-            <svg className="w-10 h-10 text-slate-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.5" d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-2 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4" />
-            </svg>
-          </div>
-          <div>
-            <p className="text-2xl font-display font-bold uppercase text-slate-400 tracking-wide mb-2">
-              Expansion Not Active
-            </p>
-            <p className="text-slate-600 text-sm max-w-md mx-auto">
-              Enable expansion in League Settings to add {teamCount} new franchise{teamCount > 1 ? 's' : ''} to your league via expansion draft.
-            </p>
-          </div>
-          <div className="flex items-center justify-center gap-3 pt-2">
-            <div className="h-px flex-1 max-w-24 bg-slate-800" />
-            <span className="text-[10px] font-black uppercase tracking-widest text-slate-600">How to enable</span>
-            <div className="h-px flex-1 max-w-24 bg-slate-800" />
-          </div>
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 max-w-xl mx-auto text-left">
-            {[
-              { n: '1', t: 'Open Settings', d: 'Go to League Settings → League tab' },
-              { n: '2', t: 'Toggle On', d: 'Find "Enable Expansion" and turn it on' },
-              { n: '3', t: 'Return Here', d: 'Come back to launch your expansion draft' },
-            ].map(step => (
-              <div key={step.n} className="bg-slate-950 border border-slate-800 rounded-2xl p-4 flex gap-3">
-                <span className="text-2xl font-display font-black text-slate-700">{step.n}</span>
-                <div>
-                  <p className="font-bold text-slate-300 text-sm">{step.t}</p>
-                  <p className="text-slate-600 text-xs mt-0.5">{step.d}</p>
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
-      </div>
-    );
-  }
-
-  // ══════════════════════════════════════════════════════════════════════════
-  // SCREEN 2: Enabled but not started
+  // SCREEN 1: Unlocked — configure and launch
   // ══════════════════════════════════════════════════════════════════════════
   if (!draftState?.active) {
     return (
@@ -483,6 +432,29 @@ const Expansion: React.FC<ExpansionProps> = ({ league, updateLeague, onScout }) 
               </div>
             </div>
           ))}
+        </div>
+
+        {/* Team count selector */}
+        <div className="bg-slate-900 border border-slate-800 rounded-3xl p-6 flex flex-col sm:flex-row sm:items-center gap-4">
+          <div className="flex-1">
+            <p className="text-xs font-black uppercase tracking-[0.3em] text-slate-400">Expansion Teams</p>
+            <p className="text-[11px] text-slate-600 mt-0.5">How many new franchises will join next season?</p>
+          </div>
+          <div className="flex gap-2">
+            {([1, 2, 4] as const).map(n => (
+              <button
+                key={n}
+                onClick={() => updateLeague({ settings: { ...s, expansionTeamCount: n } })}
+                className={`w-14 h-10 rounded-xl font-display font-black text-sm transition-all ${
+                  teamCount === n
+                    ? 'bg-orange-500 text-slate-950 shadow-lg shadow-orange-500/30'
+                    : 'bg-slate-800 text-slate-400 hover:bg-slate-700 hover:text-slate-200'
+                }`}
+              >
+                {n}
+              </button>
+            ))}
+          </div>
         </div>
 
         {/* Steps overview */}

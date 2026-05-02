@@ -43,7 +43,7 @@ const DEFAULT_SETTINGS: Partial<LeagueSettings> = {
   draftType: 'NBA 1994', customLotterySelections: 4,
   customLotteryChances: [140,140,140,125,105,90,75,60,45,30,20,15,10,5,5],
   tradableDraftPickSeasons: 4, prospectAgeMin: 19, prospectAgeMax: 22,
-  scheduledExpansion: 'Off', expansionTeamCount: 2, expansionDraftRules: 'Standard', expansionEnabled: false,
+  scheduledExpansion: 'Off', expansionTeamCount: 1, expansionDraftRules: 'Standard', expansionEnabled: false,
   fatigueImpact: 'Medium', b2bPenalty: 'Mild', loadManagement: true,
   injuryDuration: 'Realistic', practiceInjuries: false, careerEndingInjuries: true,
   teamChemistry: true, chemistryImpact: 'Medium', personalityClashPenalties: true,
@@ -129,7 +129,6 @@ const SEARCH_INDEX: { tab: SettingsTab; label: string }[] = [
   { tab: 'league', label: 'Draft Type' }, { tab: 'league', label: 'Custom Lottery Selections' },
   { tab: 'league', label: 'Custom Lottery Chances' }, { tab: 'league', label: 'Tradable Draft Pick Seasons' },
   { tab: 'league', label: 'Prospect Age Min' }, { tab: 'league', label: 'Prospect Age Max' },
-  { tab: 'league', label: 'Enable Expansion' }, { tab: 'league', label: 'Expansion Team Count' },
   { tab: 'league', label: 'Expansion Draft Rules' },
   { tab: 'league', label: 'Division Games' }, { tab: 'league', label: 'Conference Games' },
   { tab: 'league', label: 'Trade Deadline Fraction' }, { tab: 'league', label: 'Split By Conference' },
@@ -327,7 +326,7 @@ const Settings: React.FC<SettingsProps> = ({ league, updateLeague, onRegenerateS
   const resetTab = () => {
     const tabDefaults: Partial<LeagueSettings> = {};
     const tabMap: Record<SettingsTab, (keyof typeof DEFAULT_SETTINGS)[]> = {
-      league:     ['playoffFormat','playoffSeeding','playInTournament','homeCourt','tradeDeadline','hardCapAtDeadline','maxContractYears','rookieScaleContracts','maxPlayerSalaryPct','birdRights','draftRounds','draftClassSize','internationalProspects','draftLottery','scheduledExpansion','expansionTeamCount','expansionDraftRules','expansionEnabled','divisionGames','conferenceGames','tradeDeadlineFraction','splitByConference','guaranteedPerDivision','reseedRounds','ownerPatienceLevel','luxuryTaxMultiplier','budgetThreshold','tradeSalaryMatchPct','seasonLength','minRosterSize','maxRosterSize','draftType','customLotterySelections','tradableDraftPickSeasons','prospectAgeMin','prospectAgeMax','minPayroll','luxuryTaxThreshold','salaryCapType','pick1SalaryPct','roundsAboveMin','canRefuseAfterRookie'],
+      league:     ['playoffFormat','playoffSeeding','playInTournament','homeCourt','tradeDeadline','hardCapAtDeadline','maxContractYears','rookieScaleContracts','maxPlayerSalaryPct','birdRights','draftRounds','draftClassSize','internationalProspects','draftLottery','scheduledExpansion','expansionDraftRules','divisionGames','conferenceGames','tradeDeadlineFraction','splitByConference','guaranteedPerDivision','reseedRounds','ownerPatienceLevel','luxuryTaxMultiplier','budgetThreshold','tradeSalaryMatchPct','seasonLength','minRosterSize','maxRosterSize','draftType','customLotterySelections','tradableDraftPickSeasons','prospectAgeMin','prospectAgeMax','minPayroll','luxuryTaxThreshold','salaryCapType','pick1SalaryPct','roundsAboveMin','canRefuseAfterRookie'],
       gameplay:   ['fatigueImpact','b2bPenalty','loadManagement','injuryDuration','practiceInjuries','careerEndingInjuries','teamChemistry','chemistryImpact','personalityClashPenalties','playerMorale','moraleAffectsAttributes','tradeRequestThreshold'],
       sliders:    ['sliderLayup','sliderMidRange','slider3pt','sliderFreeThrow','sliderFastBreak','sliderPostUp','sliderPickRoll','sliderSteal','sliderBlock','sliderFoul','sliderHelpDefense','sliderPerimeterDefense','sliderTimeout','sliderSubstitution','sliderTechFoul','sliderFlagrantFoul','sliderInjuryMultiplier'],
       simulation: ['pbpDetailLevel','aiDecisionSpeed','blowoutFrequency','comebackFrequency','overtimeFrequency','upsetFrequency','globalPaceOverride','shotClockLength','scoringEra','threePtFrequency','simBlockFrequency','turnoverFrequency','wnbaStatRealism','singleYearSeason'],
@@ -991,25 +990,10 @@ const Settings: React.FC<SettingsProps> = ({ league, updateLeague, onRegenerateS
 
             {/* Expansion */}
             <SectionHeader title="Expansion"
-              sub="Enable to add new franchise(s) via expansion draft. Configure teams in the Expansion tab." />
-            <ToggleField label="Enable Expansion" value={s.expansionEnabled ?? false}
-              onChange={v => updateSettings({ expansionEnabled: v }, 'Enable Expansion')} />
-            <ButtonField label="Expansion Team Count" options={[1,2,4]}
-              value={s.expansionTeamCount ?? 2}
-              onChange={v => updateSettings({ expansionTeamCount: Number(v) as 1|2|4 }, 'Expansion Team Count')} />
+              sub="Expansion automatically unlocks after the Finals each season. Configure team count and draft rules in the Expansion tab." />
             <SelectField label="Expansion Draft Rules" value={s.expansionDraftRules ?? 'Standard'}
               options={['Standard (8 protected)','Protected (11 protected)','Open (0 protected)']}
               onChange={v => updateSettings({ expansionDraftRules: v.split(' ')[0] as any }, 'Expansion Draft Rules')} />
-            {(s.expansionEnabled) && (
-              <div className="md:col-span-2 flex items-center gap-3 bg-orange-500/10 border border-orange-500/30 rounded-2xl p-4">
-                <svg className="w-5 h-5 text-orange-400 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-                </svg>
-                <p className="text-xs text-orange-300 font-bold">
-                  Expansion is enabled — head to the <span className="text-orange-400 uppercase tracking-widest">Expansion</span> tab to set up your new team(s) and run the draft.
-                </p>
-              </div>
-            )}
 
             {/* Export */}
             <div className="md:col-span-2 flex gap-3 pt-2">
