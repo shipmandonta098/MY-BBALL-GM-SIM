@@ -66,7 +66,7 @@ const Finances: React.FC<FinancesProps> = ({ league, updateLeague }) => {
   const champCount = (league.championshipHistory ?? []).filter(c => c.championId === userTeam.id).length;
   const prevMadePlayoffs = (league.previousSeasonStandings ?? []).find(s => s.teamId === userTeam.id)?.madePlayoffs ?? false;
   const liveValuation = useMemo(() => calcFranchiseValuation(userTeam, {
-    isWNBA,
+    isWNBA: isWomens,
     champCount,
     prevMadePlayoffs,
     seasonLength: league.settings.seasonLength ?? 82,
