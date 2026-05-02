@@ -70,7 +70,7 @@ const Finances: React.FC<FinancesProps> = ({ league, updateLeague }) => {
     champCount,
     prevMadePlayoffs,
     seasonLength: league.settings.seasonLength ?? 82,
-  }), [userTeam, isWNBA, champCount, prevMadePlayoffs, league.settings.seasonLength]);
+  }), [userTeam, isWomens, champCount, prevMadePlayoffs, league.settings.seasonLength]);
 
   // If we have an end-of-season snapshot, prefer it; otherwise show live estimate
   const displayValuation = userTeam.valuation ?? liveValuation.value;
