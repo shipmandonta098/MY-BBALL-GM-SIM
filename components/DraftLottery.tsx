@@ -27,10 +27,14 @@ const DraftLottery: React.FC<DraftLotteryProps> = ({ league, updateLeague }) => 
   const [fullOrder, setFullOrder] = useState<DraftPick[]>([]);
   const ballAnimRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
+  // Exclude brand-new expansion teams added this offseason — they have no prevSeasonWins
+  // because they haven't played a full season yet. They'll enter the lottery next year.
+  const eligibleTeams = league.teams.filter(t => t.prevSeasonWins !== undefined);
+
   // Sort bottom 14 teams by worst record for lottery eligibility.
   // During offseason the current wins/losses are reset to 0, so use prevSeasonWins/prevSeasonLosses
   // which are captured at season end before the reset. Fall back to current record if not available.
-  const sortedByRecord = [...league.teams].sort((a, b) => {
+  const sortedByRecord = [...eligibleTeams].sort((a, b) => {
     const aW = a.prevSeasonWins ?? a.wins;
     const aL = a.prevSeasonLosses ?? a.losses;
     const bW = b.prevSeasonWins ?? b.wins;
