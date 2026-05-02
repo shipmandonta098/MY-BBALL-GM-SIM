@@ -9,6 +9,7 @@ import { autoSimAllStarWeekend } from './utils/allStarSim';
 import { snapshotPlayerStats } from './utils/playerUtils';
 import { generateGameRecap, generateScoutingReport, generateSeasonNarrative, generateCoachScoutingReport, generateNewsHeadline } from './services/geminiService';
 import { generateAwards } from './utils/awardEngine';
+import { runHofProcessing, computeHofProbability } from './utils/hofEngine';
 import { assignAIPersonalities, runAIGMOffseason, aiGMTradeDeadlineAction, aiGMInSeasonTrades, aiGMPreOffseasonAgreements, generateAITradeProposalsForUser } from './utils/aiGMEngine';
 import { db } from './db';
 import { NavigationProvider } from './context/NavigationContext';
@@ -43,6 +44,7 @@ import TradeProposals from './components/TradeProposals';
 import NewsFeed from './components/NewsFeed';
 import Expansion from './components/Expansion';
 import Awards from './components/Awards';
+import HallOfFame from './components/HallOfFame';
 import Playoffs from './components/Playoffs';
 import Transactions from './components/Transactions';
 import PowerRankings from './components/PowerRankings';
@@ -123,7 +125,7 @@ const App: React.FC = () => {
   const [status, setStatus] = useState<AppStatus>('title');
   const [league, setLeague] = useState<LeagueState | null>(null);
   const [pendingTeamId, setPendingTeamId] = useState<string | null>(null);
-  const [activeTab, setActiveTab] = useState<'dashboard' | 'news' | 'roster' | 'rotations' | 'free_agency' | 'results' | 'standings' | 'schedule' | 'draft' | 'coaching' | 'stats' | 'finances' | 'trade' | 'trade_proposals' | 'expansion' | 'settings' | 'coach_market' | 'awards' | 'playoffs' | 'transactions' | 'power_rankings' | 'gm_profile' | 'team_management' | 'players' | 'allstar' | 'league_history' | 'franchise_history'>('dashboard');
+  const [activeTab, setActiveTab] = useState<'dashboard' | 'news' | 'roster' | 'rotations' | 'free_agency' | 'results' | 'standings' | 'schedule' | 'draft' | 'coaching' | 'stats' | 'finances' | 'trade' | 'trade_proposals' | 'expansion' | 'settings' | 'coach_market' | 'awards' | 'playoffs' | 'transactions' | 'power_rankings' | 'gm_profile' | 'team_management' | 'players' | 'allstar' | 'league_history' | 'franchise_history' | 'hof'>('dashboard');
   const [counterProposal, setCounterProposal] = useState<import('./types').TradeProposal | null>(null);
   const [rosterTeamId, setRosterTeamId] = useState<string>('');
   const [teamManagementId, setTeamManagementId] = useState<string>('');
@@ -3481,6 +3483,53 @@ const App: React.FC = () => {
       return true;
     });
     tempState.freeAgents = cappedFAs;
+
+    // ── HOF processing: retirement + induction ───────────────────────────────
+    {
+      const hofResult = runHofProcessing(tempState);
+
+      // Remove retired players from the FA pool
+      const retiredIds = new Set(hofResult.newlyRetired.map(p => p.id));
+      tempState.freeAgents = tempState.freeAgents.filter(p => !retiredIds.has(p.id));
+      tempState.retiredPlayers = hofResult.updatedRetiredPlayers;
+      tempState.hallOfFame = hofResult.updatedHof;
+
+      // Update hofProbability on all current roster players and FAs
+      const awardHist = tempState.awardHistory ?? [];
+      tempState.teams = tempState.teams.map(t => ({
+        ...t,
+        roster: t.roster.map(p => ({ ...p, hofProbability: computeHofProbability(p, awardHist) })),
+      }));
+      tempState.freeAgents = tempState.freeAgents.map(p => ({ ...p, hofProbability: computeHofProbability(p, awardHist) }));
+
+      // HOF induction news items
+      if (hofResult.newlyInducted.length > 0) {
+        const hofNewsItems: import('./types').NewsItem[] = hofResult.newlyInducted.map((ind, i) => ({
+          id: `hof-induction-${ind.id}-${tempState.season}`,
+          category: 'award' as import('./types').NewsCategory,
+          headline: `${ind.name} Inducted into the Hall of Fame!`,
+          content: `${ind.name} (${ind.position}, ${ind.primaryTeam}) has been inducted into the Basketball Hall of Fame. ${ind.inductionNote}`,
+          timestamp: tempState.currentDay,
+          realTimestamp: Date.now() + i * 50,
+          isBreaking: i === 0,
+          seasonYear: tempState.season,
+        }));
+        if (hofResult.newlyInducted.length > 1) {
+          hofNewsItems.push({
+            id: `hof-class-${tempState.season}`,
+            category: 'award' as import('./types').NewsCategory,
+            headline: `Hall of Fame Class Announced — ${hofResult.newlyInducted.length} Inductees`,
+            content: `This year's HOF class: ${hofResult.newlyInducted.map(h => h.name).join(', ')}.`,
+            timestamp: tempState.currentDay,
+            realTimestamp: Date.now() + hofResult.newlyInducted.length * 50,
+            isBreaking: false,
+            seasonYear: tempState.season,
+          });
+        }
+        tempState.newsFeed = [...hofNewsItems, ...(tempState.newsFeed || [])].slice(0, 2000);
+      }
+    }
+
     tempState.season += 1;
     tempState.coachPool = [...generateCoachPool(20, tempState.settings.coachGenderRatio, tempState.season)];
 
@@ -4318,6 +4367,7 @@ const App: React.FC = () => {
           {activeTab === 'free_agency' && <FreeAgency league={league} updateLeague={updateLeagueState} onScout={handleViewPlayer} recordTransaction={recordTransaction} onAdvanceSeason={handleAdvanceToRegularSeason} onBeginTransition={() => setIsSeasonTransitioning(true)} />}
           {activeTab === 'coach_market' && <CoachesMarket league={league} updateLeague={updateLeagueState} onScout={handleScoutCoach} />}
           {activeTab === 'awards' && <Awards league={league} onScout={handleViewPlayer} onScoutCoach={handleScoutCoach} onManageTeam={handleManageTeam} />}
+          {activeTab === 'hof' && <HallOfFame league={league} />}
           {activeTab === 'playoffs' && <Playoffs league={league} updateLeague={updateLeagueState} onStartOffseason={handleStartOffseason} onScout={handleViewPlayer} onViewBoxScore={(res, home, away) => setViewingBoxScore({ result: res, home, away })} onAddNews={async (cat, data, breaking) => {
             const newState = await addNewsItem(league, cat, data, breaking);
             updateLeagueState(newState);
@@ -4540,6 +4590,9 @@ const App: React.FC = () => {
               teamPrimaryColor: playerTeam?.primaryColor,
             }}
             teams={league.teams.map(t => t.name)}
+            awardHistory={league.awardHistory ?? []}
+            isHofMember={(league.hallOfFame ?? []).some(h => h.id === selectedPlayer.id)}
+            hofYearInducted={(league.hallOfFame ?? []).find(h => h.id === selectedPlayer.id)?.yearInducted}
           />
         );
       })()}

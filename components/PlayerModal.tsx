@@ -1,8 +1,9 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { Player, PlayerStatus, PersonalityTrait, Position, PlayerTendencies, TeamRotation, TrainingFocusArea } from '../types';
+import { Player, PlayerStatus, PersonalityTrait, Position, PlayerTendencies, TeamRotation, TrainingFocusArea, SeasonAwards } from '../types';
 import { getFlag, countryFromHometown, POS_ATTR_RANGES, PosAttrRangeKey, enforcePositionalBounds, FEMALE_ATTR_CAPS, NAMES_MALE, NAMES_FEMALE, COLLEGES_HIGH_MAJOR, COLLEGES_MID_MAJOR, ALL_HOMETOWNS, deriveComposites, deriveArchetype } from '../constants';
 import { fmtSalary } from '../utils/formatters';
 import { getEffectiveRating, canPlayThrough, getInjurySeverity } from '../utils/injuryEffects';
+import { computeHofProbability } from '../utils/hofEngine';
 import { rawUPER, normalizePER, leagueAvgRawUPER } from '../utils/playerUtils';
 
 const POS_RANGE_KEYS: PosAttrRangeKey[] = ['shooting', 'playmaking', 'defense', 'rebounding', 'athleticism'];
@@ -63,6 +64,12 @@ interface PlayerModalProps {
   isWomensLeague?: boolean;
   /** Max allowable extension salary (e.g. max player salary from contract rules) */
   maxExtensionSalary?: number;
+  /** League award history — used to compute HOF probability */
+  awardHistory?: SeasonAwards[];
+  /** True if this player is already in the Hall of Fame */
+  isHofMember?: boolean;
+  /** Year the player was inducted (if HOF member) */
+  hofYearInducted?: number;
 }
 
 const traitIcons: Record<PersonalityTrait, string> = {
@@ -108,6 +115,9 @@ const PlayerModal: React.FC<PlayerModalProps> = ({
   isOffseason = false,
   isWomensLeague = false,
   maxExtensionSalary,
+  awardHistory = [],
+  isHofMember = false,
+  hofYearInducted,
 }) => {
   const [isEditing, setIsEditing] = React.useState(false);
   const [statsTab, setStatsTab] = useState<'season' | 'career' | 'advanced' | 'playoffs'>('season');
@@ -2148,10 +2158,46 @@ const PlayerModal: React.FC<PlayerModalProps> = ({
                   );
                 })()}
 
+                {/* ── HOF Probability ─────────────────────────────────────────── */}
+                {(() => {
+                  if (isHofMember) {
+                    return (
+                      <div className="flex items-center gap-3 px-4 py-3 rounded-2xl bg-amber-500/10 border border-amber-500/25">
+                        <span className="text-xl leading-none">🏛️</span>
+                        <div>
+                          <p className="text-[10px] font-black uppercase tracking-widest text-amber-500">Hall of Fame</p>
+                          <p className="text-xs font-bold text-amber-300">
+                            Inducted {hofYearInducted ? `in ${hofYearInducted}` : ''}
+                          </p>
+                        </div>
+                      </div>
+                    );
+                  }
+                  if (player.careerStats.length >= 2) {
+                    const prob = player.hofProbability ?? computeHofProbability(player, awardHistory);
+                    const color = prob >= 70 ? 'text-emerald-400' : prob >= 40 ? 'text-amber-400' : 'text-rose-400';
+                    const bg = prob >= 70
+                      ? 'bg-emerald-500/8 border-emerald-500/20'
+                      : prob >= 40
+                      ? 'bg-amber-500/8 border-amber-500/20'
+                      : 'bg-rose-500/8 border-rose-500/20';
+                    return (
+                      <div className={`flex items-center justify-between px-4 py-3 rounded-2xl border ${bg}`}>
+                        <div className="flex items-center gap-2">
+                          <span className="text-base leading-none">🏛️</span>
+                          <p className="text-[10px] font-black uppercase tracking-widest text-slate-500">HOF Probability</p>
+                        </div>
+                        <p className={`text-lg font-display font-black ${color}`}>{prob}%</p>
+                      </div>
+                    );
+                  }
+                  return null;
+                })()}
+
                 {/* ── Career highs ────────────────────────────────────────────── */}
                 {hasHighs && (
                   <div className="space-y-2">
-                    <p className="text-[10px] font-black text-slate-600 uppercase tracking-widest">Career Highs</p>
+                    <p className="text-[10px] font-black text-slate-600 uppercase tracking-widest">Career Game Highs</p>
                     <div className="grid grid-cols-3 sm:grid-cols-6 gap-2">
                       {[
                         { label: 'PTS', value: player.careerHighs.points },
