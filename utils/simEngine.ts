@@ -2929,6 +2929,134 @@ const generateCinematicLines = (
   return { setup, attack, result };
 };
 
+// ─── Intentional Late-Game Fouling ───────────────────────────────────────────
+/** Generates PBP events for intentional-foul sequences when a trailing team
+ *  is down 1–8 in the final 60 seconds of Q4 or OT. */
+const generateIntentionalFoulEvents = (
+  trailingTeam: Team,
+  leadingTeam: Team,
+  deficit: number,
+  quarter: number,
+  isWNBA: boolean,
+): PlayByPlayEvent[] => {
+  const events: PlayByPlayEvent[] = [];
+
+  // Number of foul sequences scales with deficit and urgency
+  // Down ≤3: can squeeze in 3 fouls in 60 sec; down 7-8: one desperation foul
+  const nSeqs = deficit <= 3 ? 3 : deficit <= 6 ? 2 : 1;
+
+  // All clock times confined to the final 60 seconds (0:59 → 0:00)
+  const seqTimes =
+    nSeqs === 3 ? ['0:52', '0:35', '0:14'] :
+    nSeqs === 2 ? ['0:48', '0:22'] :
+                  ['0:40'];
+
+  // Find the worst FT shooter on leading team — weight C/PF as preferred hack-a targets
+  const leadRoster = leadingTeam.roster.filter(p => !p.injured);
+  if (!leadRoster.length) return events;
+  const foulTarget = leadRoster.reduce((worst, p) => {
+    const score  = (p.attributes?.freeThrow ?? 50) - (['C', 'PF'].includes(p.position ?? '') ? 5 : 0);
+    const wScore = (worst.attributes?.freeThrow ?? 50) - (['C', 'PF'].includes(worst.position ?? '') ? 5 : 0);
+    return score < wScore ? p : worst;
+  }, leadRoster[0]);
+
+  // A big on the trailing team commits the foul
+  const trailRoster = trailingTeam.roster.filter(p => !p.injured);
+  if (!trailRoster.length) return events;
+  const fouler = trailRoster.find(p => ['PF', 'C'].includes(p.position ?? '')) ?? trailRoster[0];
+
+  const targetName = lastName(foulTarget);
+  const foulerName = lastName(fouler);
+  const trailCoach = trailingTeam.staff.headCoach?.name?.split(' ').at(-1) ?? 'Coach';
+  const ftPct = getFreeThrowPercentage(foulTarget.attributes?.freeThrow ?? 50, foulTarget.position);
+  const pr = pronouns(foulTarget);
+  const isOT = quarter > 4;
+
+  for (let i = 0; i < seqTimes.length; i++) {
+    const time = seqTimes[i];
+    // Parse seconds from "0:SS" for flavor text
+    const secsLeft = parseInt(time.split(':')[1], 10);
+
+    // Coach signals the intentional foul — reference the live clock
+    const callLines = [
+      `${trailCoach} signals for the intentional foul — ${secsLeft} seconds left, no other choice!`,
+      `Hack-a strategy engaged with ${secsLeft} seconds on the clock. ${trailCoach} calling the play!`,
+      `${trailCoach} calls for the deliberate foul — ${trailingTeam.name} need every possession with ${secsLeft} to go.`,
+      `INTENTIONAL FOUL — ${trailCoach} screaming from the sideline with ${secsLeft} seconds remaining${isOT ? ' in OT' : ''}!`,
+    ];
+    events.push({ time, text: callLines[Math.floor(Math.random() * callLines.length)], type: 'info', quarter });
+
+    // Foul committed
+    const foulLines = [
+      `${foulerName} grabs ${targetName} deliberately — sending ${pr.him} to the line. Two shots.`,
+      `${targetName} is fouled hard on the perimeter — ${foulerName} with the intentional hack. Two free throws.`,
+      `${foulerName} wraps up ${targetName}. Deliberate foul called — ${targetName} at the stripe.`,
+      `Intentional foul by ${foulerName} on ${targetName}. ${pr.He} steps to the charity stripe.`,
+    ];
+    events.push({ time, text: foulLines[Math.floor(Math.random() * foulLines.length)], type: 'foul', quarter });
+
+    // Free throw 1
+    const ft1Make = Math.random() < ftPct;
+    const ft1Lines = ft1Make
+      ? [
+          `${targetName} knocks down FT #1 — ${leadingTeam.name} extending the lead with ${secsLeft} seconds left.`,
+          `${targetName} calm under pressure — buries the first free throw.`,
+          `Free throw GOOD. ${targetName} automatic from the charity stripe.`,
+          `${targetName} drills the first one. Hack-a strategy not working yet.`,
+        ]
+      : [
+          `${targetName} MISSES FT #1 with ${secsLeft} seconds left — hack-a strategy paying off!`,
+          `Off the back of the rim! ${targetName} clanks the first free throw. ${trailingTeam.name} alive!`,
+          `${targetName} can't convert — FT #1 rattles out! ${trailingTeam.name} needed that!`,
+          `No good! ${targetName} misses the first. The strategy is WORKING for ${trailingTeam.name}!`,
+        ];
+    events.push({ time, text: ft1Lines[Math.floor(Math.random() * ft1Lines.length)], type: ft1Make ? 'score' : 'miss', quarter });
+
+    // Free throw 2
+    const ft2Make = Math.random() < ftPct;
+    const ft2Lines = ft2Make
+      ? [
+          `${targetName} converts FT #2. ${leadingTeam.name} holding on with ${secsLeft} seconds to go.`,
+          `FT #2 is GOOD — ${pr.he} goes 2-for-2. ${trailingTeam.name} running out of time.`,
+          `${targetName} completes the two-shot trip. Hack-a backfired — tough night for ${trailingTeam.name}.`,
+          `Knocks down the second too. ${trailingTeam.name} needs a miracle with ${secsLeft} seconds left.`,
+        ]
+      : [
+          `${targetName} MISSES FT #2 with ${secsLeft} seconds left! ${trailingTeam.name} gets a live-ball rebound!`,
+          `FT #2 off the iron! Hack-a ${targetName} is WORKING tonight!`,
+          `Both free throws missed — ${trailingTeam.name} grabs the board and still has a chance!`,
+          `Can't hit from the line — ${trailingTeam.name} with the rebound and ${secsLeft} seconds to tie!`,
+        ];
+    events.push({ time, text: ft2Lines[Math.floor(Math.random() * ft2Lines.length)], type: ft2Make ? 'score' : 'miss', quarter });
+
+    // Live rebound if either FT missed
+    if (!ft1Make || !ft2Make) {
+      const rebLines = [
+        `${trailingTeam.name} secures the rebound — pushing the pace with ${secsLeft} seconds on the clock!`,
+        `Rebound ${trailingTeam.name}! Clock stopped — the comeback is alive!`,
+        `${trailingTeam.name} with the board — timeout called to set up the final play.`,
+        `${trailingTeam.name} grabs it! They need a score NOW to keep this game going.`,
+      ];
+      events.push({ time, text: rebLines[Math.floor(Math.random() * rebLines.length)], type: 'info', quarter });
+    }
+
+    // After the last sequence, add ball-inbound acknowledgment with dwindling clock
+    if (i === seqTimes.length - 1) {
+      const afterSecs = Math.max(2, secsLeft - 6);
+      const inboundTime = `0:${afterSecs.toString().padStart(2, '0')}`;
+      const inboundLines = [
+        `Ball inbounded — ${afterSecs} seconds left on the clock. ${leadingTeam.name} just needs to survive.`,
+        `Clock ticking down… ${afterSecs} seconds remaining. ${trailingTeam.name} needs a miracle finish.`,
+        `${afterSecs} seconds left${isOT ? ' in OT' : ''}. ${leadingTeam.name} holds a ${deficit}-point lead.`,
+        `Ball in play — ${afterSecs} seconds to go. Can ${trailingTeam.name} complete the comeback?`,
+      ];
+      events.push({ time: inboundTime, text: inboundLines[Math.floor(Math.random() * inboundLines.length)], type: 'info', quarter });
+    }
+  }
+
+  return events;
+};
+
 // ─── Quarter PBP Generator ────────────────────────────────────────────────────
 const generateQuarterPBP = (
   offTeam: Team,
@@ -3848,6 +3976,17 @@ export const simulateGame = (
     }
     if (q === 4 && Math.abs(runningHome - runningAway) <= 5) {
       pbp.push({ time: '4:00', text: `We have a BALL GAME! ${Math.abs(runningHome - runningAway) <= 2 ? "Anyone's game with 4 minutes left!" : 'One possession game down the stretch!'}`, type: 'info', quarter: q });
+    }
+
+    // Intentional fouling — trailing team hack-a strategy in final 60 seconds of Q4/OT
+    if (q >= 4 && !garbageTime) {
+      const finalDiff    = runningHome - runningAway;
+      const finalDeficit = Math.abs(finalDiff);
+      if (finalDeficit >= 1 && finalDeficit <= 8) {
+        const trailingTeam4 = finalDiff < 0 ? home : away;
+        const leadingTeam4  = finalDiff < 0 ? away : home;
+        pbp.push(...generateIntentionalFoulEvents(trailingTeam4, leadingTeam4, finalDeficit, q, isWNBA));
+      }
     }
 
     // Upset drama commentary — fires when the expected underdog is leading late
