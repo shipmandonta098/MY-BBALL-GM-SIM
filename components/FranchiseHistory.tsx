@@ -154,7 +154,11 @@ const FranchiseHistory: React.FC<FranchiseHistoryProps> = ({ league, initialTeam
     const totalLosses = seasonRecords.reduce((acc, r) => acc + r.losses, 0);
     const winPct = (totalWins + totalLosses > 0) ? (totalWins / (totalWins + totalLosses)).toFixed(3) : '.000';
     const championships = seasonRecords.filter(r => r.isChampion).map(r => r.year);
-    const playoffApps = seasonRecords.filter(r => r.playoffResult !== 'Missed Playoffs').length;
+    const playoffApps = seasonRecords.filter(r =>
+      r.playoffResult !== 'Missed Playoffs' &&
+      r.playoffResult !== 'Not Started' &&
+      r.playoffResult !== 'In Progress'
+    ).length;
     const startYear = seasonRecords.length > 0 ? Math.min(...seasonRecords.map(r => r.year)) : league.season;
     const endYear = league.season;
     return {
@@ -552,7 +556,7 @@ const FranchiseHistory: React.FC<FranchiseHistoryProps> = ({ league, initialTeam
                           { key: 'finalsMvp', label: 'Finals MVP' },
                           { key: 'mvp',       label: 'MVP' },
                           { key: 'dpoy',      label: 'DPOY' },
-                          { key: 'smoy',      label: 'SMOY' },
+                          { key: 'smoy',      label: league.settings.playerGenderRatio === 100 ? 'SWOY' : 'SMOY' },
                           { key: 'mip',       label: 'MIP' },
                           { key: 'roy',       label: 'ROY' },
                         ] as { key: LeagueSortKey; label: string }[]
@@ -696,7 +700,7 @@ const FranchiseHistory: React.FC<FranchiseHistoryProps> = ({ league, initialTeam
                                       {([
                                         { key: 'mvp',      label: 'MVP',   icon: '🏆' },
                                         { key: 'dpoy',     label: 'DPOY',  icon: '🛡️' },
-                                        { key: 'sixthMan', label: 'SMOY',  icon: '⚡' },
+                                        { key: 'sixthMan', label: league.settings.playerGenderRatio === 100 ? 'SWOY' : 'SMOY',  icon: '⚡' },
                                         { key: 'mip',      label: 'MIP',   icon: '📈' },
                                         { key: 'roy',      label: 'ROY',   icon: '🌟' },
                                         { key: 'coy',      label: 'COY',   icon: '🎯' },

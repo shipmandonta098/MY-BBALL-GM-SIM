@@ -27,10 +27,20 @@ const DraftLottery: React.FC<DraftLotteryProps> = ({ league, updateLeague }) => 
   const [fullOrder, setFullOrder] = useState<DraftPick[]>([]);
   const ballAnimRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
-  // Sort bottom 14 teams by worst record for lottery eligibility
-  const sortedByRecord = [...league.teams].sort((a, b) => {
-    const aWinPct = a.wins / Math.max(1, a.wins + a.losses);
-    const bWinPct = b.wins / Math.max(1, b.wins + b.losses);
+  // Exclude brand-new expansion teams added this offseason — they have no prevSeasonWins
+  // because they haven't played a full season yet. They'll enter the lottery next year.
+  const eligibleTeams = league.teams.filter(t => t.prevSeasonWins !== undefined);
+
+  // Sort bottom 14 teams by worst record for lottery eligibility.
+  // During offseason the current wins/losses are reset to 0, so use prevSeasonWins/prevSeasonLosses
+  // which are captured at season end before the reset. Fall back to current record if not available.
+  const sortedByRecord = [...eligibleTeams].sort((a, b) => {
+    const aW = a.prevSeasonWins ?? a.wins;
+    const aL = a.prevSeasonLosses ?? a.losses;
+    const bW = b.prevSeasonWins ?? b.wins;
+    const bL = b.prevSeasonLosses ?? b.losses;
+    const aWinPct = aW / Math.max(1, aW + aL);
+    const bWinPct = bW / Math.max(1, bW + bL);
     return aWinPct - bWinPct;
   });
   const lotteryTeams = sortedByRecord.slice(0, 14);
@@ -39,6 +49,22 @@ const DraftLottery: React.FC<DraftLotteryProps> = ({ league, updateLeague }) => 
   const userLotterySlot = lotteryTeams.findIndex(t => t.id === league.userTeamId); // -1 if not in lottery
 
   const computeFullOrder = (): DraftPick[] => {
+    // The draft consuming this season's picks: season - 1 is the regular season whose picks were tradable.
+    // Picks with year === draftSeason (or legacy no-year picks) were traded during that regular season.
+    const draftSeason = league.season - 1;
+
+    // Build a lookup: originalTeamId + round → currentTeamId (respects trades)
+    const pickHolderMap = new Map<string, string>();
+    for (const team of league.teams) {
+      for (const pick of team.picks) {
+        if (pick.year === draftSeason || pick.year === undefined) {
+          pickHolderMap.set(`${pick.originalTeamId}-${pick.round}`, team.id);
+        }
+      }
+    }
+    const holder = (originalTeamId: string, round: number): string =>
+      pickHolderMap.get(`${originalTeamId}-${round}`) ?? originalTeamId;
+
     const results: DraftPick[] = [];
     const usedTeams = new Set<string>();
 
@@ -54,14 +80,14 @@ const DraftLottery: React.FC<DraftLotteryProps> = ({ league, updateLeague }) => 
         if (rnd <= 0) { winner = candidates[j]; break; }
       }
       usedTeams.add(winner.id);
-      results.push({ round: 1, pick: i + 1, originalTeamId: winner.id, currentTeamId: winner.id });
+      results.push({ round: 1, pick: i + 1, originalTeamId: winner.id, currentTeamId: holder(winner.id, 1), year: draftSeason });
     }
 
     // Picks 5–14: remaining lottery teams in record order
     lotteryTeams.forEach(t => {
       if (!usedTeams.has(t.id)) {
         usedTeams.add(t.id);
-        results.push({ round: 1, pick: results.length + 1, originalTeamId: t.id, currentTeamId: t.id });
+        results.push({ round: 1, pick: results.length + 1, originalTeamId: t.id, currentTeamId: holder(t.id, 1), year: draftSeason });
       }
     });
 
@@ -69,7 +95,7 @@ const DraftLottery: React.FC<DraftLotteryProps> = ({ league, updateLeague }) => 
     [...playoffTeams]
       .sort((a, b) => (a.wins / Math.max(1, a.wins + a.losses)) - (b.wins / Math.max(1, b.wins + b.losses)))
       .forEach(t => {
-        results.push({ round: 1, pick: results.length + 1, originalTeamId: t.id, currentTeamId: t.id });
+        results.push({ round: 1, pick: results.length + 1, originalTeamId: t.id, currentTeamId: holder(t.id, 1), year: draftSeason });
       });
 
     // Additional rounds (2+): reverse order of round 1 for each round
@@ -81,7 +107,8 @@ const DraftLottery: React.FC<DraftLotteryProps> = ({ league, updateLeague }) => 
           round,
           pick: (round - 1) * league.teams.length + idx + 1,
           originalTeamId: p.originalTeamId,
-          currentTeamId: p.currentTeamId,
+          currentTeamId: holder(p.originalTeamId, round),
+          year: draftSeason,
         });
       });
     }
@@ -151,11 +178,12 @@ const DraftLottery: React.FC<DraftLotteryProps> = ({ league, updateLeague }) => 
         }
 
         const pick = order[revealIdx];
+        const pickNum = revealIdx + 1; // snapshot BEFORE decrement — updater runs after callback returns (React 18 batching), so revealIdx would already be decremented if we closed over it directly
         const originalSlot = lotteryTeams.findIndex(t => t.id === pick.currentTeamId) + 1; // 1-based, -1 + 1 = 0 if playoff team
-        const jumped = originalSlot > 0 && originalSlot > revealIdx + 1;
+        const jumped = originalSlot > 0 && originalSlot > pickNum;
 
         setRevealedPicks(prev => [
-          { pick: revealIdx + 1, teamId: pick.currentTeamId, originalSlot, jumped },
+          { pick: pickNum, teamId: pick.currentTeamId, originalSlot, jumped },
           ...prev,
         ]);
         revealIdx--;
@@ -257,7 +285,7 @@ const DraftLottery: React.FC<DraftLotteryProps> = ({ league, updateLeague }) => 
                         {team.name}
                       </p>
                       <p className="text-[10px] text-slate-500 font-bold uppercase">
-                        {team.wins}–{team.losses}
+                        {team.prevSeasonWins ?? team.wins}–{team.prevSeasonLosses ?? team.losses}
                       </p>
                     </div>
                     {jumped && (
@@ -310,7 +338,7 @@ const DraftLottery: React.FC<DraftLotteryProps> = ({ league, updateLeague }) => 
                         {team.name}
                       </span>
                       <span className="ml-auto text-[10px] text-slate-600 font-bold">
-                        {team.wins}–{team.losses}
+                        {team.prevSeasonWins ?? team.wins}–{team.prevSeasonLosses ?? team.losses}
                       </span>
                     </div>
                   );
@@ -367,7 +395,9 @@ const DraftLottery: React.FC<DraftLotteryProps> = ({ league, updateLeague }) => 
                 {lotteryTeams.map((team, idx) => {
                   const isUser = team.id === league.userTeamId;
                   const pct = LOTTERY_ODDS_PCT[idx];
-                  const winPct = (team.wins / Math.max(1, team.wins + team.losses) * 100).toFixed(1);
+                  const prevW = team.prevSeasonWins ?? team.wins;
+                  const prevL = team.prevSeasonLosses ?? team.losses;
+                  const winPct = (prevW / Math.max(1, prevW + prevL) * 100).toFixed(1);
                   return (
                     <tr key={team.id} className={`group hover:bg-slate-800/30 transition-all ${isUser ? 'bg-amber-500/5' : ''}`}>
                       <td className="px-6 py-4">
@@ -389,7 +419,9 @@ const DraftLottery: React.FC<DraftLotteryProps> = ({ league, updateLeague }) => 
                         </div>
                       </td>
                       <td className="px-6 py-4 text-center">
-                        <span className="font-mono text-slate-300">{team.wins}–{team.losses}</span>
+                        <span className="font-mono text-slate-300">
+                          {team.prevSeasonWins ?? team.wins}–{team.prevSeasonLosses ?? team.losses}
+                        </span>
                       </td>
                       <td className="px-6 py-4 text-center text-slate-500 font-mono">{winPct}%</td>
                       <td className="px-6 py-4 text-right">

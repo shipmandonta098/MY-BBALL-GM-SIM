@@ -1,6 +1,10 @@
-import React, { useState, useEffect } from 'react';
-import { Player, PlayerStatus, PersonalityTrait, Position, PlayerTendencies, TeamRotation } from '../types';
+import React, { useState, useEffect, useMemo } from 'react';
+import { Player, PlayerStatus, PersonalityTrait, Position, PlayerTendencies, TeamRotation, TrainingFocusArea, SeasonAwards } from '../types';
 import { getFlag, countryFromHometown, POS_ATTR_RANGES, PosAttrRangeKey, enforcePositionalBounds, FEMALE_ATTR_CAPS, NAMES_MALE, NAMES_FEMALE, COLLEGES_HIGH_MAJOR, COLLEGES_MID_MAJOR, ALL_HOMETOWNS, deriveComposites, deriveArchetype } from '../constants';
+import { fmtSalary } from '../utils/formatters';
+import { getEffectiveRating, canPlayThrough, getInjurySeverity } from '../utils/injuryEffects';
+import { computeHofProbability } from '../utils/hofEngine';
+import { rawUPER, normalizePER, leagueAvgRawUPER } from '../utils/playerUtils';
 
 const POS_RANGE_KEYS: PosAttrRangeKey[] = ['shooting', 'playmaking', 'defense', 'rebounding', 'athleticism'];
 
@@ -12,6 +16,9 @@ interface PlayerModalProps {
   isUserTeam: boolean;
   onUpdateStatus: (playerId: string, status: PlayerStatus) => void;
   onRelease: (playerId: string) => void;
+  onAppealSuspension?: (playerId: string) => void;
+  /** True when the draft lottery/live draft is in progress — disables all waiver actions */
+  draftLocked?: boolean;
   godMode?: boolean;
   onUpdatePlayer?: (player: Player) => void;
   /** Whether this player is in the current season's All-Star game */
@@ -34,9 +41,35 @@ interface PlayerModalProps {
     teamLosses?: number;
     /** Team's actual rotation — used to derive true role (Starter/Rotation/Bench) */
     teamRotation?: TeamRotation;
+    teamLogo?: string;
+    teamPrimaryColor?: string;
   };
   /** All team names for the draft-team dropdown in god mode */
   teams?: string[];
+  /** League max player salary for God Mode validation */
+  maxPlayerSalary?: number;
+  /** How many dev-focus interventions the GM has used this season */
+  devInterventionsUsed?: number;
+  /** Maximum allowed interventions per season */
+  devInterventionsMax?: number;
+  /** Called when GM sets a new training focus for this player */
+  onSetTrainingFocus?: (playerId: string, areas: TrainingFocusArea[], durationDays: number) => void;
+  /** Called when GM activates play-through for an injured player */
+  onPlayThroughInjury?: (playerId: string) => void;
+  /** Called when GM extends this player's contract (offseason or expiring) */
+  onExtend?: (playerId: string, years: number, salary: number) => void;
+  /** True when the league is in offseason phase */
+  isOffseason?: boolean;
+  /** True in WNBA-only mode — affects salary display scale */
+  isWomensLeague?: boolean;
+  /** Max allowable extension salary (e.g. max player salary from contract rules) */
+  maxExtensionSalary?: number;
+  /** League award history — used to compute HOF probability */
+  awardHistory?: SeasonAwards[];
+  /** True if this player is already in the Hall of Fame */
+  isHofMember?: boolean;
+  /** Year the player was inducted (if HOF member) */
+  hofYearInducted?: number;
 }
 
 const traitIcons: Record<PersonalityTrait, string> = {
@@ -63,6 +96,8 @@ const PlayerModal: React.FC<PlayerModalProps> = ({
   isUserTeam,
   onUpdateStatus,
   onRelease,
+  onAppealSuspension,
+  draftLocked = false,
   godMode = false,
   onUpdatePlayer,
   isCurrentAllStar = false,
@@ -71,9 +106,136 @@ const PlayerModal: React.FC<PlayerModalProps> = ({
   currentSeason,
   leagueContext,
   teams = [],
+  maxPlayerSalary,
+  devInterventionsUsed = 0,
+  devInterventionsMax = 4,
+  onSetTrainingFocus,
+  onPlayThroughInjury,
+  onExtend,
+  isOffseason = false,
+  isWomensLeague = false,
+  maxExtensionSalary,
+  awardHistory = [],
+  isHofMember = false,
+  hofYearInducted,
 }) => {
   const [isEditing, setIsEditing] = React.useState(false);
   const [statsTab, setStatsTab] = useState<'season' | 'career' | 'advanced' | 'playoffs'>('season');
+  const [showFocusPanel, setShowFocusPanel] = useState(false);
+  const [focusDraft, setFocusDraft] = useState<TrainingFocusArea[]>([]);
+  const [focusDuration, setFocusDuration] = useState<30 | 60 | 90>(60);
+  const [vsTeamId, setVsTeamId] = useState<string>('all');
+  const [showExtendPanel, setShowExtendPanel] = useState(false);
+  const [extendYears, setExtendYears] = useState(2);
+  const [extendSalary, setExtendSalary] = useState(player.salary || (isWomensLeague ? 75_000 : 5_000_000));
+
+  const ALL_FOCUS_AREAS: TrainingFocusArea[] = [
+    'Shooting / 3PT', 'Playmaking / Passing', 'Defense / Rebounding',
+    'Post Scoring / Interior', 'Athleticism / Dunking', 'Finishing / Layups',
+    'Free Throws', 'Mental / Leadership',
+  ];
+  const FOCUS_ICONS: Record<TrainingFocusArea, string> = {
+    'Shooting / 3PT':          '🎯',
+    'Playmaking / Passing':    '🎩',
+    'Defense / Rebounding':    '🛡️',
+    'Post Scoring / Interior': '🏋️',
+    'Athleticism / Dunking':   '💥',
+    'Finishing / Layups':      '🔥',
+    'Free Throws':             '🎱',
+    'Mental / Leadership':     '🧠',
+  };
+  const toggleFocusArea = (area: TrainingFocusArea) => {
+    setFocusDraft(prev =>
+      prev.includes(area)
+        ? prev.filter(a => a !== area)
+        : prev.length < 2 ? [...prev, area] : prev
+    );
+  };
+  const previewResponse = (): { label: string; color: string; desc: string } => {
+    const morale = player.morale ?? 75;
+    const traits = player.personalityTraits ?? [];
+    if (traits.includes('Gym Rat') || traits.includes('Workhorse') || (morale >= 75 && !traits.includes('Lazy') && !traits.includes('Diva/Star'))) {
+      return { label: '🔥 Enthusiastic', color: 'text-emerald-400', desc: '+40% development bonus' };
+    } else if (traits.includes('Lazy') || traits.includes('Diva/Star') || morale < 40) {
+      return { label: '😤 Resistant', color: 'text-rose-400', desc: 'Only 45% of bonus applies' };
+    }
+    return { label: '👍 Receptive', color: 'text-amber-400', desc: 'Standard development bonus' };
+  };
+
+  // ── Last 5 non-DNP games (most recent first) ──────────────────────────────
+  const last5Games = useMemo(() =>
+    [...(player.gameLog ?? [])]
+      .filter(g => !g.dnp)
+      .sort((a, b) => (b.date ?? 0) - (a.date ?? 0))
+      .slice(0, 5),
+    [player.gameLog],
+  );
+
+  // ── Season highs computed from this season's game log ─────────────────────
+  const seasonHighs = useMemo(() => {
+    const games = (player.gameLog ?? []).filter(g => !g.dnp);
+    if (!games.length) return null;
+    const maxOf = (fn: (g: typeof games[0]) => number) =>
+      games.reduce((m, g) => Math.max(m, fn(g)), 0);
+    const bestFgPctGame = games
+      .filter(g => g.fga >= 5)
+      .reduce<typeof games[0] | null>((best, g) =>
+        !best || g.fgm / g.fga > best.fgm / best.fga ? g : best, null);
+    const best3PctGame = games
+      .filter(g => g.threepa >= 3)
+      .reduce<typeof games[0] | null>((best, g) =>
+        !best || g.threepm / g.threepa > best.threepm / best.threepa ? g : best, null);
+    return {
+      pts:     maxOf(g => g.pts),
+      reb:     maxOf(g => g.reb),
+      ast:     maxOf(g => g.ast),
+      stl:     maxOf(g => g.stl),
+      blk:     maxOf(g => g.blk),
+      threepm: maxOf(g => g.threepm),
+      ftm:     maxOf(g => g.ftm),
+      fgm:     maxOf(g => g.fgm),
+      pm:      games.reduce((m, g) => Math.max(m, g.plusMinus), -999),
+      bestFgPctGame,
+      best3PctGame,
+    };
+  }, [player.gameLog]);
+
+  // ── Unique opponents seen in game log ─────────────────────────────────────
+  const uniqueOpponents = useMemo(() => {
+    const seen = new Map<string, string>();
+    (player.gameLog ?? []).forEach(g => {
+      if (g.opponentTeamId && g.opponentTeamName && !seen.has(g.opponentTeamId))
+        seen.set(g.opponentTeamId, g.opponentTeamName);
+    });
+    return [...seen.entries()]
+      .map(([id, name]) => ({ id, name }))
+      .sort((a, b) => a.name.localeCompare(b.name));
+  }, [player.gameLog]);
+
+  // ── Aggregated stats for selected opponent (or all opponents) ─────────────
+  const vsTeamStats = useMemo(() => {
+    const games = (player.gameLog ?? []).filter(
+      g => !g.dnp && (vsTeamId === 'all' || g.opponentTeamId === vsTeamId),
+    );
+    if (!games.length) return null;
+    const n = games.length;
+    const sum = (fn: (g: typeof games[0]) => number) => games.reduce((acc, g) => acc + fn(g), 0);
+    const totalFga = sum(g => g.fga), totalFgm = sum(g => g.fgm);
+    const total3pa = sum(g => g.threepa), total3pm = sum(g => g.threepm);
+    const totalFta = sum(g => g.fta), totalFtm = sum(g => g.ftm);
+    return {
+      gp: n,
+      ppg:  sum(g => g.pts)  / n,
+      rpg:  sum(g => g.reb)  / n,
+      apg:  sum(g => g.ast)  / n,
+      spg:  sum(g => g.stl)  / n,
+      bpg:  sum(g => g.blk)  / n,
+      fgPct:    totalFga > 0 ? totalFgm / totalFga : null,
+      threePct: total3pa > 0 ? total3pm / total3pa : null,
+      ftPct:    totalFta > 0 ? totalFtm / totalFta : null,
+      pm:   sum(g => g.plusMinus) / n,
+    };
+  }, [player.gameLog, vsTeamId]);
 
   const defaultAttributes = {
     shooting: 50, defense: 50, rebounding: 50, playmaking: 50, athleticism: 50,
@@ -242,7 +404,7 @@ const PlayerModal: React.FC<PlayerModalProps> = ({
     }));
   };
 
-  const handleContractChange = (key: 'salary' | 'contractYears', val: number) => {
+  const handleContractChange = (key: keyof Player, val: any) => {
     setEditedPlayer(prev => ({
       ...prev,
       [key]: val
@@ -585,14 +747,22 @@ const PlayerModal: React.FC<PlayerModalProps> = ({
                     <div className="h-px w-full bg-slate-800/50 my-4"></div>
                     
                     <h3 className="text-[10px] font-black text-amber-500 uppercase tracking-[0.5em]">Contract & Draft</h3>
+                    {maxPlayerSalary && editedPlayer.salary > maxPlayerSalary && (
+                      <div className="flex items-center gap-2 bg-rose-500/10 border border-rose-500/30 rounded-xl px-3 py-2">
+                        <span className="text-rose-400 text-[11px]">⚠ Salary exceeds league max ({fmtSalary(maxPlayerSalary)})</span>
+                      </div>
+                    )}
                     <div className="grid grid-cols-2 gap-4">
                       <div className="space-y-2">
-                        <label className="text-[10px] font-black uppercase text-slate-500 tracking-widest">Salary ($)</label>
-                        <input 
-                          type="number" 
+                        <label className="text-[10px] font-black uppercase text-slate-500 tracking-widest">
+                          Salary ($)
+                          {maxPlayerSalary && <span className="ml-2 text-emerald-600 normal-case font-bold">max {fmtSalary(maxPlayerSalary)}</span>}
+                        </label>
+                        <input
+                          type="number"
                           value={editedPlayer.salary}
                           onChange={e => handleContractChange('salary', parseInt(e.target.value))}
-                          className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-3 text-white font-bold focus:outline-none focus:border-amber-500/50"
+                          className={`w-full bg-slate-950 border rounded-xl px-4 py-3 text-white font-bold focus:outline-none focus:border-amber-500/50 ${maxPlayerSalary && editedPlayer.salary > maxPlayerSalary ? 'border-rose-500/50' : 'border-slate-800'}`}
                         />
                       </div>
                       <div className="space-y-2">
@@ -606,6 +776,72 @@ const PlayerModal: React.FC<PlayerModalProps> = ({
                         />
                       </div>
                     </div>
+                    {/* ── FA Type ── */}
+                    <div className="space-y-2">
+                      <label className="text-[10px] font-black uppercase text-slate-500 tracking-widest">FA Classification</label>
+                      <select
+                        value={editedPlayer.faType ?? 'none'}
+                        onChange={e => handleContractChange('faType', e.target.value === 'none' ? undefined : (e.target.value as 'UFA' | 'RFA'))}
+                        className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-3 text-white font-bold focus:outline-none focus:border-amber-500/50"
+                      >
+                        <option value="none">— None —</option>
+                        <option value="UFA">Unrestricted FA (UFA)</option>
+                        <option value="RFA">Restricted FA (RFA)</option>
+                      </select>
+                    </div>
+
+                    {/* ── Team Option ── */}
+                    <div className="space-y-2">
+                      <div className="flex items-center justify-between">
+                        <label className="text-[10px] font-black uppercase text-slate-500 tracking-widest">Team Option</label>
+                        <button
+                          type="button"
+                          onClick={() => handleContractChange('teamOption', !editedPlayer.teamOption)}
+                          className={`relative w-10 h-5 rounded-full transition-colors ${editedPlayer.teamOption ? 'bg-amber-500' : 'bg-slate-700'}`}
+                        >
+                          <span className={`absolute top-0.5 w-4 h-4 bg-white rounded-full shadow transition-all ${editedPlayer.teamOption ? 'left-5' : 'left-0.5'}`} />
+                        </button>
+                      </div>
+                      {editedPlayer.teamOption && (
+                        <div className="flex items-center gap-2">
+                          <span className="text-[10px] text-slate-500 font-bold">Year</span>
+                          <input
+                            type="number"
+                            min="1" max="5"
+                            value={editedPlayer.teamOptionYear ?? 1}
+                            onChange={e => handleContractChange('teamOptionYear', parseInt(e.target.value))}
+                            className="w-full bg-slate-950 border border-amber-500/30 rounded-xl px-4 py-2 text-white font-bold focus:outline-none focus:border-amber-500"
+                          />
+                        </div>
+                      )}
+                    </div>
+
+                    {/* ── Player Option ── */}
+                    <div className="space-y-2">
+                      <div className="flex items-center justify-between">
+                        <label className="text-[10px] font-black uppercase text-slate-500 tracking-widest">Player Option</label>
+                        <button
+                          type="button"
+                          onClick={() => handleContractChange('playerOption', !editedPlayer.playerOption)}
+                          className={`relative w-10 h-5 rounded-full transition-colors ${editedPlayer.playerOption ? 'bg-sky-500' : 'bg-slate-700'}`}
+                        >
+                          <span className={`absolute top-0.5 w-4 h-4 bg-white rounded-full shadow transition-all ${editedPlayer.playerOption ? 'left-5' : 'left-0.5'}`} />
+                        </button>
+                      </div>
+                      {editedPlayer.playerOption && (
+                        <div className="flex items-center gap-2">
+                          <span className="text-[10px] text-slate-500 font-bold">Year</span>
+                          <input
+                            type="number"
+                            min="1" max="5"
+                            value={editedPlayer.playerOptionYear ?? 1}
+                            onChange={e => handleContractChange('playerOptionYear', parseInt(e.target.value))}
+                            className="w-full bg-slate-950 border border-sky-500/30 rounded-xl px-4 py-2 text-white font-bold focus:outline-none focus:border-sky-500"
+                          />
+                        </div>
+                      )}
+                    </div>
+
                     <div className="grid grid-cols-2 gap-4">
                       <div className="space-y-2">
                         <label className="text-[10px] font-black uppercase text-slate-500 tracking-widest">Draft Year</label>
@@ -822,13 +1058,43 @@ const PlayerModal: React.FC<PlayerModalProps> = ({
           </button>
         </div>
 
-        <div className="relative h-64 bg-slate-800 shrink-0">
-          <div className="absolute inset-0 bg-gradient-to-t from-slate-900 via-slate-900/40 to-transparent"></div>
+        <div
+          className="relative h-64 shrink-0 overflow-hidden"
+          style={leagueContext?.teamPrimaryColor
+            ? { background: `linear-gradient(135deg, #0f172a 0%, ${leagueContext.teamPrimaryColor}30 100%)` }
+            : { backgroundColor: '#0f172a' }}
+        >
+          {/* Team logo — faded background element */}
+          {leagueContext?.teamLogo ? (
+            <img
+              src={leagueContext.teamLogo}
+              alt=""
+              className="absolute right-2 top-1/2 -translate-y-1/2 w-80 h-80 object-contain pointer-events-none select-none"
+              style={{ opacity: 0.13 }}
+              referrerPolicy="no-referrer"
+              onError={e => { (e.currentTarget as HTMLImageElement).style.display = 'none'; }}
+            />
+          ) : (
+            <div className="absolute right-4 top-1/2 -translate-y-1/2 font-display font-black text-white/[0.04] pointer-events-none select-none leading-none"
+              style={{ fontSize: '18rem' }}>
+              #{player.jerseyNumber}
+            </div>
+          )}
+          {/* Gradient overlays — keep left-side text crisp */}
+          <div className="absolute inset-0 bg-gradient-to-r from-slate-950 via-slate-950/70 to-transparent" />
+          <div className="absolute inset-0 bg-gradient-to-t from-slate-950 via-transparent to-slate-950/20" />
           <div className="absolute bottom-8 left-10 md:bottom-10 md:left-12 flex items-end gap-8">
-            <div className="text-[12rem] md:text-[14rem] font-display font-black text-white/[0.03] absolute -top-10 md:-top-20 -left-10 md:-left-16 pointer-events-none select-none">#{player.jerseyNumber}</div>
 
             <div className="relative z-10 flex flex-col">
-              <h2 className="text-5xl md:text-8xl font-display font-bold uppercase tracking-tighter text-white drop-shadow-lg leading-tight">{player.name}</h2>
+              <h2 className="text-5xl md:text-8xl font-display font-bold uppercase tracking-tighter text-white drop-shadow-lg leading-tight flex items-baseline gap-3">
+                {player.name}
+                {(player.allStarSelections?.length ?? 0) > 0 && (
+                  <span
+                    title={`${player.allStarSelections!.length}× All-Star`}
+                    className="text-amber-400 text-4xl md:text-6xl leading-none select-none drop-shadow-md"
+                  >★</span>
+                )}
+              </h2>
               <div className="flex flex-wrap items-center gap-4 mt-2">
                 <span className="px-4 py-1.5 bg-amber-500 text-slate-950 text-xs font-black uppercase rounded-lg shadow-lg shadow-amber-500/20">{player.position}</span>
                 <span className="text-slate-100 font-display font-bold text-xl uppercase tracking-wider">
@@ -862,6 +1128,12 @@ const PlayerModal: React.FC<PlayerModalProps> = ({
                       : 'bg-sky-500/15 text-sky-400 border-sky-500/30 shadow-sky-900/20'
                   }`}>
                     ⭐ All-Star {currentAllStarRole}
+                  </span>
+                )}
+                {player.isSuspended && (player.suspensionGames ?? 0) > 0 && (
+                  <span className="px-3 py-1 text-[10px] font-black uppercase tracking-widest rounded border flex items-center gap-1.5 bg-red-500/15 text-red-400 border-red-500/40 shadow-lg shadow-red-900/20">
+                    ⛔ Suspended · {player.suspensionGames}G remaining
+                    {player.suspensionReason ? ` · ${player.suspensionReason}` : ''}
                   </span>
                 )}
               </div>
@@ -937,25 +1209,116 @@ const PlayerModal: React.FC<PlayerModalProps> = ({
              </div>
              <div className="space-y-4">
                 <h4 className="text-[10px] text-slate-500 font-black uppercase tracking-[0.2em]">Overall Efficiency</h4>
-                <div className="flex items-center gap-6">
-                   <span className="text-6xl font-display font-bold text-white">{player.rating}</span>
-                   <div className="flex-1 space-y-2">
-                      <div className="flex justify-between text-[10px] font-black text-slate-500 uppercase tracking-widest">
-                         <span>Rating: {player.rating}</span>
-                         <span>Potential: {player.potential}</span>
+                {(() => {
+                  const effRating = getEffectiveRating(player);
+                  const isInj = player.status === 'Injured' || (player.injuryDaysLeft != null && player.injuryDaysLeft > 0);
+                  const daysLeft = player.injuryDaysLeft ?? 0;
+                  const severity = isInj ? getInjurySeverity(daysLeft) : null;
+                  const showPlayThrough = isUserTeam && isInj && !player.isCareerEnding && !player.isPlayingThrough && daysLeft > 0 && canPlayThrough(daysLeft) && !!onPlayThroughInjury;
+                  return (
+                    <div className="space-y-4">
+                      <div className="flex items-center gap-6">
+                        <div className="flex flex-col items-center gap-1">
+                          <span className="text-6xl font-display font-bold" style={{ color: player.isCareerEnding ? '#7f1d1d' : isInj ? '#f43f5e' : 'white' }}>{effRating}</span>
+                          {player.isCareerEnding && (
+                            <span className="text-[10px] font-black uppercase tracking-widest text-red-300 bg-red-900/40 border border-red-700/60 rounded px-2 py-0.5 whitespace-nowrap animate-pulse">
+                              ☠ Career Threat — Season Ended
+                            </span>
+                          )}
+                          {!player.isCareerEnding && player.isPlayingThrough && (
+                            <span className="text-[10px] font-black uppercase tracking-widest text-orange-300 bg-orange-900/30 border border-orange-500/40 rounded px-2 py-0.5 whitespace-nowrap">
+                              Playing Hurt ⚠️ -{player.injuryOVRPenalty} OVR
+                            </span>
+                          )}
+                          {!player.isCareerEnding && !player.isPlayingThrough && isInj && player.injuryOVRPenalty != null && (
+                            <span className="text-[10px] font-black uppercase tracking-widest text-rose-400 bg-rose-500/10 border border-rose-500/20 rounded px-2 py-0.5 whitespace-nowrap">
+                              {severity === 'severe' ? '🚑' : severity === 'moderate' ? '🤕' : '🩹'} {severity} — -{player.injuryOVRPenalty} OVR
+                            </span>
+                          )}
+                        </div>
+                        <div className="flex-1 space-y-2">
+                          <div className="flex justify-between text-[10px] font-black text-slate-500 uppercase tracking-widest">
+                            <span>Rating: {player.rating}{isInj && player.injuryOVRPenalty != null ? ` (Eff: ${effRating})` : ''}</span>
+                            <span>Potential: {player.potential}</span>
+                          </div>
+                          <div className="h-2 bg-slate-800 rounded-full overflow-hidden">
+                            <div className="h-full" style={{ width: `${effRating}%`, backgroundColor: player.isCareerEnding ? '#7f1d1d' : isInj ? '#f43f5e' : '#f59e0b' }}></div>
+                          </div>
+                          {player.potentialLossNote && (
+                            <p className="text-[9px] font-bold text-rose-400 mt-1">{player.potentialLossNote}</p>
+                          )}
+                          {isInj && daysLeft > 0 && daysLeft < 999 && (
+                            <p className="text-[9px] text-slate-500 font-bold">{daysLeft} day{daysLeft !== 1 ? 's' : ''} remaining · {player.injuryType ?? 'Injury'}</p>
+                          )}
+                        </div>
                       </div>
-                      <div className="h-2 bg-slate-800 rounded-full overflow-hidden">
-                        <div className="h-full bg-amber-500" style={{ width: `${player.rating}%` }}></div>
-                      </div>
-                   </div>
-                </div>
+
+                      {/* Play Through Injury panel */}
+                      {showPlayThrough && (
+                        <div className="bg-orange-900/20 border border-orange-500/30 rounded-2xl p-4 space-y-3">
+                          <div className="flex items-start gap-2">
+                            <span className="text-base">⚠️</span>
+                            <div>
+                              <p className="text-[10px] font-black uppercase tracking-widest text-orange-400">
+                                Play Through Injury — {severity === 'moderate' ? 'High Risk' : 'Available'}
+                              </p>
+                              <p className="text-[10px] text-slate-400 mt-0.5 leading-relaxed">
+                                {severity === 'moderate'
+                                  ? 'Moderate injuries carry significant risk of worsening. Continued play could escalate to a severe or season-ending injury.'
+                                  : 'Minor injury — player can suit up at reduced OVR. Still carries worsening risk, especially in playoffs or back-to-backs.'}
+                              </p>
+                              <p className="text-[9px] text-orange-400/70 mt-1 font-bold">
+                                OVR drops an additional 5–12 points while playing hurt. Worsening chance: {severity === 'moderate' ? '4–14%' : '6–18%'} per game day.
+                              </p>
+                            </div>
+                          </div>
+                          <button
+                            onClick={() => onPlayThroughInjury!(player.id)}
+                            className="w-full py-2.5 rounded-xl bg-orange-500/20 border border-orange-500/40 text-orange-300 text-[10px] font-black uppercase tracking-widest hover:bg-orange-500/30 transition-all"
+                          >
+                            Activate Play Through Injury
+                          </button>
+                        </div>
+                      )}
+
+                      {/* Career-ending — no play-through available */}
+                      {player.isCareerEnding && (
+                        <div className="bg-red-900/20 border border-red-700/40 rounded-2xl p-4">
+                          <p className="text-[10px] font-black uppercase tracking-widest text-red-400 mb-1">Career-Threatening Injury</p>
+                          <p className="text-[10px] text-slate-400 leading-relaxed">
+                            This player cannot return this season. Their long-term future is uncertain. Potential has been permanently affected.
+                          </p>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })()}
              </div>
           </section>
 
           <section className="space-y-8">
-            <div className="flex items-center gap-4">
+            <div className="flex items-center gap-4 flex-wrap">
               <h3 className="text-[10px] font-black text-amber-500 uppercase tracking-[0.5em] whitespace-nowrap">Technical Attribute Matrix</h3>
-              <div className="h-px w-full bg-slate-800/50"></div>
+              <div className="h-px flex-1 bg-slate-800/50"></div>
+              {/* Active training focus badge */}
+              {player.trainingFocus && player.trainingFocus.daysRemaining > 0 && (
+                <div className="flex items-center gap-1.5 px-2.5 py-1 bg-sky-500/10 border border-sky-500/30 rounded-xl">
+                  <span className="text-xs leading-none">🎯</span>
+                  <div>
+                    <div className="text-[8px] font-black uppercase tracking-widest text-sky-400/70">Training Focus</div>
+                    <div className="text-[10px] font-bold text-sky-300 leading-tight">
+                      {player.trainingFocus.areas.join(' · ')}
+                    </div>
+                  </div>
+                  <span className={`ml-1 text-[8px] font-black uppercase ${
+                    player.trainingFocus.playerResponse === 'enthusiastic' ? 'text-emerald-400' :
+                    player.trainingFocus.playerResponse === 'resistant' ? 'text-rose-400' : 'text-amber-400'
+                  }`}>
+                    {player.trainingFocus.playerResponse === 'enthusiastic' ? '🔥 All-In' :
+                     player.trainingFocus.playerResponse === 'resistant' ? '😤 Resisting' : '👍 On-Board'}
+                  </span>
+                </div>
+              )}
             </div>
             
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-x-8 gap-y-10">
@@ -1129,10 +1492,10 @@ const PlayerModal: React.FC<PlayerModalProps> = ({
             const twop = twopa > 0 ? twopm / twopa : 0;
             const ts  = (s.fga + 0.44 * s.fta) > 0
               ? s.points / (2 * (s.fga + 0.44 * s.fta)) : 0;
-            const per = s.minutes > 0
-              ? (s.points + s.rebounds + s.assists + s.steals + s.blocks
-                  - (s.fga - s.fgm) - (s.fta - s.ftm) - s.tov)
-                / s.minutes * 30 : 0;
+            const _lgAvgRaw = leagueAvgRawUPER(
+              (leagueContext?.allPlayers ?? []).map(p => p.stats)
+            );
+            const per = normalizePER(rawUPER(s), _lgAvgRaw);
             const pmPg = s.gamesPlayed > 0 ? s.plusMinus / s.gamesPlayed : 0;
 
             // Current-season splits from previous teams (trade splits)
@@ -1490,6 +1853,68 @@ const PlayerModal: React.FC<PlayerModalProps> = ({
                   </div>
                 )}
 
+                {/* ── Season Highs ────────────────────────────────────────────── */}
+                {statsTab === 'season' && seasonHighs && seasonHighs.pts > 0 && (() => {
+                  const yr = currentSeason;
+                  const hiCol = (v: number) =>
+                    v >= 40 ? 'text-amber-300 font-black' :
+                    v >= 30 ? 'text-amber-400 font-black' :
+                    v >= 20 ? 'text-orange-400 font-bold' :
+                    v >= 10 ? 'text-slate-200 font-bold' : 'text-slate-400';
+                  const card = (label: string, v: number, gold?: boolean) => (
+                    <div key={label} className={`rounded-xl p-2.5 text-center border ${gold ? 'bg-amber-500/10 border-amber-500/25' : 'bg-slate-900/60 border-slate-800/60'}`}>
+                      <div className="text-[9px] font-black uppercase tracking-widest text-slate-600">{label}</div>
+                      <div className={`font-display font-bold text-xl tabular-nums mt-0.5 ${gold ? 'text-amber-400' : hiCol(v)}`}>{v || '—'}</div>
+                    </div>
+                  );
+                  return (
+                    <div className="space-y-2">
+                      <p className="text-[10px] font-black text-orange-500/70 uppercase tracking-widest">
+                        {yr ? `${yr}–${String(yr + 1).slice(2)} ` : ''}Season Highs
+                      </p>
+                      <div className="bg-slate-950/60 border border-orange-500/10 rounded-2xl p-4 space-y-2">
+                        <div className="grid grid-cols-4 gap-2">
+                          {card('PTS',  seasonHighs.pts,     seasonHighs.pts  >= 30)}
+                          {card('REB',  seasonHighs.reb,     seasonHighs.reb  >= 15)}
+                          {card('AST',  seasonHighs.ast,     seasonHighs.ast  >= 10)}
+                          {card('3PM',  seasonHighs.threepm, seasonHighs.threepm >= 7)}
+                        </div>
+                        <div className="grid grid-cols-4 gap-2">
+                          {card('STL', seasonHighs.stl)}
+                          {card('BLK', seasonHighs.blk)}
+                          {card('FTM', seasonHighs.ftm)}
+                          <div className="rounded-xl p-2.5 text-center border bg-slate-900/60 border-slate-800/60">
+                            <div className="text-[9px] font-black uppercase tracking-widest text-slate-600">+/-</div>
+                            <div className={`font-display font-bold text-xl tabular-nums mt-0.5 ${seasonHighs.pm > 15 ? 'text-emerald-400 font-black' : seasonHighs.pm > 0 ? 'text-slate-200' : 'text-slate-500'}`}>
+                              {seasonHighs.pm > -999 ? (seasonHighs.pm > 0 ? `+${seasonHighs.pm}` : String(seasonHighs.pm)) : '—'}
+                            </div>
+                          </div>
+                        </div>
+                        {(seasonHighs.bestFgPctGame || seasonHighs.best3PctGame) && (
+                          <div className="grid grid-cols-2 gap-2 pt-1 border-t border-slate-800/40">
+                            {seasonHighs.bestFgPctGame && (
+                              <div className="flex items-center justify-between px-3 py-2 bg-slate-900/40 border border-slate-800/40 rounded-xl">
+                                <span className="text-[9px] font-black uppercase tracking-widest text-slate-600">Best FG%</span>
+                                <span className="text-[11px] font-bold text-amber-400">
+                                  {seasonHighs.bestFgPctGame.fgm}/{seasonHighs.bestFgPctGame.fga} ({((seasonHighs.bestFgPctGame.fgm / seasonHighs.bestFgPctGame.fga) * 100).toFixed(0)}%)
+                                </span>
+                              </div>
+                            )}
+                            {seasonHighs.best3PctGame && (
+                              <div className="flex items-center justify-between px-3 py-2 bg-slate-900/40 border border-slate-800/40 rounded-xl">
+                                <span className="text-[9px] font-black uppercase tracking-widest text-slate-600">Best 3P%</span>
+                                <span className="text-[11px] font-bold text-amber-400">
+                                  {seasonHighs.best3PctGame.threepm}/{seasonHighs.best3PctGame.threepa} ({((seasonHighs.best3PctGame.threepm / seasonHighs.best3PctGame.threepa) * 100).toFixed(0)}%)
+                                </span>
+                              </div>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })()}
+
                 {/* ── Playoff Stats ───────────────────────────────────────────── */}
                 {statsTab === 'playoffs' && hasPlayoffs && (() => {
                   const po   = player.playoffStats!;
@@ -1509,10 +1934,7 @@ const PlayerModal: React.FC<PlayerModalProps> = ({
                   const pTwoA = po.fga - po.threepa;
                   const pTs  = (po.fga + 0.44 * po.fta) > 0
                     ? po.points / (2 * (po.fga + 0.44 * po.fta)) : 0;
-                  const pPer = po.minutes > 0
-                    ? (po.points + po.rebounds + po.assists + po.steals + po.blocks
-                        - (po.fga - po.fgm) - (po.fta - po.ftm) - po.tov)
-                      / po.minutes * 30 : 0;
+                  const pPer = normalizePER(rawUPER(po), _lgAvgRaw);
 
                   const poCols = [
                     { label: 'GP',   value: String(po.gamesPlayed) },
@@ -1570,15 +1992,24 @@ const PlayerModal: React.FC<PlayerModalProps> = ({
                           </tbody>
                         </table>
                       </div>
-                      <div className="border-t border-slate-800/60 grid grid-cols-3 divide-x divide-slate-800/60">
-                        {[
-                          { label: 'PER',  value: isNaN(pPer) ? '—' : pPer.toFixed(1) },
-                          { label: 'TS%',  value: isNaN(pTs)  ? '—' : (pTs * 100).toFixed(1) + '%' },
-                          { label: 'GP',   value: String(po.gamesPlayed) },
-                        ].map(c => (
+                      <div className="border-t border-slate-800/60 grid grid-cols-3 sm:grid-cols-6 divide-x divide-slate-800/60">
+                        {(() => {
+                          const pPmPg = po.gamesPlayed > 0 ? po.plusMinus / po.gamesPlayed : 0;
+                          const pPoss = (po.fga / pgp) - (po.offReb / pgp) + 0.44 * (po.fta / pgp) + ptpg;
+                          const pORtg = pPoss > 0.5 ? Math.round((pppg / pPoss) * 100) : 0;
+                          const pDRtg = Math.max(85, Math.round(110 - (pspg + pbpg) * 2.5 - (po.defReb / pgp) * 0.5));
+                          return [
+                            { label: 'PER',   value: isNaN(pPer)  ? '—' : pPer.toFixed(1),          hi: pPer >= 20 },
+                            { label: 'TS%',   value: isNaN(pTs)   ? '—' : (pTs * 100).toFixed(1) + '%', hi: pTs >= 0.58 },
+                            { label: 'eFG%',  value: po.fga > 0   ? (peFG * 100).toFixed(1) + '%' : '—', hi: peFG >= 0.53 },
+                            { label: '+/-',   value: po.gamesPlayed > 0 ? (pPmPg >= 0 ? '+' : '') + pPmPg.toFixed(1) : '—', hi: pPmPg >= 5 },
+                            { label: 'ORtg',  value: pORtg > 0    ? String(pORtg) : '—',              hi: pORtg >= 115 },
+                            { label: 'DRtg',  value: po.gamesPlayed > 0 ? String(pDRtg) : '—',        hi: pDRtg <= 105 },
+                          ];
+                        })().map(c => (
                           <div key={c.label} className="py-3 text-center">
                             <div className="text-[10px] font-black uppercase tracking-widest text-slate-500">{c.label}</div>
-                            <div className="font-display font-bold text-slate-300 tabular-nums mt-0.5">{c.value}</div>
+                            <div className={`font-display font-bold tabular-nums mt-0.5 text-sm ${c.hi ? 'text-amber-400' : 'text-slate-300'}`}>{c.value}</div>
                           </div>
                         ))}
                       </div>
@@ -1818,33 +2249,107 @@ const PlayerModal: React.FC<PlayerModalProps> = ({
                   );
                 })()}
 
-                {/* ── Career highs ────────────────────────────────────────────── */}
-                {hasHighs && (
-                  <div className="space-y-2">
-                    <p className="text-[10px] font-black text-slate-600 uppercase tracking-widest">Career Highs</p>
-                    <div className="grid grid-cols-3 sm:grid-cols-6 gap-2">
-                      {[
-                        { label: 'PTS', value: player.careerHighs.points },
-                        { label: 'REB', value: player.careerHighs.rebounds },
-                        { label: 'AST', value: player.careerHighs.assists },
-                        { label: 'STL', value: player.careerHighs.steals },
-                        { label: 'BLK', value: player.careerHighs.blocks },
-                        { label: '3PM', value: player.careerHighs.threepm },
-                      ].map(h => (
-                        <div key={h.label} className="bg-slate-900 border border-slate-800 rounded-2xl p-3 text-center">
-                          <div className="text-[10px] font-black uppercase tracking-widest text-slate-600">{h.label}</div>
-                          <div className="font-display font-bold text-xl text-amber-400 mt-0.5 tabular-nums">{h.value || '—'}</div>
+                {/* ── HOF Probability ─────────────────────────────────────────── */}
+                {(() => {
+                  if (isHofMember) {
+                    return (
+                      <div className="flex items-center gap-3 px-4 py-3 rounded-2xl bg-amber-500/10 border border-amber-500/25">
+                        <span className="text-xl leading-none">🏛️</span>
+                        <div>
+                          <p className="text-[10px] font-black uppercase tracking-widest text-amber-500">Hall of Fame</p>
+                          <p className="text-xs font-bold text-amber-300">
+                            Inducted {hofYearInducted ? `in ${hofYearInducted}` : ''}
+                          </p>
                         </div>
-                      ))}
+                      </div>
+                    );
+                  }
+                  if (player.careerStats.length >= 2) {
+                    const prob = player.hofProbability ?? computeHofProbability(player, awardHistory);
+                    const color = prob >= 70 ? 'text-emerald-400' : prob >= 40 ? 'text-amber-400' : 'text-rose-400';
+                    const bg = prob >= 70
+                      ? 'bg-emerald-500/8 border-emerald-500/20'
+                      : prob >= 40
+                      ? 'bg-amber-500/8 border-amber-500/20'
+                      : 'bg-rose-500/8 border-rose-500/20';
+                    return (
+                      <div className={`flex items-center justify-between px-4 py-3 rounded-2xl border ${bg}`}>
+                        <div className="flex items-center gap-2">
+                          <span className="text-base leading-none">🏛️</span>
+                          <p className="text-[10px] font-black uppercase tracking-widest text-slate-500">HOF Probability</p>
+                        </div>
+                        <p className={`text-lg font-display font-black ${color}`}>{prob}%</p>
+                      </div>
+                    );
+                  }
+                  return null;
+                })()}
+
+                {/* ── Career Game Highs ───────────────────────────────────────── */}
+                {hasHighs && (() => {
+                  const ch = player.careerHighs;
+                  const chCol = (v: number) =>
+                    v >= 50 ? 'text-amber-300 font-black' :
+                    v >= 40 ? 'text-amber-400 font-black' :
+                    v >= 30 ? 'text-orange-400 font-bold' :
+                    v >= 20 ? 'text-slate-200 font-bold' : 'text-amber-500/80';
+                  const chBg = (v: number) =>
+                    v >= 40 ? 'bg-amber-500/15 border-amber-500/30' :
+                    v >= 25 ? 'bg-orange-500/10 border-orange-500/20' : 'bg-slate-900 border-slate-800';
+                  // Season high comparison: show delta if season high > career high (shouldn't happen, but shows freshness)
+                  const sh = seasonHighs;
+                  const delta = (career: number, season: number | undefined) =>
+                    season !== undefined && season > 0 && season === career
+                      ? <span className="ml-1 text-[8px] text-emerald-400 font-black">★</span>
+                      : null;
+                  return (
+                    <div className="space-y-2">
+                      <div className="flex items-center gap-2">
+                        <p className="text-[10px] font-black text-slate-600 uppercase tracking-widest">Career Game Highs</p>
+                        {sh && sh.pts > 0 && (
+                          <span className="text-[8px] font-black text-emerald-400/60 uppercase tracking-widest">★ = this season's high</span>
+                        )}
+                      </div>
+                      <div className="grid grid-cols-3 sm:grid-cols-6 gap-2">
+                        {([
+                          { label: 'PTS', career: ch.points,   season: sh?.pts },
+                          { label: 'REB', career: ch.rebounds, season: sh?.reb },
+                          { label: 'AST', career: ch.assists,  season: sh?.ast },
+                          { label: 'STL', career: ch.steals,   season: sh?.stl },
+                          { label: 'BLK', career: ch.blocks,   season: sh?.blk },
+                          { label: '3PM', career: ch.threepm,  season: sh?.threepm },
+                        ]).map(h => (
+                          <div key={h.label} className={`border rounded-2xl p-3 text-center ${chBg(h.career)}`}>
+                            <div className="text-[9px] font-black uppercase tracking-widest text-slate-600">{h.label}</div>
+                            <div className={`font-display font-bold text-xl tabular-nums mt-0.5 ${chCol(h.career)}`}>
+                              {h.career || '—'}{delta(h.career, h.season)}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
                     </div>
-                  </div>
-                )}
+                  );
+                })()}
 
                 {/* ── Career awards & honours ─────────────────────────────────── */}
-                {(careerAwards.length > 0 || (player.allStarSelections?.length ?? 0) > 0) && (
+                {(careerAwards.length > 0 || (player.allStarSelections?.length ?? 0) > 0 || (player.championYears?.length ?? 0) > 0) && (
                   <div className="space-y-3">
                     <p className="text-[10px] font-black text-slate-600 uppercase tracking-widest">Honours & Awards</p>
                     <div className="flex flex-wrap gap-2">
+                      {/* Championship rings — shown as a distinct gold banner */}
+                      {(player.championYears?.length ?? 0) > 0 && (
+                        <div className="flex items-center gap-2 px-3 py-2 bg-amber-500/15 border border-amber-400/40 rounded-2xl">
+                          <span className="text-base leading-none">🏆</span>
+                          <div>
+                            <div className="text-[9px] font-black uppercase tracking-widest text-amber-400/80">Champion</div>
+                            <div className="text-xs font-bold text-amber-300">
+                              {player.championYears!.length === 1
+                                ? `${player.championYears![0]}`
+                                : `${player.championYears!.length}× (${player.championYears!.slice().sort((a,b)=>a-b).join(', ')})`}
+                            </div>
+                          </div>
+                        </div>
+                      )}
                       {/* All-Star selections bubble */}
                       {(player.allStarSelections?.length ?? 0) > 0 && (
                         <div className="flex items-center gap-2 px-3 py-2 bg-amber-500/10 border border-amber-500/25 rounded-2xl">
@@ -1868,6 +2373,153 @@ const PlayerModal: React.FC<PlayerModalProps> = ({
                         </div>
                       ))}
                     </div>
+                  </div>
+                )}
+              </section>
+            );
+          })()}
+
+          {/* ── Last 5 Games ────────────────────────────────────────────────── */}
+          {last5Games.length > 0 && (() => {
+            const f1  = (v: number) => v.toFixed(1);
+            const fPct = (v: number | null) => v == null ? '—' : `${(v * 100).toFixed(0)}%`;
+            const ptColor = (pts: number) =>
+              pts >= 30 ? 'text-amber-300 font-black' :
+              pts >= 20 ? 'text-amber-400 font-bold' :
+              pts <= 4  ? 'text-rose-500' :
+              pts <= 9  ? 'text-rose-400' : 'text-slate-200';
+            const pmColor = (pm: number) =>
+              pm > 10 ? 'text-emerald-400' : pm < -10 ? 'text-rose-400' : 'text-slate-400';
+            return (
+              <section className="space-y-3">
+                <h3 className="text-[10px] font-black text-amber-500 uppercase tracking-[0.5em]">Last 5 Games</h3>
+                <div className="bg-slate-950/50 border border-slate-800 rounded-3xl overflow-hidden">
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-center text-xs">
+                      <thead>
+                        <tr className="border-b border-slate-800">
+                          {['OPP','PTS','REB','AST','STL','BLK','FG%','3P%','MIN','+/−'].map(h => (
+                            <th key={h} className="px-3 py-3 text-[10px] font-black uppercase tracking-widest text-slate-500 whitespace-nowrap">{h}</th>
+                          ))}
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-800/40">
+                        {last5Games.map((g, i) => {
+                          const fgPct = g.fga > 0 ? g.fgm / g.fga : null;
+                          const tpPct = g.threepa > 0 ? g.threepm / g.threepa : null;
+                          const isHot  = g.pts >= 25 || (g.pts >= 20 && g.ast >= 5);
+                          const isCold = g.pts <= 5 && g.reb <= 3 && g.ast <= 1;
+                          return (
+                            <tr
+                              key={i}
+                              className={`transition-colors ${
+                                isHot  ? 'bg-amber-500/5 hover:bg-amber-500/10' :
+                                isCold ? 'bg-rose-500/5 hover:bg-rose-500/10' :
+                                'hover:bg-slate-800/20'
+                              }`}
+                            >
+                              <td className="px-3 py-3 whitespace-nowrap">
+                                <div className="flex flex-col items-center gap-0.5">
+                                  <span className="text-[10px] font-black uppercase text-slate-400">
+                                    {g.opponentTeamName ?? '—'}
+                                  </span>
+                                  {g.date != null && (
+                                    <span className="text-[9px] text-slate-600">Day {g.date}</span>
+                                  )}
+                                </div>
+                              </td>
+                              <td className={`px-3 py-3 font-display font-bold tabular-nums text-sm ${ptColor(g.pts)}`}>{g.pts}</td>
+                              <td className="px-3 py-3 font-display font-bold text-slate-200 tabular-nums text-sm">{g.reb}</td>
+                              <td className="px-3 py-3 font-display font-bold text-slate-300 tabular-nums text-sm">{g.ast}</td>
+                              <td className="px-3 py-3 font-display font-bold text-slate-400 tabular-nums text-sm">{g.stl}</td>
+                              <td className="px-3 py-3 font-display font-bold text-slate-400 tabular-nums text-sm">{g.blk}</td>
+                              <td className="px-3 py-3 font-display font-bold text-slate-400 tabular-nums text-sm">{fPct(fgPct)}</td>
+                              <td className="px-3 py-3 font-display font-bold text-slate-400 tabular-nums text-sm">{fPct(tpPct)}</td>
+                              <td className="px-3 py-3 font-display font-bold text-slate-500 tabular-nums text-sm">{f1(g.min)}</td>
+                              <td className={`px-3 py-3 font-display font-bold tabular-nums text-sm ${pmColor(g.plusMinus)}`}>
+                                {g.plusMinus > 0 ? `+${g.plusMinus}` : g.plusMinus}
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                  <div className="px-4 py-2 border-t border-slate-800/60 flex gap-3 flex-wrap">
+                    <span className="flex items-center gap-1.5 text-[9px] text-amber-500/70 font-bold uppercase">
+                      <span className="inline-block w-2 h-2 rounded-full bg-amber-500/40" /> Hot game
+                    </span>
+                    <span className="flex items-center gap-1.5 text-[9px] text-rose-500/70 font-bold uppercase">
+                      <span className="inline-block w-2 h-2 rounded-full bg-rose-500/40" /> Cold game
+                    </span>
+                  </div>
+                </div>
+              </section>
+            );
+          })()}
+
+          {/* ── Stats vs Teams ───────────────────────────────────────────────── */}
+          {uniqueOpponents.length > 0 && (() => {
+            const f1  = (v: number) => v.toFixed(1);
+            const fPct = (v: number | null) => v == null ? '—' : `${(v * 100).toFixed(0)}%`;
+            const pmColor = (pm: number) =>
+              pm > 5 ? 'text-emerald-400' : pm < -5 ? 'text-rose-400' : 'text-slate-300';
+            const stats = vsTeamStats;
+            return (
+              <section className="space-y-3">
+                <div className="flex items-center justify-between flex-wrap gap-2">
+                  <h3 className="text-[10px] font-black text-amber-500 uppercase tracking-[0.5em]">Matchup Stats</h3>
+                  <select
+                    value={vsTeamId}
+                    onChange={e => setVsTeamId(e.target.value)}
+                    className="bg-slate-900 border border-slate-700 rounded-xl px-3 py-1.5 text-xs font-bold text-white focus:outline-none focus:border-amber-500/60 min-w-[140px]"
+                  >
+                    <option value="all">All Opponents</option>
+                    {uniqueOpponents.map(t => (
+                      <option key={t.id} value={t.id}>{t.name}</option>
+                    ))}
+                  </select>
+                </div>
+                {stats ? (
+                  <div className="bg-slate-950/50 border border-slate-800 rounded-3xl overflow-hidden">
+                    {/* GP badge */}
+                    <div className="px-5 py-3 border-b border-slate-800/60 flex items-center justify-between">
+                      <span className="text-[10px] font-black uppercase tracking-widest text-slate-500">
+                        {vsTeamId === 'all'
+                          ? `All opponents · ${stats.gp} game${stats.gp !== 1 ? 's' : ''}`
+                          : `vs ${uniqueOpponents.find(t => t.id === vsTeamId)?.name} · ${stats.gp} game${stats.gp !== 1 ? 's' : ''}`}
+                      </span>
+                      <span className={`text-sm font-display font-black ${pmColor(stats.pm)}`}>
+                        {stats.pm > 0 ? `+${f1(stats.pm)}` : f1(stats.pm)} avg +/−
+                      </span>
+                    </div>
+                    <div className="overflow-x-auto">
+                      <table className="w-full text-center text-xs">
+                        <thead>
+                          <tr className="border-b border-slate-800">
+                            {['PPG','RPG','APG','SPG','BPG','FG%','3P%','FT%'].map(h => (
+                              <th key={h} className="px-4 py-3 text-[10px] font-black uppercase tracking-widest text-slate-500">{h}</th>
+                            ))}
+                          </tr>
+                        </thead>
+                        <tbody>
+                          <tr>
+                            <td className={`px-4 py-4 font-display font-black tabular-nums text-lg ${stats.ppg >= 20 ? 'text-amber-400' : 'text-slate-200'}`}>{f1(stats.ppg)}</td>
+                            <td className="px-4 py-4 font-display font-bold tabular-nums text-sm text-slate-200">{f1(stats.rpg)}</td>
+                            <td className="px-4 py-4 font-display font-bold tabular-nums text-sm text-slate-200">{f1(stats.apg)}</td>
+                            <td className="px-4 py-4 font-display font-bold tabular-nums text-sm text-slate-300">{f1(stats.spg)}</td>
+                            <td className="px-4 py-4 font-display font-bold tabular-nums text-sm text-slate-300">{f1(stats.bpg)}</td>
+                            <td className={`px-4 py-4 font-display font-bold tabular-nums text-sm ${stats.fgPct != null && stats.fgPct >= 0.5 ? 'text-emerald-400' : stats.fgPct != null && stats.fgPct < 0.4 ? 'text-rose-400' : 'text-slate-300'}`}>{fPct(stats.fgPct)}</td>
+                            <td className={`px-4 py-4 font-display font-bold tabular-nums text-sm ${stats.threePct != null && stats.threePct >= 0.38 ? 'text-emerald-400' : 'text-slate-300'}`}>{fPct(stats.threePct)}</td>
+                            <td className="px-4 py-4 font-display font-bold tabular-nums text-sm text-slate-300">{fPct(stats.ftPct)}</td>
+                          </tr>
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="bg-slate-950/50 border border-slate-800 rounded-3xl p-8 text-center">
+                    <p className="text-[10px] text-slate-600 uppercase tracking-widest font-bold">No games logged vs this team</p>
                   </div>
                 )}
               </section>
@@ -2029,10 +2681,10 @@ const PlayerModal: React.FC<PlayerModalProps> = ({
 
         {isUserTeam && (
            <div className="p-10 bg-slate-950/80 border-t border-slate-800 flex flex-wrap justify-between items-center gap-6">
-              <div className="flex items-center gap-6">
+              <div className="flex items-center gap-6 flex-wrap">
                  <div className="space-y-2">
                     <label className="text-[10px] font-black uppercase text-slate-500 tracking-widest">Roster Status</label>
-                    <select 
+                    <select
                        value={player.status}
                        onChange={(e) => onUpdateStatus(player.id, e.target.value as PlayerStatus)}
                        className="bg-slate-900 border border-slate-800 rounded-xl px-4 py-2 text-sm font-bold text-white focus:outline-none"
@@ -2043,14 +2695,253 @@ const PlayerModal: React.FC<PlayerModalProps> = ({
                        <option value="Injured">Injured</option>
                     </select>
                  </div>
+                 {onSetTrainingFocus && (
+                   <div className="space-y-2">
+                     <label className="text-[10px] font-black uppercase text-slate-500 tracking-widest">
+                       Dev Focus <span className="text-slate-600">({devInterventionsUsed}/{devInterventionsMax} used)</span>
+                     </label>
+                     <button
+                       onClick={() => { setFocusDraft(player.trainingFocus?.areas ?? []); setFocusDuration(60); setShowFocusPanel(true); }}
+                       disabled={devInterventionsUsed >= devInterventionsMax && !player.trainingFocus}
+                       className={`flex items-center gap-2 px-4 py-2 rounded-xl border text-sm font-bold transition-all ${
+                         player.trainingFocus && player.trainingFocus.daysRemaining > 0
+                           ? 'bg-sky-500/10 border-sky-500/40 text-sky-300 hover:bg-sky-500/20'
+                           : devInterventionsUsed >= devInterventionsMax
+                           ? 'bg-slate-800/30 border-slate-700/30 text-slate-600 cursor-not-allowed'
+                           : 'bg-slate-800 border-slate-700 text-slate-300 hover:border-amber-500/50 hover:text-amber-400'
+                       }`}
+                     >
+                       <span>🎯</span>
+                       {player.trainingFocus && player.trainingFocus.daysRemaining > 0 ? 'Edit Focus' : 'Set Training Focus'}
+                     </button>
+                   </div>
+                 )}
               </div>
-              <button 
-                 onClick={() => onRelease(player.id)}
-                 className="px-10 py-5 bg-rose-500/10 hover:bg-rose-500 text-rose-500 hover:text-white border border-rose-500/20 font-display font-bold uppercase rounded-2xl transition-all"
-              >
-                 Waive Player
-              </button>
+              <div className="flex items-center gap-4 flex-wrap">
+                {onExtend && !draftLocked && (isOffseason || player.contractYears <= 1) && (
+                  <button
+                    onClick={() => { setExtendSalary(player.salary || (isWomensLeague ? 75_000 : 5_000_000)); setExtendYears(2); setShowExtendPanel(true); }}
+                    className="px-10 py-5 bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 hover:text-emerald-300 border border-emerald-500/30 font-display font-bold uppercase rounded-2xl transition-all"
+                  >
+                    Extend Contract
+                  </button>
+                )}
+                {draftLocked ? (
+                  <div className="flex flex-col items-end gap-1">
+                    <button
+                      disabled
+                      className="px-10 py-5 bg-slate-800/50 text-slate-600 border border-slate-700/50 font-display font-bold uppercase rounded-2xl cursor-not-allowed opacity-60"
+                      title="Roster moves are locked during the draft"
+                    >
+                      Waive Player
+                    </button>
+                    <span className="text-[10px] text-amber-500/70 font-bold uppercase tracking-widest">
+                      🔒 Locked · Draft in Progress
+                    </span>
+                  </div>
+                ) : (
+                  <button
+                     onClick={() => onRelease(player.id)}
+                     className="px-10 py-5 bg-rose-500/10 hover:bg-rose-500 text-rose-500 hover:text-white border border-rose-500/20 font-display font-bold uppercase rounded-2xl transition-all"
+                  >
+                     Waive Player
+                  </button>
+                )}
+              </div>
+              {player.isSuspended && (player.suspensionGames ?? 0) > 0 && !player.suspensionAppealed && onAppealSuspension && (
+                <button
+                  onClick={() => onAppealSuspension(player.id)}
+                  className="px-10 py-5 bg-amber-500/10 hover:bg-amber-500/20 text-amber-400 hover:text-amber-300 border border-amber-500/30 font-display font-bold uppercase rounded-2xl transition-all flex items-center gap-2"
+                  title="25% chance to reduce suspension by 1 game. Costs 3 Owner Patience. One appeal per suspension."
+                >
+                  ⚖️ Appeal Suspension
+                </button>
+              )}
+              {player.isSuspended && player.suspensionAppealed && (
+                <span className="px-6 py-3 text-xs font-bold uppercase text-slate-500 border border-slate-700/50 rounded-2xl tracking-widest">
+                  Appeal Filed
+                </span>
+              )}
            </div>
+        )}
+
+        {/* ── Contract Extension Panel ─────────────────────────────────────────── */}
+        {showExtendPanel && (
+          <div className="absolute inset-0 z-[100] bg-slate-950/95 backdrop-blur-sm rounded-[3rem] flex flex-col p-10 overflow-y-auto animate-in fade-in duration-200">
+            <div className="flex items-center justify-between mb-8">
+              <div>
+                <h2 className="text-2xl font-display font-bold uppercase text-white tracking-tight">Extend Contract</h2>
+                <p className="text-xs text-slate-500 mt-1">{player.name} · Current: {player.contractYears} yr{player.contractYears !== 1 ? 's' : ''} @ {fmtSalary(player.salary)}/yr</p>
+              </div>
+              <button onClick={() => setShowExtendPanel(false)} className="p-3 bg-slate-800 hover:bg-slate-700 rounded-full text-slate-400 transition-colors">
+                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12" /></svg>
+              </button>
+            </div>
+
+            {player.desiredContract && (
+              <div className="mb-6 p-5 bg-slate-900 border border-slate-700 rounded-2xl flex items-center gap-4">
+                <span className="text-2xl">🤝</span>
+                <div>
+                  <p className="text-[10px] text-slate-500 uppercase tracking-widest mb-0.5">Player Asking Price</p>
+                  <p className="text-white font-bold">{player.desiredContract.years} yr{player.desiredContract.years !== 1 ? 's' : ''} · {fmtSalary(player.desiredContract.salary)}/yr</p>
+                </div>
+              </div>
+            )}
+
+            <div className="grid grid-cols-2 gap-6 mb-6">
+              <div className="space-y-3">
+                <label className="text-[10px] font-black uppercase text-slate-500 tracking-widest">Contract Length</label>
+                <div className="flex gap-2 flex-wrap">
+                  {[1, 2, 3, 4, 5].map(y => (
+                    <button
+                      key={y}
+                      onClick={() => setExtendYears(y)}
+                      className={`flex-1 py-3 rounded-xl border text-sm font-bold transition-all ${extendYears === y ? 'bg-amber-500 border-amber-500 text-slate-950' : 'bg-slate-900 border-slate-700 text-slate-400 hover:border-amber-500/50'}`}
+                    >
+                      {y} Yr{y > 1 ? 's' : ''}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              <div className="space-y-3">
+                <label className="text-[10px] font-black uppercase text-slate-500 tracking-widest">
+                  Annual Salary
+                  {maxExtensionSalary && <span className="ml-2 text-emerald-600 normal-case font-bold">max {fmtSalary(maxExtensionSalary)}</span>}
+                </label>
+                <input
+                  type="number"
+                  min={isWomensLeague ? 25_000 : 1_000_000}
+                  step={isWomensLeague ? 5_000 : 100_000}
+                  value={extendSalary}
+                  onChange={e => setExtendSalary(Math.max(0, parseInt(e.target.value) || 0))}
+                  className={`w-full bg-slate-950 border rounded-xl px-4 py-3 text-white font-bold focus:outline-none focus:border-amber-500/50 ${maxExtensionSalary && extendSalary > maxExtensionSalary ? 'border-rose-500/50' : 'border-slate-700'}`}
+                />
+                {maxExtensionSalary && extendSalary > maxExtensionSalary && (
+                  <p className="text-rose-400 text-xs font-bold">Exceeds max player salary</p>
+                )}
+                <p className="text-xs text-slate-500">{fmtSalary(extendSalary)}/yr · {extendYears} yr total: {fmtSalary(extendSalary * extendYears)}</p>
+              </div>
+            </div>
+
+            <div className="flex gap-4 mt-auto">
+              <button
+                onClick={() => setShowExtendPanel(false)}
+                className="flex-1 py-4 bg-slate-800 hover:bg-slate-700 text-slate-300 font-display font-bold uppercase rounded-2xl transition-all"
+              >
+                Cancel
+              </button>
+              <button
+                disabled={!!(maxExtensionSalary && extendSalary > maxExtensionSalary)}
+                onClick={() => { if (onExtend) { onExtend(player.id, extendYears, extendSalary); setShowExtendPanel(false); } }}
+                className="flex-1 py-4 bg-emerald-600 hover:bg-emerald-500 disabled:bg-slate-700 disabled:text-slate-500 disabled:cursor-not-allowed text-white font-display font-bold uppercase rounded-2xl transition-all shadow-lg shadow-emerald-900/30"
+              >
+                Confirm Extension
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* ── Training Focus Panel ─────────────────────────────────────────────── */}
+        {showFocusPanel && (
+          <div className="absolute inset-0 z-[100] bg-slate-950/95 backdrop-blur-sm rounded-[3rem] flex flex-col p-10 overflow-y-auto animate-in fade-in duration-200">
+            <div className="flex items-center justify-between mb-6">
+              <div>
+                <h2 className="text-2xl font-display font-bold uppercase text-white tracking-tight">Discuss Development</h2>
+                <p className="text-xs text-slate-500 mt-1">{player.name} · {devInterventionsUsed}/{devInterventionsMax} interventions used this season</p>
+              </div>
+              <button onClick={() => setShowFocusPanel(false)} className="text-slate-500 hover:text-white text-2xl p-2 transition-colors">✕</button>
+            </div>
+
+            {/* Current focus (if any) */}
+            {player.trainingFocus && player.trainingFocus.daysRemaining > 0 && (
+              <div className="mb-6 p-4 bg-sky-500/10 border border-sky-500/30 rounded-2xl">
+                <p className="text-[10px] font-black uppercase tracking-widest text-sky-400/70 mb-1">Current Focus Active</p>
+                <p className="text-sm font-bold text-sky-300">{player.trainingFocus.areas.join(' + ')} — {player.trainingFocus.daysRemaining} days remaining</p>
+              </div>
+            )}
+
+            {/* Player reaction preview */}
+            {(() => { const r = previewResponse(); return (
+              <div className="mb-6 p-4 bg-slate-900 border border-slate-800 rounded-2xl flex items-center gap-4">
+                <div>
+                  <p className="text-[10px] font-black uppercase tracking-widest text-slate-500 mb-0.5">Player Attitude</p>
+                  <p className={`text-sm font-bold ${r.color}`}>{r.label}</p>
+                  <p className="text-xs text-slate-500 mt-0.5">{r.desc}</p>
+                </div>
+                <div className="ml-auto text-right">
+                  <p className="text-[10px] font-black uppercase tracking-widest text-slate-500 mb-0.5">Morale</p>
+                  <p className={`text-sm font-bold ${player.morale >= 70 ? 'text-emerald-400' : player.morale >= 45 ? 'text-amber-400' : 'text-rose-400'}`}>{player.morale}</p>
+                </div>
+              </div>
+            ); })()}
+
+            {/* Area selection (pick 1 or 2) */}
+            <p className="text-[10px] font-black uppercase tracking-widest text-slate-500 mb-3">Choose 1–2 Focus Areas</p>
+            <div className="grid grid-cols-2 gap-2 mb-6">
+              {ALL_FOCUS_AREAS.map(area => {
+                const selected = focusDraft.includes(area);
+                const disabled = !selected && focusDraft.length >= 2;
+                return (
+                  <button
+                    key={area}
+                    onClick={() => !disabled && toggleFocusArea(area)}
+                    className={`flex items-center gap-2 px-4 py-3 rounded-xl border text-sm font-bold text-left transition-all ${
+                      selected
+                        ? 'bg-sky-500/20 border-sky-500/60 text-sky-200'
+                        : disabled
+                        ? 'bg-slate-900/40 border-slate-800/40 text-slate-600 cursor-not-allowed'
+                        : 'bg-slate-900 border-slate-800 text-slate-400 hover:border-slate-600 hover:text-white'
+                    }`}
+                  >
+                    <span className="text-base">{FOCUS_ICONS[area]}</span>
+                    <span className="text-xs leading-tight">{area}</span>
+                    {selected && <span className="ml-auto text-sky-400 text-xs">✓</span>}
+                  </button>
+                );
+              })}
+            </div>
+
+            {/* Duration picker */}
+            <p className="text-[10px] font-black uppercase tracking-widest text-slate-500 mb-3">Duration</p>
+            <div className="flex gap-2 mb-8">
+              {([30, 60, 90] as const).map(d => (
+                <button
+                  key={d}
+                  onClick={() => setFocusDuration(d)}
+                  className={`flex-1 py-3 rounded-xl border text-sm font-bold transition-all ${
+                    focusDuration === d
+                      ? 'bg-amber-500/20 border-amber-500/60 text-amber-300'
+                      : 'bg-slate-900 border-slate-800 text-slate-500 hover:text-white'
+                  }`}
+                >
+                  {d === 30 ? '1 Month' : d === 60 ? '2 Months' : '3 Months'}
+                </button>
+              ))}
+            </div>
+
+            {/* Confirm / Cancel */}
+            <div className="flex gap-3 mt-auto">
+              <button
+                onClick={() => setShowFocusPanel(false)}
+                className="flex-1 py-3 rounded-xl bg-slate-800 border border-slate-700 text-slate-300 font-bold text-sm hover:bg-slate-700 transition-all"
+              >Cancel</button>
+              <button
+                disabled={focusDraft.length === 0}
+                onClick={() => {
+                  if (focusDraft.length === 0 || !onSetTrainingFocus) return;
+                  onSetTrainingFocus(player.id, focusDraft, focusDuration);
+                  setShowFocusPanel(false);
+                }}
+                className={`flex-1 py-3 rounded-xl font-black text-sm uppercase tracking-widest transition-all ${
+                  focusDraft.length > 0
+                    ? 'bg-sky-500 text-white hover:bg-sky-400 shadow-lg'
+                    : 'bg-slate-800 text-slate-600 cursor-not-allowed'
+                }`}
+              >
+                {player.trainingFocus && player.trainingFocus.daysRemaining > 0 ? 'Update Focus' : 'Set Focus'}
+              </button>
+            </div>
+          </div>
         )}
       </div>
     </div>

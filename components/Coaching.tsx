@@ -2,6 +2,7 @@
 import React, { useState, useRef } from 'react';
 import { LeagueState, Team, Coach, CoachScheme } from '../types';
 import { getCoachPreferredScheme } from '../constants';
+import { fmtSalary } from '../utils/formatters';
 
 interface CoachingProps {
   league: LeagueState;
@@ -175,7 +176,7 @@ const Coaching: React.FC<CoachingProps> = ({ league, updateLeague, godMode = fal
                   <span className="text-slate-500 uppercase">DEV:</span> <span className="text-emerald-400">{coach.ratingDevelopment}</span>
                </div>
                <div className="bg-slate-950/50 p-2 rounded">
-                  <span className="text-slate-500 uppercase">SAL:</span> <span className="text-slate-300">${(coach.salary/1000000).toFixed(1)}M</span>
+                  <span className="text-slate-500 uppercase">SAL:</span> <span className="text-slate-300">{fmtSalary(coach.salary)}</span>
                </div>
             </div>
             <button 
@@ -204,10 +205,9 @@ const Coaching: React.FC<CoachingProps> = ({ league, updateLeague, godMode = fal
           <div>
             <h2 className="text-4xl font-display font-bold uppercase tracking-tight text-white mb-2">Strategy & Staff</h2>
             <p className="text-slate-500 text-sm font-bold uppercase tracking-widest flex items-center gap-2">
-              Staff Budget: <span className="text-emerald-400">${(userTeam.staffBudget/1000000).toFixed(1)}M</span>
+              Staff Budget: <span className="text-emerald-400">{fmtSalary(userTeam.staffBudget)}</span>
               <span className="w-1 h-1 rounded-full bg-slate-700"></span>
-              {/* Fix: Use currentStaffCost instead of non-existent currentSalary */}
-              Allocated: <span className="text-amber-500">${(currentStaffCost / 1000000).toFixed(1)}M</span>
+              Allocated: <span className="text-amber-500">{fmtSalary(currentStaffCost)}</span>
             </p>
           </div>
           
@@ -237,28 +237,20 @@ const Coaching: React.FC<CoachingProps> = ({ league, updateLeague, godMode = fal
            <section className="bg-slate-900 border border-slate-800 rounded-3xl p-8 shadow-2xl">
               <h3 className="text-xs font-black uppercase tracking-[0.3em] text-slate-500 mb-1 pb-2 border-b border-slate-800">Team Playbook</h3>
 
-              {/* Coach fit indicator */}
+              {/* Scheme mismatch warning — only shown when GM has deviated from coach's pick */}
               {(() => {
                 const hc = userTeam.staff.headCoach;
                 if (!hc) return null;
                 const preferred = getCoachPreferredScheme(hc);
-                const isMatch = userTeam.activeScheme === preferred;
+                if (userTeam.activeScheme === preferred) return null;
                 return (
-                  <div className={`mt-4 mb-5 p-3 rounded-xl border text-[10px] font-bold flex items-start gap-2 ${
-                    isMatch
-                      ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400'
-                      : 'bg-orange-500/10 border-orange-500/30 text-orange-400'
-                  }`}>
-                    <span className="text-base leading-none mt-0.5">{isMatch ? '✓' : '⚠'}</span>
+                  <div className="mt-4 mb-5 p-3 rounded-xl border text-[10px] font-bold flex items-start gap-2 bg-orange-500/10 border-orange-500/30 text-orange-400">
+                    <span className="text-base leading-none mt-0.5">⚠</span>
                     <div>
-                      <p className="uppercase tracking-widest">
-                        {isMatch ? 'Scheme match' : 'Scheme mismatch'}
-                      </p>
+                      <p className="uppercase tracking-widest">Scheme mismatch</p>
                       <p className="font-normal text-slate-400 mt-0.5">
-                        {hc.name.split(' ').at(-1)} runs <span className="font-bold text-slate-200">{preferred}</span>
-                        {isMatch
-                          ? ' — players thrive in their natural system (+morale)'
-                          : ` — current playbook is ${userTeam.activeScheme}. Expect reduced morale for scorers and Diva players.`}
+                        {hc.name.split(' ').at(-1)} prefers <span className="font-bold text-slate-200">{preferred}</span>
+                        {` — running ${userTeam.activeScheme} instead. Expect reduced morale for scorers and Diva players.`}
                       </p>
                     </div>
                   </div>
@@ -328,6 +320,21 @@ const Coaching: React.FC<CoachingProps> = ({ league, updateLeague, godMode = fal
 
         {/* Center/Right: Staff Carousel */}
         <div className="lg:col-span-2 space-y-6">
+           {/* Front Office — GM nameplate */}
+           {userTeam.gmName && (
+             <div className="flex items-center gap-4 bg-slate-900 border border-slate-800 rounded-2xl px-5 py-4">
+               <div className="w-10 h-10 rounded-xl bg-slate-800 flex items-center justify-center shrink-0">
+                 <span className="text-lg">💼</span>
+               </div>
+               <div className="min-w-0">
+                 <p className="text-[9px] font-black uppercase tracking-[0.3em] text-slate-500">General Manager</p>
+                 <p className="text-sm font-bold text-white truncate">{userTeam.gmName}</p>
+                 {userTeam.gmAge && (
+                   <p className="text-[9px] text-slate-600 font-bold uppercase tracking-widest">Age {userTeam.gmAge}</p>
+                 )}
+               </div>
+             </div>
+           )}
            {/* Interim / search banner */}
            {userTeam.staff.headCoach?.isInterim && (
              <div className="flex items-start gap-4 bg-amber-500/10 border border-amber-500/30 rounded-2xl px-5 py-4 animate-in fade-in duration-500">
@@ -437,7 +444,7 @@ const Coaching: React.FC<CoachingProps> = ({ league, updateLeague, godMode = fal
                                 <div><span className="text-slate-600 block">EXP (YRS)</span> {coach.experience}</div>
                              </div>
                              <div className="pt-4 border-t border-slate-800 flex justify-between items-center">
-                                <span className="font-mono text-emerald-400 font-bold">${(coach.salary/1000000).toFixed(1)}M /yr</span>
+                                <span className="font-mono text-emerald-400 font-bold">{fmtSalary(coach.salary)} /yr</span>
                                 <button 
                                    onClick={() => handleHire(coach)}
                                    className="px-4 py-2 bg-amber-500 hover:bg-amber-400 text-slate-950 text-[10px] font-black uppercase rounded-lg transition-all"

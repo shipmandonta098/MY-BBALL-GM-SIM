@@ -2,6 +2,7 @@
 import React, { useEffect, useState } from 'react';
 import { Coach, CoachBadge, CoachScheme, Gender } from '../types';
 import { getFlag } from '../constants';
+import { fmtSalary } from '../utils/formatters';
 
 interface CoachModalProps {
   coach: Coach;
@@ -10,6 +11,9 @@ interface CoachModalProps {
   scoutingReport: { coachId: string; report: string } | null;
   isUserTeam: boolean;
   onFire?: (coachId: string) => void;
+  onExtend?: (coachId: string, years: number, salary: number) => void;
+  isOffseason?: boolean;
+  isWomensLeague?: boolean;
   godMode?: boolean;
   onUpdateCoach?: (coach: Coach) => void;
   /** Career awards (e.g. COY wins) sorted newest-first */
@@ -37,12 +41,18 @@ const CoachModal: React.FC<CoachModalProps> = ({
   scoutingReport,
   isUserTeam,
   onFire,
+  onExtend,
+  isOffseason = false,
+  isWomensLeague = false,
   godMode = false,
   onUpdateCoach,
   careerAwards = [],
 }) => {
   const [isEditing, setIsEditing] = useState(false);
   const [editedCoach, setEditedCoach] = useState<Coach>(coach);
+  const [showExtendPanel, setShowExtendPanel] = useState(false);
+  const [extendYears, setExtendYears] = useState(2);
+  const [extendSalary, setExtendSalary] = useState(coach.salary || (isWomensLeague ? 300_000 : 3_000_000));
 
   // Sync state if coach prop changes
   useEffect(() => {
@@ -403,14 +413,100 @@ const CoachModal: React.FC<CoachModalProps> = ({
         </div>
 
         {isUserTeam && (
-           <div className="p-10 bg-slate-950/80 border-t border-slate-800 flex justify-end gap-4">
-              <button 
-                 onClick={() => onFire && onFire(coach.id)}
-                 className="px-10 py-5 bg-rose-500/10 hover:bg-rose-500 text-rose-500 hover:text-white border border-rose-500/20 font-display font-bold uppercase rounded-2xl transition-all"
-              >
-                 Terminate Contract
-              </button>
+           <div className="p-10 bg-slate-950/80 border-t border-slate-800 flex justify-between items-center gap-4 flex-wrap">
+              <div className="flex items-center gap-3">
+                <span className="text-xs text-slate-500 uppercase tracking-widest font-bold">Contract:</span>
+                <span className="text-white font-bold">{coach.contractYears} yr{coach.contractYears !== 1 ? 's' : ''} · {fmtSalary(coach.salary ?? 0)}/yr</span>
+                {coach.contractYears <= 1 && (
+                  <span className="px-2 py-0.5 bg-amber-500/20 text-amber-400 border border-amber-500/30 text-[10px] font-black uppercase rounded-full">Expiring</span>
+                )}
+              </div>
+              <div className="flex gap-4">
+                {onExtend && (isOffseason || coach.contractYears <= 1) && (
+                  <button
+                    onClick={() => { setExtendSalary(coach.salary || (isWomensLeague ? 300_000 : 3_000_000)); setExtendYears(2); setShowExtendPanel(true); }}
+                    className="px-10 py-5 bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 hover:text-emerald-300 border border-emerald-500/30 font-display font-bold uppercase rounded-2xl transition-all"
+                  >
+                    Extend Contract
+                  </button>
+                )}
+                <button
+                   onClick={() => onFire && onFire(coach.id)}
+                   className="px-10 py-5 bg-rose-500/10 hover:bg-rose-500 text-rose-500 hover:text-white border border-rose-500/20 font-display font-bold uppercase rounded-2xl transition-all"
+                >
+                   Terminate Contract
+                </button>
+              </div>
            </div>
+        )}
+
+        {/* ── Contract Extension Panel ─────────────────────────────────────── */}
+        {showExtendPanel && (
+          <div className="absolute inset-0 z-[100] bg-slate-950/95 backdrop-blur-sm rounded-[3rem] flex flex-col p-10 overflow-y-auto animate-in fade-in duration-200">
+            <div className="flex items-center justify-between mb-8">
+              <div>
+                <h2 className="text-2xl font-display font-bold uppercase text-white tracking-tight">Extend Contract</h2>
+                <p className="text-xs text-slate-500 mt-1">{coach.name} · Current: {coach.contractYears} yr{coach.contractYears !== 1 ? 's' : ''} @ {fmtSalary(coach.salary ?? 0)}/yr</p>
+              </div>
+              <button onClick={() => setShowExtendPanel(false)} className="p-3 bg-slate-800 hover:bg-slate-700 rounded-full text-slate-400 transition-colors">
+                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12" /></svg>
+              </button>
+            </div>
+
+            {coach.desiredContract && (
+              <div className="mb-6 p-5 bg-slate-900 border border-slate-700 rounded-2xl flex items-center gap-4">
+                <span className="text-2xl">🤝</span>
+                <div>
+                  <p className="text-[10px] text-slate-500 uppercase tracking-widest mb-0.5">Coach Asking Price</p>
+                  <p className="text-white font-bold">{coach.desiredContract.years} yr{coach.desiredContract.years !== 1 ? 's' : ''} · {fmtSalary(coach.desiredContract.salary)}/yr</p>
+                </div>
+              </div>
+            )}
+
+            <div className="grid grid-cols-2 gap-6 mb-8">
+              <div className="space-y-3">
+                <label className="text-[10px] font-black uppercase text-slate-500 tracking-widest">Contract Length</label>
+                <div className="flex gap-2 flex-wrap">
+                  {[1, 2, 3, 4].map(y => (
+                    <button
+                      key={y}
+                      onClick={() => setExtendYears(y)}
+                      className={`flex-1 py-3 rounded-xl border text-sm font-bold transition-all ${extendYears === y ? 'bg-amber-500 border-amber-500 text-slate-950' : 'bg-slate-900 border-slate-700 text-slate-400 hover:border-amber-500/50'}`}
+                    >
+                      {y} Yr{y > 1 ? 's' : ''}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              <div className="space-y-3">
+                <label className="text-[10px] font-black uppercase text-slate-500 tracking-widest">Annual Salary</label>
+                <input
+                  type="number"
+                  min={isWomensLeague ? 50_000 : 500_000}
+                  step={isWomensLeague ? 10_000 : 100_000}
+                  value={extendSalary}
+                  onChange={e => setExtendSalary(Math.max(0, parseInt(e.target.value) || 0))}
+                  className="w-full bg-slate-950 border border-slate-700 rounded-xl px-4 py-3 text-white font-bold focus:outline-none focus:border-amber-500/50"
+                />
+                <p className="text-xs text-slate-500">{fmtSalary(extendSalary)}/yr · {extendYears} yr total: {fmtSalary(extendSalary * extendYears)}</p>
+              </div>
+            </div>
+
+            <div className="flex gap-4 mt-auto">
+              <button
+                onClick={() => setShowExtendPanel(false)}
+                className="flex-1 py-4 bg-slate-800 hover:bg-slate-700 text-slate-300 font-display font-bold uppercase rounded-2xl transition-all"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={() => { if (onExtend) { onExtend(coach.id, extendYears, extendSalary); setShowExtendPanel(false); } }}
+                className="flex-1 py-4 bg-emerald-600 hover:bg-emerald-500 text-white font-display font-bold uppercase rounded-2xl transition-all shadow-lg shadow-emerald-900/30"
+              >
+                Confirm Extension
+              </button>
+            </div>
+          </div>
         )}
       </div>
     </div>

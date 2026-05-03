@@ -1,7 +1,10 @@
 import React, { useState, useMemo, useEffect, useRef } from 'react';
 import { Team, Player, Position, PlayerStatus, PersonalityTrait, Coach, TeamRotation } from '../types';
 import TeamBadge from './TeamBadge';
+import WatchToggle from './WatchToggle';
 import { getFlag } from '../constants';
+import { fmtSalary } from '../utils/formatters';
+import { getEffectiveRating } from '../utils/injuryEffects';
 
 export interface RosterProps {
   leagueTeams: Team[];
@@ -13,6 +16,12 @@ export interface RosterProps {
   onUpdateTeamRoster?: (teamId: string, updatedRoster: Player[]) => void;
   onManageTeam?: (teamId: string) => void;
   godMode?: boolean;
+  watchList?: string[];
+  onToggleWatch?: (id: string) => void;
+  minRosterSize?: number;
+  maxRosterSize?: number;
+  /** Offseason development deltas to show ↑/↓ next to OVR and POT */
+  devChanges?: import('../types').PlayerDevChange[];
 }
 
 const traitIcons: Record<PersonalityTrait, string> = {
@@ -35,9 +44,17 @@ const traitIcons: Record<PersonalityTrait, string> = {
 const isPlayerInjured = (p: Player) =>
   p.status === 'Injured' || (p.injuryDaysLeft != null && p.injuryDaysLeft > 0);
 
-/** Derive display status from rotation slot, overriding with injury when applicable. */
+/** True if a player is currently serving a suspension. */
+const isPlayerSuspended = (p: Player) =>
+  !!p.isSuspended && (p.suspensionGames ?? 0) > 0;
+
+/** True if a player is unavailable for any reason */
+const isPlayerUnavailable = (p: Player) => isPlayerInjured(p) || isPlayerSuspended(p);
+
+/** Derive display status from rotation slot, overriding with injury/suspension when applicable. */
 const getEffectiveStatus = (p: Player, rotation?: TeamRotation): PlayerStatus => {
   if (isPlayerInjured(p)) return 'Injured';
+  if (isPlayerSuspended(p)) return 'Injured'; // reuse Injured slot for display, badge overrides
   if (!rotation) return p.status;
   const starterIds = Object.values(rotation.starters);
   if (starterIds.includes(p.id)) return 'Starter';
@@ -57,7 +74,17 @@ const ARCHETYPE_COLORS: Record<string, string> = {
   'Two-Way Forward':    'bg-teal-500/20 text-teal-400 border-teal-500/30',
 };
 
-const Roster: React.FC<RosterProps> = ({ leagueTeams, userTeamId, initialTeamId, onScout, onScoutCoach, scoutingReport, onUpdateTeamRoster, onManageTeam, godMode }) => {
+const moraleInfo = (morale: number | undefined) => {
+  const m = morale ?? 70;
+  if (m >= 85) return { emoji: '😊', label: 'High',     color: 'text-emerald-400' };
+  if (m >= 70) return { emoji: '🙂', label: 'Good',     color: 'text-sky-400' };
+  if (m >= 55) return { emoji: '😐', label: 'Neutral',  color: 'text-slate-400' };
+  if (m >= 40) return { emoji: '😟', label: 'Low',      color: 'text-amber-400' };
+  return             { emoji: '😠', label: 'Very Low',  color: 'text-rose-400' };
+};
+
+const Roster: React.FC<RosterProps> = ({ leagueTeams, userTeamId, initialTeamId, onScout, onScoutCoach, scoutingReport, onUpdateTeamRoster, onManageTeam, godMode, watchList = [], onToggleWatch, minRosterSize = 10, maxRosterSize = 18, devChanges }) => {
+  const devMap = new Map((devChanges ?? []).map(c => [c.playerId, c]));
   const [selectedTeamId, setSelectedTeamId] = useState(initialTeamId || userTeamId);
   const [searchTerm, setSearchTerm] = useState('');
   const [posFilter, setPosFilter] = useState<string>('ALL');
@@ -111,7 +138,7 @@ const Roster: React.FC<RosterProps> = ({ leagueTeams, userTeamId, initialTeamId,
         const matchesSearch = p.name.toLowerCase().includes(searchTerm.toLowerCase());
         const matchesPos = posFilter === 'ALL' || p.position === posFilter;
         const matchesOvr = p.rating >= minOvr;
-        const matchesInjured = !injuredOnly || isPlayerInjured(p);
+          const matchesInjured = !injuredOnly || isPlayerUnavailable(p);
         return matchesSearch && matchesPos && matchesOvr && matchesInjured;
       })
       .sort((a, b) => {
@@ -136,7 +163,7 @@ const Roster: React.FC<RosterProps> = ({ leagueTeams, userTeamId, initialTeamId,
     }));
   };
 
-  const formatMoney = (amount: number) => `$${(amount / 1000000).toFixed(1)}M`;
+  const formatMoney = fmtSalary;
 
   const hcRating = activeTeam.staff.headCoach ? Math.round((activeTeam.staff.headCoach.ratingOffense + activeTeam.staff.headCoach.ratingDefense)/2) : 0;
 
@@ -264,6 +291,29 @@ const Roster: React.FC<RosterProps> = ({ leagueTeams, userTeamId, initialTeamId,
             </div>
 
             <div className="flex flex-wrap gap-4">
+              {/* Roster spot counter */}
+              <div className={`p-6 rounded-2xl text-center min-w-[140px] border ${
+                activeTeam.roster.length < minRosterSize
+                  ? 'bg-rose-950/30 border-rose-500/40'
+                  : activeTeam.roster.length >= maxRosterSize
+                  ? 'bg-amber-950/20 border-amber-500/30'
+                  : 'bg-slate-950/50 border-slate-800'
+              }`}>
+                <p className="text-[10px] text-slate-500 font-black uppercase tracking-widest mb-1">Roster Spots</p>
+                <p className={`text-4xl font-display font-bold ${
+                  activeTeam.roster.length < minRosterSize ? 'text-rose-400' :
+                  activeTeam.roster.length >= maxRosterSize ? 'text-amber-400' : 'text-white'
+                }`}>
+                  {activeTeam.roster.length}<span className="text-slate-600 text-2xl">/{maxRosterSize}</span>
+                </p>
+                <p className={`text-[10px] font-bold uppercase mt-1 ${
+                  activeTeam.roster.length < minRosterSize ? 'text-rose-400' : 'text-slate-600'
+                }`}>
+                  {activeTeam.roster.length < minRosterSize
+                    ? `Min ${minRosterSize} required`
+                    : `Min ${minRosterSize}`}
+                </p>
+              </div>
               <div className="bg-slate-950/50 border border-slate-800 p-6 rounded-2xl text-center min-w-[140px]">
                 <p className="text-[10px] text-slate-500 font-black uppercase tracking-widest mb-1">Chemistry</p>
                 <p className={`text-4xl font-display font-bold ${chemistry > 75 ? 'text-emerald-400' : chemistry > 45 ? 'text-amber-500' : 'text-rose-500'}`}>
@@ -325,7 +375,7 @@ const Roster: React.FC<RosterProps> = ({ leagueTeams, userTeamId, initialTeamId,
             injuredOnly ? 'bg-rose-500/20 border-rose-500 text-rose-400 shadow-lg shadow-rose-900/20' : 'bg-slate-900 border-slate-800 text-slate-500 hover:border-slate-600'
           }`}
         >
-          <span>🤕</span> {injuredOnly ? 'Showing Injured Only' : 'Show Injured Only'}
+          <span>🤕</span> {injuredOnly ? 'Showing Injured/Suspended' : 'Show Injured / Suspended'}
         </button>
         {injuredOnly && filteredRoster.length > 0 && (
           <span className="text-[10px] text-rose-400 font-bold uppercase tracking-widest">{filteredRoster.length} on injured list</span>
@@ -411,12 +461,23 @@ const Roster: React.FC<RosterProps> = ({ leagueTeams, userTeamId, initialTeamId,
               {filteredRoster.map((player) => (
                 <tr 
                   key={player.id} 
-                  className={`group hover:bg-slate-800/40 transition-all cursor-pointer ${isPlayerInjured(player) ? 'bg-rose-950/20 border-l-2 border-rose-500/30' : ''}`}
+                  className={`group hover:bg-slate-800/40 transition-all cursor-pointer ${
+                    isPlayerSuspended(player)   ? 'bg-red-950/25 border-l-2 border-red-500/40' :
+                    player.isCareerEnding       ? 'bg-red-950/30 border-l-2 border-red-700/50' :
+                    player.isPlayingThrough     ? 'bg-orange-950/20 border-l-2 border-orange-500/30' :
+                    isPlayerInjured(player)     ? 'bg-rose-950/20 border-l-2 border-rose-500/30' : ''
+                  }`}
                   onClick={() => onScout(player)}
                 >
                   <td className="px-8 py-6">
                     <div className="flex items-center gap-4">
-                      <div className={`w-12 h-12 rounded-xl flex items-center justify-center font-display text-xl border ${isPlayerInjured(player) ? 'bg-rose-950/40 border-rose-500/40 text-rose-400' : 'bg-slate-800 border-slate-700 text-slate-600'}`}>
+                      <div className={`w-12 h-12 rounded-xl flex items-center justify-center font-display text-xl border ${
+                        isPlayerSuspended(player)   ? 'bg-red-950/40 border-red-500/40 text-red-400' :
+                        player.isCareerEnding       ? 'bg-red-950/60 border-red-700/60 text-red-300' :
+                        player.isPlayingThrough     ? 'bg-orange-950/40 border-orange-500/40 text-orange-400' :
+                        isPlayerInjured(player)     ? 'bg-rose-950/40 border-rose-500/40 text-rose-400' :
+                        'bg-slate-800 border-slate-700 text-slate-600'
+                      }`}>
                         {player.name.charAt(0)}
                       </div>
                       <div className="min-w-0">
@@ -424,13 +485,53 @@ const Roster: React.FC<RosterProps> = ({ leagueTeams, userTeamId, initialTeamId,
                           {player.country && (
                             <span className="text-base leading-none" title={player.country}>{getFlag(player.country)}</span>
                           )}
-                          <span className={`font-display font-bold text-lg uppercase tracking-tight transition-colors group-hover:text-amber-500 ${isPlayerInjured(player) ? 'text-rose-400' : 'text-slate-100'}`}>
+                          {onToggleWatch && (
+                            <span onClick={e => e.stopPropagation()}>
+                              <WatchToggle playerId={player.id} watchList={watchList} onToggle={onToggleWatch} />
+                            </span>
+                          )}
+                          <span className={`font-display font-bold text-lg uppercase tracking-tight transition-colors group-hover:text-amber-500 ${
+                            isPlayerSuspended(player) ? 'text-red-400' :
+                            isPlayerInjured(player)   ? 'text-rose-400' : 'text-slate-100'
+                          }`}>
                             {player.name}
                           </span>
+                          {(player.allStarSelections?.length ?? 0) > 0 && (
+                            <span
+                              title={`${player.allStarSelections!.length}× All-Star`}
+                              className="text-amber-400 text-base leading-none select-none"
+                            >★</span>
+                          )}
+                          {(() => {
+                            const m = moraleInfo(player.morale);
+                            return (
+                              <span
+                                title={`Morale: ${m.label} (${player.morale ?? 70})`}
+                                className={`text-xs font-bold ${m.color} opacity-80 group-hover:opacity-100 transition-opacity`}
+                              >
+                                {m.emoji}
+                              </span>
+                            );
+                          })()}
                         </div>
                         <div className="flex items-center gap-2 mt-1 flex-wrap">
                           {(() => {
+                            if (isPlayerSuspended(player)) return (
+                              <span className="text-[10px] font-black uppercase tracking-widest px-1.5 py-0.5 rounded bg-red-500/10 text-red-400 border border-red-500/20 whitespace-nowrap">
+                                ⛔ SUSP{(player.suspensionGames ?? 0) > 0 ? ` · ${player.suspensionGames}G` : ''}
+                              </span>
+                            );
                             const eff = getEffectiveStatus(player, activeTeam.rotation);
+                            if (player.isPlayingThrough) return (
+                              <span className="text-[10px] font-black uppercase tracking-widest px-1.5 py-0.5 rounded bg-orange-500/10 text-orange-400 border border-orange-500/20 whitespace-nowrap">
+                                Playing Hurt ⚠️{player.injuryDaysLeft ? ` · ${player.injuryDaysLeft}d` : ''}
+                              </span>
+                            );
+                            if (player.isCareerEnding) return (
+                              <span className="text-[10px] font-black uppercase tracking-widest px-1.5 py-0.5 rounded bg-red-900/30 text-red-300 border border-red-700/40 whitespace-nowrap">
+                                ☠ Career Threat
+                              </span>
+                            );
                             if (eff === 'Injured') return (
                               <span className="text-[10px] font-black uppercase tracking-widest px-1.5 py-0.5 rounded bg-rose-500/10 text-rose-400 border border-rose-500/20 whitespace-nowrap">
                                 🤕 {player.injuryType ?? 'Injured'}{player.injuryDaysLeft ? ` · ${player.injuryDaysLeft}d` : ''}
@@ -468,12 +569,44 @@ const Roster: React.FC<RosterProps> = ({ leagueTeams, userTeamId, initialTeamId,
                     <span className="text-sm font-bold text-slate-300">{player.age}</span>
                   </td>
                   <td className="px-8 py-6 text-center">
-                    <span className={`text-2xl font-display font-black`} style={{ color: player.rating >= 85 ? activeTeam.primaryColor : player.rating >= 75 ? activeTeam.secondaryColor : '#64748b' }}>
-                      {player.rating}
-                    </span>
+                    {(() => {
+                      const effRating = getEffectiveRating(player);
+                      const isInj = isPlayerInjured(player);
+                      const d = devMap.get(player.id);
+                      const delta = d ? d.ovrAfter - d.ovrBefore : 0;
+                      return (
+                        <div className="flex flex-col items-center gap-0.5">
+                          <div className="flex items-center gap-1">
+                            <span className="text-2xl font-display font-black" style={{ color: isInj ? '#f43f5e' : effRating >= 85 ? activeTeam.primaryColor : effRating >= 75 ? activeTeam.secondaryColor : '#64748b' }}>
+                              {effRating}
+                            </span>
+                            {delta > 0 && <span className="text-[10px] font-black text-emerald-400 leading-none">↑{delta}</span>}
+                            {delta < 0 && <span className="text-[10px] font-black text-rose-400 leading-none">↓{Math.abs(delta)}</span>}
+                          </div>
+                          {isInj && player.injuryOVRPenalty != null && (
+                            <span className="text-[8px] font-black uppercase tracking-widest text-rose-500 leading-none">(Injured -{player.injuryOVRPenalty})</span>
+                          )}
+                        </div>
+                      );
+                    })()}
                   </td>
                   <td className="px-8 py-6 text-center">
-                    <span className="text-sm font-bold text-slate-500">{player.potential}</span>
+                    <div className="flex flex-col items-center gap-0.5">
+                      {(() => {
+                        const d = devMap.get(player.id);
+                        const delta = d ? d.potAfter - d.potBefore : 0;
+                        return (
+                          <div className="flex items-center gap-1">
+                            <span className="text-sm font-bold text-slate-500">{player.potential}</span>
+                            {delta > 0 && <span className="text-[9px] font-black text-emerald-500/80 leading-none">↑{delta}</span>}
+                            {delta < 0 && <span className="text-[9px] font-black text-rose-500/80 leading-none">↓{Math.abs(delta)}</span>}
+                          </div>
+                        );
+                      })()}
+                      {player.potentialLossNote && (
+                        <span className="text-[8px] font-black text-rose-400 leading-tight text-center">{player.potentialLossNote}</span>
+                      )}
+                    </div>
                   </td>
                   <td className="px-8 py-6 text-right">
                     <div className="font-mono text-sm font-bold text-slate-100">{formatMoney(player.salary)}</div>

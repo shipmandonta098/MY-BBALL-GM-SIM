@@ -1,6 +1,9 @@
 import React, { useState } from 'react';
 import { LeagueState, Team, Player, GameResult } from '../types';
 import TeamBadge from './TeamBadge';
+import { teamSeasonAttendance } from '../utils/attendanceEngine';
+import { fmtSalary } from '../utils/formatters';
+import { calcTeamEffectiveOVR, getTeamInjuryNote } from '../utils/injuryEffects';
 
 interface DashboardProps {
   league: LeagueState;
@@ -12,6 +15,7 @@ interface DashboardProps {
   onViewRoster: (teamId: string) => void;
   onManageTeam: (teamId: string) => void;
   onAdvanceToRegularSeason?: () => void;
+  onOpenOffseasonAlerts?: () => void;
 }
 
 const CircularGauge = ({ value, label, color, size = 80 }: { value: number, label: string, color: string, size?: number }) => {
@@ -54,17 +58,27 @@ const CircularGauge = ({ value, label, color, size = 80 }: { value: number, labe
   );
 };
 
-const Dashboard: React.FC<DashboardProps> = ({ league, news, onSimulate, onScout, scoutingReport, setActiveTab, onViewRoster, onManageTeam, onAdvanceToRegularSeason }) => {
-  const userTeam = league.teams.find(t => t.id === league.userTeamId)!;
+const Dashboard: React.FC<DashboardProps> = ({ league, news, onSimulate, onScout, scoutingReport, setActiveTab, onViewRoster, onManageTeam, onAdvanceToRegularSeason, onOpenOffseasonAlerts }) => {
+  const userTeam = league.teams.find(t => t.id === league.userTeamId);
+  if (!userTeam) return null;
   const opponents = league.teams.filter(t => t.id !== userTeam.id);
-  const nextOpponent = opponents[league.currentDay % opponents.length];
+  const nextOpponent = opponents.length > 0 ? opponents[league.currentDay % opponents.length] : null;
+  const safeHistory = league.history ?? [];
+  const safeSchedule = league.schedule ?? [];
 
   const winPct = (userTeam.wins / (userTeam.wins + userTeam.losses || 1)).toFixed(3);
-  const teamOvr = Math.round(userTeam.roster.reduce((acc, p) => acc + p.rating, 0) / userTeam.roster.length);
+  const vsW = userTeam.vsAbove500W ?? 0;
+  const vsL = userTeam.vsAbove500L ?? 0;
+  const vsGames = vsW + vsL;
+  const vsPct = vsGames > 0 ? vsW / vsGames : null;
+  const vsRecord = vsGames > 0 ? `${vsW}-${vsL}` : '—';
+  const vsColor = vsPct === null ? 'text-slate-500' : vsPct >= 0.5 ? 'text-emerald-400' : vsPct >= 0.4 ? 'text-amber-400' : 'text-rose-400';
+  const teamOvr = calcTeamEffectiveOVR(userTeam.roster);
+  const teamOvrInjuryNote = getTeamInjuryNote(userTeam.roster);
   const teamMorale = Math.round(userTeam.roster.reduce((acc, p) => acc + p.morale, 0) / userTeam.roster.length);
   
   // Advanced Stats Calculation
-  const teamHistory = league.history.filter(h => h.homeTeamId === userTeam.id || h.awayTeamId === userTeam.id);
+  const teamHistory = safeHistory.filter(h => h.homeTeamId === userTeam.id || h.awayTeamId === userTeam.id);
   const seasonStats = teamHistory.reduce((acc, game) => {
     const isHome = game.homeTeamId === userTeam.id;
     const teamLines = isHome ? game.homePlayerStats : game.awayPlayerStats;
@@ -89,26 +103,28 @@ const Dashboard: React.FC<DashboardProps> = ({ league, news, onSimulate, onScout
   const ftRate = (seasonStats.fta / (seasonStats.fga || 1) * 100).toFixed(1);
 
   // SOS Calculation
-  const last10Games = league.history
+  const last10Games = safeHistory
     .filter(g => g.homeTeamId === userTeam.id || g.awayTeamId === userTeam.id)
     .sort((a, b) => b.date - a.date)
     .slice(0, 10);
-  const last10AvgOvr = last10Games.length > 0 
+  const last10AvgOvr = last10Games.length > 0
     ? Math.round(last10Games.reduce((acc, g) => {
         const oppId = g.homeTeamId === userTeam.id ? g.awayTeamId : g.homeTeamId;
-        const opp = league.teams.find(t => t.id === oppId)!;
+        const opp = league.teams.find(t => t.id === oppId);
+        if (!opp || !opp.roster.length) return acc;
         return acc + (opp.roster.reduce((s, p) => s + p.rating, 0) / opp.roster.length);
       }, 0) / last10Games.length)
     : 0;
 
-  const next10Games = league.schedule
+  const next10Games = safeSchedule
     .filter(g => !g.played && (g.homeTeamId === userTeam.id || g.awayTeamId === userTeam.id))
     .sort((a, b) => a.day - b.day)
     .slice(0, 10);
   const next10AvgOvr = next10Games.length > 0
     ? Math.round(next10Games.reduce((acc, g) => {
         const oppId = g.homeTeamId === userTeam.id ? g.awayTeamId : g.homeTeamId;
-        const opp = league.teams.find(t => t.id === oppId)!;
+        const opp = league.teams.find(t => t.id === oppId);
+        if (!opp || !opp.roster.length) return acc;
         return acc + (opp.roster.reduce((s, p) => s + p.rating, 0) / opp.roster.length);
       }, 0) / next10Games.length)
     : 0;
@@ -130,7 +146,7 @@ const Dashboard: React.FC<DashboardProps> = ({ league, news, onSimulate, onScout
   if (expiringSoon > 0) alerts.push({ text: `${expiringSoon} contracts expiring soon`, type: 'warning' });
   
   const totalSalary = userTeam.roster.reduce((s, p) => s + p.salary, 0);
-  if (totalSalary > league.settings.salaryCap) alerts.push({ text: "Over salary cap!", type: 'danger' });
+  if (league.settings?.salaryCap && totalSalary > league.settings.salaryCap) alerts.push({ text: "Over salary cap!", type: 'danger' });
   
   const lowMorale = userTeam.roster.filter(p => p.morale < 50).length;
   const moderateMorale = userTeam.roster.filter(p => p.morale >= 50 && p.morale < 65).length;
@@ -166,7 +182,7 @@ const Dashboard: React.FC<DashboardProps> = ({ league, news, onSimulate, onScout
     alerts.push({ text: `${p.name} — ${label}${days > 0 ? ` · ${days}d` : ''}`, type: 'danger' });
   });
 
-  const formatMoney = (amount: number) => `$${(amount / 1000000).toFixed(1)}M`;
+  const formatMoney = fmtSalary;
 
   return (
     <div className="space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-700">
@@ -205,14 +221,14 @@ const Dashboard: React.FC<DashboardProps> = ({ league, news, onSimulate, onScout
           <div className="relative z-10 flex flex-col md:flex-row items-center justify-between gap-12">
             <div className="flex items-center gap-8">
               <div className="text-center">
-                <div 
+                <div
                   className="w-24 h-24 bg-slate-800 rounded-2xl flex items-center justify-center border border-slate-700 mb-2 cursor-pointer hover:border-amber-500 transition-colors"
                   style={{ borderColor: userTeam.primaryColor }}
                   onClick={() => onManageTeam(userTeam.id)}
                 >
                   <TeamBadge team={userTeam} size="xl" />
                 </div>
-                <p 
+                <p
                   className="font-display font-bold text-lg uppercase cursor-pointer hover:text-amber-500 transition-colors"
                   onClick={() => onManageTeam(userTeam.id)}
                 >
@@ -220,18 +236,19 @@ const Dashboard: React.FC<DashboardProps> = ({ league, news, onSimulate, onScout
                 </p>
                 <p className="text-xs text-slate-500 font-bold tracking-widest">{userTeam.wins}-{userTeam.losses}</p>
               </div>
-              
+
               <div className="text-4xl font-display font-black text-slate-700 italic">VS</div>
-              
+
+              {nextOpponent ? (
               <div className="text-center">
-                <div 
+                <div
                   className="w-24 h-24 bg-slate-800 rounded-2xl flex items-center justify-center border border-slate-700 mb-2 cursor-pointer hover:border-amber-500 transition-colors"
                   style={{ borderColor: nextOpponent.primaryColor }}
                   onClick={() => onManageTeam(nextOpponent.id)}
                 >
                   <TeamBadge team={nextOpponent} size="xl" />
                 </div>
-                <p 
+                <p
                   className="font-display font-bold text-lg uppercase cursor-pointer hover:text-amber-500 transition-colors"
                   onClick={() => onManageTeam(nextOpponent.id)}
                 >
@@ -239,14 +256,24 @@ const Dashboard: React.FC<DashboardProps> = ({ league, news, onSimulate, onScout
                 </p>
                 <p className="text-xs text-slate-500 font-bold tracking-widest">{nextOpponent.wins}-{nextOpponent.losses}</p>
               </div>
+              ) : (
+              <div className="text-center">
+                <div className="w-24 h-24 bg-slate-800 rounded-2xl flex items-center justify-center border border-slate-700 mb-2">
+                  <span className="text-slate-600 font-bold text-xs uppercase">TBD</span>
+                </div>
+                <p className="font-display font-bold text-lg uppercase text-slate-600">Opponent TBD</p>
+              </div>
+              )}
             </div>
 
             <div className="flex-1 space-y-4 max-w-sm">
               <div>
                 <h3 className="text-xs font-black uppercase tracking-[0.3em] mb-1" style={{ color: userTeam.primaryColor }}>Game Preview</h3>
                 <p className="text-slate-300 text-sm leading-relaxed">
-                  The <span className="text-white font-bold">{userTeam.city} {userTeam.name}</span> face off against the <span className="text-white font-bold">{nextOpponent.name}</span> in a crucial {userTeam.conference} matchup. 
-                  Win Probability: <span className="text-emerald-400 font-bold">{teamOvr > nextOpponent.roster.reduce((a,b)=>a+b.rating,0)/nextOpponent.roster.length ? '68%' : '42%'}</span>.
+                  {nextOpponent
+                    ? <>The <span className="text-white font-bold">{userTeam.city} {userTeam.name}</span> face off against the <span className="text-white font-bold">{nextOpponent.name}</span> in a crucial {userTeam.conference} matchup. Win Probability: <span className="text-emerald-400 font-bold">{teamOvr > calcTeamEffectiveOVR(nextOpponent.roster) ? '68%' : '42%'}</span>.</>
+                    : <>The <span className="text-white font-bold">{userTeam.city} {userTeam.name}</span> are gearing up for the season.</>
+                  }
                 </p>
               </div>
               <div className="flex gap-3">
@@ -257,12 +284,14 @@ const Dashboard: React.FC<DashboardProps> = ({ league, news, onSimulate, onScout
                 >
                   Tip Off Now
                 </button>
-                <button 
+                {nextOpponent && (
+                <button
                    onClick={() => onViewRoster(nextOpponent.id)}
                    className="px-6 py-3 bg-slate-800 hover:bg-slate-700 text-slate-300 font-display font-bold uppercase rounded-xl transition-all"
                 >
                   Scout Roster
                 </button>
+                )}
               </div>
             </div>
           </div>
@@ -277,8 +306,10 @@ const Dashboard: React.FC<DashboardProps> = ({ league, news, onSimulate, onScout
                 <p className="text-[10px] text-slate-500 font-bold uppercase mb-1">Team OVR</p>
                 <div className="flex items-baseline gap-2">
                   <span className="text-3xl font-display font-black" style={{ color: userTeam.primaryColor }}>{teamOvr}</span>
-                  <span className="text-xs text-emerald-400 font-bold">↑ 2</span>
                 </div>
+                {teamOvrInjuryNote && (
+                  <p className="text-[9px] text-rose-400 font-bold mt-1 leading-tight">{teamOvrInjuryNote}</p>
+                )}
               </div>
               <div className="bg-slate-950/50 p-4 rounded-2xl border border-slate-800">
                 <p className="text-[10px] text-slate-500 font-bold uppercase mb-1">Team Morale</p>
@@ -306,6 +337,18 @@ const Dashboard: React.FC<DashboardProps> = ({ league, news, onSimulate, onScout
                 <span className={`text-sm font-bold ${userTeam.streak >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
                   {userTeam.streak >= 0 ? `W${userTeam.streak}` : `L${Math.abs(userTeam.streak)}`}
                 </span>
+             </div>
+             <div className="flex justify-between items-center border-t border-slate-800 pt-3 mt-1" title="Record against teams with .500 or better win% at time of game">
+                <div>
+                  <span className="text-xs font-bold text-slate-400 uppercase">vs .500+ Teams</span>
+                  <p className="text-[9px] text-slate-600 font-bold uppercase mt-0.5">Contender test</p>
+                </div>
+                <div className="text-right">
+                  <span className={`text-sm font-mono font-bold ${vsColor}`}>{vsRecord}</span>
+                  {vsPct !== null && (
+                    <p className={`text-[10px] font-black ${vsColor}`}>({vsPct.toFixed(3)})</p>
+                  )}
+                </div>
              </div>
           </div>
         </div>
@@ -403,6 +446,58 @@ const Dashboard: React.FC<DashboardProps> = ({ league, news, onSimulate, onScout
         </div>
       </div>
 
+      {/* Attendance Summary Card */}
+      {(() => {
+        const { homeGames, avgAttendance, capacityPct } = teamSeasonAttendance(userTeam, safeSchedule);
+        const allRanked = [...league.teams]
+          .map(t => ({ id: t.id, avg: teamSeasonAttendance(t, safeSchedule).avgAttendance }))
+          .sort((a, b) => b.avg - a.avg);
+        const rank = allRanked.findIndex(r => r.id === userTeam.id) + 1;
+        const fmt = (n: number) => n.toLocaleString('en-US');
+        if (homeGames === 0) return null;
+        return (
+          <div className="bg-slate-900 border border-slate-800 rounded-3xl p-6 shadow-2xl">
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-[10px] font-black uppercase tracking-[0.4em] text-slate-500">Home Attendance</h3>
+              <button
+                onClick={() => setActiveTab('stats')}
+                className="text-[10px] font-black uppercase tracking-widest text-amber-500 hover:text-amber-400 transition-colors"
+              >
+                Rankings →
+              </button>
+            </div>
+            <div className="grid grid-cols-3 gap-4">
+              <div className="text-center">
+                <p className="text-[10px] text-slate-500 font-black uppercase mb-1">Avg / Game</p>
+                <p className="text-2xl font-display font-black text-white">{fmt(avgAttendance)}</p>
+              </div>
+              <div className="text-center">
+                <p className="text-[10px] text-slate-500 font-black uppercase mb-1">% Capacity</p>
+                <p className={`text-2xl font-display font-black ${
+                  capacityPct >= 95 ? 'text-emerald-400' :
+                  capacityPct >= 80 ? 'text-amber-400' :
+                  capacityPct >= 60 ? 'text-slate-300' : 'text-rose-400'
+                }`}>{capacityPct.toFixed(1)}%</p>
+              </div>
+              <div className="text-center">
+                <p className="text-[10px] text-slate-500 font-black uppercase mb-1">League Rank</p>
+                <p className="text-2xl font-display font-black" style={{ color: userTeam.primaryColor }}>#{rank}</p>
+              </div>
+            </div>
+            <div className="mt-4 h-1.5 bg-slate-800 rounded-full overflow-hidden">
+              <div
+                className="h-full rounded-full transition-all duration-500"
+                style={{
+                  width: `${Math.min(100, capacityPct)}%`,
+                  backgroundColor: capacityPct >= 95 ? '#34d399' : capacityPct >= 80 ? '#f59e0b' : capacityPct >= 60 ? '#94a3b8' : '#f43f5e',
+                }}
+              />
+            </div>
+            <p className="text-[10px] text-slate-600 font-bold mt-1.5">{homeGames} home games played · Arena cap: {fmt(userTeam.stadiumCapacity || 19_000)}</p>
+          </div>
+        );
+      })()}
+
       {/* Main Grid: Depth Chart & Quick Actions */}
       <div className="grid grid-cols-1 lg:grid-cols-4 gap-8">
         
@@ -436,7 +531,11 @@ const Dashboard: React.FC<DashboardProps> = ({ league, news, onSimulate, onScout
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-800/50">
-                  {userTeam.roster.sort((a,b) => b.rating - a.rating).map((player, i) => (
+                  {[...userTeam.roster].sort((a,b) => {
+                    const effA = a.injuryOVRPenalty != null && (a.status === 'Injured' || (a.injuryDaysLeft ?? 0) > 0) ? Math.max(40, a.rating - a.injuryOVRPenalty) : a.rating;
+                    const effB = b.injuryOVRPenalty != null && (b.status === 'Injured' || (b.injuryDaysLeft ?? 0) > 0) ? Math.max(40, b.rating - b.injuryOVRPenalty) : b.rating;
+                    return effB - effA;
+                  }).map((player, i) => (
                     <tr 
                       key={player.id} 
                       className={`group hover:bg-slate-800/30 transition-all cursor-pointer ${i < 5 ? 'bg-slate-800/10' : ''}`}
@@ -453,8 +552,26 @@ const Dashboard: React.FC<DashboardProps> = ({ league, news, onSimulate, onScout
                       </td>
                       <td className="px-6 py-4 text-xs font-bold text-slate-400">{player.position}</td>
                       <td className="px-6 py-4 text-center text-sm font-medium">{player.age}</td>
-                      <td className="px-6 py-4 text-center font-display font-bold text-lg text-white">{player.rating}</td>
-                      <td className="px-6 py-4 text-center font-display font-bold text-sm text-slate-500">{player.potential}</td>
+                      <td className="px-6 py-4 text-center">
+                        {(() => {
+                          const isInj = player.status === 'Injured' || (player.injuryDaysLeft != null && player.injuryDaysLeft > 0);
+                          const eff = isInj && player.injuryOVRPenalty != null ? Math.max(40, player.rating - player.injuryOVRPenalty) : player.rating;
+                          return (
+                            <div>
+                              <span className="font-display font-bold text-lg" style={{ color: isInj ? '#f43f5e' : 'white' }}>{eff}</span>
+                              {isInj && player.injuryOVRPenalty != null && (
+                                <div className="text-[8px] font-black text-rose-500 uppercase leading-none">(INJ -{player.injuryOVRPenalty})</div>
+                              )}
+                            </div>
+                          );
+                        })()}
+                      </td>
+                      <td className="px-6 py-4 text-center">
+                        <span className="font-display font-bold text-sm text-slate-500">{player.potential}</span>
+                        {player.potentialLossNote && (
+                          <div className="text-[8px] font-black text-rose-400 leading-tight">{player.potentialLossNote}</div>
+                        )}
+                      </td>
                       <td className="px-6 py-4 text-center font-mono text-sm text-slate-300">{(player.stats.points / (player.stats.gamesPlayed || 1)).toFixed(1)}</td>
                       <td className="px-6 py-4 text-center font-mono text-sm text-slate-300">{(player.stats.rebounds / (player.stats.gamesPlayed || 1)).toFixed(1)}</td>
                       <td className="px-6 py-4 text-center font-mono text-sm text-slate-300">{(player.stats.assists / (player.stats.gamesPlayed || 1)).toFixed(1)}</td>
@@ -489,36 +606,125 @@ const Dashboard: React.FC<DashboardProps> = ({ league, news, onSimulate, onScout
         {/* Right Panel: Quick Actions & News */}
         <div className="space-y-8">
 
-          {/* ── Preseason Banner ── */}
-          {(league.seasonPhase === 'Preseason' || (league.isOffseason && league.draftPhase === 'completed')) && onAdvanceToRegularSeason && (
+          {/* ── Offseason Alerts Re-open Banner ── */}
+          {league.isOffseason && onOpenOffseasonAlerts && (league.offseasonAlerts ?? []).some(a => !a.dismissed) && (
+            <button
+              onClick={onOpenOffseasonAlerts}
+              className="w-full flex items-center gap-3 bg-amber-500/10 hover:bg-amber-500/20 border border-amber-500/30 hover:border-amber-500/60 rounded-2xl px-5 py-4 transition-all text-left group"
+            >
+              <span className="text-2xl">🔔</span>
+              <div className="flex-1 min-w-0">
+                <p className="text-[10px] font-black uppercase tracking-[0.3em] text-amber-400">Offseason Alerts</p>
+                <p className="text-sm font-bold text-white truncate">
+                  {(league.offseasonAlerts ?? []).filter(a => !a.dismissed).length} pending alert{(league.offseasonAlerts ?? []).filter(a => !a.dismissed).length > 1 ? 's' : ''} — tap to review
+                </p>
+              </div>
+              <span className="text-amber-500 group-hover:translate-x-1 transition-transform text-lg">›</span>
+            </button>
+          )}
+
+          {/* ── Preseason / Offseason Banner ── */}
+          {(league.isOffseason && league.draftPhase === 'completed') && onAdvanceToRegularSeason && (
             <div className="bg-gradient-to-br from-amber-900/30 to-slate-900 border border-amber-500/30 rounded-3xl p-6 shadow-2xl animate-in slide-in-from-top-2">
               <div className="flex items-center gap-3 mb-4">
                 <span className="text-2xl">🏀</span>
                 <div>
-                  <p className="text-[10px] font-black uppercase tracking-[0.4em] text-amber-500">
-                    {league.isOffseason ? 'Offseason Complete' : 'Preseason'}
-                  </p>
-                  <h3 className="text-lg font-display font-black text-white uppercase">
-                    {league.isOffseason ? 'Ready to Tip Off' : 'Season Locked & Loaded'}
-                  </h3>
+                  <p className="text-[10px] font-black uppercase tracking-[0.4em] text-amber-500">Offseason Complete</p>
+                  <h3 className="text-lg font-display font-black text-white uppercase">Ready to Tip Off</h3>
                 </div>
               </div>
               <p className="text-slate-400 text-xs mb-5 leading-relaxed">
-                {league.isOffseason
-                  ? 'Draft and free agency are complete. Generate a fresh schedule and begin the new season.'
-                  : 'A schedule has been generated. You can regenerate it in Settings → League, or advance to start the regular season now.'}
+                Draft and free agency are complete. Start the preseason exhibition slate and get your squad game-ready before the regular season.
               </p>
               <button
                 onClick={onAdvanceToRegularSeason}
                 className="w-full py-4 bg-amber-500 hover:bg-amber-400 active:scale-95 text-slate-950 font-display font-black uppercase text-sm rounded-2xl transition-all shadow-lg shadow-amber-500/20 flex items-center justify-center gap-2"
               >
                 <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M13 9l3 3m0 0l-3 3m3-3H8m13 0a9 9 0 11-18 0 9 9 0 0118 0z" />
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z" />
                 </svg>
-                Advance to Regular Season
+                Start Preseason
               </button>
             </div>
           )}
+
+          {/* ── Live Preseason Banner (active preseason games) ── */}
+          {league.seasonPhase === 'Preseason' && !league.isOffseason && (() => {
+            const preSched   = league.preseasonSchedule ?? [];
+            const preRecord  = league.preseasonRecord ?? { wins: 0, losses: 0 };
+            const totalPre   = preSched.length;
+            const playedPre  = preSched.filter(g => g.played).length;
+            const unplayed   = preSched.filter(
+              g => !g.played && (g.homeTeamId === league.userTeamId || g.awayTeamId === league.userTeamId)
+            );
+            const nextPreGame = unplayed[0] ?? null;
+            const nextOpp    = nextPreGame
+              ? league.teams.find(t => t.id === (nextPreGame.homeTeamId === league.userTeamId ? nextPreGame.awayTeamId : nextPreGame.homeTeamId))
+              : null;
+            const nextIsHome = nextPreGame ? nextPreGame.homeTeamId === league.userTeamId : false;
+
+            if (totalPre === 0) return null;
+
+            return (
+              <div className="bg-gradient-to-br from-amber-900/25 to-slate-900 border border-amber-500/30 rounded-3xl p-6 shadow-2xl animate-in slide-in-from-top-2">
+                <div className="flex items-center justify-between mb-4">
+                  <div className="flex items-center gap-3">
+                    <span className="text-2xl">🏋️</span>
+                    <div>
+                      <p className="text-[10px] font-black uppercase tracking-[0.4em] text-amber-500">Preseason — Exhibition</p>
+                      <h3 className="text-lg font-display font-black text-white uppercase">
+                        {playedPre === totalPre ? 'Preseason Complete!' : `${totalPre - playedPre} Game${totalPre - playedPre !== 1 ? 's' : ''} Left`}
+                      </h3>
+                    </div>
+                  </div>
+                  <div className="text-right">
+                    <p className="text-2xl font-display font-black text-white">{preRecord.wins}–{preRecord.losses}</p>
+                    <p className="text-[9px] text-slate-500 font-bold uppercase tracking-widest">Preseason Record</p>
+                  </div>
+                </div>
+
+                {/* Progress bar */}
+                <div className="h-1 bg-slate-800 rounded-full mb-4 overflow-hidden">
+                  <div className="h-full bg-amber-500 rounded-full transition-all duration-500" style={{ width: `${totalPre > 0 ? (playedPre / totalPre) * 100 : 0}%` }} />
+                </div>
+
+                {/* Next game */}
+                {nextPreGame && nextOpp && (
+                  <div className="bg-slate-950/60 border border-slate-800 rounded-2xl p-3 mb-4 flex items-center gap-3">
+                    <span className="text-xl">{nextOpp.logo}</span>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-[9px] text-slate-500 font-black uppercase tracking-widest">
+                        Next Preseason Game — {nextIsHome ? '🏠 Home' : '🛫 Away'}
+                      </p>
+                      <p className="text-sm font-bold text-white truncate">{nextOpp.city} {nextOpp.name}</p>
+                    </div>
+                    <span className="px-2 py-1 bg-amber-500/10 border border-amber-500/20 rounded-lg text-[8px] text-amber-500 font-black uppercase whitespace-nowrap">
+                      No standings impact
+                    </span>
+                  </div>
+                )}
+
+                <div className="flex gap-2">
+                  <button
+                    onClick={() => onSimulate('next')}
+                    className="flex-1 py-3 bg-amber-500 hover:bg-amber-400 active:scale-95 text-slate-950 font-display font-black uppercase text-xs rounded-2xl transition-all shadow-lg shadow-amber-500/20 flex items-center justify-center gap-2"
+                  >
+                    <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24"><path d="M8 5v14l11-7z" /></svg>
+                    {playedPre === totalPre ? 'Start Regular Season' : 'Sim Next Exhibition'}
+                  </button>
+                  {onAdvanceToRegularSeason && playedPre < totalPre && (
+                    <button
+                      onClick={onAdvanceToRegularSeason}
+                      className="px-4 py-3 bg-slate-800 hover:bg-slate-700 text-slate-400 font-display font-black uppercase text-xs rounded-2xl transition-all border border-slate-700 whitespace-nowrap"
+                      title="Skip remaining preseason games"
+                    >
+                      Skip
+                    </button>
+                  )}
+                </div>
+              </div>
+            );
+          })()}
 
           <section className="bg-slate-900 border border-slate-800 rounded-3xl p-6 shadow-2xl">
             <h3 className="text-xs font-black uppercase tracking-[0.2em] text-slate-500 mb-6 pb-2 border-b border-slate-800">Simulation Hub</h3>

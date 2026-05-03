@@ -33,6 +33,10 @@ const Sidebar: React.FC<SidebarProps> = ({
   const isOffseason = league.isOffseason;
   const draftPhase = league.draftPhase;
   const currentPhase = getSeasonPhase(league);
+  const isWomensLeague = (league.settings.playerGenderRatio ?? 0) === 100;
+  const finalsLabel = isWomensLeague ? 'WNBA Finals' : 'NBA Finals';
+  // Expansion is only available during the true offseason (after the Finals, before next season)
+  const expansionLocked = !isOffseason;
 
   // Offseason sub-phase label for Draft Hub
   const offseasonPhaseLabel =
@@ -47,13 +51,14 @@ const Sidebar: React.FC<SidebarProps> = ({
     { id: 'team_management', label: 'Team Management', icon: 'M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4' },
     { id: 'news', label: 'News Feed', icon: 'M19 20l-7-7 7-7M5 8h14M5 12h14M5 16h14' },
     { id: 'transactions', label: 'League Log', icon: 'M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9h6m-6 4h6' },
-    { id: 'expansion', label: 'Expansion Draft', icon: 'M12 9v3m0 0v3m0-3h3m-3 0H9m12 0a9 9 0 11-18 0 9 9 0 0118 0z', notification: isExpansionActive, visible: isExpansionActive },
+    { id: 'expansion', label: 'Expansion Draft', icon: 'M12 9v3m0 0v3m0-3h3m-3 0H9m12 0a9 9 0 11-18 0 9 9 0 0118 0z', notification: isExpansionActive, locked: expansionLocked, lockedTooltip: `Expansion Draft available after the ${finalsLabel} conclude` },
     { id: 'schedule', label: 'Schedule', icon: 'M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z' },
     { id: 'standings', label: 'Standings', icon: 'M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z' },
     { id: 'power_rankings', label: 'Power Rankings', icon: 'M13 7h8m0 0v8m0-8l-8 8-4-4-6 6' },
     { id: 'playoffs', label: 'Playoffs', icon: 'M13 10V3L4 14h7v7l9-11h-7z' },
     { id: 'allstar', label: 'All-Star Weekend', icon: 'M11.049 2.927c.3-.921 1.603-.921 1.902 0l1.519 4.674a1 1 0 00.95.69h4.915c.969 0 1.371 1.24.588 1.81l-3.976 2.888a1 1 0 00-.363 1.118l1.518 4.674c.3.922-.755 1.688-1.538 1.118l-3.976-2.888a1 1 0 00-1.176 0l-3.976 2.888c-.783.57-1.838-.197-1.538-1.118l1.518-4.674a1 1 0 00-.363-1.118l-3.976-2.888c-.784-.57-.382-1.81.588-1.81h4.914a1 1 0 00.951-.69l1.519-4.674z', notification: currentPhase === 'All-Star Weekend', visible: !!league.allStarWeekend },
     { id: 'awards', label: 'Trophies', icon: 'M5 3v4M3 5h4M6 17v4m-2-2h4m5-16l2.286 6.857L21 12l-7.714 2.143L11 21l-2.286-6.857L1 12l7.714-2.143L11 3z' },
+    { id: 'hof', label: 'Hall of Fame', icon: 'M8 14v3m4-3v3m4-3v3M3 21h18M3 10h18M3 7l9-4 9 4M4 10h16v11H4V10z' },
     { id: 'finances', label: 'Finances', icon: 'M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z' },
     { id: 'trade', label: 'Trade Machine', icon: 'M8 7h12m0 0l-4-4m4 4l-4 4m0 6H4m0 0l4-4m-4 4l4 4' },
     { id: 'trade_proposals', label: 'Trade Proposals', icon: 'M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z', notification: ((league.incomingTradeProposals ?? []).filter(p => p.status === 'incoming').length > 0) },
@@ -204,27 +209,42 @@ const Sidebar: React.FC<SidebarProps> = ({
         {menuItems.map(item => {
           if (item.visible === false) return null;
           const isActive = activeTab === item.id;
+          const isLocked = !!(item as any).locked;
+          const lockedTooltip = (item as any).lockedTooltip as string | undefined;
           return (
             <button
               key={item.id}
-              onClick={() => setActiveTab(item.id)}
+              onClick={isLocked ? undefined : () => setActiveTab(item.id)}
+              disabled={isLocked}
+              title={isLocked ? lockedTooltip : isCollapsed ? item.label : ''}
               className={`w-full flex items-center gap-3 p-3 rounded-lg transition-all group relative ${
-                isActive ? 'text-slate-950 shadow-lg' : 'text-slate-400 hover:text-white hover:bg-slate-800/50'
+                isLocked
+                  ? 'text-slate-700 cursor-not-allowed opacity-50 select-none'
+                  : isActive
+                    ? 'text-slate-950 shadow-lg'
+                    : 'text-slate-400 hover:text-white hover:bg-slate-800/50'
               }`}
-              style={isActive ? { backgroundColor: team.primaryColor } : {}}
-              title={isCollapsed ? item.label : ''}
+              style={!isLocked && isActive ? { backgroundColor: team.primaryColor } : {}}
             >
-              <div className="shrink-0">
+              <div className="shrink-0 relative">
                 <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d={item.icon} />
                 </svg>
+                {/* Lock badge — sits over the icon's top-right corner */}
+                {isLocked && (
+                  <div className="absolute -top-1 -right-1 w-3.5 h-3.5 bg-slate-900 border border-slate-700 rounded-full flex items-center justify-center">
+                    <svg className="w-2 h-2 text-slate-500" fill="currentColor" viewBox="0 0 20 20">
+                      <path fillRule="evenodd" d="M5 9V7a5 5 0 0110 0v2a2 2 0 012 2v5a2 2 0 01-2 2H5a2 2 0 01-2-2v-5a2 2 0 012-2zm8-2v2H7V7a3 3 0 016 0z" clipRule="evenodd" />
+                    </svg>
+                  </div>
+                )}
               </div>
               {!isCollapsed && (
                 <span className="font-bold text-sm whitespace-nowrap animate-in fade-in slide-in-from-left-2 duration-300">
                   {item.label}
                 </span>
               )}
-              {item.notification && (
+              {item.notification && !isLocked && (
                 <span
                   className={`absolute ${isCollapsed ? 'top-1 right-1' : 'top-2 right-2'} w-2 h-2 bg-amber-500 rounded-full animate-pulse shadow-[0_0_8px_rgba(245,158,11,0.5)]`}
                 />

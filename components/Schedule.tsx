@@ -1,6 +1,7 @@
 import React, { useState, useMemo, useEffect, useRef } from 'react';
 import { LeagueState, Team, ScheduleGame, Player, RivalryStats, GameResult } from '../types';
 import TeamBadge from './TeamBadge';
+import { formatSeasonLabel } from '../utils/formatters';
 
 interface ScheduleProps {
   league: LeagueState;
@@ -11,40 +12,50 @@ interface ScheduleProps {
   onManageTeam?: (teamId: string) => void;
   onAdvanceToRegularSeason?: () => void;
   onViewAllStar?: () => void;
+  onRegenerateSchedule?: () => void;
 }
 
-const Schedule: React.FC<ScheduleProps> = ({ league, onSimulate, onScout, onWatchLive, onViewBoxScore, onManageTeam, onAdvanceToRegularSeason, onViewAllStar }) => {
+const Schedule: React.FC<ScheduleProps> = ({ league, onSimulate, onScout, onWatchLive, onViewBoxScore, onManageTeam, onAdvanceToRegularSeason, onViewAllStar, onRegenerateSchedule }) => {
   const [viewMode, setViewMode] = useState<'team' | 'league'>('team');
   const [selectedTeamId, setSelectedTeamId] = useState<string>(league.userTeamId);
   const [selectedDay, setSelectedDay] = useState<number>(league.currentDay);
   
   const listRef = useRef<HTMLDivElement>(null);
+  const didAutoGenRef = useRef(false);
 
-  const selectedTeam = useMemo(() => 
-    league.teams.find(t => t.id === selectedTeamId) || league.teams.find(t => t.id === league.userTeamId)!
+  // Null-safe aliases — old saves may be missing these fields
+  const safeSchedule = league.schedule  ?? [];
+  const safeHistory  = league.history   ?? [];
+
+  const selectedTeam = useMemo(() =>
+    league.teams.find(t => t.id === selectedTeamId) ||
+    league.teams.find(t => t.id === league.userTeamId) ||
+    league.teams[0]
   , [league.teams, selectedTeamId, league.userTeamId]);
 
-  const teamSchedule = useMemo(() => 
-    league.schedule
-      .filter(g => g.homeTeamId === selectedTeam.id || g.awayTeamId === selectedTeam.id)
-      .sort((a, b) => a.day - b.day)
-  , [league.schedule, selectedTeam.id]);
+  const selectedTeamId_ = selectedTeam?.id ?? '';
 
-  const dailySchedule = useMemo(() => 
-    league.schedule
+  const teamSchedule = useMemo(() =>
+    safeSchedule
+      .filter(g => g.homeTeamId === selectedTeamId_ || g.awayTeamId === selectedTeamId_)
+      .sort((a, b) => a.day - b.day)
+  , [safeSchedule, selectedTeamId_]);
+
+  const dailySchedule = useMemo(() =>
+    safeSchedule
       .filter(g => g.day === selectedDay)
       .sort((a, b) => (a.gameNumber || 0) - (b.gameNumber || 0))
-  , [league.schedule, selectedDay]);
+  , [safeSchedule, selectedDay]);
 
   const stats = useMemo(() => {
     const played = teamSchedule.filter(g => g.played);
-    const homeLeft = teamSchedule.filter(g => !g.played && g.homeTeamId === selectedTeam.id).length;
-    const awayLeft = teamSchedule.filter(g => !g.played && g.awayTeamId === selectedTeam.id).length;
-    
+    const homeLeft = teamSchedule.filter(g => !g.played && g.homeTeamId === selectedTeamId_).length;
+    const awayLeft = teamSchedule.filter(g => !g.played && g.awayTeamId === selectedTeamId_).length;
+
     let b2bsTotal = 0;
     let b2bsPlayed = 0;
     teamSchedule.forEach(g => {
-      const isSelectedHome = g.homeTeamId === selectedTeam.id;
+      const isSelectedHome = g.homeTeamId === selectedTeamId_;
       if (isSelectedHome ? g.homeB2B : g.awayB2B) {
         b2bsTotal++;
         if (g.played) b2bsPlayed++;
@@ -60,17 +71,18 @@ const Schedule: React.FC<ScheduleProps> = ({ league, onSimulate, onScout, onWatc
       b2bsLeft: Math.max(0, b2bsTotal - b2bsPlayed),
       b2bsTotal
     };
-  }, [teamSchedule, selectedTeam.id]);
+  }, [teamSchedule, selectedTeamId_]);
 
   const nextFiveDifficulty = useMemo(() => {
     const upcoming = teamSchedule.filter(g => !g.played).slice(0, 5);
     return upcoming.map(g => {
-      const oppId = g.homeTeamId === selectedTeam.id ? g.awayTeamId : g.homeTeamId;
-      const opp = league.teams.find(t => t.id === oppId)!;
+      const oppId = g.homeTeamId === selectedTeamId_ ? g.awayTeamId : g.homeTeamId;
+      const opp = league.teams.find(t => t.id === oppId);
+      if (!opp || !opp.roster.length) return 50;
       const oppOvr = Math.round(opp.roster.reduce((acc, p) => acc + p.rating, 0) / opp.roster.length);
       return Math.min(100, (oppOvr - 65) * 3);
     });
-  }, [teamSchedule, league.teams, selectedTeam.id]);
+  }, [teamSchedule, league.teams, selectedTeamId_]);
 
   useEffect(() => {
     if (viewMode === 'team') {
@@ -83,6 +95,18 @@ const Schedule: React.FC<ScheduleProps> = ({ league, onSimulate, onScout, onWatc
       }
     }
   }, [teamSchedule, viewMode]);
+
+  // Auto-generate schedule if missing or stale (no games for user's team)
+  useEffect(() => {
+    if (!didAutoGenRef.current && onRegenerateSchedule) {
+      const scheduleEmpty   = safeSchedule.length === 0;
+      const noGamesForTeam  = teamSchedule.length === 0 && safeSchedule.length > 0;
+      if (scheduleEmpty || noGamesForTeam) {
+        didAutoGenRef.current = true;
+        onRegenerateSchedule();
+      }
+    }
+  }, []); // intentionally empty — fire once on mount only
 
   // ── Betting line / spread calculator ─────────────────────────────────────
   // Line expressed from home team perspective: negative = home favored.
@@ -136,12 +160,13 @@ const Schedule: React.FC<ScheduleProps> = ({ league, onSimulate, onScout, onWatc
   const GameCard = ({ game, index, focusTeamId }: { game: ScheduleGame, index: number, focusTeamId?: string }) => {
     const displayTeamId = focusTeamId || game.homeTeamId;
     const isHome = game.homeTeamId === displayTeamId;
-    const homeTeam = league.teams.find(t => t.id === game.homeTeamId)!;
-    const awayTeam = league.teams.find(t => t.id === game.awayTeamId)!;
-    const focusTeam = league.teams.find(t => t.id === displayTeamId)!;
+    const homeTeam = league.teams.find(t => t.id === game.homeTeamId);
+    const awayTeam = league.teams.find(t => t.id === game.awayTeamId);
+    const focusTeam = league.teams.find(t => t.id === displayTeamId);
+    if (!homeTeam || !awayTeam || !focusTeam) return null;
     const opp = isHome ? awayTeam : homeTeam;
 
-    const result = game.played ? league.history.find(h => h.id === game.id) : null;
+    const result = game.played ? safeHistory.find(h => h.id === game.id) : null;
     const spread  = calcSpread(homeTeam, awayTeam);
     // From focus-team perspective
     const focusFavored  = isHome ? spread.homeFavored : !spread.homeFavored;
@@ -317,7 +342,7 @@ const Schedule: React.FC<ScheduleProps> = ({ league, onSimulate, onScout, onWatc
                   className="w-16 h-16 bg-slate-800 rounded-2xl flex items-center justify-center border border-slate-700 relative overflow-hidden shrink-0 group-hover:scale-110 transition-transform cursor-pointer"
                   onClick={() => onManageTeam?.(opp.id)}
                 >
-                  <TeamBadge team={opp} size="lg" />
+                  <TeamBadge team={opp} size="lg" useSecondary={!isHome} />
                 </div>
                 <div>
                   <div className="flex items-center gap-2">
@@ -332,7 +357,7 @@ const Schedule: React.FC<ScheduleProps> = ({ league, onSimulate, onScout, onWatc
                     </h3>
                   </div>
                   <p className="text-xs text-slate-500 font-bold uppercase tracking-widest">
-                    OVR: {Math.round(opp.roster.reduce((s,p)=>s+p.rating,0)/opp.roster.length)} • {opp.wins}-{opp.losses}
+                    OVR: {opp.roster.length > 0 ? Math.round(opp.roster.reduce((s,p)=>s+p.rating,0)/opp.roster.length) : '—'} • {opp.wins}-{opp.losses}
                   </p>
                 </div>
               </div>
@@ -414,30 +439,235 @@ const Schedule: React.FC<ScheduleProps> = ({ league, onSimulate, onScout, onWatc
     );
   };
 
-  const isPreseason = league.seasonPhase === 'Preseason' && !league.schedule.some(g => g.played);
+  // Preseason state helpers
+  const preseasonSchedule = league.preseasonSchedule ?? [];
+  const isPreseasonPhase  = league.seasonPhase === 'Preseason';
+  const hasPreseasonGames = preseasonSchedule.length > 0;
+  const preseasonPlayed   = preseasonSchedule.filter(g => g.played).length;
+  const preseasonTotal    = preseasonSchedule.length;
+
+  // Use selectedTeamId so the preseason section updates when the team selector changes
+  const focusTeamPreseasonGames = preseasonSchedule.filter(
+    g => g.homeTeamId === selectedTeamId || g.awayTeamId === selectedTeamId
+  );
+
+  // Compute preseason record for whichever team is selected
+  const focusPreRecord = (() => {
+    if (selectedTeamId === league.userTeamId) return league.preseasonRecord ?? { wins: 0, losses: 0 };
+    const hist = league.preseasonHistory ?? [];
+    const wins = hist.filter(g =>
+      (g.homeTeamId === selectedTeamId && g.homeScore > g.awayScore) ||
+      (g.awayTeamId === selectedTeamId && g.awayScore > g.homeScore)
+    ).length;
+    const played = hist.filter(g => g.homeTeamId === selectedTeamId || g.awayTeamId === selectedTeamId).length;
+    return { wins, losses: played - wins };
+  })();
+
+  // Look up preseason result from preseasonHistory
+  const getPreseasonResult = (gameId: string) =>
+    (league.preseasonHistory ?? []).find(r => r.id === gameId) ?? null;
 
   return (
     <div className="space-y-8 animate-in fade-in duration-500 pb-40">
 
-      {/* ── Preseason banner ── */}
-      {isPreseason && onAdvanceToRegularSeason && (
-        <div className="bg-gradient-to-br from-amber-900/30 to-slate-900 border border-amber-500/30 rounded-[2rem] p-7 flex flex-col sm:flex-row items-center justify-between gap-5 shadow-xl animate-in slide-in-from-top-2">
-          <div className="space-y-1">
-            <p className="text-[10px] font-black uppercase tracking-[0.5em] text-amber-500">⏸ Preseason</p>
-            <h2 className="text-xl font-display font-black text-white uppercase">Schedule Generated — Season Not Started</h2>
-            <p className="text-slate-400 text-xs leading-relaxed">
-              Regenerate the schedule in <span className="text-slate-300 font-bold">Settings → League</span>, or lock it in and advance to the regular season now.
-            </p>
+      {/* ── Preseason Schedule Section ── */}
+      {hasPreseasonGames && (
+        <div className="space-y-4 animate-in slide-in-from-top-2">
+          {/* Header bar */}
+          <div className="bg-gradient-to-br from-amber-900/30 to-slate-900 border border-amber-500/30 rounded-[2rem] p-6 shadow-xl">
+            <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+              <div className="space-y-1">
+                <p className="text-[10px] font-black uppercase tracking-[0.5em] text-amber-500">🏋️ Preseason — Exhibition Slate</p>
+                <h2 className="text-xl font-display font-black text-white uppercase">
+                  {preseasonPlayed === preseasonTotal ? 'Preseason Complete' : `${preseasonTotal - preseasonPlayed} Exhibition Game${preseasonTotal - preseasonPlayed !== 1 ? 's' : ''} Remaining`}
+                </h2>
+                <div className="flex items-center gap-4 mt-1">
+                  <span className="text-slate-400 text-xs">
+                    {selectedTeamId === league.userTeamId ? 'Your' : (selectedTeam?.abbreviation ?? '')} Record:{' '}
+                    <span className="text-white font-black">{focusPreRecord.wins}–{focusPreRecord.losses}</span>
+                  </span>
+                  <span className="text-slate-600 text-xs">•</span>
+                  <span className="text-slate-400 text-xs">{preseasonPlayed}/{preseasonTotal} games played</span>
+                  <span className="text-slate-600 text-xs">•</span>
+                  <span className="text-xs text-amber-500/80 font-bold uppercase tracking-wider">No standings impact</span>
+                </div>
+                {/* Progress bar */}
+                <div className="h-1 bg-slate-800 rounded-full mt-2 w-64 overflow-hidden">
+                  <div className="h-full bg-amber-500 rounded-full transition-all duration-500" style={{ width: `${preseasonTotal > 0 ? (preseasonPlayed / preseasonTotal) * 100 : 0}%` }} />
+                </div>
+              </div>
+              <div className="flex flex-col sm:flex-row gap-2 shrink-0">
+                <button
+                  onClick={() => onSimulate('next')}
+                  className="px-5 py-3 bg-amber-500 hover:bg-amber-400 active:scale-95 text-slate-950 font-display font-black uppercase text-xs rounded-2xl transition-all shadow-lg shadow-amber-500/20 flex items-center gap-2 whitespace-nowrap"
+                >
+                  <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24"><path d="M8 5v14l11-7z" /></svg>
+                  Sim Next Game
+                </button>
+                {onAdvanceToRegularSeason && (
+                  <button
+                    onClick={onAdvanceToRegularSeason}
+                    className="px-5 py-3 bg-slate-800 hover:bg-slate-700 active:scale-95 text-slate-300 font-display font-black uppercase text-xs rounded-2xl transition-all flex items-center gap-2 whitespace-nowrap border border-slate-700"
+                  >
+                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M13 9l3 3m0 0l-3 3m3-3H8m13 0a9 9 0 11-18 0 9 9 0 0118 0z" />
+                    </svg>
+                    Skip to Regular Season
+                  </button>
+                )}
+              </div>
+            </div>
           </div>
-          <button
-            onClick={onAdvanceToRegularSeason}
-            className="shrink-0 px-8 py-4 bg-amber-500 hover:bg-amber-400 active:scale-95 text-slate-950 font-display font-black uppercase text-sm rounded-2xl transition-all shadow-lg shadow-amber-500/20 flex items-center gap-2 whitespace-nowrap"
-          >
-            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M13 9l3 3m0 0l-3 3m3-3H8m13 0a9 9 0 11-18 0 9 9 0 0118 0z" />
-            </svg>
-            Advance to Regular Season
-          </button>
+
+          {/* User's preseason games */}
+          <div className="bg-slate-900 border border-slate-800 rounded-[2rem] p-6 shadow-xl">
+            <h3 className="text-[10px] font-black uppercase tracking-[0.3em] text-slate-500 mb-5 pb-3 border-b border-slate-800 flex items-center gap-2">
+              <span className="w-2 h-2 rounded-full bg-amber-500 inline-block" />
+              {selectedTeamId === league.userTeamId ? 'Your' : (selectedTeam?.name ?? '')} Preseason Schedule
+            </h3>
+            <div className="space-y-3">
+              {focusTeamPreseasonGames.map((game, idx) => {
+                const isHome    = game.homeTeamId === selectedTeamId;
+                const opp       = league.teams.find(t => t.id === (isHome ? game.awayTeamId : game.homeTeamId));
+                if (!opp) return null;
+                const result    = getPreseasonResult(game.id);
+                const userScore = result ? (isHome ? result.homeScore : result.awayScore) : null;
+                const oppScore  = result ? (isHome ? result.awayScore : result.homeScore) : null;
+                const isWin     = userScore !== null && oppScore !== null && userScore > oppScore;
+                const isNext    = !game.played && (idx === 0 || focusTeamPreseasonGames[idx - 1]?.played);
+
+                return (
+                  <div
+                    key={game.id}
+                    className={`flex flex-col sm:flex-row items-start sm:items-center gap-4 p-4 rounded-2xl border transition-all ${
+                      isNext
+                        ? 'bg-amber-500/5 border-amber-500/30 ring-1 ring-amber-500/20'
+                        : game.played
+                        ? 'bg-slate-950/50 border-slate-800 opacity-80'
+                        : 'bg-slate-950/50 border-slate-800'
+                    }`}
+                  >
+                    {/* Game number & exhibition badge */}
+                    <div className="flex items-center gap-3 min-w-[110px]">
+                      <div className="text-center">
+                        <p className="text-[9px] text-slate-500 font-black uppercase tracking-widest">PRE {idx + 1}</p>
+                        <p className="text-[9px] text-slate-600 font-bold">Day {game.day}</p>
+                      </div>
+                      <span className="px-2 py-0.5 bg-amber-500/10 border border-amber-500/20 rounded-full text-[8px] font-black text-amber-500 uppercase tracking-widest whitespace-nowrap">
+                        Exhibition
+                      </span>
+                    </div>
+
+                    {/* Opponent */}
+                    <div className="flex items-center gap-3 flex-1">
+                      <div className="w-10 h-10 bg-slate-800 rounded-xl flex items-center justify-center border border-slate-700 shrink-0">
+                        <span className="text-lg">{opp.logo}</span>
+                      </div>
+                      <div>
+                        <p className="text-[9px] font-black text-slate-500 uppercase tracking-widest leading-none mb-0.5">
+                          {isHome ? '🏠 Home' : '🛫 Away'}
+                        </p>
+                        <p className="text-sm font-bold text-white">{opp.city} {opp.name}</p>
+                        <p className="text-[9px] text-slate-500 font-bold">OVR {Math.round(opp.roster.reduce((s, p) => s + p.rating, 0) / (opp.roster.length || 1))}</p>
+                      </div>
+                    </div>
+
+                    {/* Result / actions */}
+                    <div className="flex items-center gap-3 sm:ml-auto">
+                      {game.played && result ? (
+                        <>
+                          <div className="text-right">
+                            <p className={`text-xl font-display font-black ${isWin ? 'text-emerald-400' : 'text-rose-500'}`}>
+                              {isWin ? 'W' : 'L'} {userScore}-{oppScore}
+                            </p>
+                            <p className="text-[9px] text-slate-500 font-bold uppercase">Exhibition</p>
+                          </div>
+                          <button
+                            onClick={() => {
+                              const homeTeam = league.teams.find(t => t.id === game.homeTeamId);
+                              const awayTeam = league.teams.find(t => t.id === game.awayTeamId);
+                              if (homeTeam && awayTeam) onViewBoxScore(result, homeTeam, awayTeam);
+                            }}
+                            className="px-3 py-1.5 bg-amber-500/10 hover:bg-amber-500 text-amber-500 hover:text-slate-950 text-[9px] font-black uppercase tracking-widest rounded-lg border border-amber-500/20 transition-all whitespace-nowrap"
+                          >
+                            Box Score
+                          </button>
+                        </>
+                      ) : (
+                        <>
+                          {isNext && (
+                            <span className="px-2 py-1 bg-amber-500/10 border border-amber-500/30 rounded-lg text-[9px] text-amber-500 font-black uppercase">
+                              Next Up
+                            </span>
+                          )}
+                          <button
+                            onClick={() => onSimulate('single-instant', game.id)}
+                            className="px-4 py-2 bg-amber-500/10 hover:bg-amber-500 text-amber-500 hover:text-slate-950 text-[9px] font-black uppercase tracking-widest rounded-xl border border-amber-500/20 transition-all whitespace-nowrap"
+                          >
+                            Simulate
+                          </button>
+                          {onWatchLive && (
+                            <button
+                              onClick={() => onWatchLive(game.id)}
+                              className="px-4 py-2 bg-emerald-500/10 hover:bg-emerald-500 text-emerald-500 hover:text-slate-950 text-[9px] font-black uppercase tracking-widest rounded-xl border border-emerald-500/20 transition-all whitespace-nowrap flex items-center gap-1.5"
+                            >
+                              <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 24 24"><path d="M8 5v14l11-7z" /></svg>
+                              Watch Live
+                            </button>
+                          )}
+                          <button
+                            onClick={() => onSimulate('to-game', game.id)}
+                            className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-400 text-[9px] font-black uppercase tracking-widest rounded-xl transition-all whitespace-nowrap"
+                          >
+                            Sim To
+                          </button>
+                        </>
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
+              {focusTeamPreseasonGames.length === 0 && (
+                <p className="text-slate-500 text-sm text-center py-4">No preseason games scheduled for your team.</p>
+              )}
+            </div>
+          </div>
+
+          {/* League-wide preseason results summary */}
+          {preseasonPlayed > 0 && (
+            <div className="bg-slate-900 border border-slate-800 rounded-[2rem] p-6 shadow-xl">
+              <h3 className="text-[10px] font-black uppercase tracking-[0.3em] text-slate-500 mb-4 pb-3 border-b border-slate-800">
+                Recent Exhibition Results
+              </h3>
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+                {(league.preseasonHistory ?? []).slice(0, 9).map(result => {
+                  const home = league.teams.find(t => t.id === result.homeTeamId);
+                  const away = league.teams.find(t => t.id === result.awayTeamId);
+                  if (!home || !away) return null;
+                  return (
+                    <div
+                      key={result.id}
+                      className="flex items-center justify-between px-3 py-2.5 bg-slate-950/60 border border-slate-800 rounded-xl cursor-pointer hover:border-amber-500/30 transition-all"
+                      onClick={() => onViewBoxScore(result, home, away)}
+                    >
+                      <div className="flex items-center gap-2 min-w-0">
+                        <span className="text-base shrink-0">{away.logo}</span>
+                        <span className="text-[10px] text-slate-400 font-bold truncate">{away.abbreviation}</span>
+                      </div>
+                      <div className="text-center px-2">
+                        <p className="text-[10px] font-black font-mono text-white">{result.awayScore}-{result.homeScore}</p>
+                        <p className="text-[8px] text-amber-500/60 font-bold uppercase">Exhib.</p>
+                      </div>
+                      <div className="flex items-center gap-2 min-w-0 flex-row-reverse">
+                        <span className="text-base shrink-0">{home.logo}</span>
+                        <span className="text-[10px] text-slate-400 font-bold truncate">{home.abbreviation}</span>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
         </div>
       )}
 
@@ -445,19 +675,24 @@ const Schedule: React.FC<ScheduleProps> = ({ league, onSimulate, onScout, onWatc
         <div className="absolute top-0 right-0 w-80 h-80 bg-amber-500/5 blur-[100px] rounded-full -mr-40 -mt-40"></div>
         
         <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-6 mb-8 relative z-10">
-          <div className="flex bg-slate-950 p-1 rounded-2xl border border-slate-800">
-            <button 
-              onClick={() => setViewMode('team')}
-              className={`px-6 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all ${viewMode === 'team' ? 'bg-amber-500 text-slate-950' : 'text-slate-500 hover:text-slate-300'}`}
-            >
-              Team Schedule
-            </button>
-            <button 
-              onClick={() => setViewMode('league')}
-              className={`px-6 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all ${viewMode === 'league' ? 'bg-amber-500 text-slate-950' : 'text-slate-500 hover:text-slate-300'}`}
-            >
-              League Schedule
-            </button>
+          <div className="flex items-center gap-4">
+            <div className="flex bg-slate-950 p-1 rounded-2xl border border-slate-800">
+              <button
+                onClick={() => setViewMode('team')}
+                className={`px-6 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all ${viewMode === 'team' ? 'bg-amber-500 text-slate-950' : 'text-slate-500 hover:text-slate-300'}`}
+              >
+                Team Schedule
+              </button>
+              <button
+                onClick={() => setViewMode('league')}
+                className={`px-6 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all ${viewMode === 'league' ? 'bg-amber-500 text-slate-950' : 'text-slate-500 hover:text-slate-300'}`}
+              >
+                League Schedule
+              </button>
+            </div>
+            <span className="hidden md:inline-block px-3 py-1 bg-slate-800 border border-slate-700 rounded-full text-[10px] font-black uppercase tracking-widest text-slate-400">
+              {formatSeasonLabel(league.season, league.settings)}
+            </span>
           </div>
 
           {viewMode === 'team' ? (
@@ -528,9 +763,10 @@ const Schedule: React.FC<ScheduleProps> = ({ league, onSimulate, onScout, onWatc
               <div className="overflow-x-auto pb-1">
                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 min-w-0">
                   {dailySchedule.map(game => {
-                    const home = league.teams.find(t => t.id === game.homeTeamId)!;
-                    const away = league.teams.find(t => t.id === game.awayTeamId)!;
-                    const result = game.played ? league.history.find(h => h.id === game.id) : null;
+                    const home = league.teams.find(t => t.id === game.homeTeamId);
+                    const away = league.teams.find(t => t.id === game.awayTeamId);
+                    if (!home || !away) return null;
+                    const result = game.played ? safeHistory.find(h => h.id === game.id) : null;
                     const isUserGame = game.homeTeamId === league.userTeamId || game.awayTeamId === league.userTeamId;
                     const sp = calcSpread(home, away);
                     return (
@@ -542,7 +778,7 @@ const Schedule: React.FC<ScheduleProps> = ({ league, onSimulate, onScout, onWatc
                           {/* Away Team */}
                           <div className="flex items-center gap-2 flex-1 min-w-0">
                             <div className="w-8 h-8 bg-slate-800 rounded-lg flex items-center justify-center border border-slate-700 shrink-0">
-                              <TeamBadge team={away} size="sm" />
+                              <TeamBadge team={away} size="sm" useSecondary />
                             </div>
                             <div className="min-w-0">
                               <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest leading-none mb-0.5">🛫 Away</p>
@@ -689,6 +925,25 @@ const Schedule: React.FC<ScheduleProps> = ({ league, onSimulate, onScout, onWatc
             </React.Fragment>
           );
         })}
+        {viewMode === 'team' && teamSchedule.length === 0 && (
+          <div className="py-20 text-center space-y-5">
+            <div
+              className="w-12 h-12 border-4 border-slate-700 rounded-full animate-spin mx-auto"
+              style={{ borderTopColor: league.teams.find(t => t.id === league.userTeamId)?.primaryColor ?? '#f59e0b' }}
+            />
+            <p className="text-slate-400 font-bold uppercase tracking-widest text-sm">
+              {safeSchedule.length === 0 ? 'Generating schedule...' : 'No games scheduled for this team.'}
+            </p>
+            {onRegenerateSchedule && (
+              <button
+                onClick={onRegenerateSchedule}
+                className="px-6 py-2.5 bg-slate-800 hover:bg-slate-700 border border-slate-700 hover:border-slate-500 text-slate-300 text-[10px] font-black uppercase tracking-widest rounded-xl transition-all"
+              >
+                Regenerate Schedule
+              </button>
+            )}
+          </div>
+        )}
         {viewMode === 'league' && dailySchedule.length === 0 && (
           <div className="py-20 text-center">
             <p className="text-slate-500 font-medium uppercase tracking-widest">No games scheduled for Day {selectedDay}</p>

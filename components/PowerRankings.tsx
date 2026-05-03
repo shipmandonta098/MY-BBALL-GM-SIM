@@ -2,7 +2,9 @@ import React, { useState, useMemo, useEffect } from 'react';
 import { LeagueState, Team, PowerRankingEntry, PowerRankingSnapshot } from '../types';
 import TeamBadge from './TeamBadge';
 import { generateTeamComparisonInsight } from '../services/geminiService';
+import { fmtSalary } from '../utils/formatters';
 import { PlayerLink } from '../context/NavigationContext';
+import { calcTeamEffectiveOVR, getEffectiveRating } from '../utils/injuryEffects';
 
 interface PowerRankingsProps {
   league: LeagueState;
@@ -23,7 +25,7 @@ const PowerRankings: React.FC<PowerRankingsProps> = ({ league, onViewRoster, onM
   const teamData = useMemo(() => {
     return league.teams.map(team => {
       const winPct = team.wins / (team.wins + team.losses || 1);
-      const teamOvr = Math.round(team.roster.reduce((sum, p) => sum + p.rating, 0) / team.roster.length);
+      const teamOvr = calcTeamEffectiveOVR(team.roster);
       const teamGames = league.history.filter(g => g.homeTeamId === team.id || g.awayTeamId === team.id);
       let totalDiff = 0;
       teamGames.forEach(g => {
@@ -73,8 +75,8 @@ const PowerRankings: React.FC<PowerRankingsProps> = ({ league, onViewRoster, onM
   };
 
   const TeamComparisonCard = ({ team, side }: { team: Team, side: 'left' | 'right' }) => {
-    const ovr = Math.round(team.roster.reduce((a,b)=>a+b.rating,0)/team.roster.length);
-    const top5 = team.roster.sort((a,b)=>b.rating-a.rating).slice(0, 5);
+    const ovr = calcTeamEffectiveOVR(team.roster);
+    const top5 = [...team.roster].sort((a,b)=>getEffectiveRating(b)-getEffectiveRating(a)).slice(0, 5);
     const cap = team.budget - team.roster.reduce((s,p)=>s+p.salary,0);
 
     return (
@@ -96,7 +98,7 @@ const PowerRankings: React.FC<PowerRankingsProps> = ({ league, onViewRoster, onM
            </div>
            <div className="bg-slate-950 p-4 rounded-xl border border-slate-800">
               <p className="text-[10px] text-slate-500 font-black uppercase mb-1">Cap Space</p>
-              <p className={`text-xl font-mono font-bold ${cap > 0 ? 'text-emerald-400' : 'text-rose-500'}`}>${(cap/1000000).toFixed(1)}M</p>
+              <p className={`text-xl font-mono font-bold ${cap > 0 ? 'text-emerald-400' : 'text-rose-500'}`}>{fmtSalary(Math.abs(cap))}{cap < 0 ? ' over' : ''}</p>
            </div>
         </div>
 

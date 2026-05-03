@@ -1,7 +1,10 @@
 import React, { useState, useMemo, useEffect } from 'react';
-import { LeagueState, Team, Player, DraftPick, TradePiece, TradeProposal, Position, Transaction } from '../types';
+import { LeagueState, Team, Player, DraftPick, TradePiece, TradeProposal, Position, Transaction, RivalryStats } from '../types';
 import TeamBadge from './TeamBadge';
 import { snapshotPlayerStats } from '../utils/playerUtils';
+import OwnerReactionModal from './OwnerReactionModal';
+import { calcTradeReaction, OwnerReaction } from '../utils/ownerReactionEngine';
+import { fmtSalary } from '../utils/formatters';
 
 interface TradeProps {
   league: LeagueState;
@@ -28,6 +31,17 @@ const Trade: React.FC<TradeProps> = ({ league, updateLeague, recordTransaction, 
   const [finderPos, setFinderPos] = useState<Position | 'ALL'>('ALL');
   const [finderMaxSalary, setFinderMaxSalary] = useState(50000000);
   const [finderResults, setFinderResults] = useState<{ player: Player, team: Team }[]>([]);
+  // Approval feedback shown briefly after executing a trade
+  const [tradeApproval, setTradeApproval] = useState<{ ownerDelta: number; fanDelta: number } | null>(null);
+  // Pending trade execution waiting for owner confirmation
+  const [pendingTrade, setPendingTrade] = useState<{
+    updatedTeams: Team[];
+    updatedTransactions: Transaction[];
+    rivalryHistory: RivalryStats[];
+    ownerDelta: number;
+    fanDelta: number;
+    reaction: OwnerReaction;
+  } | null>(null);
 
   const userTeam = league.teams.find(t => t.id === league.userTeamId)!;
   const partnerTeam = league.teams.find(t => t.id === partnerTeamId)!;
@@ -72,7 +86,7 @@ const Trade: React.FC<TradeProps> = ({ league, updateLeague, recordTransaction, 
   const userOutgoingSalary = userPieces.reduce((sum, p) => sum + (p.type === 'player' ? (p.data as Player).salary : 0), 0);
   const partnerOutgoingSalary = partnerPieces.reduce((sum, p) => sum + (p.type === 'player' ? (p.data as Player).salary : 0), 0);
 
-  const formatMoney = (val: number) => `$${(val / 1000000).toFixed(1)}M`;
+  const formatMoney = fmtSalary;
 
   // ── Pick helpers ──────────────────────────────────────────────────────────
   const pickLabel = (pick: DraftPick): string => {
@@ -247,10 +261,34 @@ const Trade: React.FC<TradeProps> = ({ league, updateLeague, recordTransaction, 
       });
     }
 
-    updateLeague({ teams: updatedTeams, transactions: updatedTransactions, rivalryHistory });
+    // ── Approval impact — show owner modal before finalizing ─────────────────
+    const reaction = calcTradeReaction(userPieces, partnerPieces, league);
+    setPendingTrade({
+      updatedTeams,
+      updatedTransactions,
+      rivalryHistory,
+      ownerDelta: reaction.ownerDelta,
+      fanDelta: reaction.fanDelta,
+      reaction,
+    });
+  };
+
+  const finalizeTradeExecution = () => {
+    if (!pendingTrade) return;
+    const newOwner = Math.max(0, Math.min(100, (league.ownerApproval ?? 55) + pendingTrade.ownerDelta));
+    const newFan   = Math.max(0, Math.min(100, (league.fanApproval   ?? 60) + pendingTrade.fanDelta));
+    updateLeague({
+      teams: pendingTrade.updatedTeams,
+      transactions: pendingTrade.updatedTransactions,
+      rivalryHistory: pendingTrade.rivalryHistory,
+      ownerApproval: newOwner,
+      fanApproval: newFan,
+    });
     setUserPieces([]);
     setPartnerPieces([]);
+    if (pendingTrade.ownerDelta !== 0) setTradeApproval({ ownerDelta: pendingTrade.ownerDelta, fanDelta: pendingTrade.fanDelta });
     setAiResponse({ status: 'neutral', message: 'Trade finalized! Roster updates complete.' });
+    setPendingTrade(null);
   };
 
   const handleSaveTrade = () => {
@@ -338,6 +376,15 @@ const Trade: React.FC<TradeProps> = ({ league, updateLeague, recordTransaction, 
 
   return (
     <div className="space-y-8 animate-in fade-in duration-500 pb-40">
+      {/* ── Owner Reaction Modal ── */}
+      {pendingTrade && (
+        <OwnerReactionModal
+          reaction={pendingTrade.reaction}
+          moveType="trade"
+          onProceed={finalizeTradeExecution}
+          onCancel={() => { setPendingTrade(null); setAiResponse({ status: 'accepted', message: 'Trade proposal accepted — confirm to finalize.' }); }}
+        />
+      )}
       {isDeadlinePassed && (
         <div className="bg-rose-500/10 border border-rose-500/40 rounded-2xl px-6 py-4 flex items-center gap-4">
           <span className="text-2xl">🚨</span>
@@ -426,6 +473,23 @@ const Trade: React.FC<TradeProps> = ({ league, updateLeague, recordTransaction, 
                     "{aiResponse.message}"
                   </p>
                </div>
+
+               {/* ── Approval feedback toast (shown after trade executes) ── */}
+               {tradeApproval && (
+                 <div className={`rounded-2xl border p-4 flex items-center justify-between animate-in fade-in duration-500 ${
+                   tradeApproval.ownerDelta >= 0 ? 'bg-emerald-500/10 border-emerald-500/30' : 'bg-rose-500/10 border-rose-500/30'
+                 }`}>
+                   <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">Approval Impact</p>
+                   <div className="flex items-center gap-4 text-sm font-black">
+                     <span className={tradeApproval.ownerDelta >= 0 ? 'text-emerald-400' : 'text-rose-400'}>
+                       👔 Owner {tradeApproval.ownerDelta >= 0 ? '+' : ''}{tradeApproval.ownerDelta}
+                     </span>
+                     <span className={tradeApproval.fanDelta >= 0 ? 'text-emerald-400' : 'text-rose-400'}>
+                       📣 Fans {tradeApproval.fanDelta >= 0 ? '+' : ''}{tradeApproval.fanDelta}
+                     </span>
+                   </div>
+                 </div>
+               )}
 
                <div className="space-y-3">
                  <button onClick={handlePropose} disabled={!canPropose} className="w-full py-5 bg-amber-500 hover:bg-amber-400 disabled:opacity-20 text-slate-950 font-display font-bold uppercase rounded-2xl shadow-xl">Propose Trade</button>

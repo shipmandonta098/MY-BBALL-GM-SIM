@@ -1,4 +1,5 @@
 import { Team, Position, Player, Conference, Division, MarketSize, PersonalityTrait, PlayerTendencies, ScheduleGame, Prospect, DraftPick, Coach, CoachScheme, CoachBadge, OwnerGoal, Gender, CoachRole, TeamRotation } from './types';
+import { computeMensMarketSalary } from './utils/contractRules';
 
 export const POSITIONS: Position[] = ['PG', 'SG', 'SF', 'PF', 'C'];
 export const SCHEMES: CoachScheme[] = ['Balanced', 'Pace and Space', 'Grit and Grind', 'Triangle', 'Small Ball', 'Showtime'];
@@ -297,6 +298,99 @@ export const calcPositionRating = (pos: Position, a: Player['attributes']): numb
 const parseHeightStr = (h: string): number => {
   const m = h?.match(/^(\d+)-(\d+)$/);
   return m ? parseInt(m[1]) * 12 + parseInt(m[2]) : 0;
+};
+
+// ── Secondary Position Assignment ────────────────────────────────────────────
+/**
+ * Derives realistic secondary positions based on height, attributes, and primary position.
+ * Returns 0–2 secondary positions the player can play without a full performance penalty.
+ */
+export const assignSecondaryPositions = (
+  primaryPos: Position,
+  attrs: Record<string, number>,
+  heightInches: number,
+): Position[] => {
+  const secondaries: Position[] = [];
+  const ballHandling = attrs.ballHandling ?? 50;
+  const passing      = attrs.passing      ?? 50;
+  const shooting3pt  = attrs.shooting3pt  ?? 50;
+  const speed        = attrs.speed        ?? 50;
+  const strength     = attrs.strength     ?? 50;
+  const shooting     = attrs.shooting     ?? 50;
+  const athleticism  = attrs.athleticism  ?? 50;
+  const interiorDef  = attrs.interiorDef  ?? 50;
+
+  switch (primaryPos) {
+    case 'PG':
+      // Combo guard / shoot-first PG → SG
+      if (shooting3pt >= 75 && speed >= 76) secondaries.push('SG');
+      // Tall PG (6-6+) with athleticism → can also play SF
+      if (heightInches >= 78 && athleticism >= 80 && shooting >= 74) secondaries.push('SF');
+      break;
+
+    case 'SG':
+      // Ball-handler combo → PG
+      if (ballHandling >= 74 && passing >= 68) secondaries.push('PG');
+      // Long athletic SG (6-5+) → SF
+      if (heightInches >= 77 && athleticism >= 80) secondaries.push('SF');
+      break;
+
+    case 'SF':
+      // Quick, shooting-capable wing → SG
+      if (speed >= 74 && shooting >= 76) secondaries.push('SG');
+      // Strong, tall SF (6-7+) → PF
+      if (strength >= 76 && heightInches >= 79) secondaries.push('PF');
+      break;
+
+    case 'PF':
+      // Mobile stretch four → SF
+      if (speed >= 70 && shooting >= 70) secondaries.push('SF');
+      // Interior-anchored PF with size → C
+      if (strength >= 80 && interiorDef >= 76) secondaries.push('C');
+      break;
+
+    case 'C':
+      // Mobile or stretch big → PF
+      if (speed >= 65 && shooting >= 60) secondaries.push('PF');
+      // Athletic, undersized C (under 7-0) with speed → SF small-ball
+      if (speed >= 72 && athleticism >= 80 && shooting >= 65 && heightInches <= 84) secondaries.push('SF');
+      break;
+  }
+
+  return secondaries;
+};
+
+/**
+ * Returns all positions a player is eligible to play (primary + secondary).
+ * Used by rotation assignment and substitution logic.
+ */
+export const getEligiblePositions = (player: { position: Position; secondaryPositions?: Position[] }): Position[] =>
+  [player.position, ...(player.secondaryPositions ?? [])];
+
+/**
+ * Positional distance penalty multiplier (0.88–1.0).
+ * A player at a position not in their eligible set takes a ~8% effective-rating hit.
+ * A player one tier away from their nearest eligible position takes ~4%.
+ */
+const POS_DISTANCE: Record<Position, Record<Position, number>> = {
+  PG: { PG: 0, SG: 1, SF: 2, PF: 3, C: 4 },
+  SG: { SG: 0, PG: 1, SF: 1, PF: 2, C: 3 },
+  SF: { SF: 0, SG: 1, PF: 1, PG: 2, C: 2 },
+  PF: { PF: 0, SF: 1, C:  1, SG: 2, PG: 3 },
+  C:  { C:  0, PF: 1, SF: 2, SG: 3, PG: 4 },
+};
+
+export const positionalPenaltyFactor = (
+  player: { position: Position; secondaryPositions?: Position[] },
+  slotPosition: Position,
+): number => {
+  const eligible = getEligiblePositions(player);
+  if (eligible.includes(slotPosition)) return 1.0;
+  // Find smallest distance from any eligible position to the slot
+  const minDist = Math.min(...eligible.map(ep => POS_DISTANCE[ep][slotPosition]));
+  if (minDist <= 1) return 0.96; // slight stretch, e.g. SG playing PF
+  if (minDist <= 2) return 0.92;
+  return 0.88;                   // far out of position, e.g. PG at C
 };
 
 /**
@@ -772,6 +866,154 @@ export const EXPANSION_TEAM_POOL = [
   { city: "San Diego", name: "Sails", conf: "Western", div: "Pacific", market: "Medium", primary: "#002D62", secondary: "#FEC524" },
 ];
 
+export interface ExpansionCityOption {
+  city: string;
+  state: string;
+  country: 'USA' | 'Canada' | 'Mexico';
+  marketSize: 'Large' | 'Medium' | 'Small';
+  population: number;
+  expansionFee: number;
+  suggestedName: string;
+  suggestedNames: string[];
+  primaryColor: string;
+  secondaryColor: string;
+  conf: 'Eastern' | 'Western';
+  div: string;
+  highlight?: boolean;
+}
+
+export const EXPANSION_CITY_DB: ExpansionCityOption[] = [
+  // ── Large markets ──────────────────────────────────────────────────────────
+  {
+    city: 'Seattle', state: 'WA', country: 'USA', marketSize: 'Large',
+    population: 4.0, expansionFee: 130,
+    suggestedName: 'SuperSonics', suggestedNames: ['SuperSonics', 'Storm', 'Kraken', 'Emeralds', 'Cascades'],
+    primaryColor: '#00471B', secondaryColor: '#FEE123',
+    conf: 'Western', div: 'Northwest', highlight: true,
+  },
+  {
+    city: 'Mexico City', state: 'MX', country: 'Mexico', marketSize: 'Large',
+    population: 21.6, expansionFee: 150,
+    suggestedName: 'Aztecs', suggestedNames: ['Aztecs', 'Dragons', 'Condors', 'Jaguars', 'Toros'],
+    primaryColor: '#006341', secondaryColor: '#CE1126',
+    conf: 'Western', div: 'Southwest', highlight: true,
+  },
+  {
+    city: 'Montreal', state: 'QC', country: 'Canada', marketSize: 'Large',
+    population: 4.2, expansionFee: 120,
+    suggestedName: 'Express', suggestedNames: ['Express', 'Royals', 'Nordiques', 'Cavaliers', 'Storm'],
+    primaryColor: '#003DA5', secondaryColor: '#E31837',
+    conf: 'Eastern', div: 'Atlantic', highlight: true,
+  },
+  // ── Medium markets ─────────────────────────────────────────────────────────
+  {
+    city: 'Las Vegas', state: 'NV', country: 'USA', marketSize: 'Medium',
+    population: 2.3, expansionFee: 125,
+    suggestedName: 'Royals', suggestedNames: ['Royals', 'Aces', 'Neon', 'Scorpions', 'Desert Wolves'],
+    primaryColor: '#702963', secondaryColor: '#FFD700',
+    conf: 'Western', div: 'Pacific', highlight: true,
+  },
+  {
+    city: 'Vancouver', state: 'BC', country: 'Canada', marketSize: 'Medium',
+    population: 2.6, expansionFee: 110,
+    suggestedName: 'Grizzlies', suggestedNames: ['Grizzlies', 'Orcas', 'Voyageurs', 'Cascades', 'Ravens'],
+    primaryColor: '#041E42', secondaryColor: '#00843D',
+    conf: 'Western', div: 'Pacific',
+  },
+  {
+    city: 'Tampa', state: 'FL', country: 'USA', marketSize: 'Medium',
+    population: 3.2, expansionFee: 100,
+    suggestedName: 'Bay', suggestedNames: ['Bay', 'Lightning', 'Armada', 'Suncoast', 'Tides'],
+    primaryColor: '#002868', secondaryColor: '#BF0A30',
+    conf: 'Eastern', div: 'Southeast',
+  },
+  {
+    city: 'St. Louis', state: 'MO', country: 'USA', marketSize: 'Medium',
+    population: 2.8, expansionFee: 95,
+    suggestedName: 'Arch', suggestedNames: ['Arch', 'Blues', 'Pioneers', 'Cardinals', 'Gateway'],
+    primaryColor: '#002F6C', secondaryColor: '#BA0C2F',
+    conf: 'Eastern', div: 'Central',
+  },
+  {
+    city: 'San Diego', state: 'CA', country: 'USA', marketSize: 'Medium',
+    population: 3.3, expansionFee: 105,
+    suggestedName: 'Sails', suggestedNames: ['Sails', 'Waves', 'Surf', 'Tides', 'Bay'],
+    primaryColor: '#002D62', secondaryColor: '#FEC524',
+    conf: 'Western', div: 'Pacific',
+  },
+  {
+    city: 'Pittsburgh', state: 'PA', country: 'USA', marketSize: 'Medium',
+    population: 2.4, expansionFee: 90,
+    suggestedName: 'Steel', suggestedNames: ['Steel', 'Rivers', 'Forge', 'Iron', 'Bridges'],
+    primaryColor: '#FFB612', secondaryColor: '#101820',
+    conf: 'Eastern', div: 'Atlantic',
+  },
+  {
+    city: 'Baltimore', state: 'MD', country: 'USA', marketSize: 'Medium',
+    population: 2.9, expansionFee: 92,
+    suggestedName: 'Ravens', suggestedNames: ['Ravens', 'Crabs', 'Harbor', 'Chesapeake', 'Iron'],
+    primaryColor: '#241773', secondaryColor: '#9E7C0C',
+    conf: 'Eastern', div: 'Atlantic',
+  },
+  {
+    city: 'Kansas City', state: 'MO', country: 'USA', marketSize: 'Medium',
+    population: 2.2, expansionFee: 88,
+    suggestedName: 'Stampede', suggestedNames: ['Stampede', 'Chiefs', 'Storm', 'Thunder', 'Royals'],
+    primaryColor: '#E31837', secondaryColor: '#FFB81C',
+    conf: 'Eastern', div: 'Central',
+  },
+  {
+    city: 'Nashville', state: 'TN', country: 'USA', marketSize: 'Medium',
+    population: 2.0, expansionFee: 85,
+    suggestedName: 'Sounds', suggestedNames: ['Sounds', 'Predators', 'Rhythm', 'Stars', 'Boots'],
+    primaryColor: '#041E42', secondaryColor: '#FFB81C',
+    conf: 'Eastern', div: 'Southeast',
+  },
+  // ── Small markets ──────────────────────────────────────────────────────────
+  {
+    city: 'Cincinnati', state: 'OH', country: 'USA', marketSize: 'Small',
+    population: 1.7, expansionFee: 78,
+    suggestedName: 'Bengals', suggestedNames: ['Bengals', 'Reds', 'River City', 'Cyclones', 'Ohio'],
+    primaryColor: '#FB4F14', secondaryColor: '#000000',
+    conf: 'Eastern', div: 'Central',
+  },
+  {
+    city: 'Raleigh', state: 'NC', country: 'USA', marketSize: 'Small',
+    population: 1.4, expansionFee: 75,
+    suggestedName: 'Oaks', suggestedNames: ['Oaks', 'Hurricanes', 'Triangle', 'Pines', 'Storm'],
+    primaryColor: '#CC0000', secondaryColor: '#000000',
+    conf: 'Eastern', div: 'Southeast',
+  },
+  {
+    city: 'Columbus', state: 'OH', country: 'USA', marketSize: 'Small',
+    population: 2.1, expansionFee: 80,
+    suggestedName: 'Crew', suggestedNames: ['Crew', 'Bucks', 'Ohio Express', 'Blue Jackets', 'Forge'],
+    primaryColor: '#002F6C', secondaryColor: '#FFD700',
+    conf: 'Eastern', div: 'Central',
+  },
+  {
+    city: 'Louisville', state: 'KY', country: 'USA', marketSize: 'Small',
+    population: 1.4, expansionFee: 72,
+    suggestedName: 'Cardinals', suggestedNames: ['Cardinals', 'Bats', 'Sluggers', 'Thunder', 'River Kings'],
+    primaryColor: '#AD0000', secondaryColor: '#000000',
+    conf: 'Eastern', div: 'Southeast',
+  },
+  {
+    city: 'Jacksonville', state: 'FL', country: 'USA', marketSize: 'Small',
+    population: 1.6, expansionFee: 74,
+    suggestedName: 'Jaguars', suggestedNames: ['Jaguars', 'Armada', 'Tides', 'Surf', 'River Cats'],
+    primaryColor: '#006778', secondaryColor: '#9F792C',
+    conf: 'Eastern', div: 'Southeast',
+  },
+  {
+    city: 'Buffalo', state: 'NY', country: 'USA', marketSize: 'Small',
+    population: 1.2, expansionFee: 70,
+    suggestedName: 'Sabres', suggestedNames: ['Sabres', 'Blizzard', 'Bills', 'Thunder', 'Niagara'],
+    primaryColor: '#00338D', secondaryColor: '#FCB514',
+    conf: 'Eastern', div: 'Atlantic',
+  },
+];
+
 export const getRandomGender = (ratio: number): Gender => {
   return Math.random() * 100 < ratio ? 'Female' : 'Male';
 };
@@ -857,6 +1099,18 @@ const DAYS_IN_MONTH = [31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
 export const ageFromBirthdate = (birthdate: string, leagueYear: number): number => {
   const birthYear = parseInt(birthdate?.split('-')[0] ?? '0', 10);
   return birthYear > 0 ? Math.max(0, leagueYear - birthYear) : 0;
+};
+
+/**
+ * WNBA draft eligibility age floor.
+ * Domestic (U.S.) players must be ≥ 22; international players must be ≥ 20.
+ * Respects any user-configured minimum if it is higher.
+ *
+ * Pass `country` as resolved from `countryFromHometown()`.
+ */
+export const wnbaAgeFloor = (country: string, userMin: number = 0): number => {
+  const baseMin = country === 'United States' ? 22 : 20;
+  return Math.max(baseMin, userMin);
 };
 
 const randomBirthdate = (age: number, leagueYear: number): string => {
@@ -1122,8 +1376,9 @@ const assignArchetype = (pos: Position, attrs: Record<string, number>, rating: n
   return clamped[clamped.length - 1][0];
 };
 
-/** Deterministic archetype derivation — picks highest-weight archetype for the given position + attributes. */
-export const deriveArchetype = (pos: Position, attrs: Record<string, number>, rating: number): string => {
+/** Deterministic archetype derivation — picks highest-weight archetype for the given position + attributes.
+ *  Pass `isStarterRole = true` when the player is in the starting 5 so "Bench Spark" is never assigned. */
+export const deriveArchetype = (pos: Position, attrs: Record<string, number>, rating: number, isStarterRole = false): string => {
   const sht  = attrs.shooting3pt ?? 50;
   const def  = attrs.defense ?? 50;
   const blk  = attrs.blocks ?? 50;
@@ -1183,7 +1438,9 @@ export const deriveArchetype = (pos: Position, attrs: Record<string, number>, ra
     w.push(['Hybrid Star',        rating >= 82 ? 8 : 2]);
   }
 
-  return w.reduce((best, cur) => (cur[1] > best[1] ? cur : best), w[0])[0];
+  // Starters should never receive "Bench Spark" — zero its weight out
+  const eligible = isStarterRole ? w.filter(([name]) => name !== 'Bench Spark') : w;
+  return eligible.reduce((best, cur) => (cur[1] > best[1] ? cur : best), eligible[0])[0];
 };
 
 type AttrMap = Record<string, number>;
@@ -1235,7 +1492,49 @@ const applyPhysical = (attrs: AttrMap, pos: string, gender: 'Male'|'Female', hei
   return a;
 };
 
-export const generatePlayer = (id: string, ageRange: [number, number] = [19, 38], genderRatio: number = 0, draftCtx?: DraftContext, leagueYear?: number, minRating = 68): Player => {
+/** WNBA-realistic salary for a given player rating and league year. */
+const calcWNBASalary = (rating: number, year: number): number => {
+  let supermax: number, star: number, starter: number, role: number, bench: number, min: number;
+  if (year >= 2026) {
+    supermax = 1_400_000; star = 900_000; starter = 550_000; role = 300_000; bench = 150_000; min = 100_000;
+  } else if (year >= 2025) {
+    supermax = 700_000; star = 440_000; starter = 250_000; role = 130_000; bench = 65_000; min = 45_000;
+  } else if (year >= 2020) {
+    supermax = 250_000; star = 175_000; starter = 120_000; role = 72_000; bench = 38_000; min = 26_000;
+  } else if (year >= 2013) {
+    supermax = 110_000; star = 78_000; starter = 52_000; role = 32_000; bench = 18_000; min = 13_000;
+  } else if (year >= 2008) {
+    supermax = 82_000; star = 58_000; starter = 38_000; role = 22_000; bench = 12_000; min = 9_000;
+  } else if (year >= 2003) {
+    supermax = 60_000; star = 42_000; starter = 28_000; role = 16_000; bench = 8_500; min = 6_500;
+  } else if (year >= 2000) {
+    supermax = 45_000; star = 32_000; starter = 20_000; role = 12_000; bench = 6_500; min = 4_500;
+  } else {
+    supermax = 35_000; star = 24_000; starter = 15_000; role = 9_000; bench = 4_500; min = 3_000;
+  }
+  const base =
+    rating >= 95 ? supermax :
+    rating >= 88 ? star    + (rating - 88) * ((supermax - star)    / 7) :
+    rating >= 80 ? starter + (rating - 80) * ((star    - starter)  / 8) :
+    rating >= 70 ? role    + (rating - 70) * ((starter - role)     / 10) :
+    rating >= 60 ? bench   + (rating - 60) * ((role    - bench)    / 10) :
+    min;
+  const unit = supermax >= 500_000 ? 25_000 : supermax >= 100_000 ? 5_000 : 1_000;
+  return Math.round((base * (0.85 + Math.random() * 0.30)) / unit) * unit;
+};
+
+/** NBA salary with era-appropriate random variance — used only for setting a player's current contract. */
+const calcNBASalary = (rating: number, year: number): number => {
+  const market = computeMensMarketSalary(rating, year);
+  const unit =
+    market >= 10_000_000 ? 250_000 :
+    market >=  1_000_000 ?  50_000 :
+    market >=    100_000 ?   5_000 :
+    market >=     10_000 ?   1_000 : 100;
+  return Math.round((market * (0.80 + Math.random() * 0.40)) / unit) * unit;
+};
+
+export const generatePlayer = (id: string, ageRange: [number, number] = [19, 38], genderRatio: number = 0, draftCtx?: DraftContext, leagueYear?: number, minRating = 58): Player => {
   const gender = getRandomGender(genderRatio);
   
   // Pick a region based on weights
@@ -1252,17 +1551,27 @@ export const generatePlayer = (id: string, ageRange: [number, number] = [19, 38]
 
   const firstNames = gender === 'Male' ? region.firstNamesMale : NAMES_FEMALE.first;
   const lastNames = gender === 'Male' ? region.lastNamesMale : NAMES_FEMALE.last;
-  
+
   const rand = Math.random();
-  // Shifted distribution — avg ~78, producing realistic NBA-caliber league quality
-  let baseRating = rand > 0.97 ? 91 + Math.floor(Math.random() * 8)  // 3%: 91–98 (stars)
+  // Shifted distribution — avg ~77, includes G-League-caliber fringe players
+  let baseRating = rand > 0.97 ? 91 + Math.floor(Math.random() * 8)  // 3%:  91–98 (stars)
                  : rand > 0.83 ? 83 + Math.floor(Math.random() * 9)  // 14%: 83–91 (good starters)
-                 : rand > 0.45 ? 76 + Math.floor(Math.random() * 8)  // 38%: 76–83 (starters/rotation)
-                               : 68 + Math.floor(Math.random() * 9); // 45%: 68–76 (role players)
+                 : rand > 0.50 ? 76 + Math.floor(Math.random() * 8)  // 33%: 76–83 (starters/rotation)
+                 : rand > 0.15 ? 68 + Math.floor(Math.random() * 9)  // 35%: 68–76 (role players)
+                               : 58 + Math.floor(Math.random() * 10); // 15%: 58–67 (fringe/G-League)
   const rating = Math.min(99, Math.max(minRating, baseRating));
   const potential = Math.min(99, rating + Math.floor(Math.random() * 12));
   const pos = POSITIONS[Math.floor(Math.random() * POSITIONS.length)];
-  const age = Math.floor(Math.random() * (ageRange[1] - ageRange[0]) + ageRange[0]);
+
+  // WNBA age eligibility: domestic (U.S.) ≥ 22, international ≥ 20.
+  // Enforced here so every code path that calls generatePlayer automatically respects WNBA rules.
+  const isWomensGen = genderRatio === 100;
+  const playerCountry = region.id === 'usa' ? 'United States' : region.name;
+  const effectiveAgeMin = isWomensGen
+    ? wnbaAgeFloor(playerCountry, ageRange[0])
+    : ageRange[0];
+  const effectiveAgeMax = Math.max(effectiveAgeMin, ageRange[1]);
+  const age = effectiveAgeMin + Math.floor(Math.random() * (effectiveAgeMax - effectiveAgeMin + 1));
   const _leagueYear = leagueYear ?? new Date().getFullYear();
   
   const f = region.flavor;
@@ -1314,15 +1623,17 @@ export const generatePlayer = (id: string, ageRange: [number, number] = [19, 38]
     rating,
     potential,
     attributes: pAttrs as Player['attributes'],
-    salary: Math.round((
-      rating >= 95 ? 38_000_000 + (rating - 95) * 1_400_000 :
-      rating >= 88 ? 26_000_000 + (rating - 88) * 1_714_286 :
-      rating >= 80 ? 16_000_000 + (rating - 80) * 1_250_000 :
-      rating >= 70 ? 7_000_000  + (rating - 70) * 900_000   :
-      rating >= 60 ? 3_000_000  + (rating - 60) * 400_000   : 1_500_000
-    ) * (0.85 + Math.random() * 0.30) / 250_000) * 250_000,
+    salary: gender === 'Female'
+      ? calcWNBASalary(rating, _leagueYear)
+      : calcNBASalary(rating, _leagueYear),
     contractYears: Math.floor(Math.random() * 5) + 1,
-    stats: { 
+    desiredContract: {
+      years: rating >= 80 ? 4 : rating >= 70 ? 3 : 2,
+      salary: gender === 'Female'
+        ? calcWNBASalary(rating, _leagueYear)
+        : computeMensMarketSalary(rating, _leagueYear),
+    },
+    stats: {
       points: 0, rebounds: 0, offReb: 0, defReb: 0, assists: 0, steals: 0, blocks: 0, gamesPlayed: 0, gamesStarted: 0,
       minutes: 0, fgm: 0, fga: 0, threepm: 0, threepa: 0, ftm: 0, fta: 0, tov: 0, pf: 0,
       techs: 0, flagrants: 0, ejections: 0, plusMinus: 0
@@ -1339,7 +1650,10 @@ export const generatePlayer = (id: string, ageRange: [number, number] = [19, 38]
     },
     morale: 75 + Math.floor(Math.random() * 20),
     jerseyNumber: Math.floor(Math.random() * 99),
-    height: phys.heightStr, weight: phys.weight, archetype: assignArchetype(pos, pAttrs as Record<string, number>, rating), status: 'Bench',
+    height: phys.heightStr, weight: phys.weight,
+    archetype: deriveArchetype(pos, pAttrs as Record<string, number>, rating, false),
+    secondaryPositions: assignSecondaryPositions(pos, pAttrs as Record<string, number>, phys.heightIn),
+    status: 'Bench',
     personalityTraits: playerTraits,
     tendencies: generateTendencies(pos, playerTraits),
     hometown: playerHometown,
@@ -1359,9 +1673,13 @@ export const generateFreeAgentPool = (count: number, season: number, genderRatio
   return Array.from({ length: count }).map((_, i) => {
     const draftCtx: DraftContext = { season, teamNames, usedPicks };
     const p = generatePlayer(`fa-${season}-${i}`, [21, 36], genderRatio, draftCtx, season);
-    // Skew OVR distribution: 90% → 70–82, 8% → 83–87, 2% → 88–92, none 93+
+    // Generated FA pool is capped at 75 OVR — realistic players above 75 are almost always
+    // on rosters. The only 76+ FAs are real players waived/released mid-season (not generated).
+    // Distribution: 20% → 60–67 (fringe/bench), 60% → 68–73 (rotation depth), 20% → 74–75 (ceiling).
     const tierRoll = Math.random();
-    const [tierMin, tierMax] = tierRoll < 0.90 ? [70, 82] : tierRoll < 0.98 ? [83, 87] : [88, 92];
+    const [tierMin, tierMax] =
+      tierRoll < 0.20 ? [60, 67] :
+      tierRoll < 0.80 ? [68, 73] : [74, 75];
     const skewedRating = Math.min(tierMax, Math.max(tierMin, p.rating));
     const skewedPlayer = skewedRating !== p.rating ? { ...p, rating: skewedRating } : p;
     return {
@@ -1371,13 +1689,9 @@ export const generateFreeAgentPool = (count: number, season: number, genderRatio
       contractYears: 0,
       desiredContract: {
         years: Math.floor(Math.random() * 3) + 1,
-        salary: Math.round((
-          skewedRating >= 95 ? 38_000_000 + (skewedRating - 95) * 1_400_000 :
-          skewedRating >= 88 ? 26_000_000 + (skewedRating - 88) * 1_714_286 :
-          skewedRating >= 80 ? 16_000_000 + (skewedRating - 80) * 1_250_000 :
-          skewedRating >= 70 ? 7_000_000  + (skewedRating - 70) * 900_000   :
-          skewedRating >= 60 ? 3_000_000  + (skewedRating - 60) * 400_000   : 1_500_000
-        ) * (0.90 + Math.random() * 0.20) / 250_000) * 250_000
+        salary: p.gender === 'Female'
+          ? calcWNBASalary(skewedRating, season)
+          : computeMensMarketSalary(skewedRating, season)
       },
       interestScore: 30 + Math.floor(Math.random() * 50)
     };
@@ -1406,11 +1720,54 @@ export const generateProspects = (year: number, count: number = 100, genderRatio
     const id = `prospect-${year}-${i}`;
     const pos = POSITIONS[Math.floor(Math.random() * POSITIONS.length)];
     
-    let rating = 60 + Math.floor(Math.random() * 15);
-    if (i < 5) rating = 78 + Math.floor(Math.random() * 5); 
-    else if (i < 15) rating = 72 + Math.floor(Math.random() * 6); 
-    
-    const potential = Math.min(99, rating + Math.floor(Math.random() * 20) + 5);
+    // ── Traits first — they drive bust risk and potential ceiling ──────────
+    const prospectTraits = getRandomTraits();
+    const badCount  = prospectTraits.filter(t => (t === 'Lazy' || t === 'Hot Head' || t === 'Money Hungry' || t === 'Diva/Star')).length;
+    const goodCount = prospectTraits.filter(t => (t === 'Gym Rat' || t === 'Workhorse' || t === 'Leader' || t === 'Professional' || t === 'Clutch')).length;
+
+    // ── OVR by pick slot (realistic rookie ranges — strong prospects, not superstars) ─
+    let rating: number;
+    if (i === 0) {
+      rating = 88 + Math.floor(Math.random() * 7);          // #1 overall: 88-94
+    } else if (i < 5) {
+      rating = 82 + Math.floor(Math.random() * 8);          // Top 5: 82-89
+    } else if (i < 14) {
+      rating = 76 + Math.floor(Math.random() * 8);          // Lottery 6-14: 76-83
+    } else if (i < 30) {
+      rating = 71 + Math.floor(Math.random() * 8);          // Late first: 71-78
+    } else if (i < 60) {
+      rating = Math.random() < 0.08                         // 2nd round: sleeper or normal
+        ? 74 + Math.floor(Math.random() * 5)                //   sleeper:  74-78
+        : 63 + Math.floor(Math.random() * 10);              //   normal:   63-72
+    } else {
+      rating = 58 + Math.floor(Math.random() * 9);          // Undrafted: 58-66
+    }
+
+    // ── Trait bust-risk modifier ─────────────────────────────────────────
+    // Late picks are more sensitive — less polish, more variance from character flaws.
+    // Good traits (Gym Rat, Workhorse…) can nudge a player above their slot ceiling.
+    const bustMultiplier = i >= 14 ? 2.0 : i >= 5 ? 1.0 : 0.5;
+    const traitDelta     = Math.round((goodCount - badCount * 1.5) * bustMultiplier);
+    const maxAdjust      = i === 0 ? 2 : i < 5 ? 3 : i < 14 ? 4 : 6;
+    rating = Math.min(99, Math.max(55, rating + Math.max(-maxAdjust, Math.min(maxAdjust, traitDelta))));
+
+    // ── Potential: high ceiling for top prospects, tiered down for late picks ─
+    let potential: number;
+    if (i === 0) {
+      potential = 92 + Math.floor(Math.random() * 8);                // #1 pick:    92-99
+    } else if (i < 5) {
+      potential = Math.min(99, 88 + Math.floor(Math.random() * 12)); // Top 5:      88-99
+    } else if (i < 14) {
+      potential = Math.min(99, rating + Math.floor(Math.random() * 16) + 6); // Lottery: good upside
+    } else if (i < 30) {
+      potential = Math.min(99, rating + Math.floor(Math.random() * 13) + 4); // Late 1st: moderate
+    } else {
+      potential = Math.min(99, rating + Math.floor(Math.random() * 10) + 2); // 2nd rd / undrafted
+    }
+    // Bad traits erode ceiling for mid/late picks — bust signal
+    if (badCount > 0 && i >= 5) {
+      potential = Math.max(rating + 4, potential - badCount * 3);
+    }
     
     // Apply regional flavor
     const f = region.flavor;
@@ -1454,9 +1811,16 @@ export const generateProspects = (year: number, count: number = 100, genderRatio
       heightBonus: phys.heightIn >= (HEIGHT_WEIGHT[pos]?.[physGender]?.avgH ?? 0) + 3 ? 5 : 0,
     });
     const bAttrs = gender === 'Female' ? applyFemaleAttrCaps(bAttrsRaw) : bAttrsRaw;
-    const prospectTraits = getRandomTraits();
 
-    const prospectAge = ageMin + Math.floor(Math.random() * (Math.max(ageMin, ageMax) - ageMin + 1));
+    // WNBA draft eligibility: domestic (U.S.) prospects must be ≥ 22; international ≥ 20.
+    // The caller's ageMin/ageMax is still honoured if it enforces a stricter floor.
+    const isWomensProspect = genderRatio === 100;
+    const prospectCountry = region.id === 'usa' ? 'United States' : region.name;
+    const effectiveProspectMin = isWomensProspect
+      ? wnbaAgeFloor(prospectCountry, ageMin)
+      : ageMin;
+    const effectiveProspectMax = Math.max(effectiveProspectMin, ageMax);
+    const prospectAge = effectiveProspectMin + Math.floor(Math.random() * (effectiveProspectMax - effectiveProspectMin + 1));
     const rawProspect = {
       id,
       name: `${firstNames[Math.floor(Math.random() * firstNames.length)]} ${lastNames[Math.floor(Math.random() * lastNames.length)]}`,
@@ -1471,7 +1835,9 @@ export const generateProspects = (year: number, count: number = 100, genderRatio
       mockRank: i + 1,
       attributes: bAttrs,
       jerseyNumber: Math.floor(Math.random() * 99),
-      height: phys.heightStr, weight: phys.weight, archetype: assignArchetype(pos, bAttrs as Record<string, number>, rating),
+      height: phys.heightStr, weight: phys.weight,
+      archetype: deriveArchetype(pos, bAttrs as Record<string, number>, rating, false),
+      secondaryPositions: assignSecondaryPositions(pos, bAttrs as Record<string, number>, phys.heightIn),
       personalityTraits: prospectTraits,
       tendencies: generateTendencies(pos, prospectTraits),
       hometown: prospectHometown,
@@ -1502,7 +1868,7 @@ export const generateDefaultRotation = (roster: Player[]): TeamRotation => {
   
   const assignedIds = new Set<string>();
   
-  // Try to fill positions naturally
+  // Try to fill positions naturally — first exact primary match, then secondary match
   const positions: Position[] = ['PG', 'SG', 'SF', 'PF', 'C'];
   positions.forEach(pos => {
     const bestAtPos = sorted.find(p => p.position === pos && !assignedIds.has(p.id));
@@ -1511,7 +1877,20 @@ export const generateDefaultRotation = (roster: Player[]): TeamRotation => {
       assignedIds.add(bestAtPos.id);
     }
   });
-  
+
+  // Second pass: fill gaps with secondary-position eligible players
+  positions.forEach(pos => {
+    if (!starters[pos]) {
+      const eligible = sorted.find(
+        p => !assignedIds.has(p.id) && (p.secondaryPositions ?? []).includes(pos)
+      );
+      if (eligible) {
+        starters[pos] = eligible.id;
+        assignedIds.add(eligible.id);
+      }
+    }
+  });
+
   // Fill remaining starter spots with best available
   positions.forEach(pos => {
     if (!starters[pos]) {
@@ -1558,13 +1937,43 @@ export const generateDefaultRotation = (roster: Player[]): TeamRotation => {
 // These are minimum ratings per roster slot so teams have a realistic spread.
 const TIER_SLOT_FLOORS: Record<string, number[]> = {
   // elite: full-roster avg ≈ 85–87  (2–4 per 30-team league)
-  elite:      [96, 93, 90, 88, 87, 86, 85, 84, 83, 83, 82, 81, 80, 79],
+  elite:      [96, 93, 90, 88, 87, 86, 85, 84, 83, 83, 82, 80, 76, 70],
   // solid: full-roster avg ≈ 82–84  (6–8 teams)
-  solid:      [92, 89, 87, 85, 84, 83, 82, 81, 80, 80, 79, 78, 77, 76],
+  solid:      [92, 89, 87, 85, 84, 83, 82, 81, 80, 79, 77, 74, 70, 64],
   // average: full-roster avg ≈ 78–80 (bulk of the league)
-  average:    [87, 84, 82, 80, 80, 79, 78, 77, 76, 76, 75, 74, 74, 74],
-  // rebuilding: full-roster avg ≈ 75–77 (floor teams; normalizeOVRs lifts to 76 min)
-  rebuilding: [84, 81, 79, 77, 77, 76, 75, 74, 74, 73, 73, 72, 71, 71],
+  average:    [87, 84, 82, 80, 79, 78, 77, 76, 75, 74, 72, 69, 64, 60],
+  // rebuilding: full-roster avg ≈ 74–76 (floor teams)
+  rebuilding: [84, 81, 79, 77, 76, 75, 74, 73, 72, 71, 68, 65, 61, 58],
+};
+
+// ── Executive (GM) name generation ───────────────────────────────────────────
+const GM_FIRST_NAMES_MALE = [
+  'Marcus','Darnell','Terrence','Calvin','Jerome','Reginald','Alvin','Devin','Maurice','Kendall',
+  'Bradley','Curtis','Elijah','Gordon','Harris','Ivan','Jordan','Kevin','Lance','Miles',
+  'Nathan','Owen','Preston','Quinton','Russell','Spencer','Travis','Victor','Walter','Xavier',
+];
+const GM_FIRST_NAMES_FEMALE = [
+  'Alicia','Brenda','Carmen','Denise','Evelyn','Felicia','Gloria','Helen','Irene','Jasmine',
+  'Karen','Latasha','Monica','Natasha','Olivia','Patricia','Renee','Sandra','Tamika','Ursula',
+  'Vanessa','Whitney','Alexis','Brianna','Cassandra','Dominique','Elaine','Francine','Gwendolyn','Harriet',
+];
+const GM_LAST_NAMES = [
+  'Whitaker','Chambers','Holloway','Mercer','Stanton','Dupree','Fletcher','Gaines','Harmon','Ingram',
+  'Jefferson','Kingston','Lawson','Monroe','Nash','Okafor','Parrish','Quinn','Rhodes','Sutton',
+  'Tillman','Underwood','Vance','Washington','Yates','Zimmerman','Blackwell','Caldwell','Dixon','Ellison',
+];
+const GM_MIDDLE_INITIALS = 'ABCDEFGHJKLMNPRSTW';
+
+export const generateGMName = (genderRatio: number = 0): { name: string; age: number } => {
+  const isFemale = Math.random() * 100 < genderRatio;
+  const firstNames = isFemale ? GM_FIRST_NAMES_FEMALE : GM_FIRST_NAMES_MALE;
+  const first = firstNames[Math.floor(Math.random() * firstNames.length)];
+  const last  = GM_LAST_NAMES[Math.floor(Math.random() * GM_LAST_NAMES.length)];
+  const mid   = GM_MIDDLE_INITIALS[Math.floor(Math.random() * GM_MIDDLE_INITIALS.length)];
+  // ~50% chance of middle initial for variety
+  const name  = Math.random() < 0.5 ? `${first} ${mid}. ${last}` : `${first} ${last}`;
+  const age   = 35 + Math.floor(Math.random() * 31); // 35–65
+  return { name, age };
 };
 
 export const generateLeagueTeams = (genderRatio: number = 0, season: number = 2026, futureSeasonsToSeed: number = 4): Team[] => {
@@ -1595,8 +2004,8 @@ export const generateLeagueTeams = (genderRatio: number = 0, season: number = 20
       );
     }
     const picks: DraftPick[] = [
-      { round: 1, pick: 0, originalTeamId: teamId, currentTeamId: teamId },
-      { round: 2, pick: 0, originalTeamId: teamId, currentTeamId: teamId },
+      { round: 1, pick: 0, originalTeamId: teamId, currentTeamId: teamId, year: season },
+      { round: 2, pick: 0, originalTeamId: teamId, currentTeamId: teamId, year: season },
       ...futurePicks,
     ];
 
@@ -1604,24 +2013,40 @@ export const generateLeagueTeams = (genderRatio: number = 0, season: number = 20
     const draftCtx: DraftContext = { season, teamNames, usedPicks };
     const tier = (tierList[i] ?? 'average') as keyof typeof TIER_SLOT_FLOORS;
     const slotFloors = TIER_SLOT_FLOORS[tier];
-    const roster = Array.from({ length: 14 }).map((_, j) =>
+    let roster = Array.from({ length: 15 }).map((_, j) =>
       generatePlayer(`p-${i}-${j}`, [19, 38], genderRatio, draftCtx, season, slotFloors[j] ?? 68)
     );
 
+    // ── Payroll normalization: cap total payroll at NBA first-apron equivalent.
+    // This prevents individual random variation from stacking into absurd totals
+    // (e.g. a full roster of high-floor players). Hard ceiling = $185M.
+    {
+      const PAYROLL_HARD_CAP = 185_000_000;
+      const rawPayroll = roster.reduce((s, p) => s + p.salary, 0);
+      if (rawPayroll > PAYROLL_HARD_CAP) {
+        const scale = PAYROLL_HARD_CAP / rawPayroll;
+        roster = roster.map(p => ({
+          ...p,
+          salary: Math.round(Math.max(1_100_000, p.salary * scale) / 250_000) * 250_000,
+        }));
+      }
+    }
+
+    const headCoach = generateCoach(`coach-${teamId}-hc`, 'B', genderRatio, season);
     return {
       id: teamId,
       name: data.name,
       city: data.city,
       roster,
       staff: {
-        headCoach: generateCoach(`coach-${teamId}-hc`, 'B', genderRatio, season),
+        headCoach,
         assistantOffense: generateCoach(`coach-${teamId}-off`, 'C', genderRatio, season),
         assistantDefense: generateCoach(`coach-${teamId}-def`, 'C', genderRatio, season),
         assistantDev: generateCoach(`coach-${teamId}-dev`, 'C', genderRatio, season),
         trainer: generateCoach(`coach-${teamId}-tr`, 'C', genderRatio, season)
       },
       staffBudget: 15000000,
-      activeScheme: 'Balanced',
+      activeScheme: getCoachPreferredScheme(headCoach),
       wins: 0, losses: 0, homeWins: 0, homeLosses: 0, roadWins: 0, roadLosses: 0, confWins: 0, confLosses: 0, lastTen: [],
       budget: 180000000,
       logo: '',  // no stock photo; TeamBadge renders letter badge as default
@@ -1653,6 +2078,7 @@ export const generateLeagueTeams = (genderRatio: number = 0, season: number = 20
       stadiumCapacity: data.market === 'Large' ? 20000 : data.market === 'Medium' ? 18500 : 17000,
       borderStyle: 'Solid',
       status: 'Active',
+      ...(() => { const gm = generateGMName(genderRatio); return { gmName: gm.name, gmAge: gm.age }; })(),
     };
   });
 };
@@ -1759,6 +2185,28 @@ export const generateSeasonSchedule = (
     }
   });
 
+  // ── Build per-pair max games map (used in pool and greedy fill) ───────────
+  const maxPairGames: Record<string, number> = {};
+  for (let i = 0; i < teams.length; i++) {
+    for (let j = i + 1; j < teams.length; j++) {
+      const t1 = teams[i], t2 = teams[j];
+      const key = `${t1.id}|${t2.id}`;
+      if (numGames >= 80) {
+        if (t1.division === t2.division) {
+          maxPairGames[key] = divPP;
+        } else if (t1.conference === t2.conference) {
+          maxPairGames[key] = confPP + (confExtraPairs.has(key) ? 1 : 0);
+        } else {
+          maxPairGames[key] = oocPP + (oocExtraPairs.has(key) ? 1 : 0);
+        }
+      } else {
+        // Small league: allow multiple matchups per pair so each team reaches numGames
+        const opponentCount = Math.max(1, teams.length - 1);
+        maxPairGames[key] = Math.ceil(numGames / opponentCount);
+      }
+    }
+  }
+
   // ── Build the matchup pool ─────────────────────────────────────────────────
   for (let i = 0; i < teams.length; i++) {
     for (let j = i + 1; j < teams.length; j++) {
@@ -1776,7 +2224,10 @@ export const generateSeasonSchedule = (
           count = oocPP + (oocExtraPairs.has(key) ? 1 : 0);
         }
       } else {
-        count = 1;
+        // Small league: seed the pool with floor(numGames / opponents) games per pair;
+        // the greedy fill below tops up any remaining slots up to the maxPairGames cap.
+        const opponentCount = Math.max(1, teams.length - 1);
+        count = Math.max(1, Math.floor(numGames / opponentCount));
       }
       for (let c = 0; c < count; c++) {
         if (teamGamesCountTotal[t1.id] < numGames && teamGamesCountTotal[t2.id] < numGames) {
@@ -1787,14 +2238,38 @@ export const generateSeasonSchedule = (
   }
 
   // Fill any remaining gaps (rounding edge cases) greedily
+  // Respects per-pair maxima so conference opponents never exceed the planned cap.
+  // Priority: prefer OOC opponents → conf non-div → div → any (emergency only).
   const allTeamIds = teams.map(t => t.id);
+  const teamById: Record<string, Team> = {};
+  teams.forEach(t => { teamById[t.id] = t; });
+  const pairKey = (a: string, b: string) => a < b ? `${a}|${b}` : `${b}|${a}`;
+
   allTeamIds.forEach(id => {
     while (teamGamesCountTotal[id] < numGames) {
-      const bestOpponent = allTeamIds
-        .filter(oid => oid !== id && teamGamesCountTotal[oid] < numGames)
-        .sort((a, b) => (pairings[id][a] || 0) - (pairings[id][b] || 0))[0];
-      if (bestOpponent) addGameToPool(id, bestOpponent);
-      else break;
+      // Only consider opponents that still have capacity AND haven't hit their per-pair cap
+      const eligible = allTeamIds.filter(oid => {
+        if (oid === id || teamGamesCountTotal[oid] >= numGames) return false;
+        const max = maxPairGames[pairKey(id, oid)];
+        // If no max entry (shouldn't happen with standard setup), allow up to oocPP+1 as fallback
+        return max === undefined || (pairings[id][oid] || 0) < max;
+      });
+      if (eligible.length === 0) break;
+
+      // Sort: prefer OOC first, then conf-ND, then div; within each tier fewest pairings first
+      const myConf = teamById[id]?.conference;
+      const myDiv  = teamById[id]?.division;
+      eligible.sort((a, b) => {
+        const aConf = teamById[a]?.conference;
+        const bConf = teamById[b]?.conference;
+        const aDiv  = teamById[a]?.division;
+        const bDiv  = teamById[b]?.division;
+        const tierA = aConf !== myConf ? 0 : aDiv !== myDiv ? 1 : 2;
+        const tierB = bConf !== myConf ? 0 : bDiv !== myDiv ? 1 : 2;
+        if (tierA !== tierB) return tierA - tierB;
+        return (pairings[id][a] || 0) - (pairings[id][b] || 0);
+      });
+      addGameToPool(id, eligible[0]);
     }
   });
 
@@ -1893,6 +2368,17 @@ export interface HistoricalFinancials {
   luxuryTaxMultiplier: number;
   /** Descriptive note shown in UI */
   note: string;
+  // ── Optional WNBA / Women's league extensions ──
+  maxContractYears?: 2 | 3 | 4 | 5;
+  maxPlayerSalaryPct?: 25 | 30 | 35;
+  birdRights?: boolean;
+  draftRounds?: number;
+  draftClassSize?: 'Small' | 'Normal' | 'Large';
+  tradableDraftPickSeasons?: number;
+  /** WNBA active roster floor */
+  minRosterSize?: number;
+  /** WNBA active roster ceiling */
+  maxRosterSize?: number;
 }
 
 interface EraEntry {
@@ -2088,4 +2574,141 @@ const ERA_TABLE: EraEntry[] = [
 export const getHistoricalFinancials = (year: number): HistoricalFinancials => {
   const entry = ERA_TABLE.find(e => year >= e.from && year <= e.to);
   return entry ? entry.f : ERA_TABLE[ERA_TABLE.length - 1].f;
+};
+
+// ── WNBA / Women's League Historical Financials ──────────────────────────────
+// Years 1947–1996 intentionally omitted: dropdown is restricted to 1997+ for Women's leagues.
+
+const WNBA_ERA_TABLE: EraEntry[] = [
+  {
+    from: 1997, to: 1999,
+    f: {
+      era: 'WNBA Inaugural Era',
+      salaryCap: 400_000, luxuryTaxLine: 0, luxuryTaxThreshold: 0,
+      rookieScaleContracts: false, tradeSalaryMatchPct: 100, minPayroll: 0,
+      luxuryTaxMultiplier: 1.0,
+      maxContractYears: 2, maxPlayerSalaryPct: 25, birdRights: false,
+      draftRounds: 3, draftClassSize: 'Small', tradableDraftPickSeasons: 1,
+      minRosterSize: 10, maxRosterSize: 12,
+      note: 'WNBA founded 1997. NBA-subsidized, minimal salaries. Max $50K/yr. 3-round draft.',
+    },
+  },
+  {
+    from: 2000, to: 2002,
+    f: {
+      era: 'Early WNBA',
+      salaryCap: 550_000, luxuryTaxLine: 0, luxuryTaxThreshold: 0,
+      rookieScaleContracts: false, tradeSalaryMatchPct: 100, minPayroll: 0,
+      luxuryTaxMultiplier: 1.0,
+      maxContractYears: 2, maxPlayerSalaryPct: 25, birdRights: false,
+      draftRounds: 3, draftClassSize: 'Small', tradableDraftPickSeasons: 1,
+      minRosterSize: 10, maxRosterSize: 12,
+      note: 'Early WNBA era — minimal salaries. Team cap grows slowly to ~$550K.',
+    },
+  },
+  {
+    from: 2003, to: 2007,
+    f: {
+      era: 'WNBA 2003 CBA',
+      salaryCap: 740_000, luxuryTaxLine: 0, luxuryTaxThreshold: 0,
+      rookieScaleContracts: true, tradeSalaryMatchPct: 100, minPayroll: 0,
+      luxuryTaxMultiplier: 1.0,
+      maxContractYears: 3, maxPlayerSalaryPct: 25, birdRights: false,
+      draftRounds: 3, draftClassSize: 'Small', tradableDraftPickSeasons: 2,
+      minRosterSize: 10, maxRosterSize: 12,
+      note: '2003 CBA: rookie salary scale introduced. Cap ~$700K–$800K. Max contracts now 3 years.',
+    },
+  },
+  {
+    from: 2008, to: 2012,
+    f: {
+      era: 'Mid WNBA Era',
+      salaryCap: 878_000, luxuryTaxLine: 0, luxuryTaxThreshold: 0,
+      rookieScaleContracts: true, tradeSalaryMatchPct: 100, minPayroll: 0,
+      luxuryTaxMultiplier: 1.0,
+      maxContractYears: 3, maxPlayerSalaryPct: 25, birdRights: false,
+      draftRounds: 3, draftClassSize: 'Small', tradableDraftPickSeasons: 2,
+      minRosterSize: 10, maxRosterSize: 12,
+      note: 'Cap inches toward $900K. Growth largely flat. No luxury tax system.',
+    },
+  },
+  {
+    from: 2013, to: 2019,
+    f: {
+      era: 'Modern WNBA',
+      salaryCap: 1_000_000, luxuryTaxLine: 0, luxuryTaxThreshold: 0,
+      rookieScaleContracts: true, tradeSalaryMatchPct: 100, minPayroll: 0,
+      luxuryTaxMultiplier: 1.0,
+      maxContractYears: 4, maxPlayerSalaryPct: 30, birdRights: false,
+      draftRounds: 3, draftClassSize: 'Normal', tradableDraftPickSeasons: 2,
+      minRosterSize: 10, maxRosterSize: 12,
+      note: 'Cap crosses $1M. Player activism pushes for better conditions. Max contracts now 4 years.',
+    },
+  },
+  {
+    from: 2020, to: 2024,
+    f: {
+      era: '2020 Landmark CBA',
+      salaryCap: 1_800_000, luxuryTaxLine: 0, luxuryTaxThreshold: 0,
+      rookieScaleContracts: true, tradeSalaryMatchPct: 100, minPayroll: 500_000,
+      luxuryTaxMultiplier: 1.0,
+      maxContractYears: 4, maxPlayerSalaryPct: 30, birdRights: true,
+      draftRounds: 3, draftClassSize: 'Normal', tradableDraftPickSeasons: 3,
+      minRosterSize: 11, maxRosterSize: 12,
+      note: '2020 CBA: biggest pay jump in WNBA history at the time. Bird Rights introduced. Cap ~$1.8M.',
+    },
+  },
+  {
+    from: 2025, to: 2025,
+    f: {
+      era: '2025 Historic CBA',
+      salaryCap: 2_200_000, luxuryTaxLine: 0, luxuryTaxThreshold: 0,
+      rookieScaleContracts: true, tradeSalaryMatchPct: 100, minPayroll: 800_000,
+      luxuryTaxMultiplier: 1.0,
+      maxContractYears: 5, maxPlayerSalaryPct: 30, birdRights: true,
+      draftRounds: 3, draftClassSize: 'Normal', tradableDraftPickSeasons: 3,
+      minRosterSize: 11, maxRosterSize: 12,
+      note: 'January 2025 CBA: historic salary jump. Max 5-year deals. Team cap surges to ~$2.2M.',
+    },
+  },
+  {
+    from: 2026, to: 2099,
+    f: {
+      era: 'Future WNBA Projection',
+      salaryCap: 7_000_000, luxuryTaxLine: 8_500_000, luxuryTaxThreshold: 0,
+      rookieScaleContracts: true, tradeSalaryMatchPct: 110, minPayroll: 3_000_000,
+      luxuryTaxMultiplier: 1.5,
+      maxContractYears: 5, maxPlayerSalaryPct: 35, birdRights: true,
+      draftRounds: 3, draftClassSize: 'Normal', tradableDraftPickSeasons: 4,
+      minRosterSize: 11, maxRosterSize: 12,
+      note: 'Projected from 2026 CBA negotiations. Major growth expected as WNBA viewership surges.',
+    },
+  },
+];
+
+export const getWNBAHistoricalFinancials = (year: number): HistoricalFinancials => {
+  const entry = WNBA_ERA_TABLE.find(e => year >= e.from && year <= e.to);
+  return entry ? entry.f : WNBA_ERA_TABLE[WNBA_ERA_TABLE.length - 1].f;
+};
+
+/** Returns the historically-correct WNBA active roster limits for a given year. */
+export const getWNBARosterRules = (year: number): { minRosterSize: number; maxRosterSize: number } => {
+  const h = getWNBAHistoricalFinancials(year);
+  return {
+    minRosterSize: h.minRosterSize ?? (year >= 2020 ? 11 : 10),
+    maxRosterSize: h.maxRosterSize ?? 12,
+  };
+};
+
+/**
+ * Returns the maximum individual player salary for a given year and gender.
+ * Used by the LeagueConfiguration banner and settings validation.
+ */
+export const getEraMaxPlayerSalary = (year: number, isWomens: boolean, salaryCap: number): number => {
+  if (isWomens) {
+    const h = getWNBAHistoricalFinancials(year);
+    const pct = h.maxPlayerSalaryPct ?? 30;
+    return Math.round((salaryCap * pct) / 5_000) * 5_000;
+  }
+  return computeMensMarketSalary(99, year);
 };

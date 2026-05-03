@@ -1,7 +1,10 @@
 
 import React, { useState, useEffect } from 'react';
 import { LeagueSettings } from '../types';
-import { getHistoricalFinancials } from '../constants';
+import { getHistoricalFinancials, getWNBAHistoricalFinancials, getEraMaxPlayerSalary, getWNBARosterRules } from '../constants';
+import { computeMensMarketSalary } from '../utils/contractRules';
+import { fmtSalary } from '../utils/formatters';
+import NumericInput from './NumericInput';
 
 interface LeagueConfigurationProps {
   onConfirm: (name: string, year: number, settings: Partial<LeagueSettings>) => void;
@@ -133,6 +136,9 @@ const LeagueConfiguration: React.FC<LeagueConfigurationProps> = ({ onConfirm, on
   const [rookieScaleContracts, setRookieScaleContracts] = useState(true);
   const [maxPlayerSalaryPct, setMaxPlayerSalaryPct]   = useState<25|30|35>(35);
   const [birdRights, setBirdRights]                   = useState(true);
+  // 0 = auto-calculate from cap; non-zero = manual override
+  const [minContractSalaryOverride, setMinContractSalaryOverride] = useState(0);
+  const [maxContractSalaryOverride, setMaxContractSalaryOverride] = useState(0);
 
   // ── Finances ──────────────────────────────────────────────────────────────
   const [minPayroll, setMinPayroll]               = useState(46_650_000);
@@ -216,6 +222,8 @@ const LeagueConfiguration: React.FC<LeagueConfigurationProps> = ({ onConfirm, on
       if (p.rookieScaleContracts !== undefined) setRookieScaleContracts(p.rookieScaleContracts);
       if (p.maxPlayerSalaryPct)            setMaxPlayerSalaryPct(p.maxPlayerSalaryPct);
       if (p.birdRights !== undefined)        setBirdRights(p.birdRights);
+      if (p.minContractSalary)             setMinContractSalaryOverride(p.minContractSalary);
+      if (p.maxContractSalary)             setMaxContractSalaryOverride(p.maxContractSalary);
       if (p.draftRounds)                   setDraftRounds(p.draftRounds);
       if (p.draftClassSize)                setDraftClassSize(p.draftClassSize);
       if (p.internationalProspects !== undefined) setInternationalProspects(p.internationalProspects);
@@ -247,15 +255,41 @@ const LeagueConfiguration: React.FC<LeagueConfigurationProps> = ({ onConfirm, on
     setCoachGenderRatio(playerGenderRatio);
   }, [playerGenderRatio]);
 
-  // ── Auto-load historical financials when year changes ─────────────────────
+  // ── Auto-load historical financials when year or gender changes ──────────
+  const isWomensLeague = playerGenderRatio === 100;
+
+  // Clamp year to WNBA minimum when switching to Women's league
+  useEffect(() => {
+    if (isWomensLeague && year < 1997) setYear(1997);
+  }, [isWomensLeague]);
+
   useEffect(() => {
     if (historicalOverride) return;
-    const h = getHistoricalFinancials(year);
-    setSalaryCap(h.salaryCap > 0 ? h.salaryCap : 140_000_000);
-    setMinPayroll(h.minPayroll > 0 ? h.minPayroll : 46_650_000);
-    setLuxuryTaxThreshold(h.luxuryTaxThreshold > 0 ? h.luxuryTaxThreshold : 84_750_000);
+    const h = isWomensLeague ? getWNBAHistoricalFinancials(year) : getHistoricalFinancials(year);
+    const capDefault = isWomensLeague ? 2_200_000 : 140_000_000;
+    const payrollDefault = isWomensLeague ? 800_000 : 46_650_000;
+    const taxDefault = isWomensLeague ? 0 : 84_750_000;
+    setSalaryCap(h.salaryCap > 0 ? h.salaryCap : capDefault);
+    setMinPayroll(h.minPayroll > 0 ? h.minPayroll : payrollDefault);
+    setLuxuryTaxThreshold(h.luxuryTaxThreshold > 0 ? h.luxuryTaxThreshold : taxDefault);
     setRookieScaleContracts(h.rookieScaleContracts);
-  }, [year, historicalOverride]);
+    if (isWomensLeague) {
+      if (h.maxContractYears)       setMaxContractYears(h.maxContractYears);
+      if (h.maxPlayerSalaryPct)     setMaxPlayerSalaryPct(h.maxPlayerSalaryPct);
+      if (h.birdRights !== undefined) setBirdRights(h.birdRights);
+      if (h.draftRounds)            setDraftRounds(h.draftRounds);
+      if (h.draftClassSize)         setDraftClassSize(h.draftClassSize);
+      if (h.tradableDraftPickSeasons !== undefined) setTradableDraftPickSeasons(h.tradableDraftPickSeasons);
+      // Auto-load WNBA historical roster limits
+      const rosterRules = getWNBARosterRules(year);
+      setMinRosterSize(rosterRules.minRosterSize);
+      setMaxRosterSize(rosterRules.maxRosterSize);
+    } else {
+      // Reset to standard NBA defaults when switching back from women's
+      setMinRosterSize(10);
+      setMaxRosterSize(18);
+    }
+  }, [year, historicalOverride, isWomensLeague]);
 
   const handleGodModeToggle = (checked: boolean) => {
     if (checked) setGodModeConfirm(true);
@@ -267,17 +301,17 @@ const LeagueConfiguration: React.FC<LeagueConfigurationProps> = ({ onConfirm, on
     if (!name.trim())          errs.name = 'League name is required.';
     else if (name.length > 30) errs.name = 'League name must be 30 characters or fewer.';
     if (!year || year < 1900 || year > 2200) errs.year = 'Starting year must be between 1900 and 2200.';
+    if (isWomensLeague && year < 1997) errs.year = 'WNBA era starts in 1997.';
     if (seasonLength < 20 || seasonLength > 82) errs.seasonLength = 'Season length must be between 20 and 82 games.';
-    const h = getHistoricalFinancials(year);
-    const effectiveCap = h.salaryCap > 0 ? salaryCap : salaryCap; // always present
-    if (effectiveCap < 1_000_000 || effectiveCap > 300_000_000) errs.salaryCap = 'Salary cap must be $1M – $300M.';
+    const capMin = isWomensLeague ? 50_000 : 1_000_000;
+    if (salaryCap < capMin || salaryCap > 300_000_000) errs.salaryCap = isWomensLeague ? 'Salary cap must be $50K – $300M.' : 'Salary cap must be $1M – $300M.';
     setErrors(errs);
     return Object.keys(errs).length === 0;
   };
 
   const handleConfirm = () => {
     if (!validate()) return;
-    const h = getHistoricalFinancials(year);
+    const h = isWomensLeague ? getWNBAHistoricalFinancials(year) : getHistoricalFinancials(year);
     const noCap = !historicalOverride && h.salaryCap === 0;
     const effectiveCap  = noCap ? 999_000_000 : salaryCap;
     const effectiveTax  = noCap || h.luxuryTaxLine === 0 ? 0 : Math.round(effectiveCap * 1.15);
@@ -328,6 +362,8 @@ const LeagueConfiguration: React.FC<LeagueConfigurationProps> = ({ onConfirm, on
       rookieScaleContracts,
       maxPlayerSalaryPct,
       birdRights,
+      minContractSalary: minContractSalaryOverride || undefined,
+      maxContractSalary: maxContractSalaryOverride || undefined,
       // Draft
       draftRounds,
       draftClassSize,
@@ -372,7 +408,15 @@ const LeagueConfiguration: React.FC<LeagueConfigurationProps> = ({ onConfirm, on
     playerGenderRatio === 100 ? 'All Female'  :
     playerGenderRatio === 50  ? 'Mixed 50/50' : 'Custom';
 
-  const fmtM = (v: number) => '$' + (v / 1_000_000).toFixed(0) + 'M';
+  const fmtM = fmtSalary;
+
+  // ── contract salary auto-values (used when override is 0) ─────────────────
+  const autoMinContract = isWomensLeague
+    ? Math.max(25_000, Math.round(salaryCap * 0.012))
+    : 1_100_000;
+  const autoMaxContract = Math.round(salaryCap * maxPlayerSalaryPct / 100);
+  const displayMinContract = minContractSalaryOverride || autoMinContract;
+  const displayMaxContract = maxContractSalaryOverride || autoMaxContract;
 
   const normDiff = (d: LeagueSettings['difficulty']): string =>
     d === 'Easy' ? 'Rookie' : d === 'Medium' ? 'Pro' : d === 'Hard' ? 'All-Star' : d === 'Extreme' ? 'Legend' : d;
@@ -431,21 +475,49 @@ const LeagueConfiguration: React.FC<LeagueConfigurationProps> = ({ onConfirm, on
               className={`w-full bg-slate-950 border rounded-xl px-4 py-3 text-white font-display text-lg focus:outline-none focus:border-amber-500/50 transition-colors ${errors.name ? 'border-rose-500' : 'border-slate-800'}`} />
           </Field>
           <Field label="Starting Year" error={errors.year}>
-            <input type="number" value={year} min={1900} max={2200} onChange={e => setYear(parseInt(e.target.value) || 2025)}
-              className={`w-full bg-slate-950 border rounded-xl px-4 py-3 text-white font-display text-lg focus:outline-none ${errors.year ? 'border-rose-500' : 'border-slate-800'}`} />
+            <select value={year} onChange={e => setYear(parseInt(e.target.value))}
+              className={`w-full bg-slate-950 border rounded-xl px-4 py-3 text-white font-display text-lg focus:outline-none appearance-none cursor-pointer ${errors.year ? 'border-rose-500' : 'border-slate-800'}`}>
+              {isWomensLeague
+                ? Array.from({ length: 30 }, (_, i) => 1997 + i).map(y => (
+                    <option key={y} value={y}>{y}</option>
+                  ))
+                : Array.from({ length: 80 }, (_, i) => 1947 + i).map(y => (
+                    <option key={y} value={y}>{y}</option>
+                  ))
+              }
+            </select>
+            {isWomensLeague && (
+              <p className="text-[9px] text-violet-400/70 font-bold mt-1 uppercase tracking-widest">WNBA era: 1997–2026</p>
+            )}
           </Field>
         </div>
 
         {/* ── Historical Era Banner ─────────────────────────────────────────────── */}
         {(() => {
-          const h = getHistoricalFinancials(year);
+          const h = isWomensLeague ? getWNBAHistoricalFinancials(year) : getHistoricalFinancials(year);
           const noCap = h.salaryCap === 0;
+          const isFutureWNBA = isWomensLeague && year >= 2026;
+          const rosterRules = isWomensLeague ? getWNBARosterRules(year) : null;
+          const rosterTag = rosterRules ? ` · Roster ${rosterRules.minRosterSize}–${rosterRules.maxRosterSize}` : '';
+          const bannerLabel = historicalOverride
+            ? '✏ Custom Financials'
+            : isWomensLeague
+              ? isFutureWNBA
+                ? `📅 WNBA HISTORICAL VALUES LOADED — Future Projection · Hard Cap · No Luxury Tax${rosterTag}`
+                : `📅 WNBA HISTORICAL VALUES LOADED — ${h.era}${rosterTag}`
+              : `📅 Historical values loaded for ${year}`;
+          const accentColor = isWomensLeague ? 'text-violet-400' : 'text-amber-500';
+          const borderColor = historicalOverride
+            ? 'border-slate-700 bg-slate-900/40'
+            : isWomensLeague
+              ? 'border-violet-500/30 bg-violet-500/5'
+              : 'border-amber-500/30 bg-amber-500/5';
           return (
-            <div className={`rounded-2xl border px-5 py-4 flex flex-col gap-2 ${historicalOverride ? 'border-slate-700 bg-slate-900/40' : 'border-amber-500/30 bg-amber-500/5'}`}>
+            <div className={`rounded-2xl border px-5 py-4 flex flex-col gap-2 ${borderColor}`}>
               <div className="flex items-center justify-between flex-wrap gap-2">
                 <div className="flex items-center gap-2">
-                  <span className="text-[9px] font-black uppercase tracking-widest text-amber-500">
-                    {historicalOverride ? '✏ Custom Financials' : `📅 Historical values loaded for ${year}`}
+                  <span className={`text-[9px] font-black uppercase tracking-widest ${accentColor}`}>
+                    {bannerLabel}
                   </span>
                   <span className="text-[9px] text-slate-500 font-bold uppercase tracking-wider">— {h.era}</span>
                 </div>
@@ -454,25 +526,46 @@ const LeagueConfiguration: React.FC<LeagueConfigurationProps> = ({ onConfirm, on
                   onClick={() => setHistoricalOverride(v => !v)}
                   className={`text-[9px] font-black uppercase tracking-widest px-3 py-1 rounded-full border transition-all ${
                     historicalOverride
-                      ? 'border-amber-500 text-amber-500 hover:bg-amber-500 hover:text-slate-950'
+                      ? `border-${isWomensLeague ? 'violet' : 'amber'}-500 ${accentColor} hover:bg-${isWomensLeague ? 'violet' : 'amber'}-500 hover:text-slate-950`
                       : 'border-slate-600 text-slate-500 hover:border-slate-400 hover:text-slate-300'
                   }`}
                 >
                   {historicalOverride ? 'Restore Historical' : 'Override (Alt History)'}
                 </button>
               </div>
-              <div className="flex flex-wrap gap-3 text-[10px] font-bold text-slate-400">
+              <div className="flex flex-wrap gap-x-3 gap-y-1 text-[10px] font-bold text-slate-400">
                 <span className={noCap ? 'text-rose-400' : 'text-slate-300'}>
-                  Cap: {noCap ? 'None' : `$${(h.salaryCap / 1_000_000).toFixed(1)}M`}
+                  Cap: {noCap ? 'None' : fmtSalary(h.salaryCap)}
                 </span>
                 <span>·</span>
-                <span>
-                  Luxury Tax: {h.luxuryTaxLine === 0 ? 'None' : `$${(h.luxuryTaxLine / 1_000_000).toFixed(1)}M`}
-                </span>
+                {isWomensLeague ? (
+                  <span className="text-violet-400 font-black">Hard Cap · No Luxury Tax</span>
+                ) : (
+                  <span>
+                    Luxury Tax: {h.luxuryTaxLine === 0 ? 'None' : fmtSalary(h.luxuryTaxLine)}
+                  </span>
+                )}
                 <span>·</span>
                 <span>Rookie Scale: {h.rookieScaleContracts ? 'Yes' : 'No'}</span>
                 <span>·</span>
                 <span>Trade Match: {h.tradeSalaryMatchPct === 100 ? 'Unrestricted' : `${h.tradeSalaryMatchPct}%`}</span>
+                <span>·</span>
+                <span className={accentColor}>
+                  Max Contract: {fmtSalary(getEraMaxPlayerSalary(year, isWomensLeague, h.salaryCap))}/yr
+                </span>
+                {!isWomensLeague && (
+                  <>
+                    <span>·</span>
+                    <span className="text-slate-300">
+                      Typical Star Max: {fmtSalary(computeMensMarketSalary(90, year))}/yr
+                    </span>
+                  </>
+                )}
+                {isWomensLeague && h.maxContractYears && (<><span>·</span><span>Max Yrs: {h.maxContractYears}yr</span></>)}
+                {isWomensLeague && h.birdRights !== undefined && (<><span>·</span><span>Bird Rights: {h.birdRights ? 'Yes' : 'No'}</span></>)}
+                {isWomensLeague && h.draftRounds && (<><span>·</span><span>Draft: {h.draftRounds} rounds</span></>)}
+                {isWomensLeague && h.draftClassSize && (<><span>·</span><span>Class Size: {h.draftClassSize}</span></>)}
+                {isWomensLeague && (<><span>·</span><span className="text-violet-300 font-black">Draft Eligibility: Domestic 22+ · Intl 20+</span></>)}
               </div>
               {!historicalOverride && (
                 <p className="text-[9px] text-slate-600 italic">{h.note}</p>
@@ -610,8 +703,8 @@ const LeagueConfiguration: React.FC<LeagueConfigurationProps> = ({ onConfirm, on
 
                   <Field label="Salary Cap (Soft Limit)" hint={FIELD_HINTS.salaryCap} error={errors.salaryCap}>
                     <div className="space-y-2">
-                      <input type="number" value={salaryCap} step={1_000_000} min={80_000_000} max={300_000_000}
-                        onChange={e => setSalaryCap(parseInt(e.target.value) || 140_000_000)}
+                      <NumericInput value={salaryCap} min={80_000_000} max={300_000_000}
+                        onChange={setSalaryCap}
                         className={`w-full bg-slate-950 border rounded-xl px-4 py-3 text-white font-mono text-sm focus:outline-none ${errors.salaryCap ? 'border-rose-500' : 'border-slate-800'}`} />
                       <div className="flex gap-4 text-[9px] font-black text-slate-600 uppercase">
                         <span>Cap: {fmtM(salaryCap)}</span>
@@ -675,8 +768,8 @@ const LeagueConfiguration: React.FC<LeagueConfigurationProps> = ({ onConfirm, on
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
 
                   <Field label="Games Per Season" hint="Between 20–82 games. Affects schedule, playoff timing, and per-game stat calcs." error={errors.seasonLength}>
-                    <input type="number" value={seasonLength} min={20} max={82}
-                      onChange={e => setSeasonLength(parseInt(e.target.value) || 82)}
+                    <NumericInput value={seasonLength} min={20} max={82}
+                      onChange={setSeasonLength}
                       className={`w-full bg-slate-950 border rounded-xl px-4 py-3 text-white font-mono focus:outline-none ${errors.seasonLength ? 'border-rose-500' : 'border-slate-800'}`} />
                   </Field>
 
@@ -712,14 +805,14 @@ const LeagueConfiguration: React.FC<LeagueConfigurationProps> = ({ onConfirm, on
                   </Field>
 
                   <Field label="Division Games" hint="Games played vs. each team in own division. Leave 0 to treat like any conference game.">
-                    <input type="number" value={divisionGames} min={0} max={82}
-                      onChange={e => setDivisionGames(Math.max(0, parseInt(e.target.value) || 0))}
+                    <NumericInput value={divisionGames} min={0} max={82}
+                      onChange={setDivisionGames}
                       className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-3 text-white font-mono focus:outline-none" />
                   </Field>
 
                   <Field label="Conference Games" hint="Total games played within own conference. Leave 0 for no special treatment.">
-                    <input type="number" value={conferenceGames} min={0} max={82}
-                      onChange={e => setConferenceGames(Math.max(0, parseInt(e.target.value) || 0))}
+                    <NumericInput value={conferenceGames} min={0} max={82}
+                      onChange={setConferenceGames}
                       className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-3 text-white font-mono focus:outline-none" />
                   </Field>
 
@@ -776,8 +869,8 @@ const LeagueConfiguration: React.FC<LeagueConfigurationProps> = ({ onConfirm, on
                   </Field>
                   <Field label="Salary Cap (Soft Limit)" hint={FIELD_HINTS.salaryCap} error={errors.salaryCap}>
                     <div className="space-y-2">
-                      <input type="number" value={salaryCap} step={1_000_000} min={80_000_000} max={300_000_000}
-                        onChange={e => setSalaryCap(parseInt(e.target.value) || 140_000_000)}
+                      <NumericInput value={salaryCap} min={80_000_000} max={300_000_000}
+                        onChange={setSalaryCap}
                         className={`w-full bg-slate-950 border rounded-xl px-4 py-3 text-white font-mono text-sm focus:outline-none ${errors.salaryCap ? 'border-rose-500' : 'border-slate-800'}`} />
                       <div className="flex gap-4 text-[9px] font-black text-slate-600 uppercase">
                         <span>Cap: {fmtM(salaryCap)}</span>
@@ -787,14 +880,14 @@ const LeagueConfiguration: React.FC<LeagueConfigurationProps> = ({ onConfirm, on
                     </div>
                   </Field>
                   <Field label="Minimum Payroll" hint="Payroll floor — every team must spend at least this much.">
-                    <input type="number" value={minPayroll} step={250_000} min={20_000_000} max={120_000_000}
-                      onChange={e => setMinPayroll(parseInt(e.target.value) || 46_650_000)}
+                    <NumericInput value={minPayroll} min={20_000_000} max={120_000_000}
+                      onChange={setMinPayroll}
                       className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-3 text-white font-mono text-sm focus:outline-none" />
                     <p className="text-[9px] text-slate-600 mt-1">Default: {fmtM(46_650_000)}</p>
                   </Field>
                   <Field label="Luxury Tax Threshold" hint="Second apron / tax line — triggers enhanced penalties.">
-                    <input type="number" value={luxuryTaxThreshold} step={250_000} min={30_000_000} max={200_000_000}
-                      onChange={e => setLuxuryTaxThreshold(parseInt(e.target.value) || 84_750_000)}
+                    <NumericInput value={luxuryTaxThreshold} min={30_000_000} max={200_000_000}
+                      onChange={setLuxuryTaxThreshold}
                       className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-3 text-white font-mono text-sm focus:outline-none" />
                     <p className="text-[9px] text-slate-600 mt-1">Default: {fmtM(84_750_000)}</p>
                   </Field>
@@ -813,7 +906,42 @@ const LeagueConfiguration: React.FC<LeagueConfigurationProps> = ({ onConfirm, on
                   </Field>
                   <Field label="Max Player Salary %" hint="Max % of cap any single player can earn.">
                     <BtnGroup options={['25%','30%','35%']} value={`${maxPlayerSalaryPct}%`}
-                      onChange={v => setMaxPlayerSalaryPct(parseInt(v) as 25|30|35)} />
+                      onChange={v => { setMaxPlayerSalaryPct(parseInt(v) as 25|30|35); setMaxContractSalaryOverride(0); }} />
+                    <p className="text-[10px] text-emerald-500/80 font-bold mt-1.5 uppercase tracking-widest">
+                      Auto: {fmtSalary(autoMaxContract)}/yr
+                    </p>
+                  </Field>
+
+                  <Field label="Min Contract/yr" hint="Minimum annual salary a player can be signed for. Auto-calculated from cap; override if needed.">
+                    <NumericInput value={displayMinContract}
+                      min={1_000} max={displayMaxContract}
+                      onChange={v => setMinContractSalaryOverride(v)}
+                      onBlur={() => setMinContractSalaryOverride(v => Math.max(1_000, Math.min(v, displayMaxContract)))}
+                      className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-3 text-white font-mono text-sm focus:outline-none" />
+                    <div className="flex items-center justify-between mt-1.5">
+                      <p className="text-[10px] text-sky-400/80 font-bold uppercase tracking-widest">
+                        {fmtSalary(displayMinContract)}/yr
+                      </p>
+                      {minContractSalaryOverride > 0 && (
+                        <button onClick={() => setMinContractSalaryOverride(0)} className="text-[9px] text-slate-500 hover:text-slate-300 font-bold uppercase">↺ Reset Auto</button>
+                      )}
+                    </div>
+                  </Field>
+
+                  <Field label="Max Contract/yr" hint="Maximum annual salary any single player can earn. Auto-calculated from cap × max%; override if needed.">
+                    <NumericInput value={displayMaxContract}
+                      min={displayMinContract} max={salaryCap}
+                      onChange={v => setMaxContractSalaryOverride(v)}
+                      onBlur={() => setMaxContractSalaryOverride(v => Math.max(displayMinContract, Math.min(v, salaryCap)))}
+                      className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-3 text-white font-mono text-sm focus:outline-none" />
+                    <div className="flex items-center justify-between mt-1.5">
+                      <p className="text-[10px] text-amber-400/80 font-bold uppercase tracking-widest">
+                        MAX CONTRACT: {fmtSalary(displayMaxContract)}/yr
+                      </p>
+                      {maxContractSalaryOverride > 0 && (
+                        <button onClick={() => setMaxContractSalaryOverride(0)} className="text-[9px] text-slate-500 hover:text-slate-300 font-bold uppercase">↺ Reset Auto</button>
+                      )}
+                    </div>
                   </Field>
                   <Field label="Bird Rights">
                     <Toggle label={birdRights ? 'Enabled — re-sign own players over cap' : 'Disabled — hard cap applies to re-signings'}
@@ -867,14 +995,14 @@ const LeagueConfiguration: React.FC<LeagueConfigurationProps> = ({ onConfirm, on
                 <h4 className="text-xs font-black text-amber-500 uppercase tracking-[0.3em] border-b border-slate-800 pb-3">Roster Rules</h4>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                   <Field label="Min Roster Size" hint="Minimum players required on an active roster.">
-                    <input type="number" value={minRosterSize} min={5} max={20}
-                      onChange={e => { const v = parseInt(e.target.value); if (!isNaN(v)) setMinRosterSize(v); }}
+                    <NumericInput value={minRosterSize} min={5} max={20}
+                      onChange={setMinRosterSize}
                       onBlur={() => setMinRosterSize(v => Math.max(5, Math.min(v, maxRosterSize)))}
                       className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-3 text-white font-mono focus:outline-none" />
                   </Field>
                   <Field label="Max Roster Size" hint="Maximum players allowed on an active roster.">
-                    <input type="number" value={maxRosterSize} min={10} max={30}
-                      onChange={e => { const v = parseInt(e.target.value); if (!isNaN(v)) setMaxRosterSize(v); }}
+                    <NumericInput value={maxRosterSize} min={10} max={30}
+                      onChange={setMaxRosterSize}
                       onBlur={() => setMaxRosterSize(v => Math.max(v, minRosterSize, 10))}
                       className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-3 text-white font-mono focus:outline-none" />
                   </Field>
@@ -887,8 +1015,8 @@ const LeagueConfiguration: React.FC<LeagueConfigurationProps> = ({ onConfirm, on
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
 
                   <Field label="# Draft Rounds" hint={FIELD_HINTS.draftRounds}>
-                    <input type="number" value={draftRounds} min={1} max={10}
-                      onChange={e => setDraftRounds(Math.max(1, parseInt(e.target.value)||2))}
+                    <NumericInput value={draftRounds} min={1} max={10}
+                      onChange={setDraftRounds}
                       className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-3 text-white font-mono focus:outline-none" />
                   </Field>
                   <Field label="Draft Type" hint="Lottery format used to assign draft order.">
@@ -904,8 +1032,8 @@ const LeagueConfiguration: React.FC<LeagueConfigurationProps> = ({ onConfirm, on
                   {(draftType === 'Custom Lottery' || draftType === 'Carry-Over (COLA)') && (
                     <>
                       <Field label="Custom # Lottery Selections" hint="How many picks are decided by lottery (rest go in order).">
-                        <input type="number" value={customLotterySelections} min={1} max={14}
-                          onChange={e => setCustomLotterySelections(Math.max(1, parseInt(e.target.value)||4))}
+                        <NumericInput value={customLotterySelections} min={1} max={14}
+                          onChange={setCustomLotterySelections}
                           className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-3 text-white font-mono focus:outline-none" />
                       </Field>
                       <Field label="Custom Lottery Chances" hint="JSON array of weights per team slot (worst → best). Must sum to 1000.">
@@ -925,15 +1053,17 @@ const LeagueConfiguration: React.FC<LeagueConfigurationProps> = ({ onConfirm, on
                     <div className="flex gap-3 items-center">
                       <div className="flex-1 space-y-1">
                         <label className="text-[9px] font-black text-slate-600 uppercase tracking-widest">Min Age</label>
-                        <input type="number" value={prospectAgeMin} min={16} max={prospectAgeMax}
-                          onChange={e => setProspectAgeMin(Math.min(parseInt(e.target.value)||19, prospectAgeMax))}
+                        <NumericInput value={prospectAgeMin} min={16} max={prospectAgeMax}
+                          onChange={v => setProspectAgeMin(Math.min(v, prospectAgeMax))}
+                          onBlur={() => setProspectAgeMin(v => Math.min(v, prospectAgeMax))}
                           className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2.5 text-white font-mono focus:outline-none" />
                       </div>
                       <span className="text-slate-600 font-bold mt-5">–</span>
                       <div className="flex-1 space-y-1">
                         <label className="text-[9px] font-black text-slate-600 uppercase tracking-widest">Max Age</label>
-                        <input type="number" value={prospectAgeMax} min={prospectAgeMin} max={35}
-                          onChange={e => setProspectAgeMax(Math.max(parseInt(e.target.value)||22, prospectAgeMin))}
+                        <NumericInput value={prospectAgeMax} min={prospectAgeMin} max={35}
+                          onChange={v => setProspectAgeMax(Math.max(v, prospectAgeMin))}
+                          onBlur={() => setProspectAgeMax(v => Math.max(v, prospectAgeMin))}
                           className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2.5 text-white font-mono focus:outline-none" />
                       </div>
                     </div>

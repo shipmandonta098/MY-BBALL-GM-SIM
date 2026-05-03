@@ -1,5 +1,6 @@
 import React from 'react';
 import { Team, Player } from '../types';
+import { fmtSalary } from '../utils/formatters';
 
 interface MarketProps {
   teams: Team[];
@@ -37,7 +38,7 @@ const Market: React.FC<MarketProps> = ({ teams, userTeamId, onScout, scoutingRep
                 </div>
                 <div className="flex gap-4 text-sm text-slate-500 mt-1">
                     <span>Rating: <strong className="text-amber-500">{player.rating}</strong></span>
-                    <span>Value: <strong className="text-emerald-500">${(player.salary / 1000000).toFixed(1)}M</strong></span>
+                    <span>Value: <strong className="text-emerald-500">{fmtSalary(player.salary)}</strong></span>
                     <span>Age: {player.age}</span>
                 </div>
             </div>
