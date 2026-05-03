@@ -2929,6 +2929,115 @@ const generateCinematicLines = (
   return { setup, attack, result };
 };
 
+// ─── Intentional Late-Game Fouling ───────────────────────────────────────────
+/** Generates PBP events for intentional-foul sequences when a trailing team
+ *  is down 1–8 with less than 3 minutes left in Q4. */
+const generateIntentionalFoulEvents = (
+  trailingTeam: Team,
+  leadingTeam: Team,
+  deficit: number,
+  quarter: number,
+  isWNBA: boolean,
+): PlayByPlayEvent[] => {
+  const events: PlayByPlayEvent[] = [];
+
+  // More foul sequences the closer the game
+  const nSeqs = deficit <= 3 ? 3 : deficit <= 6 ? 2 : 1;
+  const seqTimes =
+    nSeqs === 3 ? ['2:40', '1:35', '0:40'] :
+    nSeqs === 2 ? ['2:20', '1:10'] :
+                  ['1:30'];
+
+  // Find the worst FT shooter on leading team — weight C/PF as preferred hack-a targets
+  const leadRoster = leadingTeam.roster.filter(p => !p.injured);
+  if (!leadRoster.length) return events;
+  const foulTarget = leadRoster.reduce((worst, p) => {
+    const score  = (p.attributes?.freeThrow ?? 50) - (['C', 'PF'].includes(p.position ?? '') ? 5 : 0);
+    const wScore = (worst.attributes?.freeThrow ?? 50) - (['C', 'PF'].includes(worst.position ?? '') ? 5 : 0);
+    return score < wScore ? p : worst;
+  }, leadRoster[0]);
+
+  // A big on the trailing team commits the foul
+  const trailRoster = trailingTeam.roster.filter(p => !p.injured);
+  if (!trailRoster.length) return events;
+  const fouler = trailRoster.find(p => ['PF', 'C'].includes(p.position ?? '')) ?? trailRoster[0];
+
+  const targetName = lastName(foulTarget);
+  const foulerName = lastName(fouler);
+  const trailCoach = trailingTeam.staff.headCoach?.name?.split(' ').at(-1) ?? 'Coach';
+  const ftPct = getFreeThrowPercentage(foulTarget.attributes?.freeThrow ?? 50, foulTarget.position);
+  const pr = pronouns(foulTarget);
+
+  for (let i = 0; i < seqTimes.length; i++) {
+    const time = seqTimes[i];
+
+    // Coach signals the intentional foul
+    const callLines = [
+      `${trailCoach} calls for the intentional foul — ${trailingTeam.name} trying to extend the game!`,
+      `${trailCoach} signals from the sideline: HACK-${targetName.toUpperCase()}. Only way back in this one.`,
+      `${trailingTeam.name} going to the foul strategy — ${trailCoach} has no choice with ${deficit} to erase.`,
+      `Deliberate foul coming — ${trailCoach} pressing every button down the stretch.`,
+    ];
+    events.push({ time, text: callLines[Math.floor(Math.random() * callLines.length)], type: 'info', quarter });
+
+    // Foul committed
+    const foulLines = [
+      `${foulerName} grabs ${targetName} — deliberate foul to stop the clock. Two shots.`,
+      `Intentional foul by ${foulerName} on ${targetName}. ${targetName} heads to the line.`,
+      `${targetName} fouled hard on the perimeter — ${foulerName} with the deliberate hack. Two free throws.`,
+      `${foulerName} wraps up ${targetName}. Intentional foul called — ${targetName} at the stripe.`,
+    ];
+    events.push({ time, text: foulLines[Math.floor(Math.random() * foulLines.length)], type: 'foul', quarter });
+
+    // Free throw 1
+    const ft1Make = Math.random() < ftPct;
+    const ft1Lines = ft1Make
+      ? [
+          `${targetName} knocks down FT #1 — ${leadingTeam.name} extends the advantage.`,
+          `${targetName} calm at the line — buries the first free throw.`,
+          `Free throw GOOD. ${targetName} automatic from the charity stripe.`,
+          `${targetName} drills the first one. Hack-a not working yet.`,
+        ]
+      : [
+          `${targetName} MISSES FT #1 — hack-a strategy paying off!`,
+          `Off the back of the rim! ${targetName} clanks the first free throw.`,
+          `${targetName} can't convert — FT #1 rattles out! ${trailingTeam.name} needed that!`,
+          `No good! ${targetName} misses the first. Strategy working for ${trailingTeam.name}!`,
+        ];
+    events.push({ time, text: ft1Lines[Math.floor(Math.random() * ft1Lines.length)], type: ft1Make ? 'score' : 'miss', quarter });
+
+    // Free throw 2
+    const ft2Make = Math.random() < ftPct;
+    const ft2Lines = ft2Make
+      ? [
+          `${targetName} converts FT #2 as well. ${leadingTeam.name} holding strong.`,
+          `FT #2 is GOOD — ${pr.he} goes 2-for-2 from the line.`,
+          `${targetName} completes the two-shot trip. Tough night for the hack-a strategy.`,
+          `Knocks down the second too. ${trailingTeam.name} still needs a stop and a score.`,
+        ]
+      : [
+          `${targetName} MISSES FT #2! ${trailingTeam.name} gets a live-ball rebound!`,
+          `FT #2 off the iron! Hack-a ${targetName} is WORKING tonight!`,
+          `Both free throws missed — ${trailingTeam.name} grabs the board and has a chance!`,
+          `Can't buy a bucket from the line — ${trailingTeam.name} with the rebound!`,
+        ];
+    events.push({ time, text: ft2Lines[Math.floor(Math.random() * ft2Lines.length)], type: ft2Make ? 'score' : 'miss', quarter });
+
+    // If either FT was missed, trailing team secures the live rebound
+    if (!ft1Make || !ft2Make) {
+      const rebLines = [
+        `${trailingTeam.name} secures the rebound — pushing the pace!`,
+        `Rebound ${trailingTeam.name}! Clock stopped — the comeback is alive!`,
+        `${trailingTeam.name} with the board — timeout called to set up the play.`,
+        `${trailingTeam.name} grabs it! They need a score NOW to keep this game going.`,
+      ];
+      events.push({ time, text: rebLines[Math.floor(Math.random() * rebLines.length)], type: 'info', quarter });
+    }
+  }
+
+  return events;
+};
+
 // ─── Quarter PBP Generator ────────────────────────────────────────────────────
 const generateQuarterPBP = (
   offTeam: Team,
@@ -3848,6 +3957,17 @@ export const simulateGame = (
     }
     if (q === 4 && Math.abs(runningHome - runningAway) <= 5) {
       pbp.push({ time: '4:00', text: `We have a BALL GAME! ${Math.abs(runningHome - runningAway) <= 2 ? "Anyone's game with 4 minutes left!" : 'One possession game down the stretch!'}`, type: 'info', quarter: q });
+    }
+
+    // Intentional fouling — trailing team hack-a strategy in final 3 minutes of Q4
+    if (q === 4 && !garbageTime) {
+      const finalDiff    = runningHome - runningAway;
+      const finalDeficit = Math.abs(finalDiff);
+      if (finalDeficit >= 1 && finalDeficit <= 8) {
+        const trailingTeam4 = finalDiff < 0 ? home : away;
+        const leadingTeam4  = finalDiff < 0 ? away : home;
+        pbp.push(...generateIntentionalFoulEvents(trailingTeam4, leadingTeam4, finalDeficit, q, isWNBA));
+      }
     }
 
     // Upset drama commentary — fires when the expected underdog is leading late
