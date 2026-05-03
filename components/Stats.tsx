@@ -33,6 +33,7 @@ const Stats: React.FC<StatsProps> = ({ league, onViewRoster, onManageTeam, onVie
   const [playerStatsView, setPlayerStatsView] = useState<PlayerStatsView>('season');
   const [minClutchMin, setMinClutchMin] = useState(10);
   const [statsSource, setStatsSource] = useState<StatsSource>('regular');
+  const [highsView, setHighsView] = useState<'career' | 'season'>('career');
 
   const allPlayers = useMemo(() => {
     return league.teams.flatMap(t => t.roster.map(p => ({
@@ -731,30 +732,53 @@ const Stats: React.FC<StatsProps> = ({ league, onViewRoster, onManageTeam, onVie
 
         {/* ── Game Highs sub-tab ──────────────────────────────────────────── */}
         {playerSubTab === 'highs' && (() => {
-          const highsCols = [
-            { key: 'highPts',  label: 'High PTS', stat: 'points'   as const },
-            { key: 'highReb',  label: 'High REB', stat: 'rebounds' as const },
-            { key: 'highAst',  label: 'High AST', stat: 'assists'  as const },
-            { key: 'highStl',  label: 'High STL', stat: 'steals'   as const },
-            { key: 'highBlk',  label: 'High BLK', stat: 'blocks'   as const },
-            { key: 'high3pm',  label: 'High 3PM', stat: 'threepm'  as const },
-          ];
           const [highSort, setHighSort] = useState<string>('highPts');
           const [highDir, setHighDir] = useState<'asc' | 'desc'>('desc');
+
+          // Season highs helper: compute from gameLog for each player
+          const getSeasonHighs = (p: typeof allPlayers[0]) => {
+            const games = (p.gameLog ?? []).filter((g: any) => !g.dnp);
+            if (!games.length) return null;
+            const maxOf = (fn: (g: any) => number) => games.reduce((m: number, g: any) => Math.max(m, fn(g)), 0);
+            return {
+              points:   maxOf(g => g.pts),
+              rebounds: maxOf(g => g.reb),
+              assists:  maxOf(g => g.ast),
+              steals:   maxOf(g => g.stl),
+              blocks:   maxOf(g => g.blk),
+              threepm:  maxOf(g => g.threepm),
+            };
+          };
+
+          const isSeason = highsView === 'season';
+
+          const highsCols = [
+            { key: 'highPts',  label: 'High PTS', field: 'points'   },
+            { key: 'highReb',  label: 'High REB', field: 'rebounds' },
+            { key: 'highAst',  label: 'High AST', field: 'assists'  },
+            { key: 'highStl',  label: 'High STL', field: 'steals'   },
+            { key: 'highBlk',  label: 'High BLK', field: 'blocks'   },
+            { key: 'high3pm',  label: 'High 3PM', field: 'threepm'  },
+          ];
 
           const allPwT = allPlayers.filter(p => {
             if (posFilter !== 'ALL' && p.position !== posFilter) return false;
             if (teamFilter !== 'ALL' && p.teamName !== teamFilter) return false;
             if (searchTerm && !p.name.toLowerCase().includes(searchTerm.toLowerCase())) return false;
+            if (isSeason) {
+              const sh = getSeasonHighs(p);
+              return sh && (sh.points > 0 || sh.rebounds > 0 || sh.assists > 0);
+            }
             return p.careerHighs.points > 0 || p.careerHighs.rebounds > 0 || p.careerHighs.assists > 0;
           });
 
           const hiSorted = [...allPwT].sort((a, b) => {
-            const aH = a.careerHighs as any;
-            const bH = b.careerHighs as any;
-            const keyMap: Record<string, string> = { highPts: 'points', highReb: 'rebounds', highAst: 'assists', highStl: 'steals', highBlk: 'blocks', high3pm: 'threepm' };
-            const field = keyMap[highSort] ?? 'points';
-            return highDir === 'desc' ? (bH[field] ?? 0) - (aH[field] ?? 0) : (aH[field] ?? 0) - (bH[field] ?? 0);
+            const field = highsCols.find(c => c.key === highSort)?.field ?? 'points';
+            const aH = isSeason ? (getSeasonHighs(a) ?? {}) : (a.careerHighs as any);
+            const bH = isSeason ? (getSeasonHighs(b) ?? {}) : (b.careerHighs as any);
+            return highDir === 'desc'
+              ? ((bH as any)[field] ?? 0) - ((aH as any)[field] ?? 0)
+              : ((aH as any)[field] ?? 0) - ((bH as any)[field] ?? 0);
           });
 
           const ThH = ({ k, label }: { k: string; label: string }) => (
@@ -767,12 +791,38 @@ const Stats: React.FC<StatsProps> = ({ league, onViewRoster, onManageTeam, onVie
             </th>
           );
 
+          const hl = (v: number) =>
+            v >= 40 ? 'text-amber-300 font-black' :
+            v >= 30 ? 'text-amber-400 font-bold' :
+            v >= 20 ? 'text-emerald-400' :
+            v >= 10 ? 'text-slate-200' : 'text-slate-500';
+
           return (
             <div className="space-y-4">
-              <div className="bg-slate-900/50 border border-amber-500/15 rounded-2xl px-4 py-3">
-                <p className="text-[10px] font-black uppercase tracking-widest text-amber-500/70">Career Game Highs</p>
-                <p className="text-xs text-slate-500 mt-0.5">Best single-game performance recorded for each stat. Updated each game.</p>
+              {/* Season / Career toggle */}
+              <div className="flex items-center justify-between">
+                <div className="bg-slate-900/50 border border-amber-500/15 rounded-2xl px-4 py-3 flex-1 mr-4">
+                  <p className="text-[10px] font-black uppercase tracking-widest text-amber-500/70">
+                    {isSeason ? 'Season Game Highs' : 'Career Game Highs'}
+                  </p>
+                  <p className="text-xs text-slate-500 mt-0.5">
+                    {isSeason
+                      ? 'Best single-game performance from this season\'s game log.'
+                      : 'Best single-game performance across entire career. Updated each game.'}
+                  </p>
+                </div>
+                <div className="flex gap-1 bg-slate-900 border border-slate-800 rounded-xl p-1 shrink-0">
+                  <button
+                    onClick={() => setHighsView('career')}
+                    className={`px-3 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all ${!isSeason ? 'bg-amber-500 text-slate-950' : 'text-slate-500 hover:text-white'}`}
+                  >Career</button>
+                  <button
+                    onClick={() => setHighsView('season')}
+                    className={`px-3 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all ${isSeason ? 'bg-orange-500 text-slate-950' : 'text-slate-500 hover:text-white'}`}
+                  >Season</button>
+                </div>
               </div>
+
               <div className="bg-slate-900 border border-slate-800 rounded-3xl overflow-hidden shadow-2xl">
                 <div className="overflow-x-auto">
                   <table className="w-full text-left border-collapse text-xs">
@@ -787,8 +837,7 @@ const Stats: React.FC<StatsProps> = ({ league, onViewRoster, onManageTeam, onVie
                     </thead>
                     <tbody className="divide-y divide-slate-800/40">
                       {hiSorted.map((p, idx) => {
-                        const h = p.careerHighs;
-                        const hl = (v: number) => v >= 40 ? 'text-amber-300 font-black' : v >= 30 ? 'text-amber-400 font-bold' : v >= 20 ? 'text-emerald-400' : v >= 10 ? 'text-slate-200' : 'text-slate-500';
+                        const h = isSeason ? (getSeasonHighs(p) ?? p.careerHighs) : p.careerHighs;
                         return (
                           <tr key={p.id} className="hover:bg-slate-800/30 transition-colors cursor-pointer" onClick={() => onViewPlayer?.(p)}>
                             <td className="px-3 py-2.5 text-slate-600 text-center text-[10px] font-bold sticky left-0 bg-slate-900/95">{idx + 1}</td>
@@ -797,15 +846,22 @@ const Stats: React.FC<StatsProps> = ({ league, onViewRoster, onManageTeam, onVie
                             </td>
                             <td className="px-2 py-2.5 text-center text-slate-400 whitespace-nowrap">{p.teamName}</td>
                             <td className="px-2 py-2.5 text-center text-slate-500">{p.position}</td>
-                            <td className={`px-3 py-2.5 text-center font-black tabular-nums ${hl(h.points)}`}>{h.points || '—'}</td>
-                            <td className={`px-3 py-2.5 text-center font-black tabular-nums ${hl(h.rebounds)}`}>{h.rebounds || '—'}</td>
-                            <td className={`px-3 py-2.5 text-center font-black tabular-nums ${hl(h.assists)}`}>{h.assists || '—'}</td>
-                            <td className={`px-3 py-2.5 text-center font-black tabular-nums ${hl(h.steals)}`}>{h.steals || '—'}</td>
-                            <td className={`px-3 py-2.5 text-center font-black tabular-nums ${hl(h.blocks)}`}>{h.blocks || '—'}</td>
-                            <td className={`px-3 py-2.5 text-center font-black tabular-nums ${hl(h.threepm)}`}>{h.threepm || '—'}</td>
+                            <td className={`px-3 py-2.5 text-center tabular-nums ${hl(h.points)}`}>{h.points || '—'}</td>
+                            <td className={`px-3 py-2.5 text-center tabular-nums ${hl(h.rebounds)}`}>{h.rebounds || '—'}</td>
+                            <td className={`px-3 py-2.5 text-center tabular-nums ${hl(h.assists)}`}>{h.assists || '—'}</td>
+                            <td className={`px-3 py-2.5 text-center tabular-nums ${hl(h.steals)}`}>{h.steals || '—'}</td>
+                            <td className={`px-3 py-2.5 text-center tabular-nums ${hl(h.blocks)}`}>{h.blocks || '—'}</td>
+                            <td className={`px-3 py-2.5 text-center tabular-nums ${hl(h.threepm)}`}>{h.threepm || '—'}</td>
                           </tr>
                         );
                       })}
+                      {allPwT.length === 0 && (
+                        <tr>
+                          <td colSpan={10} className="px-4 py-8 text-center text-slate-600 text-sm">
+                            {isSeason ? 'No season game log data yet — play some games first.' : 'No career highs recorded yet.'}
+                          </td>
+                        </tr>
+                      )}
                     </tbody>
                   </table>
                 </div>
