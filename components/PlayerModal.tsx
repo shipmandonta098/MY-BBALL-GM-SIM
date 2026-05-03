@@ -171,6 +171,35 @@ const PlayerModal: React.FC<PlayerModalProps> = ({
     [player.gameLog],
   );
 
+  // ── Season highs computed from this season's game log ─────────────────────
+  const seasonHighs = useMemo(() => {
+    const games = (player.gameLog ?? []).filter(g => !g.dnp);
+    if (!games.length) return null;
+    const maxOf = (fn: (g: typeof games[0]) => number) =>
+      games.reduce((m, g) => Math.max(m, fn(g)), 0);
+    const bestFgPctGame = games
+      .filter(g => g.fga >= 5)
+      .reduce<typeof games[0] | null>((best, g) =>
+        !best || g.fgm / g.fga > best.fgm / best.fga ? g : best, null);
+    const best3PctGame = games
+      .filter(g => g.threepa >= 3)
+      .reduce<typeof games[0] | null>((best, g) =>
+        !best || g.threepm / g.threepa > best.threepm / best.threepa ? g : best, null);
+    return {
+      pts:     maxOf(g => g.pts),
+      reb:     maxOf(g => g.reb),
+      ast:     maxOf(g => g.ast),
+      stl:     maxOf(g => g.stl),
+      blk:     maxOf(g => g.blk),
+      threepm: maxOf(g => g.threepm),
+      ftm:     maxOf(g => g.ftm),
+      fgm:     maxOf(g => g.fgm),
+      pm:      games.reduce((m, g) => Math.max(m, g.plusMinus), -999),
+      bestFgPctGame,
+      best3PctGame,
+    };
+  }, [player.gameLog]);
+
   // ── Unique opponents seen in game log ─────────────────────────────────────
   const uniqueOpponents = useMemo(() => {
     const seen = new Map<string, string>();
@@ -1824,6 +1853,68 @@ const PlayerModal: React.FC<PlayerModalProps> = ({
                   </div>
                 )}
 
+                {/* ── Season Highs ────────────────────────────────────────────── */}
+                {statsTab === 'season' && seasonHighs && seasonHighs.pts > 0 && (() => {
+                  const yr = currentSeason;
+                  const hiCol = (v: number) =>
+                    v >= 40 ? 'text-amber-300 font-black' :
+                    v >= 30 ? 'text-amber-400 font-black' :
+                    v >= 20 ? 'text-orange-400 font-bold' :
+                    v >= 10 ? 'text-slate-200 font-bold' : 'text-slate-400';
+                  const card = (label: string, v: number, gold?: boolean) => (
+                    <div key={label} className={`rounded-xl p-2.5 text-center border ${gold ? 'bg-amber-500/10 border-amber-500/25' : 'bg-slate-900/60 border-slate-800/60'}`}>
+                      <div className="text-[9px] font-black uppercase tracking-widest text-slate-600">{label}</div>
+                      <div className={`font-display font-bold text-xl tabular-nums mt-0.5 ${gold ? 'text-amber-400' : hiCol(v)}`}>{v || '—'}</div>
+                    </div>
+                  );
+                  return (
+                    <div className="space-y-2">
+                      <p className="text-[10px] font-black text-orange-500/70 uppercase tracking-widest">
+                        {yr ? `${yr}–${String(yr + 1).slice(2)} ` : ''}Season Highs
+                      </p>
+                      <div className="bg-slate-950/60 border border-orange-500/10 rounded-2xl p-4 space-y-2">
+                        <div className="grid grid-cols-4 gap-2">
+                          {card('PTS',  seasonHighs.pts,     seasonHighs.pts  >= 30)}
+                          {card('REB',  seasonHighs.reb,     seasonHighs.reb  >= 15)}
+                          {card('AST',  seasonHighs.ast,     seasonHighs.ast  >= 10)}
+                          {card('3PM',  seasonHighs.threepm, seasonHighs.threepm >= 7)}
+                        </div>
+                        <div className="grid grid-cols-4 gap-2">
+                          {card('STL', seasonHighs.stl)}
+                          {card('BLK', seasonHighs.blk)}
+                          {card('FTM', seasonHighs.ftm)}
+                          <div className="rounded-xl p-2.5 text-center border bg-slate-900/60 border-slate-800/60">
+                            <div className="text-[9px] font-black uppercase tracking-widest text-slate-600">+/-</div>
+                            <div className={`font-display font-bold text-xl tabular-nums mt-0.5 ${seasonHighs.pm > 15 ? 'text-emerald-400 font-black' : seasonHighs.pm > 0 ? 'text-slate-200' : 'text-slate-500'}`}>
+                              {seasonHighs.pm > -999 ? (seasonHighs.pm > 0 ? `+${seasonHighs.pm}` : String(seasonHighs.pm)) : '—'}
+                            </div>
+                          </div>
+                        </div>
+                        {(seasonHighs.bestFgPctGame || seasonHighs.best3PctGame) && (
+                          <div className="grid grid-cols-2 gap-2 pt-1 border-t border-slate-800/40">
+                            {seasonHighs.bestFgPctGame && (
+                              <div className="flex items-center justify-between px-3 py-2 bg-slate-900/40 border border-slate-800/40 rounded-xl">
+                                <span className="text-[9px] font-black uppercase tracking-widest text-slate-600">Best FG%</span>
+                                <span className="text-[11px] font-bold text-amber-400">
+                                  {seasonHighs.bestFgPctGame.fgm}/{seasonHighs.bestFgPctGame.fga} ({((seasonHighs.bestFgPctGame.fgm / seasonHighs.bestFgPctGame.fga) * 100).toFixed(0)}%)
+                                </span>
+                              </div>
+                            )}
+                            {seasonHighs.best3PctGame && (
+                              <div className="flex items-center justify-between px-3 py-2 bg-slate-900/40 border border-slate-800/40 rounded-xl">
+                                <span className="text-[9px] font-black uppercase tracking-widest text-slate-600">Best 3P%</span>
+                                <span className="text-[11px] font-bold text-amber-400">
+                                  {seasonHighs.best3PctGame.threepm}/{seasonHighs.best3PctGame.threepa} ({((seasonHighs.best3PctGame.threepm / seasonHighs.best3PctGame.threepa) * 100).toFixed(0)}%)
+                                </span>
+                              </div>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })()}
+
                 {/* ── Playoff Stats ───────────────────────────────────────────── */}
                 {statsTab === 'playoffs' && hasPlayoffs && (() => {
                   const po   = player.playoffStats!;
@@ -2194,27 +2285,51 @@ const PlayerModal: React.FC<PlayerModalProps> = ({
                   return null;
                 })()}
 
-                {/* ── Career highs ────────────────────────────────────────────── */}
-                {hasHighs && (
-                  <div className="space-y-2">
-                    <p className="text-[10px] font-black text-slate-600 uppercase tracking-widest">Career Game Highs</p>
-                    <div className="grid grid-cols-3 sm:grid-cols-6 gap-2">
-                      {[
-                        { label: 'PTS', value: player.careerHighs.points },
-                        { label: 'REB', value: player.careerHighs.rebounds },
-                        { label: 'AST', value: player.careerHighs.assists },
-                        { label: 'STL', value: player.careerHighs.steals },
-                        { label: 'BLK', value: player.careerHighs.blocks },
-                        { label: '3PM', value: player.careerHighs.threepm },
-                      ].map(h => (
-                        <div key={h.label} className="bg-slate-900 border border-slate-800 rounded-2xl p-3 text-center">
-                          <div className="text-[10px] font-black uppercase tracking-widest text-slate-600">{h.label}</div>
-                          <div className="font-display font-bold text-xl text-amber-400 mt-0.5 tabular-nums">{h.value || '—'}</div>
-                        </div>
-                      ))}
+                {/* ── Career Game Highs ───────────────────────────────────────── */}
+                {hasHighs && (() => {
+                  const ch = player.careerHighs;
+                  const chCol = (v: number) =>
+                    v >= 50 ? 'text-amber-300 font-black' :
+                    v >= 40 ? 'text-amber-400 font-black' :
+                    v >= 30 ? 'text-orange-400 font-bold' :
+                    v >= 20 ? 'text-slate-200 font-bold' : 'text-amber-500/80';
+                  const chBg = (v: number) =>
+                    v >= 40 ? 'bg-amber-500/15 border-amber-500/30' :
+                    v >= 25 ? 'bg-orange-500/10 border-orange-500/20' : 'bg-slate-900 border-slate-800';
+                  // Season high comparison: show delta if season high > career high (shouldn't happen, but shows freshness)
+                  const sh = seasonHighs;
+                  const delta = (career: number, season: number | undefined) =>
+                    season !== undefined && season > 0 && season === career
+                      ? <span className="ml-1 text-[8px] text-emerald-400 font-black">★</span>
+                      : null;
+                  return (
+                    <div className="space-y-2">
+                      <div className="flex items-center gap-2">
+                        <p className="text-[10px] font-black text-slate-600 uppercase tracking-widest">Career Game Highs</p>
+                        {sh && sh.pts > 0 && (
+                          <span className="text-[8px] font-black text-emerald-400/60 uppercase tracking-widest">★ = this season's high</span>
+                        )}
+                      </div>
+                      <div className="grid grid-cols-3 sm:grid-cols-6 gap-2">
+                        {([
+                          { label: 'PTS', career: ch.points,   season: sh?.pts },
+                          { label: 'REB', career: ch.rebounds, season: sh?.reb },
+                          { label: 'AST', career: ch.assists,  season: sh?.ast },
+                          { label: 'STL', career: ch.steals,   season: sh?.stl },
+                          { label: 'BLK', career: ch.blocks,   season: sh?.blk },
+                          { label: '3PM', career: ch.threepm,  season: sh?.threepm },
+                        ]).map(h => (
+                          <div key={h.label} className={`border rounded-2xl p-3 text-center ${chBg(h.career)}`}>
+                            <div className="text-[9px] font-black uppercase tracking-widest text-slate-600">{h.label}</div>
+                            <div className={`font-display font-bold text-xl tabular-nums mt-0.5 ${chCol(h.career)}`}>
+                              {h.career || '—'}{delta(h.career, h.season)}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
                     </div>
-                  </div>
-                )}
+                  );
+                })()}
 
                 {/* ── Career awards & honours ─────────────────────────────────── */}
                 {(careerAwards.length > 0 || (player.allStarSelections?.length ?? 0) > 0 || (player.championYears?.length ?? 0) > 0) && (
