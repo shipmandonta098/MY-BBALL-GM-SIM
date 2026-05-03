@@ -1358,6 +1358,24 @@ const Settings: React.FC<SettingsProps> = ({ league, updateLeague, onRegenerateS
               </div>
             </div>
 
+            {/* UI Preferences */}
+            <div className="bg-slate-900 border border-slate-800 rounded-[2rem] p-8 space-y-6">
+              <div>
+                <h3 className="text-2xl font-display font-bold uppercase text-white tracking-tight">
+                  UI <span className="text-amber-500">Preferences</span>
+                </h3>
+                <p className="text-xs text-slate-500 mt-1 uppercase tracking-widest">Visual helpers and display options</p>
+              </div>
+              <div className="flex items-center justify-between p-5 bg-slate-950 border border-slate-800 rounded-2xl">
+                <div>
+                  <p className="text-sm font-black uppercase tracking-widest text-white">Highlight My Team &amp; Players</p>
+                  <p className="text-[11px] text-slate-500 mt-0.5 uppercase tracking-widest">Accent your team's color on all lists, tables, standings, stats, and draft boards</p>
+                </div>
+                <ToggleField label="" value={s.highlightMyTeam !== false}
+                  onChange={v => updateSettings({ highlightMyTeam: v }, 'Highlight My Team & Players')} />
+              </div>
+            </div>
+
           </div>
         )}
 

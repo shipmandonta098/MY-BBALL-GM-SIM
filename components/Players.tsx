@@ -81,7 +81,9 @@ const Players: React.FC<PlayersProps> = ({ league, onViewPlayer, watchList, onTo
   const [faOnly, setFaOnly]           = useState(false);
   const [myTeamOnly, setMyTeamOnly]   = useState(false);
 
-  const userTeamId = league.userTeamId;
+  const userTeamId    = league.userTeamId;
+  const highlightOn   = league.settings.highlightMyTeam !== false;
+  const userTeamColor = league.teams.find(t => t.id === userTeamId)?.primaryColor ?? '#f59e0b';
 
   // ─── Build flat player list including FAs ──────────────────
   const allRows = useMemo(() => {
@@ -159,10 +161,15 @@ const Players: React.FC<PlayersProps> = ({ league, onViewPlayer, watchList, onTo
   const isHoF        = (p: Player) => p.careerStats.length >= 10 && p.rating >= 88;
 
   const rowBg = (p: Player, team: typeof league.teams[0] | null) => {
-    if (isHoF(p))         return 'bg-amber-500/5 hover:bg-amber-500/10';
-    if (isUserPlayer(team)) return 'bg-sky-500/5 hover:bg-sky-500/10';
+    if (isHoF(p)) return 'bg-amber-500/5 hover:bg-amber-500/10';
+    // user-player highlight handled via inline style when enabled
+    if (isUserPlayer(team) && !highlightOn) return 'bg-sky-500/5 hover:bg-sky-500/10';
     return 'hover:bg-slate-800/40';
   };
+  const rowStyle = (team: typeof league.teams[0] | null): React.CSSProperties | undefined =>
+    highlightOn && isUserPlayer(team)
+      ? { borderLeft: `3px solid ${userTeamColor}`, background: `${userTeamColor}18` }
+      : undefined;
 
   return (
     <div className="space-y-6 animate-in fade-in duration-500 pb-40">
@@ -508,6 +515,7 @@ const Players: React.FC<PlayersProps> = ({ league, onViewPlayer, watchList, onTo
                   <tr
                     key={p.id}
                     className={`cursor-pointer transition-all ${rowBg(p, team)}`}
+                    style={rowStyle(team)}
                     onClick={() => onViewPlayer(p)}
                   >
                     {/* Rank */}

@@ -14,6 +14,7 @@ interface StandingsProps {
   rivalryHistory?: RivalryStats[];
   previousSeasonStandings?: PreviousSeasonStanding[];
   previousSeasonYear?: number;
+  highlightMyTeam?: boolean;
 }
 
 type ClinchStatus = 'z' | 'x' | 'e' | null;
@@ -46,7 +47,9 @@ const Standings: React.FC<StandingsProps> = ({
   teams, userTeamId, seasonLength, playoffFormat, season, isPlayoffs = false,
   onViewRoster, onManageTeam, rivalryHistory = [],
   previousSeasonStandings, previousSeasonYear,
+  highlightMyTeam = true,
 }) => {
+  const userColor = teams.find(t => t.id === userTeamId)?.primaryColor ?? '#f59e0b';
   const [showTiebreakers, setShowTiebreakers] = useState(false);
   const [showPrevSeason, setShowPrevSeason] = useState(false);
 
@@ -154,9 +157,11 @@ const Standings: React.FC<StandingsProps> = ({
               return (
               <tr
                 key={t.id}
-                className={`group transition-all hover:bg-slate-800/30 ${
-                  t.id === userTeamId ? 'bg-amber-500/[0.05]' : ''
-                } ${clinch === 'e' ? 'opacity-60' : ''}`}
+                className={`group transition-all hover:bg-slate-800/30 ${clinch === 'e' ? 'opacity-60' : ''}`}
+                style={t.id === userTeamId && highlightMyTeam ? {
+                  borderLeft: `3px solid ${userColor}`,
+                  background: `${userColor}18`,
+                } : t.id === userTeamId ? { background: 'rgba(245,158,11,0.05)' } : undefined}
               >
                 {/* Rank */}
                 <td className="px-6 py-5">
@@ -174,6 +179,9 @@ const Standings: React.FC<StandingsProps> = ({
                         <span className={`font-display font-bold uppercase ${t.id === userTeamId ? 'text-amber-500' : 'text-slate-100 group-hover/team:text-amber-500'} transition-colors`}>
                           {t.city} {t.name}
                         </span>
+                        {t.id === userTeamId && highlightMyTeam && (
+                          <span className="ml-2 text-[8px] font-black uppercase px-1.5 py-0.5 rounded leading-none" style={{ background: userColor + '30', color: userColor }}>YOU</span>
+                        )}
                         <ClinchBadge status={clinch} />
                       </div>
                       <div className="text-[10px] text-slate-500 font-bold uppercase">{t.division}</div>
