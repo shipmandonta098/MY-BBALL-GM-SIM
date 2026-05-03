@@ -678,6 +678,7 @@ export interface LeagueSettings {
   allowManualGenderEdits: boolean;
   b2bFrequency: 'None' | 'Low' | 'Realistic' | 'High' | 'Brutal';
   showAdvancedStats: boolean;
+  highlightMyTeam?: boolean;    // defaults true — accent-colors user's team/players in all lists
   hardCap?: number;
   numTeams?: number;
 

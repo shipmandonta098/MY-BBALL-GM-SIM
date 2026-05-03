@@ -20,6 +20,13 @@ type StatsSource = 'regular' | 'playoffs';
 const EMPTY_PS = { points: 0, rebounds: 0, offReb: 0, defReb: 0, assists: 0, steals: 0, blocks: 0, gamesPlayed: 0, gamesStarted: 0, minutes: 0, fgm: 0, fga: 0, threepm: 0, threepa: 0, ftm: 0, fta: 0, tov: 0, pf: 0, techs: 0, flagrants: 0, ejections: 0, plusMinus: 0 };
 
 const Stats: React.FC<StatsProps> = ({ league, onViewRoster, onManageTeam, onViewPlayer }) => {
+  const highlightMyTeam = league.settings.highlightMyTeam !== false;
+  const userTeamColor   = league.teams.find(t => t.id === league.userTeamId)?.primaryColor ?? '#f59e0b';
+  const myRowStyle = (teamId: string): React.CSSProperties | undefined =>
+    highlightMyTeam && teamId === league.userTeamId
+      ? { borderLeft: `3px solid ${userTeamColor}`, background: `${userTeamColor}18` }
+      : undefined;
+
   const [activeTab, setActiveTab] = useState<StatTab>('leaderboards');
   const [compareList, setCompareList] = useState<string[]>([]);
   const [minGames, setMinGames] = useState(1);
@@ -295,7 +302,7 @@ const Stats: React.FC<StatsProps> = ({ league, onViewRoster, onManageTeam, onVie
               {sorted.map((p, idx) => {
                 const val = (p.adv as any)[statKey] ?? (p.stats as any)[statKey] / Math.max(1, p.stats.gamesPlayed) ?? 0;
                 return (
-                  <tr key={p.id} className="hover:bg-slate-800/30 transition-all">
+                  <tr key={p.id} className="hover:bg-slate-800/30 transition-all" style={myRowStyle(p.teamId)}>
                     <td className="px-6 py-4 font-display font-bold text-slate-600">#{idx + 1}</td>
                     <td className="px-6 py-4 flex items-center gap-3">
                        <span className="flex items-center gap-1">
@@ -839,7 +846,7 @@ const Stats: React.FC<StatsProps> = ({ league, onViewRoster, onManageTeam, onVie
                       {hiSorted.map((p, idx) => {
                         const h = isSeason ? (getSeasonHighs(p) ?? p.careerHighs) : p.careerHighs;
                         return (
-                          <tr key={p.id} className="hover:bg-slate-800/30 transition-colors cursor-pointer" onClick={() => onViewPlayer?.(p)}>
+                          <tr key={p.id} className="hover:bg-slate-800/30 transition-colors cursor-pointer" style={myRowStyle(p.teamId ?? '')} onClick={() => onViewPlayer?.(p)}>
                             <td className="px-3 py-2.5 text-slate-600 text-center text-[10px] font-bold sticky left-0 bg-slate-900/95">{idx + 1}</td>
                             <td className="px-4 py-2.5 sticky left-8 bg-slate-900/95">
                               <span className="font-bold text-white whitespace-nowrap hover:text-amber-400 transition-colors">{p.name}</span>
@@ -1388,7 +1395,7 @@ const Stats: React.FC<StatsProps> = ({ league, onViewRoster, onManageTeam, onVie
                 </thead>
                 <tbody className="divide-y divide-slate-800/40">
                   {sortedTeams.map((t, idx) => (
-                    <tr key={t.id} className="hover:bg-slate-800/30 transition-all cursor-pointer group" onClick={() => onManageTeam?.(t.id)}>
+                    <tr key={t.id} className="hover:bg-slate-800/30 transition-all cursor-pointer group" style={myRowStyle(t.id)} onClick={() => onManageTeam?.(t.id)}>
                       <LeadTd t={t} idx={idx} />
                       <td className="px-2 py-4 text-center font-mono text-xs">{n1(t.avgAge)}</td>
                       <td className="px-2 py-4 text-center font-mono text-xs">{n1(t.fgm)}</td>
@@ -1471,7 +1478,7 @@ const Stats: React.FC<StatsProps> = ({ league, onViewRoster, onManageTeam, onVie
                 </thead>
                 <tbody className="divide-y divide-slate-800/40">
                   {sortedTeams.map((t, idx) => (
-                    <tr key={t.id} className="hover:bg-slate-800/30 transition-all cursor-pointer group" onClick={() => onManageTeam?.(t.id)}>
+                    <tr key={t.id} className="hover:bg-slate-800/30 transition-all cursor-pointer group" style={myRowStyle(t.id)} onClick={() => onManageTeam?.(t.id)}>
                       <LeadTd t={t} idx={idx} />
                       <td className={`px-2 py-4 text-center font-mono text-xs font-bold ${t.pts > avg.pts ? 'text-emerald-400' : 'text-rose-400'}`}>{n1(t.pts)}</td>
                       <td className="px-2 py-4 text-center font-mono text-xs">{n1(t.pace)}</td>
@@ -1539,7 +1546,7 @@ const Stats: React.FC<StatsProps> = ({ league, onViewRoster, onManageTeam, onVie
                 </thead>
                 <tbody className="divide-y divide-slate-800/40">
                   {sortedTeams.map((t, idx) => (
-                    <tr key={t.id} className="hover:bg-slate-800/30 transition-all cursor-pointer group" onClick={() => onManageTeam?.(t.id)}>
+                    <tr key={t.id} className="hover:bg-slate-800/30 transition-all cursor-pointer group" style={myRowStyle(t.id)} onClick={() => onManageTeam?.(t.id)}>
                       <LeadTd t={t} idx={idx} />
                       <td className={`px-2 py-4 text-center font-mono text-xs font-bold ${t.oppPts < avg.oppPts ? 'text-emerald-400' : 'text-rose-400'}`}>{n1(t.oppPts)}</td>
                       <td className="px-2 py-4 text-center font-mono text-xs">{n1(t.oppFgm)}</td>
@@ -1609,7 +1616,7 @@ const Stats: React.FC<StatsProps> = ({ league, onViewRoster, onManageTeam, onVie
                 </thead>
                 <tbody className="divide-y divide-slate-800/40">
                   {sortedClutchTeams.map((t, idx) => (
-                    <tr key={t.teamId} className="hover:bg-slate-800/30 transition-all cursor-pointer group" onClick={() => onManageTeam?.(t.teamId)}>
+                    <tr key={t.teamId} className="hover:bg-slate-800/30 transition-all cursor-pointer group" style={myRowStyle(t.teamId)} onClick={() => onManageTeam?.(t.teamId)}>
                       <td className="px-4 py-4 font-mono text-xs text-slate-500">{idx + 1}</td>
                       <td className="px-4 py-4 sticky left-0 bg-slate-900 group-hover:bg-slate-800/60 transition-colors">
                         <div className="flex items-center gap-3">
@@ -1675,7 +1682,7 @@ const Stats: React.FC<StatsProps> = ({ league, onViewRoster, onManageTeam, onVie
                   </thead>
                   <tbody className="divide-y divide-slate-800/40">
                     {sortedQuarterTeams.map((t, idx) => (
-                      <tr key={t.teamId} className="hover:bg-slate-800/30 transition-all cursor-pointer group" onClick={() => onManageTeam?.(t.teamId)}>
+                      <tr key={t.teamId} className="hover:bg-slate-800/30 transition-all cursor-pointer group" style={myRowStyle(t.teamId)} onClick={() => onManageTeam?.(t.teamId)}>
                         <td className="px-4 py-4 font-mono text-xs text-slate-500">{idx + 1}</td>
                         <td className="px-4 py-4 sticky left-0 bg-slate-900 group-hover:bg-slate-800/60 transition-colors">
                           <div className="flex items-center gap-3">
