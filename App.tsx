@@ -2154,21 +2154,38 @@ const App: React.FC = () => {
       } catch (_e) { /* non-fatal */ }
     }
 
-    // ── Generate incoming AI-to-user trade proposals (every 3 sim-days) ──
-    // Decoupled from the weekly AI-to-AI block so it fires more frequently.
-    if (!newState.isOffseason && newState.currentDay % 3 === 0 && !newState.tradeDeadlinePassed && !newState.playoffBracket) {
-      try {
-        const newProposals = generateAITradeProposalsForUser(newState, newState.settings.difficulty ?? 'Medium');
-        if (newProposals.length > 0) {
+    // ── Generate incoming AI-to-user trade proposals (every 10–15 games) ──
+    // Triggered by a pre-computed game-count threshold rather than a day modulus
+    // so frequency is consistent regardless of how many games are simmed per day.
+    if (!newState.isOffseason && !newState.tradeDeadlinePassed && !newState.playoffBracket) {
+      const regGamesPlayed = newState.schedule.filter(g => g.played).length;
+      const triggerAt = newState.nextProposalGameCount ?? 12; // first batch at game 12 if unset
+      if (regGamesPlayed >= triggerAt) {
+        try {
+          const newProposals = generateAITradeProposalsForUser(newState, newState.settings.difficulty ?? 'Medium');
+          // Advance the threshold 10–15 games from now (random interval)
+          const nextThreshold = regGamesPlayed + 10 + Math.floor(Math.random() * 6);
+          if (newProposals.length > 0) {
+            newState = {
+              ...newState,
+              incomingTradeProposals: [
+                ...newProposals,
+                ...(newState.incomingTradeProposals ?? []),
+              ].slice(0, 20),
+              nextProposalGameCount: nextThreshold,
+              newProposalCount: (newState.newProposalCount ?? 0) + newProposals.length,
+            };
+          } else {
+            // No proposals generated this cycle — still advance threshold
+            newState = { ...newState, nextProposalGameCount: nextThreshold };
+          }
+        } catch (_e) { /* non-fatal */
           newState = {
             ...newState,
-            incomingTradeProposals: [
-              ...newProposals,
-              ...(newState.incomingTradeProposals ?? []),
-            ].slice(0, 20),
+            nextProposalGameCount: (newState.schedule.filter(g => g.played).length) + 12,
           };
         }
-      } catch (_e) { /* non-fatal */ }
+      }
     }
 
     // ── AI in-season / preseason signings ──────────────────────────────────
@@ -3723,6 +3740,8 @@ const App: React.FC = () => {
           freeAgents: [...state.freeAgents, ...skipCuts.filter(p => !existingFAIds.has(p.id))],
           currentDay: 1,
           seasonPhase: 'Regular Season' as SeasonPhase,
+          nextProposalGameCount: 12,
+          newProposalCount: 0,
           newsFeed: [{
             id: `preseason-complete-skip-${state.season}`,
             category: 'milestone' as const,
@@ -3817,6 +3836,8 @@ const App: React.FC = () => {
         tradeDeadlinePassed: false,
         allStarWeekend: undefined,
         devReport: undefined,
+        nextProposalGameCount: 12,
+        newProposalCount: 0,
       };
     });
     // Navigate to schedule so the user lands on preseason content (not free agency)
@@ -3824,6 +3845,21 @@ const App: React.FC = () => {
     // Hold overlay briefly so IndexedDB auto-save can start before UI unlocks
     await new Promise<void>(resolve => setTimeout(resolve, 150));
     setIsSeasonTransitioning(false);
+  };
+
+  const handleCheckForProposals = () => {
+    if (!league) return;
+    const today = league.currentDay ?? 1;
+    if (today < (league.proposalManualCooldownDay ?? 0)) return;
+    if (league.isOffseason || league.tradeDeadlinePassed || !!league.playoffBracket) return;
+    try {
+      const proposals = generateAITradeProposalsForUser(league, league.settings.difficulty ?? 'Medium');
+      updateLeagueState({
+        incomingTradeProposals: [...proposals, ...(league.incomingTradeProposals ?? [])].slice(0, 20),
+        proposalManualCooldownDay: today + 3,
+        newProposalCount: (league.newProposalCount ?? 0) + proposals.length,
+      });
+    } catch (_e) { /* non-fatal */ }
   };
 
   const handleScoutPlayer = async (player: Player | Prospect) => { setLoading(true); const report = await generateScoutingReport(player); setScoutingReport({ playerId: player.id, report }); setLoading(false); };
@@ -4473,6 +4509,10 @@ const App: React.FC = () => {
               }}
               onAcceptRequest={handleAcceptTradeRequest}
               onDeclineRequest={handleDeclineTradeRequest}
+              onCheckForProposals={handleCheckForProposals}
+              onClearNewCount={() => updateLeagueState({ newProposalCount: 0 })}
+              proposalCooldownDay={league.proposalManualCooldownDay ?? 0}
+              newProposalCount={league.newProposalCount ?? 0}
             />
           )}
           {activeTab === 'settings' && <Settings league={league} updateLeague={updateLeagueState} onRegenerateSchedule={async () => {

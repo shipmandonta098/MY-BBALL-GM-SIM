@@ -900,6 +900,12 @@ export interface LeagueState {
   coachPool: Coach[];
   savedTrades: TradeProposal[];
   incomingTradeProposals?: TradeProposal[];
+  /** Regular-season games-played count at which the next proposal batch fires (10–15 game interval). */
+  nextProposalGameCount?: number;
+  /** League day when the GM last used the manual "Check for New Proposals" button (3-day cooldown). */
+  proposalManualCooldownDay?: number;
+  /** Count of new unseen trade proposals since the GM last viewed the Trade Proposals tab. */
+  newProposalCount?: number;
   newsFeed: NewsItem[];
   transactions: Transaction[];
   powerRankingHistory?: PowerRankingSnapshot[];
