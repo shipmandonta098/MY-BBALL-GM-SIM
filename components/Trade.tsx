@@ -31,6 +31,11 @@ const Trade: React.FC<TradeProps> = ({ league, updateLeague, recordTransaction, 
   const [finderPos, setFinderPos] = useState<Position | 'ALL'>('ALL');
   const [finderMaxSalary, setFinderMaxSalary] = useState(50000000);
   const [finderResults, setFinderResults] = useState<{ player: Player, team: Team }[]>([]);
+
+  // Dump Mode State
+  const [dumpMode, setDumpMode] = useState(false);
+  const [dumpFilter, setDumpFilter] = useState<'all' | 'cap' | 'rebuild' | 'depth'>('all');
+  const [dumpMinCap, setDumpMinCap] = useState(0);
   // Approval feedback shown briefly after executing a trade
   const [tradeApproval, setTradeApproval] = useState<{ ownerDelta: number; fanDelta: number } | null>(null);
   // Pending trade execution waiting for owner confirmation
@@ -142,6 +147,37 @@ const Trade: React.FC<TradeProps> = ({ league, updateLeague, recordTransaction, 
   const userCapPass = userTeamSalary - userOutgoingSalary + partnerOutgoingSalary <= capLimit || partnerOutgoingSalary <= userOutgoingSalary * 1.25 + 100000;
   const partnerCapPass = partnerTeamSalary - partnerOutgoingSalary + userOutgoingSalary <= capLimit || userOutgoingSalary <= partnerOutgoingSalary * 1.25 + 100000;
 
+  // Dump targets: AI teams ranked by willingness to absorb salary / extra players
+  const dumpTargets = useMemo(() => {
+    return league.teams
+      .filter(t => t.id !== userTeam.id)
+      .map(t => {
+        const sal = t.roster.reduce((s, p) => s + p.salary, 0);
+        const capSpace = Math.max(0, capLimit - sal);
+        const rosterSpots = Math.max(0, 15 - t.roster.length);
+        const isRebuilding = (t.finances as any)?.ownerGoal === 'Rebuild' || t.losses > t.wins * 1.2;
+        const isContender  = (t.finances as any)?.ownerGoal === 'Win Now'  || t.wins  > t.losses * 1.2;
+        let score = 0;
+        if (capSpace > 30_000_000) score += 40;
+        else if (capSpace > 15_000_000) score += 25;
+        else if (capSpace > 5_000_000) score += 10;
+        if (isRebuilding) score += 25;
+        if (rosterSpots >= 3) score += 20;
+        else if (rosterSpots >= 2) score += 10;
+        if (t.losses > t.wins) score += 10;
+        const label = isRebuilding ? 'Rebuilding' : isContender ? 'Contender' : 'Developing';
+        return { team: t, capSpace, rosterSpots, isRebuilding, isContender, score, label };
+      })
+      .filter(d => {
+        if (d.capSpace < dumpMinCap) return false;
+        if (dumpFilter === 'cap')     return d.capSpace >= 15_000_000;
+        if (dumpFilter === 'rebuild') return d.isRebuilding;
+        if (dumpFilter === 'depth')   return d.isContender && d.rosterSpots >= 1;
+        return true;
+      })
+      .sort((a, b) => b.score - a.score);
+  }, [league.teams, userTeam.id, dumpFilter, dumpMinCap, capLimit]);
+
   const canPropose = (userPieces.length > 0 || partnerPieces.length > 0) && !isDeadlinePassed;
 
   const handlePropose = () => {
@@ -155,6 +191,24 @@ const Trade: React.FC<TradeProps> = ({ league, updateLeague, recordTransaction, 
     }
     setCounterPick(null);
     const valueRatio = userPiecesValue / (partnerPiecesValue || 1);
+
+    // Dump-friendly override: cap-rich / rebuilding teams absorb bad contracts more easily
+    const partnerCapSpace = Math.max(0, capLimit - partnerTeamSalary);
+    const partnerIsRebuilding = (partnerTeam.finances as any)?.ownerGoal === 'Rebuild' || partnerTeam.losses > partnerTeam.wins;
+    const isDumpingScenario = userOutgoingSalary > partnerOutgoingSalary + 4_000_000 && userPieces.length >= partnerPieces.length;
+    if (isDumpingScenario && partnerCapSpace >= 12_000_000 && partnerIsRebuilding && valueRatio >= 0.48) {
+      setAiResponse({ status: 'accept', message: `We're in rebuild mode with cap room to burn — we'll absorb the extra salary and take a chance on your players. Deal.` });
+      return;
+    }
+    if (isDumpingScenario && partnerCapSpace >= 22_000_000 && valueRatio >= 0.60) {
+      setAiResponse({ status: 'accept', message: `Cap flexibility isn't our concern right now. We can absorb this contract — deal.` });
+      return;
+    }
+    if (isDumpingScenario && partnerCapSpace >= 10_000_000 && valueRatio < 0.48) {
+      setAiResponse({ status: 'reject', message: `We have cap space but this still needs sweetening — add a draft pick or a younger piece and we'll talk.` });
+      return;
+    }
+
     if (valueRatio >= 1.15) {
       setAiResponse({ status: 'accept', message: `We accept! The ${partnerTeam.name} front office is thrilled with this value.` });
     } else if (valueRatio >= 0.80) {
@@ -612,50 +666,153 @@ const Trade: React.FC<TradeProps> = ({ league, updateLeague, recordTransaction, 
       )}
 
       {activeSubTab === 'block' && (
-         <div className="grid grid-cols-1 md:grid-cols-2 gap-8 animate-in fade-in duration-500">
-            <div className="bg-slate-900 border border-slate-800 rounded-3xl p-8 shadow-2xl">
-               <h3 className="text-xl font-display font-bold text-white uppercase mb-6">Trading Block Targets</h3>
-               <div className="space-y-4">
+        <div className="space-y-6 animate-in fade-in duration-500">
+          {/* Mode toggle */}
+          <div className="flex items-center gap-3 flex-wrap">
+            <button onClick={() => setDumpMode(false)} className={`px-5 py-2.5 rounded-full text-[10px] font-black uppercase tracking-widest transition-all ${!dumpMode ? 'bg-amber-500 text-slate-950' : 'bg-slate-800 text-slate-400 hover:text-white'}`}>Standard Block</button>
+            <button onClick={() => setDumpMode(true)} className={`flex items-center gap-2 px-5 py-2.5 rounded-full text-[10px] font-black uppercase tracking-widest transition-all ${dumpMode ? 'bg-rose-500 text-white shadow-[0_0_20px_rgba(239,68,68,0.35)]' : 'bg-slate-800 text-slate-400 hover:text-white'}`}>
+              <span>💸</span> Salary &amp; Player Dumping
+            </button>
+          </div>
+
+          {/* ── Standard Block ──────────────────────────────────────────────── */}
+          {!dumpMode && (
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+              <div className="bg-slate-900 border border-slate-800 rounded-3xl p-8 shadow-2xl">
+                <h3 className="text-xl font-display font-bold text-white uppercase mb-6">Trading Block Targets</h3>
+                <div className="space-y-4">
                   {league.teams.flatMap(t => t.roster.filter(p => p.onTradeBlock).map(p => ({ p, t }))).map(entry => (
                     <div key={entry.p.id} className="flex items-center justify-between p-4 bg-slate-950 border border-slate-800 rounded-2xl">
-                       <div className="flex items-center gap-4">
-                          <div className="w-10 h-10 bg-slate-800 rounded-lg flex items-center justify-center font-bold text-slate-500">{entry.p.position}</div>
-                          <div>
-                             <p className="font-bold text-slate-200">{entry.p.name}</p>
-                             <p className="text-[10px] text-rose-400 font-black uppercase tracking-widest">Wants to Move</p>
-                          </div>
-                       </div>
-                       <button 
-                         onClick={() => { setPartnerTeamId(entry.t.id); setPartnerPieces([{ type: 'player', data: entry.p }]); setActiveSubTab('machine'); }}
-                         className="px-4 py-2 bg-slate-800 hover:bg-amber-500 text-[10px] font-black uppercase rounded-lg"
-                       >
-                         Negotiate
-                       </button>
+                      <div className="flex items-center gap-4">
+                        <div className="w-10 h-10 bg-slate-800 rounded-lg flex items-center justify-center font-bold text-slate-500">{entry.p.position}</div>
+                        <div>
+                          <p className="font-bold text-slate-200">{entry.p.name}</p>
+                          <p className="text-[10px] text-rose-400 font-black uppercase tracking-widest">Wants to Move</p>
+                        </div>
+                      </div>
+                      <button onClick={() => { setPartnerTeamId(entry.t.id); setPartnerPieces([{ type: 'player', data: entry.p }]); setActiveSubTab('machine'); }} className="px-4 py-2 bg-slate-800 hover:bg-amber-500 text-[10px] font-black uppercase rounded-lg">
+                        Negotiate
+                      </button>
                     </div>
                   ))}
                   {league.teams.every(t => !t.roster.some(p => p.onTradeBlock)) && <p className="text-slate-600 italic">No players currently on the public trade block.</p>}
-               </div>
-            </div>
+                </div>
+              </div>
 
-            <div className="bg-slate-900 border border-slate-800 rounded-3xl p-8 shadow-2xl">
-               <h3 className="text-xl font-display font-bold text-white uppercase mb-6">Franchise Needs</h3>
-               <div className="space-y-4">
+              <div className="bg-slate-900 border border-slate-800 rounded-3xl p-8 shadow-2xl">
+                <h3 className="text-xl font-display font-bold text-white uppercase mb-6">Franchise Needs</h3>
+                <div className="space-y-4">
                   {league.teams.slice(0, 10).map(t => (
                     <div key={t.id} className="flex justify-between items-center border-b border-slate-800 pb-3">
-                       <div className="flex items-center gap-3">
-                          <TeamBadge team={t} size="xs" />
-                          <span className="text-sm font-bold text-slate-300">{t.name}</span>
-                       </div>
-                       <div className="flex gap-2">
-                          {(t.needs || ['PG', 'C']).map(n => (
-                            <span key={n} className="px-2 py-0.5 bg-amber-500/10 text-amber-500 text-[10px] font-black rounded border border-amber-500/20">{n}</span>
-                          ))}
-                       </div>
+                      <div className="flex items-center gap-3">
+                        <TeamBadge team={t} size="xs" />
+                        <span className="text-sm font-bold text-slate-300">{t.name}</span>
+                      </div>
+                      <div className="flex gap-2">
+                        {(t.needs || ['PG', 'C']).map(n => (
+                          <span key={n} className="px-2 py-0.5 bg-amber-500/10 text-amber-500 text-[10px] font-black rounded border border-amber-500/20">{n}</span>
+                        ))}
+                      </div>
                     </div>
                   ))}
-               </div>
+                </div>
+              </div>
             </div>
-         </div>
+          )}
+
+          {/* ── Salary / Player Dump Mode ───────────────────────────────────── */}
+          {dumpMode && (
+            <div className="space-y-6">
+              <div className="bg-rose-500/10 border border-rose-500/30 rounded-2xl px-6 py-4 flex items-center gap-4">
+                <span className="text-2xl">💸</span>
+                <div>
+                  <p className="text-rose-400 font-display font-black uppercase tracking-widest text-sm">Salary Dump Mode Active</p>
+                  <p className="text-rose-400/60 text-xs font-bold uppercase mt-0.5">Searching for teams willing to take salary / roster filler — AI partners accept lower-value offers when holding cap room or rebuilding.</p>
+                </div>
+              </div>
+
+              {/* Filters */}
+              <div className="bg-slate-900 border border-slate-800 rounded-3xl p-6 flex flex-wrap items-end gap-6">
+                <div className="space-y-2">
+                  <p className="text-[10px] font-black uppercase text-slate-500">Quick Filter</p>
+                  <div className="flex flex-wrap gap-2">
+                    {([
+                      { key: 'all',     label: 'All Teams' },
+                      { key: 'cap',     label: 'High Cap Space ($15M+)' },
+                      { key: 'rebuild', label: 'Rebuilding' },
+                      { key: 'depth',   label: 'Contender for Depth' },
+                    ] as const).map(f => (
+                      <button key={f.key} onClick={() => setDumpFilter(f.key)} className={`px-4 py-1.5 rounded-full text-[10px] font-black uppercase tracking-widest transition-all ${dumpFilter === f.key ? 'bg-rose-500 text-white' : 'bg-slate-800 text-slate-400 hover:text-white'}`}>{f.label}</button>
+                    ))}
+                  </div>
+                </div>
+                <div className="space-y-2">
+                  <p className="text-[10px] font-black uppercase text-slate-500">Min Cap Space Required</p>
+                  <select value={dumpMinCap} onChange={(e) => setDumpMinCap(Number(e.target.value))} className="bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-white text-sm">
+                    <option value={0}>Any</option>
+                    <option value={5000000}>$5M+</option>
+                    <option value={15000000}>$15M+</option>
+                    <option value={30000000}>$30M+</option>
+                  </select>
+                </div>
+              </div>
+
+              {/* Team cards */}
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                {dumpTargets.map(d => {
+                  const wLabel = d.score >= 60 ? 'HIGH' : d.score >= 35 ? 'MED' : 'LOW';
+                  const wColor = d.score >= 60 ? 'text-rose-400' : d.score >= 35 ? 'text-amber-400' : 'text-slate-500';
+                  const glow   = d.score >= 55 ? 'border-rose-500/40 shadow-[0_0_25px_rgba(239,68,68,0.07)]' : 'border-slate-800';
+                  return (
+                    <div key={d.team.id} className={`bg-slate-900 border rounded-3xl p-6 transition-all group hover:border-rose-500/40 ${glow}`}>
+                      <div className="flex items-start justify-between mb-4">
+                        <div>
+                          <div className="flex items-center gap-2 mb-1.5">
+                            <TeamBadge team={d.team} size="xs" />
+                            <p className="font-display font-bold text-white uppercase text-sm">{d.team.name}</p>
+                          </div>
+                          <span className={`text-[9px] font-black uppercase px-2 py-0.5 rounded-full border ${d.isRebuilding ? 'bg-blue-500/20 text-blue-400 border-blue-500/20' : d.isContender ? 'bg-amber-500/20 text-amber-400 border-amber-500/20' : 'bg-slate-700 text-slate-400 border-slate-600'}`}>{d.label}</span>
+                        </div>
+                        <div className="text-right">
+                          <p className="text-[9px] font-black uppercase text-slate-500 mb-0.5">Willingness</p>
+                          <p className={`text-base font-display font-bold ${wColor}`}>{wLabel}</p>
+                        </div>
+                      </div>
+
+                      <div className="grid grid-cols-2 gap-3 mb-4">
+                        <div className="bg-slate-950 rounded-xl p-3">
+                          <p className="text-[9px] font-black uppercase text-slate-500 mb-0.5">Cap Space</p>
+                          <p className={`text-sm font-display font-bold ${d.capSpace > 15_000_000 ? 'text-emerald-400' : d.capSpace > 5_000_000 ? 'text-amber-400' : 'text-slate-500'}`}>{formatMoney(d.capSpace)}</p>
+                        </div>
+                        <div className="bg-slate-950 rounded-xl p-3">
+                          <p className="text-[9px] font-black uppercase text-slate-500 mb-0.5">Open Spots</p>
+                          <p className={`text-sm font-display font-bold ${d.rosterSpots >= 3 ? 'text-emerald-400' : d.rosterSpots >= 1 ? 'text-amber-400' : 'text-rose-500'}`}>{d.rosterSpots}</p>
+                        </div>
+                      </div>
+
+                      {d.score >= 50 && (
+                        <p className="text-[9px] text-rose-400/80 font-bold italic mb-3">Strong candidate — will likely absorb contracts with a sweetener.</p>
+                      )}
+
+                      <button
+                        onClick={() => { setPartnerTeamId(d.team.id); setDumpMode(false); setActiveSubTab('machine'); }}
+                        className="w-full py-2.5 bg-slate-800 group-hover:bg-rose-500 group-hover:text-white text-[10px] font-black uppercase rounded-xl transition-all"
+                      >
+                        Open Trade Machine
+                      </button>
+                    </div>
+                  );
+                })}
+                {dumpTargets.length === 0 && (
+                  <div className="col-span-full py-16 text-center border-2 border-dashed border-slate-800 rounded-3xl text-slate-600">
+                    <p className="font-display text-xl uppercase tracking-widest mb-2">No Willing Partners Found</p>
+                    <p className="text-[10px] font-black uppercase">Try lowering the min cap space requirement or changing the filter.</p>
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+        </div>
       )}
 
       {activeSubTab === 'saved' && (
