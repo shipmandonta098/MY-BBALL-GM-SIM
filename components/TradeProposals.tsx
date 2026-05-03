@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { LeagueState, TradeProposal, TradePiece, Player, DraftPick } from '../types';
 import { playerTradeValue } from '../utils/aiGMEngine';
 import { fmtSalary } from '../utils/formatters';
@@ -10,6 +10,10 @@ interface TradeProposalsProps {
   onCounter: (proposal: TradeProposal) => void;
   onAcceptRequest: (playerId: string) => void;
   onDeclineRequest: (playerId: string) => void;
+  onCheckForProposals?: () => void;
+  onClearNewCount?: () => void;
+  proposalCooldownDay?: number;
+  newProposalCount?: number;
 }
 
 type TabType = 'proposals' | 'requests';
@@ -21,8 +25,17 @@ const TradeProposals: React.FC<TradeProposalsProps> = ({
   onCounter,
   onAcceptRequest,
   onDeclineRequest,
+  onCheckForProposals,
+  onClearNewCount,
+  proposalCooldownDay = 0,
+  newProposalCount = 0,
 }) => {
   const [activeTab, setActiveTab] = useState<TabType>('proposals');
+
+  useEffect(() => {
+    if (newProposalCount > 0) onClearNewCount?.();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const pending  = useMemo(() => (league.incomingTradeProposals ?? []).filter(p => p.status === 'incoming'), [league.incomingTradeProposals]);
   const history  = useMemo(() => (league.incomingTradeProposals ?? []).filter(p => p.status === 'rejected').slice(0, 10), [league.incomingTradeProposals]);
@@ -260,6 +273,8 @@ const TradeProposals: React.FC<TradeProposalsProps> = ({
     );
   };
 
+  const cooldownActive = (league.currentDay ?? 1) < proposalCooldownDay;
+
   return (
     <div className="max-w-4xl mx-auto space-y-8">
       {/* Header */}
@@ -268,12 +283,36 @@ const TradeProposals: React.FC<TradeProposalsProps> = ({
           <h1 className="text-3xl font-display font-black uppercase tracking-tight">Trade Center</h1>
           <p className="text-slate-500 text-sm mt-1">Incoming offers from AI GMs and player trade requests.</p>
         </div>
-        {pending.length > 0 && windowOpen && (
-          <span className="bg-amber-500 text-slate-950 text-sm font-black px-3 py-1 rounded-full animate-pulse">
-            {pending.length} PENDING
-          </span>
-        )}
+        <div className="flex items-center gap-3">
+          {pending.length > 0 && windowOpen && (
+            <span className="bg-amber-500 text-slate-950 text-sm font-black px-3 py-1 rounded-full animate-pulse">
+              {pending.length} PENDING
+            </span>
+          )}
+          {windowOpen && (
+            <button
+              onClick={onCheckForProposals}
+              disabled={cooldownActive}
+              className={`px-4 py-2 rounded-xl text-sm font-bold transition-all ${
+                cooldownActive
+                  ? 'bg-slate-800 text-slate-600 cursor-not-allowed'
+                  : 'bg-slate-700 hover:bg-slate-600 text-white'
+              }`}
+              title={cooldownActive ? `Available on Day ${proposalCooldownDay}` : 'Check for new proposals from AI GMs'}
+            >
+              {cooldownActive ? `Cooldown · Day ${proposalCooldownDay}` : 'Check for Proposals'}
+            </button>
+          )}
+        </div>
       </div>
+
+      {/* New proposals banner */}
+      {newProposalCount > 0 && (
+        <div className="flex items-center gap-3 px-5 py-3 rounded-2xl border bg-emerald-950/40 border-emerald-700/50 text-emerald-300 text-sm font-semibold animate-pulse">
+          <span className="text-lg">📬</span>
+          <span>New proposals available ({newProposalCount} new) — review them below.</span>
+        </div>
+      )}
 
       {/* Tab switcher */}
       <div className="flex gap-1 bg-slate-900 border border-slate-800 rounded-xl p-1 w-fit">
@@ -321,7 +360,7 @@ const TradeProposals: React.FC<TradeProposalsProps> = ({
               </p>
               <p className="text-slate-600 text-sm mt-1">
                 {windowOpen
-                  ? 'AI GMs reach out roughly every 5–10 games. More activity during mid-season and when teams have clear needs.'
+                  ? 'AI GMs reach out every 10–15 games. Use the "Check for Proposals" button to manually scout for activity.'
                   : 'Proposals will resume at the start of next season.'}
               </p>
             </div>
