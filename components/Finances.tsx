@@ -98,6 +98,10 @@ const Finances: React.FC<FinancesProps> = ({ league, updateLeague }) => {
   };
 
   const [toastMsg, setToastMsg] = useState<string | null>(null);
+  const [financeTab, setFinanceTab] = useState<'team' | 'league'>('team');
+  type LeagueFinSort = 'revenue' | 'expenses' | 'net' | 'cash' | 'payroll' | 'valuation' | 'attendance' | 'tax';
+  const [leagueSort, setLeagueSort] = useState<LeagueFinSort>('net');
+  const [leagueSortDir, setLeagueSortDir] = useState<'desc' | 'asc'>('desc');
 
   const handleUpgrade = (type: StaffType) => {
     const cfg = STAFF_CONFIG[type];
@@ -137,6 +141,89 @@ const Finances: React.FC<FinancesProps> = ({ league, updateLeague }) => {
     const updatedTeams = league.teams.map(t => t.id === userTeam.id ? { ...t, finances: updatedFinances } : t);
     updateLeague({ teams: updatedTeams });
   };
+
+  // ── League-wide financial data ───────────────────────────────────────────
+  const leagueFinancials = useMemo(() => {
+    const seasonLength = league.settings.seasonLength ?? 82;
+    const HOME_GAMES   = Math.max(20, Math.round(seasonLength * 0.5));
+    const champHistory = league.championshipHistory ?? [];
+    const prevStandings = league.previousSeasonStandings ?? [];
+
+    return league.teams.map(team => {
+      const teamPayroll    = team.roster.reduce((s, p) => s + p.salary, 0);
+      const teamStaffPay   = (Object.values(team.staff) as (typeof team.staff.headCoach)[]).reduce((s, c) => s + (c?.salary ?? 0), 0);
+      const bd             = (team.finances.budgets ?? {}) as Record<string, number>;
+      const teamFacilityC  =
+        STAFF_CONFIG.scouting.tiers[getStaffTierIndex(bd.scouting ?? 20)].annualCost +
+        STAFF_CONFIG.medical.tiers[getStaffTierIndex(bd.health ?? 20)].annualCost +
+        STAFF_CONFIG.facilities.tiers[getStaffTierIndex(bd.facilities ?? 20)].annualCost;
+      const teamLux = !isWomens && teamPayroll > taxLine ? (teamPayroll - taxLine) * taxMultiplier : 0;
+      const totalExpenses = teamPayroll + teamStaffPay + teamFacilityC + teamLux + 5_000_000;
+
+      const hype           = team.finances.fanHype ?? 60;
+      const avgAtt         = Math.round(8_000 + (hype / 100) * 14_000);
+      const ticketPx       = team.finances.ticketPrice || (isWomens ? 40 : 85);
+      const concPx         = team.finances.concessionPrice || 12;
+      const gateRev        = HOME_GAMES * avgAtt * ticketPx;
+      const concRev        = Math.round(HOME_GAMES * avgAtt * concPx * 0.4);
+      const mediaDeal      = isWomens ? 5_000_000 : 40_000_000;
+      const sponsorRev     = Math.round((isWomens ? 1_000_000 : 8_000_000) + (hype / 100) * (isWomens ? 4_000_000 : 15_000_000));
+      const totalRevenue   = gateRev + concRev + mediaDeal + sponsorRev;
+      const netProfit      = totalRevenue - totalExpenses;
+
+      const capacity       = team.stadiumCapacity || (isWomens ? 8_000 : 19_000);
+      const attendancePct  = Math.min(100, Math.round((avgAtt / capacity) * 100));
+
+      const champCount     = champHistory.filter(c => c.championId === team.id).length;
+      const prevPlayoffs   = prevStandings.find(s => s.teamId === team.id)?.madePlayoffs ?? false;
+      const valuation      = team.valuation ?? calcFranchiseValuation(team, {
+        isWNBA: isWomens, champCount, prevMadePlayoffs: prevPlayoffs, seasonLength,
+      }).value;
+
+      return { team, payroll: teamPayroll, totalRevenue, totalExpenses, netProfit,
+               cashReserves: team.finances.cash, valuation, attendancePct, luxuryTax: teamLux };
+    });
+  }, [league, isWomens, taxLine, taxMultiplier]);
+
+  const sortedLeagueFinancials = useMemo(() => {
+    const mult = leagueSortDir === 'desc' ? -1 : 1;
+    return [...leagueFinancials].sort((a, b) => {
+      switch (leagueSort) {
+        case 'revenue':    return (a.totalRevenue  - b.totalRevenue)  * mult;
+        case 'expenses':   return (a.totalExpenses - b.totalExpenses) * mult;
+        case 'net':        return (a.netProfit     - b.netProfit)     * mult;
+        case 'cash':       return (a.cashReserves  - b.cashReserves)  * mult;
+        case 'payroll':    return (a.payroll        - b.payroll)       * mult;
+        case 'valuation':  return (a.valuation     - b.valuation)     * mult;
+        case 'attendance': return (a.attendancePct - b.attendancePct) * mult;
+        case 'tax':        return (a.luxuryTax     - b.luxuryTax)     * mult;
+        default:           return 0;
+      }
+    });
+  }, [leagueFinancials, leagueSort, leagueSortDir]);
+
+  const leagueTotals = useMemo(() => ({
+    totalRevenue:   leagueFinancials.reduce((s, r) => s + r.totalRevenue,  0),
+    totalExpenses:  leagueFinancials.reduce((s, r) => s + r.totalExpenses, 0),
+    netProfit:      leagueFinancials.reduce((s, r) => s + r.netProfit,     0),
+    cashReserves:   leagueFinancials.reduce((s, r) => s + r.cashReserves,  0),
+    payroll:        leagueFinancials.reduce((s, r) => s + r.payroll,        0),
+    valuation:      leagueFinancials.reduce((s, r) => s + r.valuation,     0),
+    avgAttendance:  Math.round(leagueFinancials.reduce((s, r) => s + r.attendancePct, 0) / (leagueFinancials.length || 1)),
+    luxuryTax:      leagueFinancials.reduce((s, r) => s + r.luxuryTax,     0),
+  }), [leagueFinancials]);
+
+  const handleLeagueSort = (col: LeagueFinSort) => {
+    if (leagueSort === col) setLeagueSortDir(d => d === 'desc' ? 'asc' : 'desc');
+    else { setLeagueSort(col); setLeagueSortDir('desc'); }
+  };
+
+  // User comparison rank helper
+  const userFinRow = leagueFinancials.find(r => r.team.id === league.userTeamId);
+  const userValRank  = [...leagueFinancials].sort((a, b) => b.valuation  - a.valuation ).findIndex(r => r.team.id === league.userTeamId) + 1;
+  const userNetRank  = [...leagueFinancials].sort((a, b) => b.netProfit   - a.netProfit  ).findIndex(r => r.team.id === league.userTeamId) + 1;
+  const userPayRank  = [...leagueFinancials].sort((a, b) => b.payroll     - a.payroll    ).findIndex(r => r.team.id === league.userTeamId) + 1;
+  const n            = leagueFinancials.length;
 
   const TIER_COLORS = ['text-slate-500', 'text-sky-400', 'text-emerald-400', 'text-amber-400', 'text-rose-400'];
   const TIER_BORDER= ['border-slate-700', 'border-sky-500/30', 'border-emerald-500/30', 'border-amber-500/30', 'border-rose-500/30'];
@@ -275,6 +362,23 @@ const Finances: React.FC<FinancesProps> = ({ league, updateLeague }) => {
         </div>
       )}
 
+      {/* ── Sub-tab navigation ───────────────────────────────────────────────── */}
+      <div className="flex gap-1 bg-slate-900 border border-slate-800 rounded-xl p-1 w-fit">
+        <button
+          onClick={() => setFinanceTab('team')}
+          className={`px-5 py-2 rounded-lg text-sm font-semibold transition-all ${financeTab === 'team' ? 'bg-slate-700 text-white' : 'text-slate-500 hover:text-slate-300'}`}
+        >
+          Team Budget
+        </button>
+        <button
+          onClick={() => setFinanceTab('league')}
+          className={`px-5 py-2 rounded-lg text-sm font-semibold transition-all ${financeTab === 'league' ? 'bg-slate-700 text-white' : 'text-slate-500 hover:text-slate-300'}`}
+        >
+          League Finances
+        </button>
+      </div>
+
+      {financeTab === 'team' && (<>
       {/* ── Franchise Valuation ──────────────────────────────────────────────── */}
       <div className="relative overflow-hidden bg-slate-900 border border-slate-800 rounded-[2.5rem] p-8 shadow-2xl">
         {/* Ambient glow */}
@@ -707,6 +811,166 @@ const Finances: React.FC<FinancesProps> = ({ league, updateLeague }) => {
             </table>
          </div>
       </div>
+      </>)}
+
+      {/* ── League Finances ──────────────────────────────────────────────────── */}
+      {financeTab === 'league' && (
+        <div className="space-y-6 animate-in fade-in duration-300">
+
+          {/* My-team comparison strip */}
+          {userFinRow && (
+            <div className="grid grid-cols-3 gap-4">
+              {[
+                { label: 'Valuation Rank',  val: `#${userValRank} of ${n}`, sub: formatMoney(userFinRow.valuation),  good: userValRank <= n / 3 },
+                { label: 'Net Profit Rank', val: `#${userNetRank} of ${n}`, sub: `${userFinRow.netProfit >= 0 ? '+' : ''}${formatMoney(userFinRow.netProfit)}`, good: userNetRank <= n / 3 },
+                { label: 'Payroll Rank',    val: `#${userPayRank} of ${n}`, sub: formatMoney(userFinRow.payroll),    good: userPayRank >= n / 2 },
+              ].map(({ label, val, sub, good }) => (
+                <div key={label} className={`rounded-2xl border p-4 ${good ? 'bg-emerald-500/5 border-emerald-500/20' : 'bg-slate-900 border-slate-800'}`}>
+                  <p className="text-[9px] font-black uppercase tracking-widest text-slate-500 mb-1">{label}</p>
+                  <p className={`text-xl font-display font-black ${good ? 'text-emerald-400' : 'text-slate-300'}`}>{val}</p>
+                  <p className="text-[10px] text-slate-500 font-mono mt-0.5">{sub}</p>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {/* Sortable table */}
+          <div className="bg-slate-900 border border-slate-800 rounded-3xl overflow-hidden shadow-2xl">
+            <div className="px-6 py-4 border-b border-slate-800 flex items-center justify-between">
+              <h3 className="text-sm font-black uppercase tracking-widest text-white">All Teams — Financial Overview</h3>
+              <span className="text-[10px] text-slate-600 font-bold uppercase">Click any column header to sort</span>
+            </div>
+            <div className="overflow-x-auto">
+              <table className="w-full text-left min-w-[900px]">
+                <thead>
+                  <tr className="text-[9px] text-slate-500 font-black uppercase tracking-widest border-b border-slate-800 bg-slate-950/30">
+                    <th className="px-4 py-3 min-w-[160px]">Team</th>
+                    {([
+                      ['revenue',    'Revenue'],
+                      ['expenses',   'Expenses'],
+                      ['net',        'Net P/L'],
+                      ['cash',       'Cash'],
+                      ['payroll',    'Payroll'],
+                      ['valuation',  'Valuation'],
+                      ['attendance', 'Att%'],
+                      ...(!isWomens ? [['tax', 'Lux Tax']] as const : []),
+                    ] as const).map(([col, label]) => (
+                      <th
+                        key={col}
+                        className="px-4 py-3 cursor-pointer hover:text-slate-300 transition-colors whitespace-nowrap select-none"
+                        onClick={() => handleLeagueSort(col as LeagueFinSort)}
+                      >
+                        <span className="flex items-center gap-1">
+                          {label}
+                          {leagueSort === col && (
+                            <span className="text-amber-400">{leagueSortDir === 'desc' ? '↓' : '↑'}</span>
+                          )}
+                        </span>
+                      </th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-800/40">
+                  {sortedLeagueFinancials.map(({ team, payroll, totalRevenue, totalExpenses, netProfit, cashReserves, valuation, attendancePct, luxuryTax }) => {
+                    const isUser = team.id === league.userTeamId;
+                    return (
+                      <tr
+                        key={team.id}
+                        className={`transition-all relative group ${isUser ? 'bg-slate-700/20 border-l-2' : 'hover:bg-slate-800/20'}`}
+                        style={isUser ? { borderLeftColor: team.primaryColor } : undefined}
+                        title={isUser ? `Your team — Ranked #${userNetRank} in net profit, #${userValRank} in valuation` : undefined}
+                      >
+                        {/* Team */}
+                        <td className="px-4 py-3">
+                          <div className="flex items-center gap-2.5">
+                            <div
+                              className="w-7 h-7 rounded-lg flex items-center justify-center text-[10px] font-black shrink-0"
+                              style={{ backgroundColor: team.primaryColor, color: team.secondaryColor }}
+                            >
+                              {team.abbreviation.slice(0, 2)}
+                            </div>
+                            <div className="min-w-0">
+                              <p className={`text-[12px] font-bold truncate ${isUser ? 'text-white' : 'text-slate-300'}`}>{team.name}</p>
+                              <p className="text-[9px] text-slate-600 font-bold uppercase">{team.marketSize}</p>
+                            </div>
+                            {isUser && <span className="text-[8px] font-black text-amber-400 uppercase tracking-widest shrink-0">You</span>}
+                          </div>
+                        </td>
+                        {/* Revenue */}
+                        <td className="px-4 py-3 font-mono text-[12px] text-emerald-400">{formatMoney(totalRevenue)}</td>
+                        {/* Expenses */}
+                        <td className="px-4 py-3 font-mono text-[12px] text-rose-400">{formatMoney(totalExpenses)}</td>
+                        {/* Net P/L */}
+                        <td className="px-4 py-3">
+                          <span className={`font-mono text-[12px] font-bold ${netProfit >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
+                            {netProfit >= 0 ? '+' : ''}{formatMoney(netProfit)}
+                          </span>
+                        </td>
+                        {/* Cash */}
+                        <td className="px-4 py-3 font-mono text-[12px] text-slate-300">{formatMoney(cashReserves)}</td>
+                        {/* Payroll */}
+                        <td className="px-4 py-3 font-mono text-[12px] text-amber-400">{formatMoney(payroll)}</td>
+                        {/* Valuation */}
+                        <td className="px-4 py-3 font-mono text-[12px] text-slate-200 font-bold">{fmtValuation(valuation)}</td>
+                        {/* Attendance % */}
+                        <td className="px-4 py-3">
+                          <div className="flex items-center gap-2">
+                            <div className="w-14 h-1.5 bg-slate-800 rounded-full overflow-hidden">
+                              <div
+                                className={`h-full rounded-full ${attendancePct >= 85 ? 'bg-emerald-500' : attendancePct >= 65 ? 'bg-amber-500' : 'bg-rose-500'}`}
+                                style={{ width: `${attendancePct}%` }}
+                              />
+                            </div>
+                            <span className={`text-[11px] font-bold ${attendancePct >= 85 ? 'text-emerald-400' : attendancePct >= 65 ? 'text-amber-400' : 'text-rose-400'}`}>
+                              {attendancePct}%
+                            </span>
+                          </div>
+                        </td>
+                        {/* Luxury Tax — Men's only */}
+                        {!isWomens && (
+                          <td className="px-4 py-3 font-mono text-[12px]">
+                            {luxuryTax > 0
+                              ? <span className="text-amber-400">{formatMoney(luxuryTax)}</span>
+                              : <span className="text-slate-700">—</span>}
+                          </td>
+                        )}
+                      </tr>
+                    );
+                  })}
+                </tbody>
+
+                {/* Summary / totals row */}
+                <tfoot>
+                  <tr className="border-t-2 border-slate-700 bg-slate-950/60 text-[10px] font-black text-slate-400 uppercase tracking-widest">
+                    <td className="px-4 py-3 text-slate-500">League {n > 1 ? `(${n} teams)` : ''}</td>
+                    <td className="px-4 py-3 font-mono text-emerald-500">{formatMoney(leagueTotals.totalRevenue)}</td>
+                    <td className="px-4 py-3 font-mono text-rose-500">{formatMoney(leagueTotals.totalExpenses)}</td>
+                    <td className="px-4 py-3 font-mono">
+                      <span className={leagueTotals.netProfit >= 0 ? 'text-emerald-400' : 'text-rose-400'}>
+                        {leagueTotals.netProfit >= 0 ? '+' : ''}{formatMoney(leagueTotals.netProfit)}
+                      </span>
+                    </td>
+                    <td className="px-4 py-3 font-mono text-slate-400">{formatMoney(leagueTotals.cashReserves)}</td>
+                    <td className="px-4 py-3 font-mono text-amber-400">{formatMoney(leagueTotals.payroll)}</td>
+                    <td className="px-4 py-3 font-mono text-slate-200">{fmtValuation(leagueTotals.valuation)}</td>
+                    <td className="px-4 py-3">
+                      <span className={`font-mono ${leagueTotals.avgAttendance >= 85 ? 'text-emerald-400' : leagueTotals.avgAttendance >= 65 ? 'text-amber-400' : 'text-rose-400'}`}>
+                        {leagueTotals.avgAttendance}% avg
+                      </span>
+                    </td>
+                    {!isWomens && (
+                      <td className="px-4 py-3 font-mono text-amber-400">
+                        {leagueTotals.luxuryTax > 0 ? formatMoney(leagueTotals.luxuryTax) : '—'}
+                      </td>
+                    )}
+                  </tr>
+                </tfoot>
+              </table>
+            </div>
+          </div>
+        </div>
+      )}
+
     </div>
   );
 };
