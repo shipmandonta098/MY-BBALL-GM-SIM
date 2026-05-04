@@ -51,15 +51,14 @@ const Awards: React.FC<AwardsProps> = ({ league, onScout, onScoutCoach, onManage
     const getPER  = (p: Player) => normalizePER(rawUPER(p.stats), lgAvgRaw);
 
     // ── Eligibility helpers ──────────────────────────────────────────────────
-    // True first-year player only:
-    //   Gate 1 — careerStats.length > 0 means the player completed ≥1 prior season
-    //            (snapshotPlayerStats runs at season-end and appends an entry).
-    //            This is the authoritative non-rookie signal — age & draftInfo alone
-    //            are unreliable when players are generated or signed mid-simulation.
-    //   Gate 2 — drafted this season OR (no completed seasons AND played ≥1 game).
+    // True first-year player only.
+    // Primary gate: p.isRookie === true (stamped at draft/sign time, cleared at season-end).
+    // Backward-compat fallback for pre-flag saves: drafted this exact season AND
+    // no prior completed seasons. gamesPlayed is NOT used — it catches every veteran.
     const isRookie = (p: Player): boolean => {
-      if ((p.careerStats?.length ?? 0) > 0) return false; // definitive veteran gate
-      return p.draftInfo?.year === league.season || p.stats.gamesPlayed >= 1;
+      if (p.isRookie === true) return true;
+      if ((p.careerStats?.length ?? 0) > 0) return false;
+      return p.draftInfo?.year === league.season;
     };
 
     // True bench player: not in starting rotation and started < 35% of games

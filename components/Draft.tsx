@@ -89,6 +89,8 @@ const Draft: React.FC<DraftProps> = ({ league, updateLeague, onScout, scoutingRe
       contractYears,
       status: 'Rotation',
       morale: 85,
+      isRookie: true,
+      yearsPro: 0,
       // WNBA rookies get a team option on the last year of their scale contract
       ...(draftRules.isWomens && {
         isRookieContract: true,
