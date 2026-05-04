@@ -2296,12 +2296,27 @@ export const generateSeasonSchedule = (
       const t1B2B = t1Last === currentLeagueDay - 1;
       const t2B2B = t2Last === currentLeagueDay - 1;
 
-      if (t1B2B && (teamB2BCount[t1] >= 20 || teamGamesScheduled[t1] - teamLastB2BGameIndex[t1] < 3)) continue;
-      if (t2B2B && (teamB2BCount[t2] >= 20 || teamGamesScheduled[t2] - teamLastB2BGameIndex[t2] < 3)) continue;
+      if (t1B2B && (teamB2BCount[t1] >= 16 || teamGamesScheduled[t1] - teamLastB2BGameIndex[t1] < 5)) continue;
+      if (t2B2B && (teamB2BCount[t2] >= 16 || teamGamesScheduled[t2] - teamLastB2BGameIndex[t2] < 5)) continue;
+
+      // Progressive pacing guard: a team can't run more than ~20% ahead of its proportional
+      // B2B budget for the point in the season it's at. This distributes B2Bs evenly
+      // rather than clustering them in the first third of the schedule.
+      const b2bTarget = numGames >= 80 ? 15 : Math.round(numGames * 0.18);
+      if (t1B2B) {
+        const pacing = teamB2BCount[t1] / b2bTarget;
+        const progress = Math.max(0.01, teamGamesScheduled[t1] / numGames);
+        if (pacing > progress + 0.20) continue;
+      }
+      if (t2B2B) {
+        const pacing = teamB2BCount[t2] / b2bTarget;
+        const progress = Math.max(0.01, teamGamesScheduled[t2] / numGames);
+        if (pacing > progress + 0.20) continue;
+      }
 
       const roll = Math.random();
-      const restT1 = t1B2B ? 1 : (roll < 0.3 ? 1 : 2);
-      const restT2 = t2B2B ? 1 : (roll < 0.3 ? 1 : 2);
+      const restT1 = t1B2B ? 1 : (roll < 0.10 ? 1 : 2);
+      const restT2 = t2B2B ? 1 : (roll < 0.10 ? 1 : 2);
 
       if (currentLeagueDay - t1Last < restT1 && !t1B2B) continue;
       if (currentLeagueDay - t2Last < restT2 && !t2B2B) continue;
