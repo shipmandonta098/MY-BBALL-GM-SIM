@@ -156,7 +156,7 @@ const Players: React.FC<PlayersProps> = ({ league, onViewPlayer, watchList, onTo
 
   // ─── Row helpers ───────────────────────────────────────────
   const isUserPlayer = (team: typeof league.teams[0] | null) => team?.id === userTeamId;
-  const isRookie     = (p: Player) => (league.season - (p.draftInfo?.year ?? league.season)) <= 2;
+  const isRookie     = (p: Player) => p.isRookie === true || (!(p.careerStats?.length) && p.draftInfo?.year === league.season);
   const isInjured    = (p: Player) => p.status === 'Injured';
   const isHoF        = (p: Player) => p.careerStats.length >= 10 && p.rating >= 88;
 

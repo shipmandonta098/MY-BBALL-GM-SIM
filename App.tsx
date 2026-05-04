@@ -3462,7 +3462,7 @@ const App: React.FC = () => {
         seasonLength: tempState.settings.seasonLength ?? 82,
       });
 
-      return { ...t, roster: retained.map(p => ({ ...p, contractYears: p.contractYears - 1 })), prevSeasonWins: t.wins, prevSeasonLosses: t.losses, wins: 0, losses: 0, vsAbove500W: 0, vsAbove500L: 0, lastTen: [], prevSeasonValuation: t.valuation, valuation: newValuation, valuationBreakdown: newBreakdown };
+      return { ...t, roster: retained.map(p => ({ ...p, contractYears: p.contractYears - 1, isRookie: false, yearsPro: (p.yearsPro ?? 0) + 1 })), prevSeasonWins: t.wins, prevSeasonLosses: t.losses, wins: 0, losses: 0, vsAbove500W: 0, vsAbove500L: 0, lastTen: [], prevSeasonValuation: t.valuation, valuation: newValuation, valuationBreakdown: newBreakdown };
     });
 
     // Build dev report for user team from pre/post snapshot
@@ -3810,6 +3810,8 @@ const App: React.FC = () => {
             contractYears: 1,
             status: 'Active' as const,
             morale: 70,
+            isRookie: true,
+            yearsPro: 0,
             stats: {
               points: 0, rebounds: 0, offReb: 0, defReb: 0, assists: 0, steals: 0, blocks: 0,
               gamesPlayed: 0, gamesStarted: 0, minutes: 0, fgm: 0, fga: 0,

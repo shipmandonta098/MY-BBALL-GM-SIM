@@ -406,6 +406,10 @@ export interface Player {
   };
 
   // ── Contract extensions ──────────────────────────────────────────────────
+  /** True for the entire first season after being drafted/signed; cleared at season-end */
+  isRookie?: boolean;
+  /** How many completed seasons this player has played (0 = current season is their first) */
+  yearsPro?: number;
   /** True when this is a WNBA rookie scale contract; waivable before regular season */
   isRookieContract?: boolean;
   /** Free-agency classification once contract expires */

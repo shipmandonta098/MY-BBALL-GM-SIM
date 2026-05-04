@@ -51,13 +51,14 @@ export const generateAwards = async (teams: Team[], year: number, playerGenderRa
   dpoy.blurb = await generateAwardBlurb('Defensive Player of the Year', dpoy);
 
   // 3. ROY — true first-year players only.
-  //    Gate 1: drafted this exact season.
-  //    Gate 2: no prior completed seasons (careerStats is populated at season-end
-  //            via snapshotPlayerStats, so length > 0 definitively means veteran).
-  //    NO age-based fallback — veterans under 23 are not rookies.
+  //    Primary gate: p.isRookie === true (stamped at draft time, cleared at season-end).
+  //    Backward-compat fallback for pre-flag saves: drafted this exact season.
+  //    NO gamesPlayed fallback — that catches every veteran.
   const isRookieEligible = (p: Player): boolean => {
-    if ((p.careerStats?.length ?? 0) > 0) return false; // completed ≥1 prior season → veteran
-    return p.draftInfo?.year === year || p.stats.gamesPlayed >= 1;
+    if (p.isRookie === true) return true;
+    // Fallback for saves created before the isRookie flag existed
+    if ((p.careerStats?.length ?? 0) > 0) return false;
+    return p.draftInfo?.year === year;
   };
   const rookies = allPlayers.filter(entry => isRookieEligible(entry.p));
   const royPool = [...rookies].sort((a, b) => getPlayerStatsValue(b.p, b.t) - getPlayerStatsValue(a.p, a.t));
