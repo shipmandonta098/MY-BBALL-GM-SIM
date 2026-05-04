@@ -1,6 +1,6 @@
 
 import React, { useState, useMemo } from 'react';
-import { LeagueState, LeagueSettings } from '../types';
+import { LeagueState, LeagueSettings, Player } from '../types';
 import { getHistoricalFinancials } from '../constants';
 import { fmtSalary } from '../utils/formatters';
 import { useTheme, type Theme } from '../context/ThemeContext';
@@ -481,6 +481,120 @@ const Settings: React.FC<SettingsProps> = ({ league, updateLeague, onRegenerateS
       </button>
     </div>
   );
+
+  const handleExportLeagueStats = () => {
+    const gp = (p: Player) => Math.max(1, p.stats.gamesPlayed);
+    const pct = (m: number, a: number) => a > 0 ? +(m / a * 100).toFixed(1) : 0;
+
+    const standings = [...league.teams]
+      .sort((a, b) => b.wins - a.wins)
+      .map((t, i) => ({
+        rank: i + 1,
+        team: `${t.city} ${t.name}`,
+        abbreviation: t.abbreviation,
+        conference: t.conference,
+        wins: t.wins,
+        losses: t.losses,
+        winPct: +((t.wins / Math.max(1, t.wins + t.losses)) * 100).toFixed(1),
+        capSpaceM: +((t.salaryCap ?? 136_000_000) - t.roster.reduce((s, p) => s + p.salary, 0)).toFixed(0),
+      }));
+
+    const playerStats = league.teams.flatMap(t =>
+      t.roster.map(p => ({
+        name: p.name,
+        team: t.abbreviation,
+        position: p.position,
+        age: p.age,
+        gamesPlayed: p.stats.gamesPlayed,
+        ppg: +(p.stats.points / gp(p)).toFixed(1),
+        rpg: +(p.stats.rebounds / gp(p)).toFixed(1),
+        apg: +(p.stats.assists / gp(p)).toFixed(1),
+        spg: +(p.stats.steals / gp(p)).toFixed(1),
+        bpg: +(p.stats.blocks / gp(p)).toFixed(1),
+        fgPct: pct(p.stats.fgm, p.stats.fga),
+        threePct: pct(p.stats.threepm, p.stats.threepa),
+        ftPct: pct(p.stats.ftm, p.stats.fta),
+        mpg: +(p.stats.minutes / gp(p)).toFixed(1),
+        rating: p.rating,
+        salary: p.salary,
+        careerGames: p.careerStats.reduce((s, cs) => s + (cs.gamesPlayed ?? 0), 0),
+        careerPoints: p.careerStats.reduce((s, cs) => s + (cs.points ?? 0), 0),
+        seasonsPlayed: p.careerStats.length,
+      }))
+    );
+
+    const leagueLeaders = {
+      scoring: [...playerStats].sort((a, b) => b.ppg - a.ppg).slice(0, 10),
+      rebounds: [...playerStats].sort((a, b) => b.rpg - a.rpg).slice(0, 10),
+      assists: [...playerStats].sort((a, b) => b.apg - a.apg).slice(0, 10),
+      steals: [...playerStats].sort((a, b) => b.spg - a.spg).slice(0, 10),
+      blocks: [...playerStats].sort((a, b) => b.bpg - a.bpg).slice(0, 10),
+      fieldGoalPct: [...playerStats].filter(p => p.gamesPlayed >= 10).sort((a, b) => b.fgPct - a.fgPct).slice(0, 10),
+    };
+
+    const teamStats = league.teams.map(t => {
+      const gamesPlayed = t.wins + t.losses;
+      const totals = t.roster.reduce((acc, p) => ({
+        pts: acc.pts + p.stats.points,
+        reb: acc.reb + p.stats.rebounds,
+        ast: acc.ast + p.stats.assists,
+        stl: acc.stl + p.stats.steals,
+        blk: acc.blk + p.stats.blocks,
+        fgm: acc.fgm + p.stats.fgm,
+        fga: acc.fga + p.stats.fga,
+        tpm: acc.tpm + p.stats.threepm,
+        tpa: acc.tpa + p.stats.threepa,
+      }), { pts: 0, reb: 0, ast: 0, stl: 0, blk: 0, fgm: 0, fga: 0, tpm: 0, tpa: 0 });
+      const div = Math.max(1, gamesPlayed);
+      return {
+        team: `${t.city} ${t.name}`,
+        abbreviation: t.abbreviation,
+        gamesPlayed,
+        wins: t.wins,
+        losses: t.losses,
+        ppg: +(totals.pts / div).toFixed(1),
+        rpg: +(totals.reb / div).toFixed(1),
+        apg: +(totals.ast / div).toFixed(1),
+        spg: +(totals.stl / div).toFixed(1),
+        bpg: +(totals.blk / div).toFixed(1),
+        fgPct: pct(totals.fgm, totals.fga),
+        threePct: pct(totals.tpm, totals.tpa),
+        avgRosterOvr: t.roster.length > 0 ? Math.round(t.roster.reduce((s, p) => s + p.rating, 0) / t.roster.length) : 0,
+        payrollM: +(t.roster.reduce((s, p) => s + p.salary, 0) / 1_000_000).toFixed(2),
+      };
+    });
+
+    const awardsHistory = (league.awardsHistory ?? []).map(a => ({
+      year: a.year,
+      mvp: a.mvp?.name,
+      mvpTeam: a.mvp?.teamName,
+      dpoy: a.dpoy?.name,
+      roy: a.roy?.name,
+      sixthMan: a.sixthMan?.name,
+      mip: a.mip?.name,
+      coy: a.coy?.name,
+    }));
+
+    const exportData = {
+      exportedAt: new Date().toISOString(),
+      leagueName: league.leagueName,
+      season: league.season,
+      standings,
+      teamStats,
+      playerStats: playerStats.sort((a, b) => b.ppg - a.ppg),
+      leagueLeaders,
+      awardsHistory,
+    };
+
+    const blob = new Blob([JSON.stringify(exportData, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `${league.leagueName.replace(/\s+/g, '_')}_S${league.season}_stats.json`;
+    a.click();
+    URL.revokeObjectURL(url);
+    showSuccess(`League stats exported — Season ${league.season} (${playerStats.length} players, ${league.teams.length} teams).`);
+  };
 
   const handleExport = () => {
     const dataStr = JSON.stringify(league, null, 2);
@@ -1488,6 +1602,29 @@ const Settings: React.FC<SettingsProps> = ({ league, updateLeague, onRegenerateS
                   className="shrink-0 px-5 py-3 bg-amber-500 hover:bg-amber-400 text-slate-950 font-display font-bold uppercase text-[10px] tracking-widest rounded-xl transition-all active:scale-95 shadow-lg shadow-amber-500/20"
                 >
                   ↓ Download Backup
+                </button>
+              </div>
+            </div>
+
+            {/* Export League Stats */}
+            <div className="bg-slate-900 border border-slate-800 rounded-3xl p-6 space-y-4">
+              <div className="flex items-start justify-between gap-4">
+                <div>
+                  <h3 className="text-sm font-black uppercase tracking-widest text-white mb-1">Export League Stats</h3>
+                  <p className="text-[11px] text-slate-500">
+                    Download a <code className="text-emerald-400">.json</code> file with standings, team stats, player stats, league leaders, and awards history for Season {league.season}.
+                  </p>
+                  <div className="flex flex-wrap gap-2 mt-2">
+                    {(['Standings', 'Player Stats', 'Team Stats', 'League Leaders', 'Awards History'] as const).map(tag => (
+                      <span key={tag} className="px-2 py-0.5 rounded-full bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 text-[9px] font-black uppercase tracking-widest">{tag}</span>
+                    ))}
+                  </div>
+                </div>
+                <button
+                  onClick={handleExportLeagueStats}
+                  className="shrink-0 px-5 py-3 bg-emerald-600 hover:bg-emerald-500 text-white font-display font-bold uppercase text-[10px] tracking-widest rounded-xl transition-all active:scale-95 shadow-lg shadow-emerald-500/20"
+                >
+                  ↓ Export Stats
                 </button>
               </div>
             </div>
