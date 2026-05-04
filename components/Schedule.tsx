@@ -273,9 +273,16 @@ const Schedule: React.FC<ScheduleProps> = ({ league, onSimulate, onScout, onWatc
                 {viewMode === 'team' ? `GAME ${teamGameNum}/${seasonLen}` : `DAY ${game.day}`}
               </span>
               {isB2B && viewMode === 'team' && (
-                <span className="mt-1 px-2 py-0.5 bg-rose-500/20 text-rose-500 text-[9px] font-black uppercase rounded border border-rose-500/20">
-                  B2B #{b2bNum}/{stats.b2bsTotal}
-                </span>
+                <div className="mt-1 flex flex-col gap-0.5">
+                  <span className={`px-2 py-0.5 text-[9px] font-black uppercase rounded border flex items-center gap-1 ${game.played ? 'bg-rose-500/20 text-rose-500 border-rose-500/20' : 'bg-orange-500/20 text-orange-400 border-orange-500/30 animate-pulse'}`}>
+                    🔥 B2B #{b2bNum}/{stats.b2bsTotal}
+                  </span>
+                  {!game.played && (
+                    <span className="px-2 py-0.5 bg-orange-500/10 text-orange-400 text-[8px] font-bold uppercase rounded border border-orange-500/20 leading-tight">
+                      Fatigue Expected
+                    </span>
+                  )}
+                </div>
               )}
               
               {/* Rivalry Meter Badge */}

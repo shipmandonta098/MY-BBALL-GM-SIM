@@ -723,6 +723,7 @@ export interface LeagueSettings {
   fatigueImpact?: 'None' | 'Low' | 'Medium' | 'High';
   b2bPenalty?: 'None' | 'Mild' | 'Severe';
   loadManagement?: boolean;
+  b2bFatigueEnabled?: boolean;  // detailed B2B stat penalties; on by default
   injuryDuration?: 'Short' | 'Realistic' | 'Long';
   practiceInjuries?: boolean;
   careerEndingInjuries?: boolean;
