@@ -50,21 +50,28 @@ export const generateAwards = async (teams: Team[], year: number, playerGenderRa
   };
   dpoy.blurb = await generateAwardBlurb('Defensive Player of the Year', dpoy);
 
-  // 3. ROY — use draftInfo.year to find true rookies (drafted this season)
-  const rookies = allPlayers.filter(entry => entry.p.draftInfo?.year === year);
-  const royPool = rookies.length > 0
-    ? rookies
-    : allPlayers.filter(entry => entry.p.age <= 23); // fallback for edge cases
-  const royCandidate = royPool.sort((a, b) => getPlayerStatsValue(b.p, b.t) - getPlayerStatsValue(a.p, a.t))[0]
-    ?? allPlayers[0]; // ultimate safety fallback
-  const roy: AwardWinner = {
-    playerId: royCandidate.p.id,
-    name: royCandidate.p.name,
-    teamId: royCandidate.t.id,
-    teamName: royCandidate.t.name,
-    statsLabel: getStatsLabel(royCandidate.p)
+  // 3. ROY — true first-year players only.
+  //    Gate 1: drafted this exact season.
+  //    Gate 2: no prior completed seasons (careerStats is populated at season-end
+  //            via snapshotPlayerStats, so length > 0 definitively means veteran).
+  //    NO age-based fallback — veterans under 23 are not rookies.
+  const isRookieEligible = (p: Player): boolean => {
+    if ((p.careerStats?.length ?? 0) > 0) return false; // completed ≥1 prior season → veteran
+    return p.draftInfo?.year === year || p.stats.gamesPlayed >= 1;
   };
-  roy.blurb = await generateAwardBlurb('Rookie of the Year', roy);
+  const rookies = allPlayers.filter(entry => isRookieEligible(entry.p));
+  const royPool = [...rookies].sort((a, b) => getPlayerStatsValue(b.p, b.t) - getPlayerStatsValue(a.p, a.t));
+  const royEntry = royPool[0] ?? null;
+  const roy: AwardWinner = royEntry
+    ? {
+        playerId: royEntry.p.id,
+        name: royEntry.p.name,
+        teamId: royEntry.t.id,
+        teamName: royEntry.t.name,
+        statsLabel: getStatsLabel(royEntry.p),
+      }
+    : { name: '—', teamId: '', teamName: 'No eligible rookies', statsLabel: '' };
+  if (royEntry) roy.blurb = await generateAwardBlurb('Rookie of the Year', roy);
 
   // 4. Sixth Man — bench players only; three independent checks to prevent any starter slipping through:
   //    (a) player.status must be Bench or Rotation — never Starter
@@ -151,8 +158,7 @@ export const generateAwards = async (teams: Team[], year: number, playerGenderRa
     .slice(0, 10)
     .map(e => e.p.id);
 
-  const rookieSorted = rookies
-    .sort((a, b) => getPlayerStatsValue(b.p, b.t) - getPlayerStatsValue(a.p, a.t))
+  const rookieSorted = royPool  // already sorted, already filtered to true rookies
     .slice(0, 10)
     .map(e => e.p.id);
 
