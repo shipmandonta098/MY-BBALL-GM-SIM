@@ -51,10 +51,16 @@ const Awards: React.FC<AwardsProps> = ({ league, onScout, onScoutCoach, onManage
     const getPER  = (p: Player) => normalizePER(rawUPER(p.stats), lgAvgRaw);
 
     // ── Eligibility helpers ──────────────────────────────────────────────────
-    // Rookie: drafted this season OR no prior career stats (undrafted first-year player)
-    const isRookie = (p: Player) =>
-      p.draftInfo?.year === league.season ||
-      (p.careerStats?.length === 0 && p.stats.gamesPlayed >= 1);
+    // True first-year player only:
+    //   Gate 1 — careerStats.length > 0 means the player completed ≥1 prior season
+    //            (snapshotPlayerStats runs at season-end and appends an entry).
+    //            This is the authoritative non-rookie signal — age & draftInfo alone
+    //            are unreliable when players are generated or signed mid-simulation.
+    //   Gate 2 — drafted this season OR (no completed seasons AND played ≥1 game).
+    const isRookie = (p: Player): boolean => {
+      if ((p.careerStats?.length ?? 0) > 0) return false; // definitive veteran gate
+      return p.draftInfo?.year === league.season || p.stats.gamesPlayed >= 1;
+    };
 
     // True bench player: not in starting rotation and started < 35% of games
     const isBenchPlayer = (p: Player) => {
@@ -93,13 +99,39 @@ const Awards: React.FC<AwardsProps> = ({ league, onScout, onScoutCoach, onManage
       .slice(0, 15);
 
     // ── ROY ──────────────────────────────────────────────────────────────────
+    // Only true first-year players (isRookie gate). Score blends production,
+    // efficiency, and win contribution so it matches real ROY voting factors.
     const roy = allPlayers
       .filter(p => p.stats.gamesPlayed >= minGP && isRookie(p))
       .map(p => {
         const team = allTeams.find(t => t.roster.some(rp => rp.id === p.id))!;
         const ppg = getPPG(p), rpg = getRPG(p), apg = getAPG(p);
-        const score = (ppg * 1.5) + (rpg * 1.0) + (apg * 1.2) + (p.rating * 0.1);
-        return { player: p, team, score, stats: { PPG: ppg.toFixed(1), TRB: rpg.toFixed(1), AST: apg.toFixed(1), OVR: p.rating, GP: p.stats.gamesPlayed } };
+        const spg = getSPG(p), bpg = getBPG(p);
+        const fgPct = getFGPct(p);
+        const gp = Math.max(1, p.stats.gamesPlayed);
+        const missesPerGame = (p.stats.fga - p.stats.fgm) / gp;
+        const eff = ppg + rpg + apg + spg + bpg - missesPerGame;
+        const score =
+          (ppg  * 1.5) +
+          (rpg  * 1.0) +
+          (apg  * 1.2) +
+          (fgPct * 8)  +   // efficiency gate — rewards accurate rookies
+          (team.wins * 0.3) + // win contribution
+          (spg  * 0.5) +
+          (bpg  * 0.5) +
+          (p.rating * 0.05);
+        return {
+          player: p, team, score,
+          isRookieBadge: true,
+          stats: {
+            PPG:   ppg.toFixed(1),
+            TRB:   rpg.toFixed(1),
+            AST:   apg.toFixed(1),
+            'FG%': `${(fgPct * 100).toFixed(1)}%`,
+            EFF:   eff.toFixed(1),
+            GP:    p.stats.gamesPlayed,
+          },
+        };
       })
       .sort((a, b) => b.score - a.score)
       .slice(0, 15);
@@ -259,13 +291,15 @@ const Awards: React.FC<AwardsProps> = ({ league, onScout, onScoutCoach, onManage
     return <span className="text-rose-400 text-[9px] font-black leading-none">↓{Math.abs(delta)}</span>;
   };
 
-  const RaceTable = ({ title, candidates, columns, gamesPlayed, seasonActive, deltas }: {
+  const RaceTable = ({ title, candidates, columns, gamesPlayed, seasonActive, deltas, subtitle, showRookieBadge }: {
     title: string;
     candidates: any[];
     columns: string[];
     gamesPlayed: number;
     seasonActive: boolean;
     deltas?: Record<string, number>;
+    subtitle?: string;
+    showRookieBadge?: boolean;
   }) => {
     const allCols = [...columns, 'GP'];
     const [localSort, setLocalSort] = useState<{ key: string, direction: 'asc' | 'desc' }>({ key: columns[0], direction: 'desc' });
@@ -294,7 +328,10 @@ const Awards: React.FC<AwardsProps> = ({ league, onScout, onScoutCoach, onManage
       <div className="bg-slate-900 border border-slate-800 rounded-[2rem] overflow-hidden shadow-2xl">
         <div className="p-5 border-b border-slate-800 flex justify-between items-center bg-slate-900/50 gap-4">
           <div className="flex items-center gap-3 min-w-0">
-            <h3 className="text-sm font-black uppercase tracking-[0.3em] text-amber-500 shrink-0">{title} Race</h3>
+            <div className="shrink-0">
+              <h3 className="text-sm font-black uppercase tracking-[0.3em] text-amber-500">{title} Race</h3>
+              {subtitle && <p className="text-[9px] font-black uppercase tracking-widest text-slate-500 mt-0.5">{subtitle}</p>}
+            </div>
             {leader && (
               <span className="text-[10px] font-bold text-slate-500 truncate">
                 Leader: <span className="text-white">{leader.player?.name || leader.coach?.name}</span>
@@ -360,9 +397,14 @@ const Awards: React.FC<AwardsProps> = ({ league, onScout, onScoutCoach, onManage
                     </td>
                     <td className="p-3 min-w-[130px]">
                       <div className="flex flex-col">
-                        <span className="text-sm font-bold text-white group-hover:text-amber-500 transition-colors leading-tight">
-                          {c.player?.name || c.coach?.name}
-                        </span>
+                        <div className="flex items-center gap-1.5 leading-tight">
+                          <span className="text-sm font-bold text-white group-hover:text-amber-500 transition-colors">
+                            {c.player?.name || c.coach?.name}
+                          </span>
+                          {showRookieBadge && c.isRookieBadge && (
+                            <span className="text-[8px] font-black uppercase px-1.5 py-0.5 rounded bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 leading-none shrink-0">R</span>
+                          )}
+                        </div>
                         <span className="text-[9px] font-black text-slate-500 uppercase tracking-widest">
                           {c.player ? `${c.player.position} · ${c.player.age}y` : 'Head Coach'}
                         </span>
@@ -453,7 +495,7 @@ const Awards: React.FC<AwardsProps> = ({ league, onScout, onScoutCoach, onManage
           <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
             <RaceTable title="MVP"   candidates={awardRaces.mvp}  columns={['PPG', 'TRB', 'AST', 'FG', 'PER']}          gamesPlayed={awardRaces.maxGamesPlayed} seasonActive={awardRaces.seasonActive} deltas={rankDeltas.mvp} />
             <RaceTable title="DPOY"  candidates={awardRaces.dpoy} columns={['BPG', 'SPG', 'TRB', 'DREB']}               gamesPlayed={awardRaces.maxGamesPlayed} seasonActive={awardRaces.seasonActive} deltas={rankDeltas.dpoy} />
-            <RaceTable title="ROY"   candidates={awardRaces.roy}  columns={['PPG', 'TRB', 'AST', 'OVR']}               gamesPlayed={awardRaces.maxGamesPlayed} seasonActive={awardRaces.seasonActive} deltas={rankDeltas.roy} />
+            <RaceTable title="ROY"   candidates={awardRaces.roy}  columns={['PPG', 'TRB', 'AST', 'FG%', 'EFF']}         gamesPlayed={awardRaces.maxGamesPlayed} seasonActive={awardRaces.seasonActive} deltas={rankDeltas.roy} subtitle="First-Year Players Only" showRookieBadge />
             <RaceTable title={league.settings.playerGenderRatio === 100 ? '6th Woman' : '6th Man'} candidates={awardRaces.smoy} columns={['PPG', 'TRB', 'AST', 'MIN']} gamesPlayed={awardRaces.maxGamesPlayed} seasonActive={awardRaces.seasonActive} deltas={rankDeltas.smoy} />
             <RaceTable title="MIP"   candidates={awardRaces.mip}  columns={['PPG Jump', 'Curr PPG', 'Prev PPG', 'OVR']}  gamesPlayed={awardRaces.maxGamesPlayed} seasonActive={awardRaces.seasonActive} deltas={rankDeltas.mip} />
             <RaceTable title="Coach" candidates={awardRaces.coy}  columns={['Wins', 'Losses', 'Record', 'W vs Exp']}     gamesPlayed={awardRaces.maxGamesPlayed} seasonActive={awardRaces.seasonActive} deltas={rankDeltas.coy} />
