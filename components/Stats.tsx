@@ -1855,6 +1855,7 @@ const Stats: React.FC<StatsProps> = ({ league, onViewRoster, onManageTeam, onVie
           <LeaderTable statKey="ftPct" label="FT%" fmt={v => (v * 100).toFixed(1) + '%'}
             minAttemptsFilter={p => p.stats.fta / Math.max(1, p.stats.gamesPlayed) >= 2.0} />
           <LeaderTable statKey="mpg"   label="Minutes" fmt={v => v.toFixed(1)} />
+          <LeaderTable statKey="tov"   label="Turnovers" fmt={v => v.toFixed(1)} />
         </div>
       )}
 
