@@ -129,6 +129,55 @@ const Dashboard: React.FC<DashboardProps> = ({ league, news, onSimulate, onScout
       }, 0) / next10Games.length)
     : 0;
 
+  // 4-Factors league rankings
+  const teamFourFactors = league.teams.map(t => {
+    const hist = safeHistory.filter(g => g.homeTeamId === t.id || g.awayTeamId === t.id);
+    const s = hist.reduce((acc, g) => {
+      const isHome = g.homeTeamId === t.id;
+      const lines = isHome ? g.homePlayerStats : g.awayPlayerStats;
+      const oppLines = isHome ? g.awayPlayerStats : g.homePlayerStats;
+      acc.fgm += lines.reduce((s, l) => s + l.fgm, 0);
+      acc.fga += lines.reduce((s, l) => s + l.fga, 0);
+      acc.tpm += lines.reduce((s, l) => s + l.threepm, 0);
+      acc.fta += lines.reduce((s, l) => s + l.fta, 0);
+      acc.tov += lines.reduce((s, l) => s + l.tov, 0);
+      acc.orb += lines.reduce((s, l) => s + l.reb, 0) * 0.25;
+      acc.oppDrb += oppLines.reduce((s, l) => s + l.reb, 0) * 0.75;
+      return acc;
+    }, { fgm: 0, fga: 0, tpm: 0, fta: 0, tov: 0, orb: 0, oppDrb: 0 });
+    return {
+      teamId: t.id,
+      eFG: s.fga > 0 ? (s.fgm + 0.5 * s.tpm) / s.fga * 100 : 0,
+      tovPct: (s.fga + 0.44 * s.fta + s.tov) > 0 ? s.tov / (s.fga + 0.44 * s.fta + s.tov) * 100 : 0,
+      orbPct: (s.orb + s.oppDrb) > 0 ? s.orb / (s.orb + s.oppDrb) * 100 : 0,
+      ftRate: s.fga > 0 ? s.fta / s.fga * 100 : 0,
+    };
+  });
+  const rankOf = (key: 'eFG' | 'tovPct' | 'orbPct' | 'ftRate', higherIsBetter: boolean) => {
+    const sorted = [...teamFourFactors].sort((a, b) =>
+      higherIsBetter ? b[key] - a[key] : a[key] - b[key]
+    );
+    return sorted.findIndex(r => r.teamId === userTeam.id) + 1;
+  };
+  const ffRanks = {
+    eFG:    rankOf('eFG',    true),
+    tovPct: rankOf('tovPct', false),
+    orbPct: rankOf('orbPct', true),
+    ftRate: rankOf('ftRate', true),
+  };
+  const rankLabel = (n: number) => {
+    if (n === 1) return '1st';
+    if (n === 2) return '2nd';
+    if (n === 3) return '3rd';
+    return `${n}th`;
+  };
+  const rankColor = (n: number, total: number) => {
+    if (n <= 5) return 'text-emerald-400';
+    if (n >= total - 4) return 'text-rose-400';
+    return 'text-slate-400';
+  };
+  const numTeams = league.teams.length;
+
   // Finals Odds
   const netRating = (seasonStats.pts - seasonStats.oppPts) / gamesPlayed;
   const playoffOdds = Math.min(99, Math.max(1, Math.round((parseFloat(winPct) * 100 + netRating * 2 + (teamOvr - 75) * 2))));
@@ -370,22 +419,22 @@ const Dashboard: React.FC<DashboardProps> = ({ league, news, onSimulate, onScout
         <div className="bg-slate-900 border border-slate-800 rounded-3xl p-6 shadow-2xl">
           <h3 className="text-[10px] font-black uppercase tracking-[0.4em] text-slate-500 mb-6">Efficiency (4-Factors)</h3>
           <div className="grid grid-cols-2 gap-3">
-            <div className="bg-slate-950/50 p-3 rounded-xl border border-slate-800">
-              <p className="text-[8px] text-slate-500 font-black uppercase mb-1">eFG%</p>
-              <p className={`text-xl font-display font-black ${parseFloat(eFG) > 52 ? 'text-emerald-400' : 'text-rose-400'}`}>{eFG}%</p>
-            </div>
-            <div className="bg-slate-950/50 p-3 rounded-xl border border-slate-800">
-              <p className="text-[8px] text-slate-500 font-black uppercase mb-1">TOV%</p>
-              <p className={`text-xl font-display font-black ${parseFloat(tovPct) < 13 ? 'text-emerald-400' : 'text-rose-400'}`}>{tovPct}%</p>
-            </div>
-            <div className="bg-slate-950/50 p-3 rounded-xl border border-slate-800">
-              <p className="text-[8px] text-slate-500 font-black uppercase mb-1">ORB%</p>
-              <p className={`text-xl font-display font-black ${parseFloat(orbPct) > 25 ? 'text-emerald-400' : 'text-rose-400'}`}>{orbPct}%</p>
-            </div>
-            <div className="bg-slate-950/50 p-3 rounded-xl border border-slate-800">
-              <p className="text-[8px] text-slate-500 font-black uppercase mb-1">FT Rate</p>
-              <p className={`text-xl font-display font-black ${parseFloat(ftRate) > 20 ? 'text-emerald-400' : 'text-rose-400'}`}>{ftRate}%</p>
-            </div>
+            {([
+              { key: 'eFG',    label: 'eFG%',    val: eFG,    rank: ffRanks.eFG    },
+              { key: 'tovPct', label: 'TOV%',    val: tovPct, rank: ffRanks.tovPct  },
+              { key: 'orbPct', label: 'ORB%',    val: orbPct, rank: ffRanks.orbPct  },
+              { key: 'ftRate', label: 'FT Rate', val: ftRate, rank: ffRanks.ftRate  },
+            ] as const).map(({ key, label, val, rank }) => (
+              <div key={key} className="bg-slate-950/50 p-3 rounded-xl border border-slate-800">
+                <p className="text-[8px] text-slate-500 font-black uppercase mb-1">{label}</p>
+                <p className={`text-xl font-display font-black ${rankColor(rank, numTeams)}`}>{val}%</p>
+                {numTeams > 0 && rank > 0 && (
+                  <p className={`text-[9px] font-black mt-0.5 ${rankColor(rank, numTeams)}`}>
+                    {rankLabel(rank)} in {label}
+                  </p>
+                )}
+              </div>
+            ))}
           </div>
         </div>
 
@@ -419,10 +468,22 @@ const Dashboard: React.FC<DashboardProps> = ({ league, news, onSimulate, onScout
 
         {/* Finals Odds */}
         <div className="bg-slate-900 border border-slate-800 rounded-3xl p-6 shadow-2xl">
-          <h3 className="text-[10px] font-black uppercase tracking-[0.4em] text-slate-500 mb-6">Finals Odds</h3>
+          <div className="flex items-start justify-between mb-6">
+            <h3 className="text-[10px] font-black uppercase tracking-[0.4em] text-slate-500">Finals Odds</h3>
+            {userTeam.division && (
+              <span className="text-[9px] font-black uppercase tracking-widest text-slate-500 bg-slate-800 px-2 py-0.5 rounded-full border border-slate-700">
+                {userTeam.division} Division
+              </span>
+            )}
+          </div>
           <div className="space-y-3">
             <div className="flex justify-between items-center p-2 bg-slate-950/50 rounded-xl border border-slate-800">
-              <span className="text-xs font-bold text-slate-400 uppercase">Championship</span>
+              <div>
+                <span className="text-xs font-bold text-slate-400 uppercase">Championship</span>
+                {userTeam.division && (
+                  <p className="text-[9px] text-slate-600 font-bold mt-0.5">{userTeam.division} Division</p>
+                )}
+              </div>
               <div className="text-right">
                 <span className="text-sm font-mono text-emerald-400 font-bold">{formatOdds(champOdds)}</span>
                 <span className="ml-2 text-[10px] text-slate-500 font-bold">({champOdds}%)</span>

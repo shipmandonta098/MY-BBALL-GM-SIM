@@ -26,8 +26,8 @@ const BoxScoreModal: React.FC<BoxScoreModalProps> = ({ result, homeTeam, awayTea
   const quarterLabel = (q: number) => q <= 4 ? `Q${q}` : `OT${q - 4}`;
 
   const StatTable = ({ team, stats }: { team: Team, stats: GamePlayerLine[] }) => {
-    const active = stats.filter(l => !l.dnp).sort((a, b) => b.pts - a.pts);
-    const dnp    = stats.filter(l => !!l.dnp);
+    const active = stats.filter(l => !l.dnp && l.min > 0).sort((a, b) => b.pts - a.pts);
+    const dnp    = stats.filter(l => !!l.dnp || l.min === 0);
     const sum = (key: keyof GamePlayerLine) => active.reduce((acc, l) => acc + ((l[key] as number) || 0), 0);
     const totals = {
       min: sum('min'), pts: sum('pts'), reb: sum('reb'), ast: sum('ast'),
