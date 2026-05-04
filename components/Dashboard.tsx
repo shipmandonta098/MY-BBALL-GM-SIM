@@ -183,6 +183,12 @@ const Dashboard: React.FC<DashboardProps> = ({ league, news, onSimulate, onScout
   const playoffOdds = Math.min(99, Math.max(1, Math.round((parseFloat(winPct) * 100 + netRating * 2 + (teamOvr - 75) * 2))));
   const confOdds = Math.round(playoffOdds * 0.4);
   const champOdds = Math.round(playoffOdds * 0.15);
+  // Division odds: based on current division standings lead
+  const divisionTeams = league.teams.filter(t => t.division === userTeam.division);
+  const userDivRank = divisionTeams.length > 0
+    ? [...divisionTeams].sort((a, b) => b.wins - a.wins || a.losses - b.losses).findIndex(t => t.id === userTeam.id) + 1
+    : 1;
+  const divOdds = Math.min(99, Math.max(1, Math.round(playoffOdds * (1.2 - (userDivRank - 1) * 0.25))));
   
   const formatOdds = (pct: number) => {
     if (pct > 50) return `-${Math.round(100 * (pct / (100 - pct)))}`;
@@ -468,22 +474,10 @@ const Dashboard: React.FC<DashboardProps> = ({ league, news, onSimulate, onScout
 
         {/* Finals Odds */}
         <div className="bg-slate-900 border border-slate-800 rounded-3xl p-6 shadow-2xl">
-          <div className="flex items-start justify-between mb-6">
-            <h3 className="text-[10px] font-black uppercase tracking-[0.4em] text-slate-500">Finals Odds</h3>
-            {userTeam.division && (
-              <span className="text-[9px] font-black uppercase tracking-widest text-slate-500 bg-slate-800 px-2 py-0.5 rounded-full border border-slate-700">
-                {userTeam.division} Division
-              </span>
-            )}
-          </div>
+          <h3 className="text-[10px] font-black uppercase tracking-[0.4em] text-slate-500 mb-6">Finals Odds</h3>
           <div className="space-y-3">
             <div className="flex justify-between items-center p-2 bg-slate-950/50 rounded-xl border border-slate-800">
-              <div>
-                <span className="text-xs font-bold text-slate-400 uppercase">Championship</span>
-                {userTeam.division && (
-                  <p className="text-[9px] text-slate-600 font-bold mt-0.5">{userTeam.division} Division</p>
-                )}
-              </div>
+              <span className="text-xs font-bold text-slate-400 uppercase">Championship</span>
               <div className="text-right">
                 <span className="text-sm font-mono text-emerald-400 font-bold">{formatOdds(champOdds)}</span>
                 <span className="ml-2 text-[10px] text-slate-500 font-bold">({champOdds}%)</span>
@@ -496,6 +490,18 @@ const Dashboard: React.FC<DashboardProps> = ({ league, news, onSimulate, onScout
                 <span className="ml-2 text-[10px] text-slate-500 font-bold">({confOdds}%)</span>
               </div>
             </div>
+            {userTeam.division && (
+              <div className="flex justify-between items-center p-2 bg-slate-950/50 rounded-xl border border-slate-800">
+                <div>
+                  <span className="text-xs font-bold text-slate-400 uppercase">Division</span>
+                  <p className="text-[9px] text-slate-600 font-bold mt-0.5">{userTeam.division}</p>
+                </div>
+                <div className="text-right">
+                  <span className="text-sm font-mono text-emerald-400 font-bold">{formatOdds(divOdds)}</span>
+                  <span className="ml-2 text-[10px] text-slate-500 font-bold">({divOdds}%)</span>
+                </div>
+              </div>
+            )}
             <div className="flex justify-between items-center p-2 bg-slate-950/50 rounded-xl border border-slate-800">
               <span className="text-xs font-bold text-slate-400 uppercase">Playoffs</span>
               <div className="text-right">
