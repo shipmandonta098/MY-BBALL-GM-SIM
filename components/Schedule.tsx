@@ -157,13 +157,26 @@ const Schedule: React.FC<ScheduleProps> = ({ league, onSimulate, onScout, onWatc
     return { label: 'Ice Cold', icon: '❄️', color: 'text-blue-400', bg: 'bg-blue-500/10', border: 'border-blue-500/20' };
   };
 
+  const injuryStatus = (daysLeft: number): { label: string; color: string } => {
+    if (daysLeft >= 10) return { label: 'Out', color: 'text-rose-400 bg-rose-500/10 border-rose-500/30' };
+    if (daysLeft >= 3)  return { label: 'Doubtful', color: 'text-orange-400 bg-orange-500/10 border-orange-500/30' };
+    return { label: 'Questionable', color: 'text-amber-400 bg-amber-500/10 border-amber-500/30' };
+  };
+
   const GameCard = ({ game, index, focusTeamId }: { game: ScheduleGame, index: number, focusTeamId?: string }) => {
+    const [injuryOpen, setInjuryOpen] = React.useState(false);
     const displayTeamId = focusTeamId || game.homeTeamId;
     const isHome = game.homeTeamId === displayTeamId;
     const homeTeam = league.teams.find(t => t.id === game.homeTeamId);
     const awayTeam = league.teams.find(t => t.id === game.awayTeamId);
     const focusTeam = league.teams.find(t => t.id === displayTeamId);
     if (!homeTeam || !awayTeam || !focusTeam) return null;
+
+    const injuredPlayers = [homeTeam, awayTeam].flatMap(t =>
+      t.roster
+        .filter(p => p.status === 'Injured' || (p.injuryDaysLeft != null && p.injuryDaysLeft > 0))
+        .map(p => ({ player: p, team: t }))
+    );
     const opp = isHome ? awayTeam : homeTeam;
 
     const result = game.played ? safeHistory.find(h => h.id === game.id) : null;
@@ -434,6 +447,74 @@ const Schedule: React.FC<ScheduleProps> = ({ league, onSimulate, onScout, onWatc
               </div>
             </div>
           </div>
+
+          {/* ── Injury Report ──────────────────────────────────────── */}
+          {injuredPlayers.length > 0 && (
+            <div className="border-t border-slate-800 pt-4">
+              <button
+                onClick={() => setInjuryOpen(o => !o)}
+                className="w-full flex items-center justify-between gap-2 group"
+              >
+                <div className="flex items-center gap-2">
+                  <span className="flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-rose-500/10 border border-rose-500/30 text-rose-400 text-[9px] font-black uppercase tracking-widest">
+                    🩹 Injury Report
+                  </span>
+                  <span className="text-[10px] text-slate-500 font-bold">
+                    {injuredPlayers.length} player{injuredPlayers.length !== 1 ? 's' : ''} listed
+                  </span>
+                  <span className="flex gap-1">
+                    {[homeTeam, awayTeam].map(t => {
+                      const count = injuredPlayers.filter(e => e.team.id === t.id).length;
+                      return count > 0 ? (
+                        <span key={t.id} className="text-[9px] font-black text-slate-500">
+                          {t.abbreviation}: <span className="text-rose-400">{count}</span>
+                        </span>
+                      ) : null;
+                    })}
+                  </span>
+                </div>
+                <span className={`text-slate-500 text-xs transition-transform ${injuryOpen ? 'rotate-180' : ''}`}>▼</span>
+              </button>
+
+              {injuryOpen && (
+                <div className="mt-3 space-y-1 animate-in slide-in-from-top-1">
+                  {/* Column headers */}
+                  <div className="grid grid-cols-[1fr_auto_auto_auto] gap-x-4 px-3 pb-1 border-b border-slate-800">
+                    {['Player / Team', 'Injury', 'Days Out', 'Status'].map(h => (
+                      <span key={h} className="text-[9px] font-black uppercase tracking-widest text-slate-600">{h}</span>
+                    ))}
+                  </div>
+                  {injuredPlayers.map(({ player: p, team: t }) => {
+                    const days = p.injuryDaysLeft ?? 0;
+                    const { label, color } = injuryStatus(days);
+                    const isUserSide = t.id === league.userTeamId;
+                    return (
+                      <div
+                        key={p.id}
+                        className={`grid grid-cols-[1fr_auto_auto_auto] gap-x-4 items-center px-3 py-2 rounded-xl transition-colors ${isUserSide ? 'bg-rose-500/5 hover:bg-rose-500/8' : 'hover:bg-slate-800/50'}`}
+                      >
+                        <div className="min-w-0">
+                          <span
+                            className="text-xs font-bold text-white truncate cursor-pointer hover:text-amber-400 transition-colors"
+                            onClick={() => onScout(p)}
+                          >
+                            {p.name}
+                          </span>
+                          <span className="text-[9px] text-slate-500 ml-1.5 font-bold uppercase">{p.position} · {t.abbreviation}</span>
+                          {isUserSide && <span className="ml-1.5 text-[8px] font-black text-amber-500 bg-amber-500/10 px-1.5 py-0.5 rounded-full border border-amber-500/20">YOUR TEAM</span>}
+                        </div>
+                        <span className="text-[10px] text-slate-400 font-medium whitespace-nowrap">{p.injuryType ?? 'Injury'}</span>
+                        <span className="text-[10px] font-black text-slate-300 text-right">{days}d</span>
+                        <span className={`text-[9px] font-black uppercase tracking-widest px-2 py-0.5 rounded-full border whitespace-nowrap ${color}`}>
+                          {label}
+                        </span>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          )}
         </div>
       </div>
     );
