@@ -44,7 +44,7 @@ const DEFAULT_SETTINGS: Partial<LeagueSettings> = {
   customLotteryChances: [140,140,140,125,105,90,75,60,45,30,20,15,10,5,5],
   tradableDraftPickSeasons: 4, prospectAgeMin: 19, prospectAgeMax: 22,
   scheduledExpansion: 'Off', expansionTeamCount: 1, expansionDraftRules: 'Standard',
-  fatigueImpact: 'Medium', b2bPenalty: 'Mild', loadManagement: true,
+  fatigueImpact: 'Medium', b2bPenalty: 'Mild', loadManagement: true, b2bFatigueEnabled: true,
   injuryDuration: 'Realistic', practiceInjuries: false, careerEndingInjuries: true,
   teamChemistry: true, chemistryImpact: 'Medium', personalityClashPenalties: true,
   playerMorale: true, moraleAffectsAttributes: true, tradeRequestThreshold: 'Medium',
@@ -78,7 +78,7 @@ const BUILT_IN_PRESETS: Preset[] = [
     name: 'Arcade Mode',
     settings: {
       ...DEFAULT_SETTINGS,
-      difficulty: 'Rookie', fatigueImpact: 'None', b2bPenalty: 'None',
+      difficulty: 'Rookie', fatigueImpact: 'None', b2bPenalty: 'None', b2bFatigueEnabled: false,
       injuryFrequency: 'Low', careerEndingInjuries: false, practiceInjuries: false,
       teamChemistry: false, playerMorale: false,
       blowoutFrequency: 'Low', comebackFrequency: 'High',
@@ -327,7 +327,7 @@ const Settings: React.FC<SettingsProps> = ({ league, updateLeague, onRegenerateS
     const tabDefaults: Partial<LeagueSettings> = {};
     const tabMap: Record<SettingsTab, (keyof typeof DEFAULT_SETTINGS)[]> = {
       league:     ['playoffFormat','playoffSeeding','playInTournament','homeCourt','tradeDeadline','hardCapAtDeadline','maxContractYears','rookieScaleContracts','maxPlayerSalaryPct','birdRights','draftRounds','draftClassSize','internationalProspects','draftLottery','scheduledExpansion','expansionDraftRules','divisionGames','conferenceGames','tradeDeadlineFraction','splitByConference','guaranteedPerDivision','reseedRounds','ownerPatienceLevel','luxuryTaxMultiplier','budgetThreshold','tradeSalaryMatchPct','seasonLength','minRosterSize','maxRosterSize','draftType','customLotterySelections','tradableDraftPickSeasons','prospectAgeMin','prospectAgeMax','minPayroll','luxuryTaxThreshold','salaryCapType','pick1SalaryPct','roundsAboveMin','canRefuseAfterRookie'],
-      gameplay:   ['fatigueImpact','b2bPenalty','loadManagement','injuryDuration','practiceInjuries','careerEndingInjuries','teamChemistry','chemistryImpact','personalityClashPenalties','playerMorale','moraleAffectsAttributes','tradeRequestThreshold'],
+      gameplay:   ['fatigueImpact','b2bPenalty','loadManagement','b2bFatigueEnabled','injuryDuration','practiceInjuries','careerEndingInjuries','teamChemistry','chemistryImpact','personalityClashPenalties','playerMorale','moraleAffectsAttributes','tradeRequestThreshold'],
       sliders:    ['sliderLayup','sliderMidRange','slider3pt','sliderFreeThrow','sliderFastBreak','sliderPostUp','sliderPickRoll','sliderSteal','sliderBlock','sliderFoul','sliderHelpDefense','sliderPerimeterDefense','sliderTimeout','sliderSubstitution','sliderTechFoul','sliderFlagrantFoul','sliderInjuryMultiplier'],
       simulation: ['pbpDetailLevel','aiDecisionSpeed','blowoutFrequency','comebackFrequency','overtimeFrequency','upsetFrequency','globalPaceOverride','shotClockLength','scoringEra','threePtFrequency','simBlockFrequency','turnoverFrequency','wnbaStatRealism','singleYearSeason'],
       godmode:    ['editAnyPlayer','editAnyTeam','forceGameOutcomes','manipulateStandings','freeAgentMarketControl','draftClassEditor'],
@@ -1180,6 +1180,8 @@ const Settings: React.FC<SettingsProps> = ({ league, updateLeague, onRegenerateS
             <SelectField label="Back-to-Back Penalty" value={s.b2bPenalty ?? 'Mild'}
               options={['None','Mild','Severe']}
               onChange={v => updateSettings({ b2bPenalty: v as any }, 'Back-to-Back Penalty')} />
+            <ToggleField label="B2B Fatigue Impact" value={s.b2bFatigueEnabled !== false}
+              onChange={v => updateSettings({ b2bFatigueEnabled: v }, 'B2B Fatigue Impact')} />
             <ToggleField label="Load Management" value={s.loadManagement ?? true}
               onChange={v => updateSettings({ loadManagement: v }, 'Load Management')} />
 

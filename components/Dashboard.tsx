@@ -195,11 +195,23 @@ const Dashboard: React.FC<DashboardProps> = ({ league, news, onSimulate, onScout
     return `+${Math.round(100 * ((100 - pct) / pct))}`;
   };
 
+  // Next scheduled game for user's team
+  const nextScheduledGame = safeSchedule
+    .filter(g => !g.played && (g.homeTeamId === userTeam.id || g.awayTeamId === userTeam.id))
+    .sort((a, b) => a.day - b.day)[0];
+  const nextGameIsB2B = nextScheduledGame
+    ? (nextScheduledGame.homeTeamId === userTeam.id ? nextScheduledGame.homeB2B : nextScheduledGame.awayB2B)
+    : false;
+
   // Alerts
-  const alerts = [];
+  const alerts: { text: string; type: string }[] = [];
   const expiringSoon = userTeam.roster.filter(p => p.contractYears === 1).length;
   if (expiringSoon > 0) alerts.push({ text: `${expiringSoon} contracts expiring soon`, type: 'warning' });
-  
+
+  if (nextGameIsB2B && league.settings?.b2bFatigueEnabled !== false) {
+    alerts.push({ text: 'Back-to-Back Tonight — Fatigue Expected · Shooting efficiency & defense will drop', type: 'b2b' });
+  }
+
   const totalSalary = userTeam.roster.reduce((s, p) => s + p.salary, 0);
   if (league.settings?.salaryCap && totalSalary > league.settings.salaryCap) alerts.push({ text: "Over salary cap!", type: 'danger' });
   
@@ -245,20 +257,34 @@ const Dashboard: React.FC<DashboardProps> = ({ league, news, onSimulate, onScout
       {/* Alerts Bar */}
       {alerts.length > 0 && (
         <div className="flex flex-wrap gap-3">
-          {alerts.map((alert, i) => (
-            <div 
-              key={i} 
-              className={`flex items-center gap-2 px-4 py-2 rounded-xl border text-xs font-black uppercase tracking-widest animate-in slide-in-from-top-2 duration-500 delay-${i * 100}`}
-              style={{
-                backgroundColor: alert.type === 'critical' ? 'rgba(185, 28, 28, 0.15)' : alert.type === 'danger' ? 'rgba(244, 63, 94, 0.1)' : 'rgba(245, 158, 11, 0.1)',
-                borderColor: alert.type === 'critical' ? 'rgba(220, 38, 38, 0.4)' : alert.type === 'danger' ? 'rgba(244, 63, 94, 0.2)' : 'rgba(245, 158, 11, 0.2)',
-                color: alert.type === 'critical' ? '#ef4444' : alert.type === 'danger' ? '#f43f5e' : '#f59e0b'
-              }}
-            >
-              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" /></svg>
-              {alert.text}
-            </div>
-          ))}
+          {alerts.map((alert, i) => {
+            const isB2BAlert = alert.type === 'b2b';
+            const bgColor = alert.type === 'critical' ? 'rgba(185, 28, 28, 0.15)'
+              : alert.type === 'danger' ? 'rgba(244, 63, 94, 0.1)'
+              : isB2BAlert ? 'rgba(249, 115, 22, 0.12)'
+              : 'rgba(245, 158, 11, 0.1)';
+            const borderColor = alert.type === 'critical' ? 'rgba(220, 38, 38, 0.4)'
+              : alert.type === 'danger' ? 'rgba(244, 63, 94, 0.2)'
+              : isB2BAlert ? 'rgba(249, 115, 22, 0.35)'
+              : 'rgba(245, 158, 11, 0.2)';
+            const textColor = alert.type === 'critical' ? '#ef4444'
+              : alert.type === 'danger' ? '#f43f5e'
+              : isB2BAlert ? '#fb923c'
+              : '#f59e0b';
+            return (
+              <div
+                key={i}
+                className={`flex items-center gap-2 px-4 py-2 rounded-xl border text-xs font-black uppercase tracking-widest animate-in slide-in-from-top-2 duration-500 delay-${i * 100}${isB2BAlert ? ' ring-1 ring-orange-500/20' : ''}`}
+                style={{ backgroundColor: bgColor, borderColor, color: textColor }}
+              >
+                {isB2BAlert
+                  ? <span className="text-sm">🔥</span>
+                  : <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" /></svg>
+                }
+                {alert.text}
+              </div>
+            );
+          })}
         </div>
       )}
       

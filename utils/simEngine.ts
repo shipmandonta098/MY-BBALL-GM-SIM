@@ -3686,7 +3686,7 @@ export const simulateGame = (
   homeB2B = false,
   awayB2B = false,
   rivalryLevel = 'Ice Cold',
-  settings?: Pick<LeagueSettings, 'injuryFrequency' | 'homeCourt' | 'b2bFrequency' | 'quarterLength' | 'wnbaStatRealism' | 'upsetFrequency'>,
+  settings?: Pick<LeagueSettings, 'injuryFrequency' | 'homeCourt' | 'b2bFrequency' | 'quarterLength' | 'wnbaStatRealism' | 'upsetFrequency' | 'b2bFatigueEnabled' | 'fatigueImpact'>,
 ): GameResult => {
   // ── Settings-driven constants ──────────────────────────────────────────────
   const quarterLength = settings?.quarterLength ?? 12; // minutes per quarter
@@ -3696,6 +3696,13 @@ export const simulateGame = (
   const injuryMultiplier = injuryMult[settings?.injuryFrequency ?? 'Medium'] ?? 1.0;
   const b2bMap: Record<string, number> = { None: 1.0, Low: 0.97, Realistic: 0.93, High: 0.90, Brutal: 0.87 };
   const b2bPenalty = b2bMap[settings?.b2bFrequency ?? 'Realistic'] ?? 0.93;
+  // b2bFatigueEnabled gates the detailed per-stat B2B penalties (REB, AST, TOV, minutes).
+  // fatigueImpact scales magnitude: Low=0.33, Medium=0.67, High=1.0.
+  const b2bFatigueEnabled = settings?.b2bFatigueEnabled !== false;
+  const fatigueScaleMap: Record<string, number> = { None: 0, Low: 0.33, Medium: 0.67, High: 1.0 };
+  const b2bFatigueScale = b2bFatigueEnabled
+    ? (fatigueScaleMap[settings?.fatigueImpact ?? 'Medium'] ?? 0.67)
+    : 0;
   // How much the rating gap drives the outcome. Lower slope → more upsets.
   // Low=0.40 (dominant favorites), Medium=0.30, Realistic=0.25, High=0.15 (frequent upsets)
   const slopeMap: Record<string, number> = { Low: 0.40, Medium: 0.30, Realistic: 0.25, High: 0.15 };
@@ -3813,6 +3820,33 @@ export const simulateGame = (
   const pbp: PlayByPlayEvent[] = [
     { time: '12:00', text: 'Game Tip-off', type: 'info', quarter: 1 },
   ];
+
+  // ── B2B fatigue PBP flavor (injected pre-game and in Q2) ─────────────────
+  if (b2bFatigueScale > 0) {
+    const b2bEarlyLines = [
+      'Legs are heavy after last night\'s game — both teams looking to shake off the fatigue early.',
+      'Tired legs showing early — this back-to-back stretch is already showing on the floor.',
+      'You can see the fatigue setting in — that second night of a back-to-back is no joke.',
+      'The wear of last night\'s game is apparent — crisp execution will be at a premium tonight.',
+    ];
+    const b2bLateLines = [
+      'The back-to-back is catching up — decision-making getting sloppy in the second half.',
+      'Fatigue factor in full effect — defense is breaking down at both ends.',
+      'These tired legs can\'t keep up the intensity — substitutions going to be key down the stretch.',
+    ];
+    if (homeB2B) {
+      pbp.push({ time: '11:00', text: `${home.name} on a back-to-back — ${b2bEarlyLines[Math.floor(Math.random() * b2bEarlyLines.length)]}`, type: 'info', quarter: 1 });
+      if (b2bFatigueScale >= 0.5) {
+        pbp.push({ time: '6:30', text: `${home.name} showing fatigue — ${b2bLateLines[Math.floor(Math.random() * b2bLateLines.length)]}`, type: 'info', quarter: 3 });
+      }
+    }
+    if (awayB2B) {
+      pbp.push({ time: '10:30', text: `${away.name} on a back-to-back — ${b2bEarlyLines[Math.floor(Math.random() * b2bEarlyLines.length)]}`, type: 'info', quarter: 1 });
+      if (b2bFatigueScale >= 0.5) {
+        pbp.push({ time: '5:45', text: `${away.name} showing fatigue — ${b2bLateLines[Math.floor(Math.random() * b2bLateLines.length)]}`, type: 'info', quarter: 3 });
+      }
+    }
+  }
   const homeScheme = home.activeScheme ?? 'Balanced';
   const awayScheme = away.activeScheme ?? 'Balanced';
   const homeStreaks = new Map<string, number>();
@@ -4050,11 +4084,18 @@ export const simulateGame = (
     const totalRating = roster.reduce((acc, p) => acc + p.rating, 0);
     // WNBA FGA: ~75-80 per team vs NBA ~88-95. Coefficient 0.80 vs 1.10.
     const teamFga     = Math.round(statPace * (isWNBA ? 0.80 : 1.10));
-    // WNBA boards: ~32-38 per team vs NBA ~42-52. Coefficient 0.35 vs 0.50.
-    const teamReb     = Math.round(statPace * (isWNBA ? 0.35 : 0.50));
     // Assists: WNBA ~20 APG. With totalPts~82: (82/2.2)*0.54 ≈ 20 ✓
     // NBA: (112/2.2)*0.46 ≈ 23 ✓ (2024-25 range 22-26)
-    const teamAst     = Math.round((totalPts / 2.2) * (isWNBA ? 0.54 : 0.46));
+    const teamAstBase = Math.round((totalPts / 2.2) * (isWNBA ? 0.54 : 0.46));
+
+    // ── B2B fatigue team-stat penalties ──────────────────────────────────────
+    // Rebounds: up to -7.5% | Assists: up to -15% (stacked with PPP penalty)
+    const isB2BTeam = isHome ? homeB2B : awayB2B;
+    const rebFatigueMult = (isB2BTeam && b2bFatigueScale > 0) ? (1 - b2bFatigueScale * 0.075) : 1;
+    const astFatigueMult = (isB2BTeam && b2bFatigueScale > 0) ? (1 - b2bFatigueScale * 0.15)  : 1;
+    // WNBA boards: ~32-38 per team vs NBA ~42-52. Coefficient 0.35 vs 0.50.
+    const teamReb = Math.round(Math.round(statPace * (isWNBA ? 0.35 : 0.50)) * rebFatigueMult);
+    const teamAst = Math.round(teamAstBase * astFatigueMult);
 
     // Opponent defensive averages — computed once per team, applied to every player's box score.
     // Uses top-8 rotation players as the sample (starters + primary bench).
@@ -4151,6 +4192,21 @@ export const simulateGame = (
           mins = Math.round(6 * quarterLengthScale) + Math.round(Math.random() * 4 * quarterLengthScale);
         }
       }
+
+      // ── B2B fatigue: reduce high-minute starters ──────────────────────────
+      // Only applies to auto-rotation (manual rotation already reflects coach intent).
+      // Top 2 stars: -3 to -6 min; 3rd–5th starters: -1 to -3 min.
+      if (isB2BTeam && b2bFatigueScale > 0 && !(team.rotation && team.rotation.minutes[p.id] !== undefined)) {
+        const rank = ratingRank.get(p.id) ?? i;
+        if (rank <= 1) {
+          const cut = Math.round((3 + b2bFatigueScale * 3) * quarterLengthScale);
+          mins = Math.max(Math.round(28 * quarterLengthScale), mins - cut);
+        } else if (rank <= 4 && i < 5) {
+          const cut = Math.round((1 + b2bFatigueScale * 2) * quarterLengthScale);
+          mins = Math.max(Math.round(22 * quarterLengthScale), mins - cut);
+        }
+      }
+
       const ftBonus    = isHome ? 0.03 : 0;
       const varRoll    = playerVariance.get(p.id) ?? 0;
       const usageShare = usageShares[i];
@@ -4216,6 +4272,33 @@ export const simulateGame = (
 
   let homePlayerStats = distributeToPlayers(home, totalHome, true,  garbageTime);
   let awayPlayerStats = distributeToPlayers(away, totalAway, false, garbageTime);
+
+  // ── B2B extra turnovers (+1.2 to +2.5 per team per game) ─────────────────
+  // Distributed to top-minute active players; runs BEFORE the TOV clamp so the
+  // elevated ceiling on B2B nights is reflected in the final clamp pass.
+  if (b2bFatigueScale > 0) {
+    const addB2BTovs = (lines: typeof homePlayerStats, extraTov: number) => {
+      let remaining = extraTov;
+      const ranked = lines
+        .map((p, idx) => ({ idx, min: p.min ?? 0 }))
+        .filter(x => x.min > 0 && !lines[x.idx].dnp)
+        .sort((a, b) => b.min - a.min);
+      for (const { idx } of ranked) {
+        if (remaining <= 0) break;
+        lines[idx] = { ...lines[idx], tov: (lines[idx].tov ?? 0) + 1 };
+        remaining--;
+      }
+      return lines;
+    };
+    if (homeB2B) {
+      const extra = Math.round(1.2 + b2bFatigueScale * 1.3);
+      homePlayerStats = addB2BTovs([...homePlayerStats], extra);
+    }
+    if (awayB2B) {
+      const extra = Math.round(1.2 + b2bFatigueScale * 1.3);
+      awayPlayerStats = addB2BTovs([...awayPlayerStats], extra);
+    }
+  }
 
   totalHome = homePlayerStats.reduce((s, p) => s + p.pts, 0);
   totalAway = awayPlayerStats.reduce((s, p) => s + p.pts, 0);
@@ -4365,7 +4448,8 @@ export const simulateGame = (
       if (injuryMultiplier === 0) return; // 'None' — injuries disabled
       let chance = 0.004 * injuryMultiplier;
       if (p.min > 35) chance *= 1.5;
-      if (isB2B)      chance *= 1.3;
+      // B2B fatigue raises injury risk: base 1.15× scaling up to 1.50× at High fatigue
+      if (isB2B)      chance *= (b2bFatigueScale > 0 ? 1.15 + b2bFatigueScale * 0.35 : 1.3);
       // Durability attribute: 99 → ~50% less likely, 50 → neutral, 1 → ~50% more likely
       const durability = player.attributes.durability ?? 50;
       chance *= 1 - ((durability - 50) / 100);
@@ -4493,13 +4577,14 @@ export const simulateGame = (
   homePlayerStats = assignPlusMinuses(homePlayerStats, margin);
   awayPlayerStats = assignPlusMinuses(awayPlayerStats, -margin);
 
-  // ── Team TOV hard caps: floor 10 / ceiling 18 per game ───────────────────────
+  // ── Team TOV hard caps: floor 10 / ceiling 18 per game (21 on B2B) ──────────
   // Ensures season averages stay in the 9.8–17.8 realistic range regardless of
   // attribute distribution.  Floor deficit is spread across the highest-minute
   // active players (+1 each); ceiling excess is scaled down proportionally.
-  const clampTeamTov = (lines: typeof homePlayerStats): typeof homePlayerStats => {
+  // B2B ceiling raised to 21 to allow the extra turnovers injected above.
+  const clampTeamTov = (lines: typeof homePlayerStats, isB2B: boolean): typeof homePlayerStats => {
     const TOV_FLOOR   = 10;
-    const TOV_CEILING = 18;
+    const TOV_CEILING = (isB2B && b2bFatigueScale > 0) ? 21 : 18;
     const total = lines.reduce((s, p) => s + (p.tov ?? 0), 0);
     if (total >= TOV_FLOOR && total <= TOV_CEILING) return lines;
 
@@ -4522,8 +4607,8 @@ export const simulateGame = (
     }
     return result;
   };
-  homePlayerStats = clampTeamTov(homePlayerStats);
-  awayPlayerStats = clampTeamTov(awayPlayerStats);
+  homePlayerStats = clampTeamTov(homePlayerStats, homeB2B);
+  awayPlayerStats = clampTeamTov(awayPlayerStats, awayB2B);
 
   // ── Simulation Symmetry Check (dev console only — never affects sim math) ──
   // Logs a warning if one team's FG% is 8%+ better than the opponent in this game.
