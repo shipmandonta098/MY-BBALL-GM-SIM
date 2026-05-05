@@ -281,16 +281,40 @@ const Expansion: React.FC<ExpansionProps> = ({ league, updateLeague, onScout }) 
       return t;
     });
 
-    const pick = Math.floor(draftIdx / expIds.length) + 1;
-    const round = pick <= expIds.length ? `R1 P${draftIdx + 1}` : `R${Math.ceil(pick / expIds.length)} P${draftIdx + 1}`;
-    const log = `${round}: ${expTeam.name} — ${picked.name} (${picked.position}, ${picked.rating} OVR) from ${fromTeamName}`;
+    const overallPick = draftIdx + 1;
+    const roundNum = Math.floor(draftIdx / expIds.length) + 1;
+    const roundLabel = `R${roundNum} P${overallPick}`;
+    const log = `${roundLabel}: ${expTeam.name} — ${picked.name} (${picked.position}, ${picked.rating} OVR) from ${fromTeamName}`;
+
+    const flavor = picked.rating >= 85
+      ? 'A proven veteran who brings immediate impact.'
+      : picked.rating >= 78
+      ? 'A reliable contributor targeted for their experience.'
+      : 'A developmental piece added to build depth.';
+
+    const pickNewsItem: NewsItem = {
+      id: `exp-pick-${draftIdx}-${Date.now()}`,
+      category: 'transaction' as const,
+      headline: roundNum === 1 ? `EXPANSION DRAFT: R1 PICK ${overallPick}` : `EXPANSION DRAFT: R${roundNum}`,
+      content: `Expansion Draft: ${expTeam.city} ${expTeam.name} select ${picked.name} (${picked.position}, ${picked.age ?? ''}${picked.age ? ', ' : ''}${picked.rating} OVR) from ${fromTeamName}. ${flavor}`,
+      timestamp: league.currentDay,
+      realTimestamp: Date.now() + draftIdx * 10,
+      teamId: expId,
+      playerId: picked.id,
+      isBreaking: false,
+      seasonYear: league.season,
+    };
 
     updateLeague({
       teams: updatedTeams,
-      expansionDraft: { ...draftState, draftLog: [log, ...draftState.draftLog] },
+      expansionDraft: {
+        ...draftState,
+        draftLog: [log, ...draftState.draftLog],
+        pickNews: [pickNewsItem, ...(draftState.pickNews ?? [])],
+      },
     });
     setDraftIdx(prev => prev + 1);
-  }, [draftState, draftIdx, league.teams, unprotectedPool, updateLeague]);
+  }, [draftState, draftIdx, league.teams, league.currentDay, league.season, unprotectedPool, updateLeague]);
 
   // ── auto-draft loop ────────────────────────────────────────────────────────
   useEffect(() => {
@@ -313,35 +337,46 @@ const Expansion: React.FC<ExpansionProps> = ({ league, updateLeague, onScout }) 
       return { ...t, rotation: generateDefaultRotation(t.roster) };
     });
 
-    const newsItems: NewsItem[] = draftState.expansionTeamIds.map((tid, i) => {
+    const teamCompleteItems: NewsItem[] = draftState.expansionTeamIds.map((tid, i) => {
       const team = updatedTeams.find(t => t.id === tid);
       const gmName = draftState.pendingTeams?.find(pt => pt.id === tid)?.gmName ?? 'the new GM';
+      const rosterSize = team?.roster.length ?? 0;
+      const topPlayer = team?.roster.slice().sort((a, b) => b.rating - a.rating)[0];
+      const topStr = topPlayer ? ` Led by ${topPlayer.name} (${topPlayer.position}, ${topPlayer.rating} OVR),` : '';
       return {
         id: `exp-news-${tid}-${Date.now()}`,
-        category: 'transaction' as const,
-        headline: `${team?.name ?? 'Expansion Team'} joins the league!`,
-        content: `The ${team?.city ?? ''} ${team?.name ?? 'Expansion franchise'} has completed its expansion draft under GM ${gmName}. The team selected ${team?.roster.length ?? 0} players and will join league play next season.`,
+        category: 'expansion' as const,
+        headline: `🏀 ${team?.name ?? 'Expansion Team'} JOINS THE LEAGUE`,
+        content: `The ${team?.city ?? ''} ${team?.name ?? 'Expansion franchise'} has completed its Expansion Draft under GM ${gmName}, selecting ${rosterSize} players.${topStr} the franchise is ready to begin play next season.`,
         timestamp: league.currentDay,
         realTimestamp: Date.now() + i * 50,
         teamId: tid,
         isBreaking: true,
+        seasonYear: league.season,
       };
     });
 
-    // Add draft-result news
-    const draftRecap: NewsItem = {
+    // Wrap up headline item
+    const teamNames = draftState.expansionTeamIds
+      .map(tid => updatedTeams.find(t => t.id === tid)?.name ?? 'Expansion Team')
+      .join(' & ');
+    const wrapUpItem: NewsItem = {
       id: `exp-recap-${Date.now()}`,
-      category: 'transaction' as const,
+      category: 'expansion' as const,
       headline: 'Expansion Draft Complete — League Grows!',
-      content: draftState.draftLog.slice(0, 6).join(' | '),
+      content: `The ${teamNames} ${draftState.expansionTeamIds.length > 1 ? 'have' : 'has'} completed the Expansion Draft. Both franchises will join league play next season.`,
       timestamp: league.currentDay,
       realTimestamp: Date.now() + 200,
       isBreaking: false,
+      seasonYear: league.season,
     };
+
+    // Per-pick news items accumulated during the draft (most recent first already)
+    const perPickNews: NewsItem[] = draftState.pickNews ?? [];
 
     updateLeague({
       teams: updatedTeams,
-      newsFeed: [...newsItems, draftRecap, ...league.newsFeed],
+      newsFeed: [...teamCompleteItems, wrapUpItem, ...perPickNews, ...league.newsFeed],
       expansionDraft: { ...draftState, active: false },
     });
   }, [draftState, league.teams, league.newsFeed, league.currentDay, updateLeague]);
