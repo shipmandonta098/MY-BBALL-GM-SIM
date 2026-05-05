@@ -237,18 +237,50 @@ export const POS_ATTR_RANGES: Record<Position, Record<PosAttrRangeKey, [number, 
 // ── Granular per-attribute hard caps & floors ────────────────────────────────
 type AttrBounds = Partial<Record<keyof Player['attributes'], number>>;
 export const POSITION_HARD_CAPS: Record<Position, AttrBounds> = {
-  PG: { blocks: 55, interiorDef: 58, offReb: 52, defReb: 65, postScoring: 60, strength: 68 },
-  SG: { blocks: 62, interiorDef: 65, offReb: 58, defReb: 68, postScoring: 65, strength: 72 },
-  SF: { blocks: 75, interiorDef: 78, offReb: 74, defReb: 78, shooting3pt: 92, strength: 80 },
-  PF: { shooting3pt: 82, ballHandling: 74, speed: 80, perimeterDef: 78, passing: 75 },
-  C:  { shooting3pt: 72, ballHandling: 68, speed: 72, perimeterDef: 70, passing: 68 },
+  PG: { blocks: 55, interiorDef: 58, offReb: 52, defReb: 65, postScoring: 60, strength: 68, freeThrow: 99 },
+  SG: { blocks: 62, interiorDef: 65, offReb: 58, defReb: 68, postScoring: 65, strength: 72, freeThrow: 99 },
+  SF: { blocks: 75, interiorDef: 78, offReb: 74, defReb: 78, shooting3pt: 92, strength: 80, freeThrow: 96 },
+  PF: { shooting3pt: 82, ballHandling: 74, speed: 80, perimeterDef: 78, passing: 75, freeThrow: 88 },
+  C:  { shooting3pt: 72, ballHandling: 68, speed: 72, perimeterDef: 70, passing: 68, freeThrow: 79 },
 };
 export const POSITION_HARD_FLOORS: Record<Position, AttrBounds> = {
-  PG: { ballHandling: 78, speed: 80, passing: 75, perimeterDef: 72, shooting3pt: 75 },
-  SG: { shooting3pt: 76, speed: 76, perimeterDef: 74, ballHandling: 70 },
-  SF: { speed: 60, perimeterDef: 72, athleticism: 76 },
-  PF: { strength: 78, interiorDef: 76, offReb: 72, defReb: 75 },
-  C:  { strength: 82, interiorDef: 80, offReb: 76, defReb: 78, blocks: 76, postScoring: 76 },
+  PG: { ballHandling: 78, speed: 80, passing: 75, perimeterDef: 72, shooting3pt: 75, freeThrow: 65 },
+  SG: { shooting3pt: 76, speed: 76, perimeterDef: 74, ballHandling: 70, freeThrow: 63 },
+  SF: { speed: 60, perimeterDef: 72, athleticism: 76, freeThrow: 52 },
+  PF: { strength: 78, interiorDef: 76, offReb: 72, defReb: 75, freeThrow: 44 },
+  C:  { strength: 82, interiorDef: 80, offReb: 76, defReb: 78, blocks: 76, postScoring: 76, freeThrow: 36 },
+};
+
+// ── Per-attribute generation bias by position ────────────────────────────────
+// Applied on top of the regional flavor when generating raw granular attributes.
+// Positive = higher baseline; negative = lower. Magnitude tuned to real NBA/WNBA
+// stat profiles: FT% especially position-sensitive (C ~68-72%, PG/SG ~80-83%).
+// These biases shift the random roll center; POSITION_HARD_CAPS/FLOORS still clamp
+// extreme outliers.
+export const POS_GRANULAR_BIAS: Record<Position, Partial<Record<string, number>>> = {
+  PG: {
+    freeThrow: +10, ballHandling: +14, speed: +8, passing: +10, perimeterDef: +6,
+    shooting3pt: +4, postScoring: -14, interiorDef: -12, blocks: -14, strength: -10,
+    offReb: -10, defReb: -6,
+  },
+  SG: {
+    freeThrow: +8,  ballHandling: +6, speed: +6, perimeterDef: +5, shooting3pt: +6,
+    postScoring: -8, interiorDef: -8, blocks: -10, strength: -5,
+  },
+  SF: {
+    freeThrow: 0, speed: +2, athleticism: +4, shooting3pt: +2,
+    postScoring: +2, strength: +2,
+  },
+  PF: {
+    freeThrow: -10, strength: +12, interiorDef: +8, postScoring: +10,
+    offReb: +10, defReb: +10, blocks: +6,
+    ballHandling: -10, speed: -6, perimeterDef: -8, shooting3pt: -8,
+  },
+  C: {
+    freeThrow: -20, strength: +16, interiorDef: +14, blocks: +14, postScoring: +14,
+    offReb: +14, defReb: +14,
+    ballHandling: -18, speed: -14, perimeterDef: -16, shooting3pt: -18, passing: -10,
+  },
 };
 
 // ── Position-weighted overall rating formula ─────────────────────────────
@@ -1575,39 +1607,43 @@ export const generatePlayer = (id: string, ageRange: [number, number] = [19, 38]
   const _leagueYear = leagueYear ?? new Date().getFullYear();
   
   const f = region.flavor;
-  const getRandomAttr = (base: number, flavor: number = 0) => 
+  const getRandomAttr = (base: number, flavor: number = 0) =>
     Math.min(99, Math.max(25, Math.floor(base + flavor + (Math.random() * 20 - 10))));
   const playerHometown = region.hometowns[Math.floor(Math.random() * region.hometowns.length)];
   const physGender = gender === 'Female' ? 'Female' : 'Male';
   const phys = genPhysical(pos, physGender);
   const posRanges = POS_ATTR_RANGES[pos];
   const clampPos = (val: number, key: PosAttrRangeKey) => { const [lo, hi] = posRanges[key]; return Math.min(Math.min(99, hi), Math.max(lo, val)); };
+  // Position granular bias: shifts each raw attr center toward position-realistic values.
+  const gb = POS_GRANULAR_BIAS[pos] ?? {};
+  const ba = (base: number, flavor: number = 0, key?: string) =>
+    getRandomAttr(base, flavor + (key !== undefined && gb[key] !== undefined ? (gb[key] as number) : 0));
   const rawAttrs: AttrMap = {
     shooting:    clampPos(rating + f.shooting,     'shooting'),
     defense:     clampPos(rating,                  'defense'),
     rebounding:  clampPos(rating,                  'rebounding'),
     playmaking:  clampPos(rating + f.passing,      'playmaking'),
     athleticism: clampPos(rating + f.athleticism,  'athleticism'),
-    layups: getRandomAttr(rating),
-    dunks: getRandomAttr(rating, f.athleticism),
-    shootingMid: getRandomAttr(rating, f.shooting),
-    shooting3pt: getRandomAttr(rating, f.shooting),
-    freeThrow: getRandomAttr(rating, f.shooting),
-    speed: getRandomAttr(rating, f.athleticism),
-    strength: getRandomAttr(rating, f.athleticism),
-    jumping: getRandomAttr(rating, f.athleticism),
-    stamina: getRandomAttr(rating),
-    perimeterDef: getRandomAttr(rating),
-    interiorDef: getRandomAttr(rating),
-    steals: getRandomAttr(rating),
-    blocks: getRandomAttr(rating),
-    defensiveIQ: getRandomAttr(rating, f.iq),
-    ballHandling: getRandomAttr(rating, f.passing),
-    passing: getRandomAttr(rating, f.passing),
-    offensiveIQ: getRandomAttr(rating, f.iq),
-    postScoring: getRandomAttr(rating),
-    offReb: getRandomAttr(rating),
-    defReb: getRandomAttr(rating),
+    layups:       ba(rating, 0,            'layups'),
+    dunks:        ba(rating, f.athleticism, 'dunks'),
+    shootingMid:  ba(rating, f.shooting,   'shootingMid'),
+    shooting3pt:  ba(rating, f.shooting,   'shooting3pt'),
+    freeThrow:    ba(rating, f.shooting,   'freeThrow'),
+    speed:        ba(rating, f.athleticism,'speed'),
+    strength:     ba(rating, f.athleticism,'strength'),
+    jumping:      ba(rating, f.athleticism,'jumping'),
+    stamina:      ba(rating, 0,            'stamina'),
+    perimeterDef: ba(rating, 0,            'perimeterDef'),
+    interiorDef:  ba(rating, 0,            'interiorDef'),
+    steals:       ba(rating, 0,            'steals'),
+    blocks:       ba(rating, 0,            'blocks'),
+    defensiveIQ:  ba(rating, f.iq,         'defensiveIQ'),
+    ballHandling: ba(rating, f.passing,    'ballHandling'),
+    passing:      ba(rating, f.passing,    'passing'),
+    offensiveIQ:  ba(rating, f.iq,         'offensiveIQ'),
+    postScoring:  ba(rating, 0,            'postScoring'),
+    offReb:       ba(rating, 0,            'offReb'),
+    defReb:       ba(rating, 0,            'defReb'),
     // Durability is independent of skill — wide random spread (30–95)
     durability: Math.min(99, Math.max(20, Math.floor(55 + (Math.random() * 60 - 15)))),
   };
@@ -1771,39 +1807,42 @@ export const generateProspects = (year: number, count: number = 100, genderRatio
     
     // Apply regional flavor
     const f = region.flavor;
-    const getRandomAttr = (base: number, flavor: number = 0) => 
+    const getRandomAttr = (base: number, flavor: number = 0) =>
       Math.min(99, Math.max(25, Math.floor(base + flavor + (Math.random() * 25 - 12))));
     const prospectHometown = region.hometowns[Math.floor(Math.random() * region.hometowns.length)];
     const physGender = gender === 'Female' ? 'Female' : 'Male';
     const phys = genPhysical(pos, physGender);
     const posRanges = POS_ATTR_RANGES[pos];
     const clampPos = (val: number, key: PosAttrRangeKey) => { const [lo, hi] = posRanges[key]; return Math.min(Math.min(99, hi), Math.max(lo, val)); };
+    const gb = POS_GRANULAR_BIAS[pos] ?? {};
+    const ba = (base: number, flavor: number = 0, key?: string) =>
+      getRandomAttr(base, flavor + (key !== undefined && gb[key] !== undefined ? (gb[key] as number) : 0));
     const rawAttrs: AttrMap = {
       shooting:    clampPos(rating + f.shooting,    'shooting'),
       defense:     clampPos(rating,                 'defense'),
       rebounding:  clampPos(rating,                 'rebounding'),
       playmaking:  clampPos(rating + f.passing,     'playmaking'),
       athleticism: clampPos(rating + f.athleticism, 'athleticism'),
-      layups: getRandomAttr(rating),
-      dunks: getRandomAttr(rating, f.athleticism),
-      shootingMid: getRandomAttr(rating, f.shooting),
-      shooting3pt: getRandomAttr(rating, f.shooting),
-      freeThrow: getRandomAttr(rating, f.shooting),
-      speed: getRandomAttr(rating, f.athleticism),
-      strength: getRandomAttr(rating, f.athleticism),
-      jumping: getRandomAttr(rating, f.athleticism),
-      stamina: getRandomAttr(rating),
-      perimeterDef: getRandomAttr(rating),
-      interiorDef: getRandomAttr(rating),
-      steals: getRandomAttr(rating),
-      blocks: getRandomAttr(rating),
-      defensiveIQ: getRandomAttr(rating, f.iq),
-      ballHandling: getRandomAttr(rating, f.passing),
-      passing: getRandomAttr(rating, f.passing),
-      offensiveIQ: getRandomAttr(rating, f.iq),
-      postScoring: getRandomAttr(rating),
-      offReb: getRandomAttr(rating),
-      defReb: getRandomAttr(rating),
+      layups:       ba(rating, 0,             'layups'),
+      dunks:        ba(rating, f.athleticism, 'dunks'),
+      shootingMid:  ba(rating, f.shooting,    'shootingMid'),
+      shooting3pt:  ba(rating, f.shooting,    'shooting3pt'),
+      freeThrow:    ba(rating, f.shooting,    'freeThrow'),
+      speed:        ba(rating, f.athleticism, 'speed'),
+      strength:     ba(rating, f.athleticism, 'strength'),
+      jumping:      ba(rating, f.athleticism, 'jumping'),
+      stamina:      ba(rating, 0,             'stamina'),
+      perimeterDef: ba(rating, 0,             'perimeterDef'),
+      interiorDef:  ba(rating, 0,             'interiorDef'),
+      steals:       ba(rating, 0,             'steals'),
+      blocks:       ba(rating, 0,             'blocks'),
+      defensiveIQ:  ba(rating, f.iq,          'defensiveIQ'),
+      ballHandling: ba(rating, f.passing,     'ballHandling'),
+      passing:      ba(rating, f.passing,     'passing'),
+      offensiveIQ:  ba(rating, f.iq,          'offensiveIQ'),
+      postScoring:  ba(rating, 0,             'postScoring'),
+      offReb:       ba(rating, 0,             'offReb'),
+      defReb:       ba(rating, 0,             'defReb'),
       durability: Math.min(99, Math.max(20, Math.floor(55 + (Math.random() * 60 - 15)))),
     };
     const pAttrs = applyPhysical(rawAttrs, pos, physGender, phys.heightIn, phys.weight);
