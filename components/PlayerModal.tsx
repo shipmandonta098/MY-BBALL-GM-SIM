@@ -1659,48 +1659,37 @@ const PlayerModal: React.FC<PlayerModalProps> = ({
                 - 1.5 * (bpg - lgBLK / Math.max(1, lgMPG) * mpg) / Math.max(0.1, mpg) * mpg
                 - 0.5 * (s.defReb/gp - lgDRB / Math.max(1, lgMPG) * mpg) / Math.max(0.1, mpg) * mpg;
 
-              // ── Win Shares ──
-              const lgPtsPerPoss = lgORtg / 100;
-              const marginalOff  = (ORtg/100 - 0.92 * lgPtsPerPoss) * possUsed;
-              const OWS = marginalOff / 33.33;
-              const marginalDef  = (lgDRtg/100 - DRtg/100) * (s.minutes * PACE / 48);
-              const DWS = marginalDef / 33.33;
+              // ── BPM — per-game formula matching Stats.tsx calibration ──
+              // avg player (14p/4r/3a, 55% TS) ≈ 0; All-Star (25/7/7, 58% TS) ≈ +6.
+              const fgMissedPg = gp > 0 ? (s.fga - s.fgm) / gp : 0;
+              const OBPM = Math.min(10, Math.max(-8,
+                (ppg       - 10.0) * 0.28
+                + (apg     -  2.0) * 0.65
+                - tpg               * 0.80
+                - fgMissedPg        * 0.12
+                + (ts      - 0.52) * 20
+              ));
+              const DBPM = Math.min(6, Math.max(-4,
+                (spg  - 0.80) * 1.50
+                + (bpg - 0.40) * 1.20
+                + (s.defReb / gp - 2.5) * 0.15
+                - 0.80
+              ));
+              const BPM  = Math.min(12, Math.max(-8, OBPM + DBPM));
+              const VORP = Math.max(0, (BPM + 2.0) * (s.minutes / (48 * SEASON)));
+
+              // ── Win Shares — derived from BPM (avg=0.100, star=0.220+) ──
+              const WS48 = Math.max(0, Math.min(0.350, (BPM + 2.0) * 0.020 + 0.060));
+              const WS_raw = s.minutes > 0 ? WS48 * s.minutes / 48 : 0;
+              const obpmPos = Math.max(0, OBPM + 2.0);
+              const dbpmPos = Math.max(0, DBPM + 2.0);
+              const bpmSum  = obpmPos + dbpmPos || 1;
+              const OWS = Math.min(12, WS_raw * (obpmPos / bpmSum));
+              const DWS = Math.min(10, WS_raw * (dbpmPos / bpmSum));
               const WS  = OWS + DWS;
-              const WS48 = s.minutes > 0 ? WS * 48 / s.minutes : 0;
 
-              // ── EWA (Estimated Wins Added) ──
-              const EWA = (per - 11.5) * s.minutes / 67.5;
-
-              // ── BPM / VORP (simplified box score method) ──
-              // Based on normalized per-100-possession stats
-              const p100 = PACE > 0 && mpg > 0 ? 100 / (mpg / 48 * PACE) : 1;
-              const pts100  = ppg  * p100;
-              const reb100  = rpg  * p100;
-              const ast100  = apg  * p100;
-              const stl100  = spg  * p100;
-              const blk100  = bpg  * p100;
-              const tov100  = tpg  * p100;
-              const orb100  = (s.offReb/gp) * p100;
-
-              const OBPM = (-2.750)
-                + 0.190 * pts100
-                + 0.140 * ast100
-                + 0.050 * orb100
-                + 0.070 * (reb100 - orb100)
-                - 0.175 * tov100
-                + 0.050 * (USGpctProper/100 * 100 - 20)
-                + 0.120 * (ts * 100 - 55)
-                + 0.080 * threePAr * 100
-                - 0.050 * FTr * 100;
-              const DBPM = (-2.200)
-                + 0.140 * stl100
-                + 0.100 * blk100
-                + 0.060 * (reb100 - orb100)
-                - 0.040 * ast100
-                - 0.040 * tov100
-                - 0.030 * (USGpctProper/100 * 100 - 20);
-              const BPM  = OBPM + DBPM;
-              const VORP = (BPM - (-2.0)) * (s.minutes / 48) / SEASON;
+              // ── EWA (Estimated Wins Added) — uses MPG, not season total ──
+              const EWA = (per - 11.5) * mpg / 67.5;
 
               return {
                 threePAr, FTr, TOVpct, USGpct: USGpctProper,

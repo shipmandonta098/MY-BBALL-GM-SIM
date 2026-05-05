@@ -206,32 +206,33 @@ const Stats: React.FC<StatsProps> = ({ league, onViewRoster, onManageTeam, onVie
     // PER — league-normalized so avg ≈ 15.0, stars 22–32, bench < 12
     const PER = normalizePER(rawUPER(p.stats), lgAvgRaw);
 
-    // ── Box Plus/Minus (BPM) ────────────────────────────────────────────
-    // OBPM: APG weight reduced 0.58→0.50 to stop elite pass/score combos from
-    //   inflating past realistic bounds. PPG/TOV/miss weights unchanged.
-    const OBPM = (ppg - 11.0) * 0.23 + (apg - 2.2) * 0.50 - tovpg * 0.62 - (fgapg - fgmpg) * 0.14;
-    // DBPM: SPG 1.40→1.05, BPG 0.95→0.72, dreb 0.11→0.09 — keeps elite
-    //   defenders in the realistic +2 to +5 range; hard cap at +5.5.
-    const DBPM = Math.min(5.5,
-      (spg - 0.85) * 1.05 + (bpg - 0.45) * 0.72 + (drebpg - 2.3) * 0.09 - pfpg * 0.04
-    );
-    // Hard clamp: even the best real player rarely exceeds +12 BPM.
+    // BPM — calibrated so avg player (14p/4r/3a, 55% TS) ≈ 0, All-Star (25/7/7, 58% TS) ≈ +6.
+    const OBPM = Math.min(10, Math.max(-8,
+      (ppg        - 10.0) * 0.28
+      + (apg      -  2.0) * 0.65
+      - tovpg              * 0.80
+      - (fgapg - fgmpg)   * 0.12
+      + (TS       - 0.52) * 20
+    ));
+    const DBPM = Math.min(6, Math.max(-4,
+      (spg    - 0.80) * 1.50
+      + (bpg  - 0.40) * 1.20
+      + (drebpg - 2.5) * 0.15
+      - 0.80
+    ));
     const BPM = Math.min(12, Math.max(-8, OBPM + DBPM));
 
-    // VORP — scaled by 0.75 to align with capped BPM values
-    const VORP = (BPM - (-2.0)) * (p.stats.minutes / (48 * 82)) * 0.75;
+    // VORP — (BPM + 2) × fraction of full 48-min season played (no arbitrary scale factor).
+    const VORP = Math.max(0, (BPM + 2.0) * (p.stats.minutes / (48 * 82)));
 
-    // Win Shares — divisor tuned so top WS/48 lands 0.22–0.29.
-    //   BPM +8 starter  → WS48 ≈ 0.254; BPM +10 → WS48 ≈ 0.285 (cap 0.290).
-    //   Full-season leader at 38 MPG: OWS ≤ 11.5, DWS ≤ 9.5, total 16–20.
-    const WS48 = Math.max(0, Math.min(0.290, (BPM + 2.0) / 65 + 0.100));
+    // WS/48 — avg player (BPM=0) → 0.100; star (BPM=+6) → 0.220; elite (BPM=+10) → 0.300.
+    const WS48 = Math.max(0, Math.min(0.350, (BPM + 2.0) * 0.020 + 0.060));
     const WS_raw = p.stats.minutes > 0 ? WS48 * p.stats.minutes / 48 : 0;
-    // OWS/DWS — split proportional to BPM components, then individually capped.
     const obpmPos = Math.max(0, OBPM + 2.0);
     const dbpmPos = Math.max(0, DBPM + 2.0);
     const bpmSum  = obpmPos + dbpmPos || 1;
-    const OWS = Math.min(11.5, WS_raw * (obpmPos / bpmSum));
-    const DWS = Math.min(9.5,  WS_raw * (dbpmPos / bpmSum));
+    const OWS = Math.min(12, WS_raw * (obpmPos / bpmSum));
+    const DWS = Math.min(10, WS_raw * (dbpmPos / bpmSum));
     const WS  = OWS + DWS;
 
     // ±/100 Possessions — gate at 10 MPG so garbage-time specialists
