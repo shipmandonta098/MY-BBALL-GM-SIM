@@ -4079,7 +4079,7 @@ export const simulateGame = (
 
   // ── 7. Player stat distribution ──────────────────────────────────────────
   const statPace = totalPoss; // use actual total possessions for FGA/REB scaling
-  const distributeToPlayers = (team: Team, totalPts: number, isHome: boolean, isGT: boolean) => {
+  const distributeToPlayers = (team: Team, totalPts: number, isHome: boolean, isGT: boolean, teamScoreDiff: number) => {
     const roster      = team.roster;
     const totalRating = roster.reduce((acc, p) => acc + p.rating, 0);
     // WNBA FGA: ~75-80 per team vs NBA ~88-95. Coefficient 0.80 vs 1.10.
@@ -4166,18 +4166,38 @@ export const simulateGame = (
       }
 
       let mins = 0;
+      // Game-script categories used by both manual and auto rotation
+      const isBlowoutWin = teamScoreDiff >= 15;
+      const isCloseGame  = Math.abs(teamScoreDiff) <= 5;
+
       if (team.rotation && team.rotation.minutes[p.id] !== undefined) {
-        mins = Math.round(team.rotation.minutes[p.id] * quarterLengthScale);
+        const baseMins = Math.round(team.rotation.minutes[p.id] * quarterLengthScale);
+        // Starters shift minutes based on game script
+        let scriptAdj = 0;
+        if (i < 5) {
+          if (isBlowoutWin)   scriptAdj = -(3 + Math.floor(Math.random() * 4)); // -3 to -6: rest starters
+          else if (isCloseGame) scriptAdj = 2 + Math.floor(Math.random() * 3); // +2 to +4: grind it out
+        }
+        // Nightly variance: same player won't play identical minutes every game (±1-3)
+        const nightly = Math.round(Math.random() * 6) - 3;
+        mins = Math.max(0, baseMins + scriptAdj + nightly);
       } else {
         const rank = ratingRank.get(p.id) ?? i;
         if (i < 5) {
-          if (rank === 0)      mins = 37 + Math.floor(Math.random() * 4);
-          else if (rank === 1) mins = 34 + Math.floor(Math.random() * 4);
-          else if (rank === 2) mins = 30 + Math.floor(Math.random() * 4);
-          else                 mins = 26 + Math.floor(Math.random() * 5);
+          if (isCloseGame) {
+            // Close game / comeback: starters grind longer (36–40)
+            mins = 36 + Math.floor(Math.random() * 5);
+          } else {
+            if (rank === 0)      mins = 35 + Math.floor(Math.random() * 4); // 35–38
+            else if (rank === 1) mins = 32 + Math.floor(Math.random() * 5); // 32–36
+            else if (rank === 2) mins = 29 + Math.floor(Math.random() * 5); // 29–33
+            else                 mins = 26 + Math.floor(Math.random() * 6); // 26–31
+          }
+          // Extra nightly noise for auto rotation (±2)
+          mins += Math.round(Math.random() * 4) - 2;
         } else if (i < 9) mins = 14 + Math.floor(Math.random() * 10);
         else if (i < 12)  mins = Math.floor(Math.random() * 6);
-        mins = Math.round(mins * quarterLengthScale);
+        mins = Math.max(0, Math.round(mins * quarterLengthScale));
       }
       if (isGT) {
         const isLeading = isHome ? totalHome > totalAway : totalAway > totalHome;
@@ -4270,8 +4290,8 @@ export const simulateGame = (
     return raw;
   };
 
-  let homePlayerStats = distributeToPlayers(home, totalHome, true,  garbageTime);
-  let awayPlayerStats = distributeToPlayers(away, totalAway, false, garbageTime);
+  let homePlayerStats = distributeToPlayers(home, totalHome, true,  garbageTime, totalHome - totalAway);
+  let awayPlayerStats = distributeToPlayers(away, totalAway, false, garbageTime, totalAway - totalHome);
 
   // ── B2B extra turnovers (+1.2 to +2.5 per team per game) ─────────────────
   // Distributed to top-minute active players; runs BEFORE the TOV clamp so the
