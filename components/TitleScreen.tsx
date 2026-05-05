@@ -81,47 +81,105 @@ const TitleScreen: React.FC<TitleScreenProps> = ({
     <div className={`fixed inset-0 bg-slate-950 flex flex-col items-center justify-center z-[100] overflow-hidden transition-all duration-1000 ${isExiting ? 'opacity-0 scale-110 pointer-events-none' : 'opacity-100 scale-100'}`}>
       {/* Background: glows + basketball court texture */}
       <div className="absolute inset-0 overflow-hidden pointer-events-none">
-        <div className="absolute top-1/4 left-1/4 w-[600px] h-[600px] bg-amber-500/8 rounded-full blur-[160px]"></div>
-        <div className="absolute bottom-1/3 right-1/4 w-[700px] h-[700px] bg-amber-600/5 rounded-full blur-[200px]"></div>
 
-        {/* Basketball court outline — top-down, centred, very subtle */}
+        {/* ── Layer 1: Hardwood plank texture ── */}
+        <div className="absolute inset-0" style={{
+          backgroundImage: `
+            repeating-linear-gradient(
+              180deg,
+              rgba(200,140,55,0.09) 0px,
+              rgba(175,115,40,0.05) 11px,
+              rgba(145,90,28,0.09)  22px,
+              rgba(70, 40, 8, 0.30) 23px,
+              rgba(200,140,55,0.09) 24px
+            ),
+            repeating-linear-gradient(
+              90deg,
+              transparent 0px,
+              rgba(210,150,60,0.018) 3px,
+              transparent 6px,
+              transparent 88px,
+              rgba(170,110,42,0.022) 91px,
+              transparent 94px
+            )
+          `,
+        }} />
+
+        {/* ── Layer 2: Basketball silhouette (centred, faint amber glow) ── */}
         <svg
-          className="absolute inset-0 w-full h-full opacity-[0.055]"
-          viewBox="0 0 940 500"
-          preserveAspectRatio="xMidYMid meet"
+          className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-[53%] opacity-[0.075] basketball-pulse"
+          style={{ width: '680px', height: '680px', filter: 'drop-shadow(0 0 48px rgba(245,158,11,0.28))' }}
+          viewBox="0 0 500 500"
           fill="none"
           stroke="#f59e0b"
-          strokeWidth="1.5"
+          strokeWidth="5.5"
+          strokeLinecap="round"
         >
-          {/* Outer boundary */}
-          <rect x="20" y="20" width="900" height="460" rx="4" />
-          {/* Mid-court line */}
-          <line x1="470" y1="20" x2="470" y2="480" />
-          {/* Centre circle */}
-          <circle cx="470" cy="250" r="60" />
-          {/* Left key */}
-          <rect x="20" y="155" width="160" height="190" />
-          <line x1="20" y1="205" x2="180" y2="205" />
-          <line x1="20" y1="295" x2="180" y2="295" />
-          {/* Left free-throw circle */}
-          <path d="M 180 190 A 60 60 0 0 1 180 310" />
-          <path d="M 180 190 A 60 60 0 0 0 180 310" strokeDasharray="8 6" />
-          {/* Left restricted arc */}
-          <path d="M 60 232 A 40 40 0 0 1 60 268" />
-          {/* Left 3-pt arc */}
-          <path d="M 20 80 L 160 80 A 230 230 0 0 1 160 420 L 20 420" />
-          {/* Right key */}
-          <rect x="760" y="155" width="160" height="190" />
-          <line x1="760" y1="205" x2="920" y2="205" />
-          <line x1="760" y1="295" x2="920" y2="295" />
-          {/* Right free-throw circle */}
-          <path d="M 760 190 A 60 60 0 0 0 760 310" />
-          <path d="M 760 190 A 60 60 0 0 1 760 310" strokeDasharray="8 6" />
-          {/* Right restricted arc */}
-          <path d="M 880 232 A 40 40 0 0 0 880 268" />
-          {/* Right 3-pt arc */}
-          <path d="M 920 80 L 780 80 A 230 230 0 0 0 780 420 L 920 420" />
+          {/* Outer ball */}
+          <circle cx="250" cy="250" r="234" />
+          {/* Horizontal seam pair — classic S-wave across equator */}
+          <path d="M 16 250 C 90 172 162 172 250 250 C 338 328 410 328 484 250" />
+          <path d="M 16 250 C 90 328 162 328 250 250 C 338 172 410 172 484 250" />
+          {/* Vertical seam pair — S-wave pole to pole */}
+          <path d="M 250 16 C 172 90 172 162 250 250 C 328 338 328 410 250 484" />
+          <path d="M 250 16 C 328 90 328 162 250 250 C 172 338 172 410 250 484" />
         </svg>
+
+        {/* ── Layer 3: Full-court top-down lines ── */}
+        <svg
+          className="absolute inset-0 w-full h-full opacity-[0.11]"
+          viewBox="0 0 940 500"
+          preserveAspectRatio="xMidYMid slice"
+          fill="none"
+          stroke="#f59e0b"
+          strokeWidth="1.4"
+          strokeLinecap="round"
+        >
+          {/* Boundary */}
+          <rect x="20" y="20" width="900" height="460" rx="3" />
+          {/* Midcourt */}
+          <line x1="470" y1="20" x2="470" y2="480" />
+          {/* Centre circle + small jump circle */}
+          <circle cx="470" cy="250" r="62" />
+          <circle cx="470" cy="250" r="10" />
+          {/* Left key */}
+          <rect x="20" y="152" width="158" height="196" />
+          <line x1="20" y1="202" x2="178" y2="202" />
+          <line x1="20" y1="298" x2="178" y2="298" />
+          {/* Left FT circle — solid top, dashed bottom */}
+          <path d="M 178 188 A 62 62 0 0 1 178 312" />
+          <path d="M 178 188 A 62 62 0 0 0 178 312" strokeDasharray="8 5" />
+          {/* Left restricted arc */}
+          <path d="M 58 228 A 42 42 0 0 1 58 272" />
+          {/* Left backboard + rim */}
+          <line x1="20" y1="228" x2="20" y2="272" strokeWidth="4" />
+          <circle cx="38" cy="250" r="14" />
+          {/* Left 3-pt arc */}
+          <path d="M 20 77 L 158 77 A 234 234 0 0 1 158 423 L 20 423" />
+          {/* Right key */}
+          <rect x="762" y="152" width="158" height="196" />
+          <line x1="762" y1="202" x2="920" y2="202" />
+          <line x1="762" y1="298" x2="920" y2="298" />
+          {/* Right FT circle */}
+          <path d="M 762 188 A 62 62 0 0 0 762 312" />
+          <path d="M 762 188 A 62 62 0 0 1 762 312" strokeDasharray="8 5" />
+          {/* Right restricted arc */}
+          <path d="M 882 228 A 42 42 0 0 0 882 272" />
+          {/* Right backboard + rim */}
+          <line x1="920" y1="228" x2="920" y2="272" strokeWidth="4" />
+          <circle cx="902" cy="250" r="14" />
+          {/* Right 3-pt arc */}
+          <path d="M 920 77 L 782 77 A 234 234 0 0 0 782 423 L 920 423" />
+        </svg>
+
+        {/* ── Layer 4: Warm amber centre glow ── */}
+        <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[560px] h-[360px] rounded-full bg-amber-500/10 blur-[110px]" />
+
+        {/* ── Layer 5: Vignette — pulls dark edges in so content stays readable ── */}
+        <div className="absolute inset-0" style={{
+          background: 'radial-gradient(ellipse 78% 72% at 50% 48%, transparent 0%, rgba(2,6,23,0.60) 65%, rgba(2,6,23,0.94) 100%)',
+        }} />
+
       </div>
 
       <div className="relative z-10 text-center px-6 max-w-4xl">
@@ -279,12 +337,12 @@ const TitleScreen: React.FC<TitleScreenProps> = ({
           background-size: 200% 200%;
           animation: gradient-x 15s ease infinite;
         }
-        .animate-fade-in {
-          animation: fadeIn 1s ease-out;
+        @keyframes basketball-pulse {
+          0%, 100% { opacity: 0.075; filter: drop-shadow(0 0 48px rgba(245,158,11,0.28)); }
+          50%       { opacity: 0.095; filter: drop-shadow(0 0 72px rgba(245,158,11,0.42)); }
         }
-        @keyframes fadeIn {
-          from { opacity: 0; transform: translateY(-10px); }
-          to { opacity: 1; transform: translateY(0); }
+        .basketball-pulse {
+          animation: basketball-pulse 6s ease-in-out infinite;
         }
       `}} />
     </div>
