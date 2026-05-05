@@ -70,5 +70,5 @@ export function snapshotPlayerStats(
     teamAbbreviation,
     isSplit,
   };
-  return { ...player, stats: { ...BLANK_STATS }, careerStats: [...(player.careerStats ?? []), entry] };
+  return { ...player, stats: { ...BLANK_STATS }, gameLog: [], careerStats: [...(player.careerStats ?? []), entry] };
 }

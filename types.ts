@@ -288,6 +288,8 @@ export interface GamePlayerLine {
   plusMinus: number;
   ejected?: boolean;
   date?: number;
+  /** League season year — used to scope per-season matchup stats. */
+  season?: number;
   opponentTeamId?: string;
   opponentTeamName?: string;
   /** Set when player did not play. Value is the reason, e.g. 'Injured'. */

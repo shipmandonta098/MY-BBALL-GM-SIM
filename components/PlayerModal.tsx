@@ -43,6 +43,10 @@ interface PlayerModalProps {
     teamRotation?: TeamRotation;
     teamLogo?: string;
     teamPrimaryColor?: string;
+    /** Current league season — used to scope matchup stats to this season only. */
+    currentSeason?: number;
+    /** Facilities budget (20–100) — used to show morale impact in Mindset panel. */
+    facilitiesBudget?: number;
   };
   /** All team names for the draft-team dropdown in god mode */
   teams?: string[];
@@ -200,23 +204,29 @@ const PlayerModal: React.FC<PlayerModalProps> = ({
     };
   }, [player.gameLog]);
 
-  // ── Unique opponents seen in game log ─────────────────────────────────────
+  // ── Unique opponents seen in game log (scoped to current season) ──────────
   const uniqueOpponents = useMemo(() => {
+    const currentSeason = leagueContext?.currentSeason;
     const seen = new Map<string, string>();
     (player.gameLog ?? []).forEach(g => {
-      if (g.opponentTeamId && g.opponentTeamName && !seen.has(g.opponentTeamId))
-        seen.set(g.opponentTeamId, g.opponentTeamName);
+      if (!g.opponentTeamId || !g.opponentTeamName) return;
+      if (currentSeason !== undefined && g.season !== undefined && g.season !== currentSeason) return;
+      if (!seen.has(g.opponentTeamId)) seen.set(g.opponentTeamId, g.opponentTeamName);
     });
     return [...seen.entries()]
       .map(([id, name]) => ({ id, name }))
       .sort((a, b) => a.name.localeCompare(b.name));
-  }, [player.gameLog]);
+  }, [player.gameLog, leagueContext?.currentSeason]);
 
   // ── Aggregated stats for selected opponent (or all opponents) ─────────────
   const vsTeamStats = useMemo(() => {
-    const games = (player.gameLog ?? []).filter(
-      g => !g.dnp && (vsTeamId === 'all' || g.opponentTeamId === vsTeamId),
-    );
+    const currentSeason = leagueContext?.currentSeason;
+    const games = (player.gameLog ?? []).filter(g => {
+      if (g.dnp) return false;
+      // Scope to current season when season field is available
+      if (currentSeason !== undefined && g.season !== undefined && g.season !== currentSeason) return false;
+      return vsTeamId === 'all' || g.opponentTeamId === vsTeamId;
+    });
     if (!games.length) return null;
     const n = games.length;
     const sum = (fn: (g: typeof games[0]) => number) => games.reduce((acc, g) => acc + fn(g), 0);
@@ -2532,10 +2542,11 @@ const PlayerModal: React.FC<PlayerModalProps> = ({
             {(() => {
               const morale = player.morale ?? 75;
               const traits = player.personalityTraits ?? [];
-              const streak = leagueContext?.teamStreak ?? 0;
-              const wins   = leagueContext?.teamWins ?? 0;
-              const losses = leagueContext?.teamLosses ?? 0;
-              const mpg    = player.stats.gamesPlayed > 0 ? player.stats.minutes / player.stats.gamesPlayed : 0;
+              const streak       = leagueContext?.teamStreak ?? 0;
+              const wins         = leagueContext?.teamWins ?? 0;
+              const losses       = leagueContext?.teamLosses ?? 0;
+              const mpg          = player.stats.gamesPlayed > 0 ? player.stats.minutes / player.stats.gamesPlayed : 0;
+              const facBudget    = leagueContext?.facilitiesBudget;
 
               const moraleColor = morale < 50 ? '#ef4444' : morale < 65 ? '#f43f5e' : morale < 80 ? '#f59e0b' : '#22c55e';
               const moraleLabel = morale < 50 ? 'Critical' : morale < 65 ? 'Low' : morale < 80 ? 'Moderate' : 'Good';
@@ -2584,6 +2595,25 @@ const PlayerModal: React.FC<PlayerModalProps> = ({
 
               // Trade block
               if (player.onTradeBlock) factors.push({ label: 'On trade block — unhappy', impact: 'negative' });
+
+              // Facilities impact
+              if (facBudget !== undefined) {
+                if (facBudget < 40) {
+                  const base = -((40 - facBudget) / 20) * 10;
+                  const negMult = traits.includes('Diva/Star')    ? 2.0
+                    : traits.includes('Money Hungry')             ? 1.5
+                    : traits.includes('Hot Head')                 ? 1.3
+                    : traits.includes('Workhorse')                ? 0.8
+                    : traits.includes('Gym Rat')                  ? 0.6
+                    : traits.includes('Professional')             ? 0.9 : 1.0;
+                  const weeklyHit = Math.round(base * negMult);
+                  factors.push({ label: `Poor Facilities (${weeklyHit} morale/wk)`, impact: 'negative' });
+                } else if (facBudget >= 80) {
+                  factors.push({ label: 'Elite Facilities (+morale)', impact: 'positive' });
+                } else if (facBudget >= 60) {
+                  factors.push({ label: 'Good Facilities (+morale)', impact: 'positive' });
+                }
+              }
 
               return (
                 <div className="bg-slate-950/50 border border-slate-800 rounded-3xl p-6 space-y-5">

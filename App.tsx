@@ -1076,19 +1076,37 @@ const App: React.FC = () => {
       }
     }
 
-    // Facilities morale boost — elite facilities add up to +20 baseline morale per week
+    // Facilities morale effect — Bare Minimum penalises morale; elite boosts it
+    // Negative side is personality-weighted: Diva/Star hit harder, Workhorse less so
     // Also decrement active training focus duration for user team
     if (newState.currentDay % 7 === 0) {
       newState = {
         ...newState,
         teams: newState.teams.map(t => {
           const facBudget = t.finances?.budgets?.facilities ?? 20;
-          const moraleBoost = ((facBudget - 20) / 80) * 20;
+          // Pivot at 40 (Basic): negative below → -10/wk at Bare Min; positive above → +20/wk at Elite
+          const moraleBoostBase = facBudget < 40
+            ? -((40 - facBudget) / 20) * 10   // -10 at 20, 0 at 40
+            : ((facBudget - 20) / 80) * 20;    // 0 at 20 → +20 at 100 (preserves old behaviour)
           const isUser = t.id === newState.userTeamId;
           return {
             ...t,
             roster: t.roster.map(p => {
-              let updated = moraleBoost > 0 ? { ...p, morale: Math.min(100, (p.morale ?? 75) + moraleBoost) } : p;
+              let moraleBoost = moraleBoostBase;
+              if (moraleBoostBase < 0) {
+                // Personality-weighted penalty
+                const traits = p.personalityTraits ?? [];
+                const negMult = traits.includes('Diva/Star')    ? 2.0
+                  : traits.includes('Money Hungry')             ? 1.5
+                  : traits.includes('Hot Head')                 ? 1.3
+                  : traits.includes('Workhorse')                ? 0.8
+                  : traits.includes('Gym Rat')                  ? 0.6
+                  : traits.includes('Professional')             ? 0.9 : 1.0;
+                moraleBoost = moraleBoostBase * negMult;
+              }
+              let updated = moraleBoost !== 0
+                ? { ...p, morale: Math.min(100, Math.max(0, (p.morale ?? 75) + moraleBoost)) }
+                : p;
               if (isUser && updated.trainingFocus && updated.trainingFocus.daysRemaining > 0) {
                 const newDays = updated.trainingFocus.daysRemaining - 7;
                 updated = {
@@ -1632,11 +1650,12 @@ const App: React.FC = () => {
           const logEntry = {
             ...line,
             date: state.currentDay,
+            season: state.season,
             opponentTeamId,
             opponentTeamName,
           };
-          // Keep last 30 games only to avoid unbounded save-game growth
-          const updatedGameLog = [...(p.gameLog ?? []), logEntry].slice(-30);
+          // Keep up to 90 entries (covers any full season length up to 82 games)
+          const updatedGameLog = [...(p.gameLog ?? []), logEntry].slice(-90);
 
           return {
             ...p,
@@ -4630,6 +4649,8 @@ const App: React.FC = () => {
               teamRotation: playerTeam?.rotation,
               teamLogo: playerTeam?.logo,
               teamPrimaryColor: playerTeam?.primaryColor,
+              currentSeason: league.season,
+              facilitiesBudget: playerTeam?.finances?.budgets?.facilities,
             }}
             teams={league.teams.map(t => t.name)}
             awardHistory={league.awardHistory ?? []}
