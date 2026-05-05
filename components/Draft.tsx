@@ -1,5 +1,5 @@
 import React, { useState, useMemo, useEffect, useRef } from 'react';
-import { LeagueState, Team, Prospect, DraftPick, Player } from '../types';
+import { LeagueState, Team, Prospect, DraftPick, Player, NewsItem } from '../types';
 import { getFlag } from '../constants';
 import { getContractRules, computeRookieSalary } from '../utils/contractRules';
 import WatchToggle from './WatchToggle';
@@ -77,6 +77,67 @@ const Draft: React.FC<DraftProps> = ({ league, updateLeague, onScout, scoutingRe
 
   const draftRules = getContractRules(league);
 
+  const ordinal = (n: number) => {
+    const s = ['th', 'st', 'nd', 'rd'], v = n % 100;
+    return n + (s[(v - 20) % 10] ?? s[v] ?? s[0]);
+  };
+
+  const buildDraftPickNews = (
+    prospect: Prospect, team: Team,
+    pickNum: number, round: number, pickInRound: number,
+    isUserPick: boolean,
+  ): NewsItem => {
+    const isWomens = draftRules.isWomens;
+    const draftName = (league.settings as any).leagueName
+      ? `${(league.settings as any).leagueName} Draft`
+      : isWomens ? 'WNBA Draft' : 'NBA Draft';
+    const yr = league.season;
+    const school = prospect.school && prospect.school !== 'Unknown' && prospect.school !== 'N/A'
+      ? ` out of ${prospect.school}`
+      : (prospect.country && prospect.country !== 'United States' ? ` from ${prospect.country}` : '');
+    const pos = prospect.position;
+    const age = prospect.age ? `, ${prospect.age}` : '';
+
+    let headline: string;
+    let content: string;
+    let isBreaking = false;
+
+    if (pickNum === 1) {
+      isBreaking = true;
+      headline = '🏀 #1 OVERALL PICK';
+      content = `${team.city} ${team.name} select ${prospect.name} (${pos}${age})${school} with the No. 1 overall pick in the ${yr} ${draftName}. A generational talent expected to anchor the franchise for years to come.`;
+    } else if (pickNum <= 3) {
+      headline = `🏀 TOP-${pickNum} PICK`;
+      const flavors = ['A consensus top prospect', 'One of the draft\'s premier talents', 'A highly decorated prospect'];
+      content = `The ${team.name} add ${prospect.name} (${pos})${school} with the No. ${pickNum} pick in the ${yr} ${draftName}. ${flavors[pickNum - 2]} who brings elite upside to ${team.city}.`;
+    } else if (pickNum <= 5) {
+      headline = `🏀 TOP-5 PICK`;
+      content = `${team.city} ${team.name} select ${prospect.name} (${pos})${school} with the No. ${pickNum} overall pick in the ${yr} ${draftName}.`;
+    } else if (pickNum <= 10) {
+      headline = `DRAFT: PICK #${pickNum}`;
+      content = `With the ${ordinal(pickNum)} pick, the ${team.name} select ${prospect.name} (${pos})${school}. ${prospect.rating >= 80 ? 'A high-upside talent bolsters the rotation.' : 'The team adds a promising young player.'}`;
+    } else if (round === 1) {
+      headline = isUserPick ? 'YOUR DRAFT PICK' : `DRAFT: R1 PICK ${pickInRound}`;
+      content = `With the ${ordinal(pickNum)} overall selection in Round 1, the ${team.name} take ${prospect.name} (${pos})${school}.`;
+    } else {
+      headline = isUserPick ? 'YOUR DRAFT PICK' : `DRAFT: R${round} PICK ${pickInRound}`;
+      content = `With the ${ordinal(pickInRound)} pick in Round ${round}, the ${team.name} select ${prospect.name} (${pos}${age})${school}. The team reaches for depth in the later rounds.`;
+    }
+
+    return {
+      id: `draft-pick-${pickNum}-${Date.now()}`,
+      category: 'transaction' as const,
+      headline,
+      content,
+      timestamp: league.currentDay,
+      realTimestamp: Date.now(),
+      teamId: team.id,
+      playerId: prospect.id,
+      isBreaking,
+      seasonYear: league.season,
+    };
+  };
+
   const makePick = (teamId: string, prospect: Prospect) => {
     const team = league.teams.find(t => t.id === teamId)!;
     const pickRound = (league.draftPicks?.[league.currentDraftPickIndex || 0]?.round) ?? 1;
@@ -118,7 +179,15 @@ const Draft: React.FC<DraftProps> = ({ league, updateLeague, onScout, scoutingRe
       `${label}: The ${team.name} select ${prospect.name} (${prospect.position}) — ${prospect.school}`,
       ...prev,
     ]);
-    updateLeague({ teams: updatedTeams, currentDraftPickIndex: currentPickIndex + 1 });
+
+    // Generate dynasty feed entry for notable picks
+    const isUserPick = teamId === league.userTeamId;
+    const isNotable = pickNum <= 10 || isUserPick || prospect.rating >= 85;
+    const feedUpdate = isNotable
+      ? [buildDraftPickNews(prospect, team, pickNum, round, pickInRound, isUserPick), ...league.newsFeed]
+      : league.newsFeed;
+
+    updateLeague({ teams: updatedTeams, currentDraftPickIndex: currentPickIndex + 1, newsFeed: feedUpdate });
   };
 
   const executeAIPick = () => {

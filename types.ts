@@ -936,6 +936,8 @@ export interface LeagueState {
     protectedPlayerIds: Record<string, string[]>;
     expansionTeamIds: string[];
     draftLog: string[];
+    /** Per-pick news items accumulated during the draft; flushed to newsFeed on finalize. */
+    pickNews?: NewsItem[];
     pendingTeams?: {
       id: string;
       name: string;
