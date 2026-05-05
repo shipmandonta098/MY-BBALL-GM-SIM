@@ -79,73 +79,76 @@ const TitleScreen: React.FC<TitleScreenProps> = ({
 
   return (
     <div className={`fixed inset-0 bg-slate-950 flex flex-col items-center justify-center z-[100] overflow-hidden transition-all duration-1000 ${isExiting ? 'opacity-0 scale-110 pointer-events-none' : 'opacity-100 scale-100'}`}>
-      {/* Cinematic Background */}
+      {/* Background: glows + basketball court texture */}
       <div className="absolute inset-0 overflow-hidden pointer-events-none">
-        <div className="absolute top-1/4 left-1/4 w-[600px] h-[600px] bg-amber-500/10 rounded-full blur-[140px] animate-pulse"></div>
-        <div className="absolute bottom-1/4 right-1/3 w-[800px] h-[800px] bg-blue-600/5 rounded-full blur-[180px]"></div>
-        
-        {/* Subtle Grid Pattern */}
-        <div className="absolute inset-0 opacity-[0.03]" style={{ 
-          backgroundImage: `linear-gradient(#f59e0b 1px, transparent 1px), linear-gradient(90deg, #f59e0b 1px, transparent 1px)`, 
-          backgroundSize: '60px 60px' 
-        }}></div>
+        <div className="absolute top-1/4 left-1/4 w-[600px] h-[600px] bg-amber-500/8 rounded-full blur-[160px]"></div>
+        <div className="absolute bottom-1/3 right-1/4 w-[700px] h-[700px] bg-amber-600/5 rounded-full blur-[200px]"></div>
+
+        {/* Basketball court outline — top-down, centred, very subtle */}
+        <svg
+          className="absolute inset-0 w-full h-full opacity-[0.055]"
+          viewBox="0 0 940 500"
+          preserveAspectRatio="xMidYMid meet"
+          fill="none"
+          stroke="#f59e0b"
+          strokeWidth="1.5"
+        >
+          {/* Outer boundary */}
+          <rect x="20" y="20" width="900" height="460" rx="4" />
+          {/* Mid-court line */}
+          <line x1="470" y1="20" x2="470" y2="480" />
+          {/* Centre circle */}
+          <circle cx="470" cy="250" r="60" />
+          {/* Left key */}
+          <rect x="20" y="155" width="160" height="190" />
+          <line x1="20" y1="205" x2="180" y2="205" />
+          <line x1="20" y1="295" x2="180" y2="295" />
+          {/* Left free-throw circle */}
+          <path d="M 180 190 A 60 60 0 0 1 180 310" />
+          <path d="M 180 190 A 60 60 0 0 0 180 310" strokeDasharray="8 6" />
+          {/* Left restricted arc */}
+          <path d="M 60 232 A 40 40 0 0 1 60 268" />
+          {/* Left 3-pt arc */}
+          <path d="M 20 80 L 160 80 A 230 230 0 0 1 160 420 L 20 420" />
+          {/* Right key */}
+          <rect x="760" y="155" width="160" height="190" />
+          <line x1="760" y1="205" x2="920" y2="205" />
+          <line x1="760" y1="295" x2="920" y2="295" />
+          {/* Right free-throw circle */}
+          <path d="M 760 190 A 60 60 0 0 0 760 310" />
+          <path d="M 760 190 A 60 60 0 0 1 760 310" strokeDasharray="8 6" />
+          {/* Right restricted arc */}
+          <path d="M 880 232 A 40 40 0 0 0 880 268" />
+          {/* Right 3-pt arc */}
+          <path d="M 920 80 L 780 80 A 230 230 0 0 0 780 420 L 920 420" />
+        </svg>
       </div>
 
-      <div className="relative z-10 text-center px-6 max-w-5xl">
-        <div className="mb-4 inline-flex items-center gap-2 px-4 py-1.5 bg-slate-900 border border-amber-500/30 text-amber-500 text-[10px] font-bold tracking-[0.4em] uppercase rounded-full shadow-lg shadow-amber-500/10 animate-fade-in">
-          <span className="relative flex h-2 w-2">
-            <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-amber-400 opacity-75"></span>
-            <span className="relative inline-flex rounded-full h-2 w-2 bg-amber-500"></span>
-          </span>
-          Next-Gen Basketball Management
-        </div>
-        
-        <h1 className="text-8xl md:text-[10rem] font-display font-bold uppercase tracking-tighter text-white leading-[0.85] mb-6 drop-shadow-2xl">
+      <div className="relative z-10 text-center px-6 max-w-4xl">
+        <h1 className="text-8xl md:text-[10rem] font-display font-bold uppercase tracking-tighter text-white leading-[0.85] mb-8 drop-shadow-2xl">
           HOOPS<br/>
-          <span className="text-transparent bg-clip-text bg-gradient-to-r from-amber-400 via-amber-600 to-amber-400 animate-gradient-x">DYNASTY</span>
+          <span className="text-transparent bg-clip-text bg-gradient-to-r from-amber-400 via-amber-500 to-amber-400 animate-gradient-x">DYNASTY</span>
         </h1>
-        
-        <p className="text-slate-400 text-lg md:text-2xl font-medium mb-16 max-w-2xl mx-auto leading-relaxed opacity-80">
-          Build a legendary franchise. Scout superstars with Gemini AI. 
-          The court is your canvas, the win is your masterpiece.
+
+        <p className="text-slate-400 text-lg md:text-xl font-medium mb-14 max-w-xl mx-auto leading-relaxed tracking-wide">
+          Build a legendary franchise. Scout superstars. Dominate the court.
         </p>
 
-        <div className="flex flex-col md:flex-row items-center justify-center gap-8">
-          <button 
+        <div className="flex flex-col md:flex-row items-center justify-center gap-6">
+          <button
             onClick={() => handleStart(onNewLeague)}
-            className="group relative w-full md:w-auto px-16 py-6 bg-amber-500 hover:bg-amber-400 text-slate-950 font-display font-bold text-3xl uppercase tracking-wider rounded-2xl transition-all hover:scale-105 active:scale-95 shadow-[0_0_50px_rgba(245,158,11,0.4)] overflow-hidden"
+            className="group relative w-full md:w-auto px-16 py-6 bg-amber-500 hover:bg-amber-400 text-slate-950 font-display font-bold text-3xl uppercase tracking-wider rounded-2xl transition-all hover:scale-105 active:scale-95 shadow-[0_0_60px_rgba(245,158,11,0.35)] overflow-hidden"
           >
             <span className="relative z-10">New Career</span>
             <div className="absolute inset-0 bg-gradient-to-tr from-white/20 to-transparent opacity-0 group-hover:opacity-100 transition-opacity"></div>
-            <div className="absolute inset-0 border-2 border-white/30 rounded-2xl scale-110 opacity-0 group-hover:opacity-100 group-hover:scale-100 transition-all duration-300"></div>
           </button>
 
-          <button 
+          <button
             onClick={() => setShowSaveList(true)}
-            className="group relative w-full md:w-auto px-16 py-6 bg-slate-900/80 backdrop-blur-md hover:bg-slate-800 text-slate-100 font-display font-bold text-3xl uppercase tracking-wider rounded-2xl transition-all hover:scale-105 active:scale-95 border-2 border-slate-800 hover:border-amber-500/50"
+            className="group relative w-full md:w-auto px-16 py-6 bg-transparent hover:bg-slate-900 text-slate-300 hover:text-white font-display font-bold text-3xl uppercase tracking-wider rounded-2xl transition-all hover:scale-105 active:scale-95 border-2 border-slate-700 hover:border-amber-500/60"
           >
             Continue
-            <p className="absolute -bottom-6 left-0 right-0 text-[10px] text-slate-500 font-sans tracking-widest font-bold opacity-0 group-hover:opacity-100 transition-opacity">LOAD OR MANAGE SAVES</p>
           </button>
-        </div>
-
-        <div className="mt-32 grid grid-cols-2 md:grid-cols-4 gap-12 border-t border-slate-900/50 pt-12">
-          <div className="text-center group">
-            <div className="text-amber-500 font-display text-3xl group-hover:scale-110 transition-transform">FLASH 3</div>
-            <div className="text-[10px] text-slate-600 uppercase font-bold tracking-[0.2em] mt-1">AI Logic Engine</div>
-          </div>
-          <div className="text-center group">
-            <div className="text-amber-500 font-display text-3xl group-hover:scale-110 transition-transform">REAL-SIM</div>
-            <div className="text-[10px] text-slate-600 uppercase font-bold tracking-[0.2em] mt-1">Court Simulation</div>
-          </div>
-          <div className="text-center group">
-            <div className="text-amber-500 font-display text-3xl group-hover:scale-110 transition-transform">DYNAMIC</div>
-            <div className="text-[10px] text-slate-600 uppercase font-bold tracking-[0.2em] mt-1">Market Logic</div>
-          </div>
-          <div className="text-center group">
-            <div className="text-amber-500 font-display text-3xl group-hover:scale-110 transition-transform">CLOUD</div>
-            <div className="text-[10px] text-slate-600 uppercase font-bold tracking-[0.2em] mt-1">Persistence</div>
-          </div>
         </div>
       </div>
 
@@ -262,11 +265,9 @@ const TitleScreen: React.FC<TitleScreenProps> = ({
         </div>
       )}
 
-      {/* Aesthetic Footer */}
-      <div className="absolute bottom-8 flex items-center gap-12 opacity-20 hover:opacity-100 transition-opacity duration-700">
-        <div className="text-[10px] text-slate-500 uppercase tracking-[0.6em] font-black">© 2025 HD PRODUCTIONS</div>
-        <div className="w-1.5 h-1.5 bg-amber-500 rounded-full"></div>
-        <div className="text-[10px] text-slate-500 uppercase tracking-[0.6em] font-black italic">PRO GM SERIES v1.2</div>
+      {/* Version footer */}
+      <div className="absolute bottom-6 text-[10px] text-slate-700 uppercase tracking-[0.5em] font-bold select-none">
+        v1.2
       </div>
 
       <style dangerouslySetInnerHTML={{ __html: `
