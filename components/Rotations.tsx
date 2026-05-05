@@ -275,8 +275,10 @@ const SortablePlayerCard = ({
       ) : (
         <div className="w-48 flex flex-col gap-1">
           <div className="flex justify-between items-center px-1">
-            <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Minutes</span>
-            <span className={`text-xs font-mono font-bold ${minutes > 35 ? 'text-rose-500' : 'text-emerald-400'}`}>{minutes}m</span>
+            <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Exp. Min</span>
+            <span className={`text-xs font-mono font-bold ${minutes > 35 ? 'text-rose-500' : 'text-emerald-400'}`}>
+              {Math.max(0, minutes - (isStarter ? 3 : 2))}–{minutes + (isStarter ? 3 : 2)}
+            </span>
           </div>
           <input
             type="range"
