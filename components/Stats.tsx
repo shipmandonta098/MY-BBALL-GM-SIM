@@ -1457,7 +1457,7 @@ const Stats: React.FC<StatsProps> = ({ league, onViewRoster, onManageTeam, onVie
             )}
 
             {/* ── ADVANCED ────────────────────────────────────────────── */}
-            {teamSubTab === 'advanced' && (
+            {teamSubTab === 'advanced' && (<>
               <table className="w-full text-left border-collapse">
                 <thead>
                   <tr className="text-[10px] text-slate-500 font-black uppercase tracking-widest border-b border-slate-800 bg-slate-950/50">
@@ -1517,7 +1517,52 @@ const Stats: React.FC<StatsProps> = ({ league, onViewRoster, onManageTeam, onVie
                   </tr>
                 </tfoot>
               </table>
-            )}
+              {/* ── Shot Distribution Visual ──────────────────────────── */}
+              <div className="border-t border-slate-800 px-5 py-5">
+                <h4 className="text-[10px] font-black uppercase tracking-[0.3em] text-slate-500 mb-4">
+                  Estimated Shot Distribution by Zone
+                </h4>
+                <div className="space-y-2.5">
+                  {sortedTeams.map(t => {
+                    const threePaRate = t.fga > 0 ? t.threepa / t.fga : 0;
+                    const raRate   = (1 - threePaRate) * 0.55;
+                    const midRate  = (1 - threePaRate) * 0.45;
+                    const c3Rate   = threePaRate * 0.22;
+                    const ab3Rate  = threePaRate * 0.78;
+                    return (
+                      <div key={t.id} className="flex items-center gap-3">
+                        <div className="w-28 shrink-0 text-[10px] font-black text-slate-400 truncate">{t.name}</div>
+                        <div className="flex-1 flex h-3.5 rounded-full overflow-hidden gap-px">
+                          <div style={{ width: `${(raRate * 100).toFixed(1)}%` }}  className="bg-emerald-600 opacity-80" title={`Restricted Area: ${(raRate * 100).toFixed(0)}%`} />
+                          <div style={{ width: `${(midRate * 100).toFixed(1)}%` }} className="bg-amber-600 opacity-80"   title={`Mid-Range: ${(midRate * 100).toFixed(0)}%`} />
+                          <div style={{ width: `${(c3Rate * 100).toFixed(1)}%` }}  className="bg-sky-500 opacity-80"     title={`Corner 3: ${(c3Rate * 100).toFixed(0)}%`} />
+                          <div style={{ width: `${(ab3Rate * 100).toFixed(1)}%` }} className="bg-violet-600 opacity-80"  title={`Above-Break 3: ${(ab3Rate * 100).toFixed(0)}%`} />
+                        </div>
+                        <div className="w-20 shrink-0 text-right text-[10px] font-bold tabular-nums text-slate-500">
+                          {(threePaRate * 100).toFixed(1)}% 3s
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+                <div className="flex flex-wrap items-center gap-4 mt-4">
+                  {[
+                    { label: 'Restricted Area', cls: 'bg-emerald-600' },
+                    { label: 'Mid-Range',        cls: 'bg-amber-600' },
+                    { label: 'Corner 3',         cls: 'bg-sky-500' },
+                    { label: 'Above-Break 3',    cls: 'bg-violet-600' },
+                  ].map(z => (
+                    <div key={z.label} className="flex items-center gap-1.5">
+                      <div className={`w-3 h-2 rounded-sm opacity-80 ${z.cls}`} />
+                      <span className="text-[9px] font-black uppercase tracking-widest text-slate-600">{z.label}</span>
+                    </div>
+                  ))}
+                </div>
+                <p className="text-[9px] text-slate-700 mt-2 italic">
+                  2P split estimated at 55% RA / 45% Mid-Range; Corner 3 estimated at ~22% of all 3PA.
+                </p>
+              </div>
+            </>)}
 
             {/* ── OPPONENT ────────────────────────────────────────────── */}
             {teamSubTab === 'opponent' && (

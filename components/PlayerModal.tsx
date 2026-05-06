@@ -2125,6 +2125,63 @@ const PlayerModal: React.FC<PlayerModalProps> = ({
                           </div>
                         );
                       })}
+                      {/* ── Shot Distribution ──────────────────────────────────── */}
+                      {s.fga > 0 && (() => {
+                        const pos = player.position;
+                        // Restricted-area share of all 2-point attempts
+                        const raShare     = pos === 'C' ? 0.75 : pos === 'PF' ? 0.60 : pos === 'SF' ? 0.45 : pos === 'SG' ? 0.38 : 0.35;
+                        // Corner-3 share of all 3-point attempts
+                        const corner3Share = pos === 'C' ? 0.10 : pos === 'PF' ? 0.15 : pos === 'SF' ? 0.22 : pos === 'SG' ? 0.25 : 0.20;
+
+                        const twoPA  = s.fga - s.threepa;
+                        const raAtt  = Math.round(twoPA * raShare);
+                        const midAtt = twoPA - raAtt;
+                        const c3Att  = Math.round(s.threepa * corner3Share);
+                        const ab3Att = s.threepa - c3Att;
+
+                        const zones = [
+                          { label: 'Restricted Area', att: raAtt,  fgPct: 64.5, color: 'bg-emerald-500', textColor: 'text-emerald-400' },
+                          { label: 'Mid-Range',        att: midAtt, fgPct: 41.0, color: 'bg-amber-500',   textColor: 'text-amber-400' },
+                          { label: 'Corner 3',         att: c3Att,  fgPct: 38.8, color: 'bg-sky-500',     textColor: 'text-sky-400' },
+                          { label: 'Above-Break 3',    att: ab3Att, fgPct: 34.7, color: 'bg-violet-500',  textColor: 'text-violet-400' },
+                        ];
+
+                        return (
+                          <div className="bg-slate-950/50 border border-slate-800/50 rounded-3xl overflow-hidden">
+                            <div className="px-5 py-3 border-b border-slate-800/60">
+                              <h4 className="text-[10px] font-black uppercase tracking-[0.3em] text-slate-400">Estimated Shot Distribution</h4>
+                              <p className="text-[9px] text-slate-600 mt-0.5">Zone splits estimated from position profile · {s.fga} FGA this season</p>
+                            </div>
+                            <div className="p-5 space-y-3.5">
+                              {zones.map(z => {
+                                const freqPct = s.fga > 0 ? (z.att / s.fga) * 100 : 0;
+                                return (
+                                  <div key={z.label}>
+                                    <div className="flex items-center justify-between mb-1.5">
+                                      <span className="text-[10px] font-black uppercase tracking-wider text-slate-500">{z.label}</span>
+                                      <div className="flex items-center gap-2.5">
+                                        <span className={`text-[10px] font-bold tabular-nums ${z.textColor}`}>
+                                          {freqPct.toFixed(1)}% of FGA
+                                        </span>
+                                        <span className="text-[9px] text-slate-700">·</span>
+                                        <span className="text-[10px] font-bold tabular-nums text-slate-500">
+                                          ~{z.fgPct.toFixed(0)}% FG
+                                        </span>
+                                      </div>
+                                    </div>
+                                    <div className="h-1.5 bg-slate-800 rounded-full overflow-hidden">
+                                      <div
+                                        className={`h-full ${z.color} rounded-full opacity-70`}
+                                        style={{ width: `${Math.min(100, freqPct).toFixed(1)}%` }}
+                                      />
+                                    </div>
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          </div>
+                        );
+                      })()}
                       <p className="text-[9px] text-slate-700 text-center italic">
                         Estimates use season-to-date stats. Some metrics require league context and may vary from traditional calculations.
                       </p>

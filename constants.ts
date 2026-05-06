@@ -2049,12 +2049,76 @@ export const generateLeagueTeams = (genderRatio: number = 0, season: number = 20
     ];
 
     const ownerGoals: OwnerGoal[] = ['Win Now', 'Rebuild', 'Profit'];
+    // Owner names: large diverse pool so every new career generates fresh identities.
+    const _ownerFirsts = [
+      'Alexander','Beatrice','Carlos','Diana','Edward','Felicia','Gordon','Helena',
+      'Ibrahim','Jacqueline','Klaus','Lorraine','Maxwell','Nadia','Oliver','Priya',
+      'Reginald','Simone','Theodore','Uma','Vincent','Whitney','Yusuf','Zoe',
+      'Andre','Bridget','Clayton','Desiree','Emil','Francesca','Grant','Harriet',
+      'Ingrid','Jerome','Kenji','Lakshmi','Morgan','Nicolette','Oswald','Penelope',
+      'Quincy','Roxanne','Stavros','Tabitha','Umberto','Valentina','Warren','Xiomara',
+    ];
+    const _ownerLasts = [
+      'Abernathy','Blackstone','Carrington','Delacroix','Everett','Fairbanks','Garrison','Holloway',
+      'Islington','Jameson','Kingston','Laurent','Merriweather','Northcott','Okonkwo','Pemberton',
+      'Quigley','Ravensworth','Stratton','Treadwell','Underwood','Vasiliev','Wentworth','Xavier',
+      'Alderton','Breckenridge','Callahan','Demetriou','Elsworth','Fontaine','Grantham','Huntington',
+      'Iyer','Johansson','Kulkarni','Lefebvre','Montoya','Nakamura','Osei','Papadopoulos',
+      'Rousseau','Shimizu','Thackeray','Uribe','Vossler','Whitfield','Yamamoto','Zuberi',
+    ];
+    const _ownerPersonalities = [
+      'Impatient Billionaire','Championship-or-Bust','Community Builder','Analytics Believer',
+      'Old-School Traditionalist','Media-Savvy Mogul','Silent Partner','Interfering Micromanager',
+      'Patient Developer','Win-Now Fanatic','Brand Builder','Revenue-Focused',
+    ];
+    const _rand = <T>(arr: T[]) => arr[Math.floor(Math.random() * arr.length)];
+    const ownerName = `${_rand(_ownerFirsts)} ${_rand(_ownerLasts)}`;
+    const ownerPersonality = _rand(_ownerPersonalities);
     const draftCtx: DraftContext = { season, teamNames, usedPicks };
     const tier = (tierList[i] ?? 'average') as keyof typeof TIER_SLOT_FLOORS;
     const slotFloors = TIER_SLOT_FLOORS[tier];
     let roster = Array.from({ length: 15 }).map((_, j) =>
       generatePlayer(`p-${i}-${j}`, [19, 38], genderRatio, draftCtx, season, slotFloors[j] ?? 68)
     );
+
+    // ── Positional balance enforcement ────────────────────────────────────────
+    // Target: 3 PG, 3 SG, 3 SF, 3 PF, 2-3 C per 15-man roster.
+    // Prevents absurd distributions (e.g. 5 C, 0 PG).  Reassigns position only —
+    // attributes are unchanged, so players feel slightly off-position which is
+    // realistic (converted bigs, point-forwards, etc.).
+    {
+      const posCount = (pos: Position) => roster.filter(p => p.position === pos).length;
+      // Too many centers (>3): convert excess C→PF, starting from lowest rating
+      let excess = posCount('C') - 3;
+      if (excess > 0) {
+        const sorted = [...roster].sort((a, b) => a.rating - b.rating);
+        roster = roster.map(p => {
+          if (excess > 0 && p.position === 'C' && sorted.findIndex(s => s.id === p.id) < sorted.filter(s => s.position === 'C').length) {
+            excess--;
+            return { ...p, position: 'PF' as Position };
+          }
+          return p;
+        });
+      }
+      // Too many PGs (>4): convert excess PG→SG
+      let exPG = posCount('PG') - 4;
+      if (exPG > 0) {
+        roster = roster.map(p => {
+          if (exPG > 0 && p.position === 'PG') { exPG--; return { ...p, position: 'SG' as Position }; }
+          return p;
+        });
+      }
+      // No center at all: convert worst PF to C
+      if (posCount('C') === 0) {
+        const worstPF = [...roster].filter(p => p.position === 'PF').sort((a, b) => a.rating - b.rating)[0];
+        if (worstPF) roster = roster.map(p => p.id === worstPF.id ? { ...p, position: 'C' as Position } : p);
+      }
+      // No PG at all: convert best SG to PG
+      if (posCount('PG') === 0) {
+        const bestSG = [...roster].filter(p => p.position === 'SG').sort((a, b) => b.rating - a.rating)[0];
+        if (bestSG) roster = roster.map(p => p.id === bestSG.id ? { ...p, position: 'PG' as Position } : p);
+      }
+    }
 
     // ── Payroll normalization: cap total payroll at NBA first-apron equivalent.
     // This prevents individual random variation from stacking into absurd totals
@@ -2103,6 +2167,8 @@ export const generateLeagueTeams = (genderRatio: number = 0, season: number = 20
         fanHype: 65,
         ownerPatience: 80,
         ownerGoal: ownerGoals[Math.floor(Math.random() * ownerGoals.length)],
+        ownerName,
+        ownerPersonality,
         budgets: {
           scouting: 20,
           health: 20,
@@ -2335,8 +2401,9 @@ export const generateSeasonSchedule = (
       const t1B2B = t1Last === currentLeagueDay - 1;
       const t2B2B = t2Last === currentLeagueDay - 1;
 
-      if (t1B2B && (teamB2BCount[t1] >= 16 || teamGamesScheduled[t1] - teamLastB2BGameIndex[t1] < 5)) continue;
-      if (t2B2B && (teamB2BCount[t2] >= 16 || teamGamesScheduled[t2] - teamLastB2BGameIndex[t2] < 5)) continue;
+      // Don't allow B2B until a team has played ≥ 4 games (prevents game-2 B2Bs at season open).
+      if (t1B2B && (teamB2BCount[t1] >= 16 || teamGamesScheduled[t1] - teamLastB2BGameIndex[t1] < 5 || teamGamesScheduled[t1] < 4)) continue;
+      if (t2B2B && (teamB2BCount[t2] >= 16 || teamGamesScheduled[t2] - teamLastB2BGameIndex[t2] < 5 || teamGamesScheduled[t2] < 4)) continue;
 
       // Progressive pacing guard: a team can't run more than ~20% ahead of its proportional
       // B2B budget for the point in the season it's at. This distributes B2Bs evenly
