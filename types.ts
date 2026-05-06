@@ -503,6 +503,10 @@ export interface TeamFinances {
   fanHype: number;
   ownerPatience: number;
   ownerGoal: OwnerGoal;
+  /** Randomly generated at career creation — unique every new save. */
+  ownerName?: string;
+  /** Personality archetype describing the owner's management style. */
+  ownerPersonality?: string;
   budgets: {
     scouting: number;
     health: number;

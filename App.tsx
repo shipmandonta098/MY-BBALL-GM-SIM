@@ -1466,20 +1466,30 @@ const App: React.FC = () => {
       }
     }
 
-    // ── Rookie / notable performer spotlight ─────────────────────────────
+    // ── Rookie / young player spotlights (preseason) ─────────────────────
+    // Lower threshold (15 pts OR 10 reb OR 8 ast) to catch prospects and undrafted FAs.
+    // Up to 2 spotlights per game so multiple young players can shine.
     const allLines = [...result.homePlayerStats, ...result.awayPlayerStats];
+    let spotlightCount = 0;
     for (const line of allLines) {
-      if (line.dnp || line.pts < 20) continue;
+      if (spotlightCount >= 2) break;
+      if (line.dnp) continue;
+      const isNotable = line.pts >= 15
+        || (line.reb >= 10 && line.pts >= 8)
+        || (line.ast >= 8  && line.pts >= 8);
+      if (!isNotable) continue;
       const player = state.teams.flatMap(t => t.roster).find(p => p.id === line.playerId);
       const team   = state.teams.find(t => t.roster.some(p => p.id === line.playerId));
       if (!player || !team) continue;
-      // Only spotlight young players (≤23) or user-team players
-      if (player.age > 23 && team.id !== state.userTeamId) continue;
-      // Rate-limit: skip if we already posted for this player in this preseason day
+      // Spotlight rookies/undrafted (yearsPro ≤ 1), young prospects (≤24), or user-team players
+      const isYoungProspect = (player.age ?? 30) <= 24
+        || (player.isRookie ?? false)
+        || (player.yearsPro ?? 5) <= 1;
+      if (!isYoungProspect && team.id !== state.userTeamId) continue;
       const cooldownId = `pre-rookie-${line.playerId}-day${newState.currentDay}`;
       if (newState.newsFeed.some(n => n.id === cooldownId)) continue;
       const { headline, content } = buildPreseasonRookieHeadline(
-        player.name, team.name, line.pts, line.reb, line.ast, player.age,
+        player.name, team.name, line.pts, line.reb, line.ast, player.age ?? 22,
       );
       newState = {
         ...newState,
@@ -1495,7 +1505,7 @@ const App: React.FC = () => {
           isBreaking: false,
         }, ...newState.newsFeed].slice(0, 2000),
       };
-      break; // one spotlight per game max
+      spotlightCount++;
     }
 
     return newState;
@@ -1565,11 +1575,13 @@ const App: React.FC = () => {
           let suspensionGames = p.suspensionGames || 0;
           let suspensionReason = p.suspensionReason;
           
-          // Season tech foul accumulation: 16 techs = 1-game suspension (per NBA rule)
-          if (newTechs >= 16 && (p.stats.techs || 0) < 16) {
+          // Season tech foul accumulation: triggers at 15, then every 2 after that (17, 19…).
+          if ((newTechs >= 15 && (p.stats.techs || 0) < 15) ||
+              (newTechs >= 17 && (p.stats.techs || 0) < 17) ||
+              (newTechs >= 19 && (p.stats.techs || 0) < 19)) {
             isSuspended = true;
             suspensionGames = Math.max(suspensionGames, 1);
-            suspensionReason = suspensionReason || '16th technical foul of the season';
+            suspensionReason = suspensionReason || `${newTechs}th technical foul of the season`;
           }
 
           let morale = p.morale ?? 75;
@@ -2066,7 +2078,7 @@ const App: React.FC = () => {
       const awayTeam = newState.teams.find(t => t.id === game.awayTeamId)!;
       const rivalry = newState.rivalryHistory?.find(r => (r.team1Id === homeTeam.id && r.team2Id === awayTeam.id) || (r.team1Id === awayTeam.id && r.team2Id === homeTeam.id));
       const rivalryLevel = getRivalryLevel(rivalry);
-      const result = simulateGame(homeTeam, awayTeam, newState.currentDay, newState.season, game.homeB2B, game.awayB2B, rivalryLevel, newState.settings);
+      const result = simulateGame(homeTeam, awayTeam, newState.currentDay, newState.season, game.homeB2B, game.awayB2B, rivalryLevel, newState.settings, usePreseason);
       result.id = game.id;
       if (homeTeam.id === state.userTeamId || awayTeam.id === state.userTeamId) dayResults.push(result);
       if (usePreseason) {
@@ -2645,7 +2657,7 @@ const App: React.FC = () => {
       const away = league.teams.find(t => t.id === game.awayTeamId)!;
       const rivalry = league.rivalryHistory?.find(r => (r.team1Id === home.id && r.team2Id === away.id) || (r.team1Id === away.id && r.team2Id === home.id));
       const rivalryLevel = getRivalryLevel(rivalry);
-      const result = simulateGame(home, away, league.currentDay, league.season, game.homeB2B, game.awayB2B, rivalryLevel, league.settings);
+      const result = simulateGame(home, away, league.currentDay, league.season, game.homeB2B, game.awayB2B, rivalryLevel, league.settings, isPreseasonGame);
       result.id = game.id;
       if (!isPreseasonGame) {
         const recap = await generateGameRecap(result, home, away);
@@ -3727,7 +3739,7 @@ const App: React.FC = () => {
           const result = simulateGame(
             home, away, game.day, state.season,
             (game as any).homeB2B ?? false, (game as any).awayB2B ?? false,
-            rivalryLevel, state.settings,
+            rivalryLevel, state.settings, true, // isPreseason = true for bulk preseason skip
           );
           result.id = game.id;
           state = await finalizePreseasonGameResult(state, game.id, result);

@@ -10,28 +10,33 @@ interface OwnerWelcomeProps {
   onBack?: () => void;
 }
 
-// ── Deterministic owner name from team id ─────────────────────────────────────
-const FIRST_NAMES = [
+// ── Owner name: use stored value when available, hash-based fallback for old saves ──
+const FALLBACK_FIRST_NAMES = [
   'Robert','James','Michael','David','Richard','William','Charles','Joseph',
   'Thomas','Daniel','Margaret','Patricia','Barbara','Susan','Dorothy','Lisa',
-  'Nancy','Karen','Betty','Helen',
+  'Nancy','Karen','Betty','Helen','Andre','Beatrice','Carlos','Diana',
+  'Edward','Felicia','Gordon','Helena','Ivan','Julia',
 ];
-const LAST_NAMES = [
+const FALLBACK_LAST_NAMES = [
   'Sterling','Johnson','Williams','Peterson','Anderson','Thompson','Mitchell',
   'Hamilton','Brooks','Turner','Blackwell','Harrington','Crawford','Donovan',
   'Fletcher','Gallagher','Holt','Ingram','Jensen','Keller',
+  'Montoya','Nakamura','Osei','Pemberton','Rousseau','Stratton','Treadwell','Vasiliev',
 ];
 function ownerNameFromTeam(team: Team): string {
+  // Prefer the randomly-generated name stored at career creation (unique each save).
+  if (team.finances?.ownerName) return team.finances.ownerName;
+  // Fallback: deterministic hash so existing saves don't break.
   let hash = 0;
   for (let i = 0; i < team.id.length; i++) hash = (hash * 31 + team.id.charCodeAt(i)) | 0;
-  const first = FIRST_NAMES[Math.abs(hash) % FIRST_NAMES.length];
-  const last  = LAST_NAMES[Math.abs(hash * 17 + 7) % LAST_NAMES.length];
+  const first = FALLBACK_FIRST_NAMES[Math.abs(hash) % FALLBACK_FIRST_NAMES.length];
+  const last  = FALLBACK_LAST_NAMES[Math.abs(hash * 17 + 7) % FALLBACK_LAST_NAMES.length];
   return `${first} ${last}`;
 }
 
 // ── Message generation ────────────────────────────────────────────────────────
 function buildMessage(team: Team, season: number): { greeting: string; body: string[]; closer: string } {
-  const { ownerGoal, ownerPatience } = team.finances;
+  const { ownerGoal, ownerPatience, ownerPersonality } = team.finances;
   const market   = team.marketSize;
   const prevWins = team.prevSeasonWins;
   const city     = team.city;
@@ -151,7 +156,16 @@ function buildMessage(team: Team, season: number): { greeting: string; body: str
 
 // ── Personality badge ─────────────────────────────────────────────────────────
 function personalityBadge(team: Team): { label: string; color: string } {
-  const { ownerGoal, ownerPatience } = team.finances;
+  const { ownerGoal, ownerPatience, ownerPersonality } = team.finances;
+  // Use stored archetype label when present (generated fresh each career)
+  if (ownerPersonality) {
+    const isHot = ['Impatient Billionaire','Championship-or-Bust','Win-Now Fanatic','Interfering Micromanager'].includes(ownerPersonality);
+    const isCool = ['Patient Developer','Community Builder','Silent Partner'].includes(ownerPersonality);
+    const color = isHot ? 'bg-rose-500/20 text-rose-300 border-rose-500/30'
+                : isCool ? 'bg-sky-500/20 text-sky-300 border-sky-500/30'
+                : 'bg-amber-500/20 text-amber-300 border-amber-500/30';
+    return { label: ownerPersonality, color };
+  }
   if (ownerPatience < 35 && ownerGoal === 'Win Now')
     return { label: 'Demanding — Win Now',   color: 'bg-rose-500/20 text-rose-300 border-rose-500/30' };
   if (ownerPatience < 35)

@@ -3634,22 +3634,22 @@ const simulatePlayerGameLine = (
   // stlBoost from defensive tendencies (pass-denial, gambles, helpDefender).
   // Stamina: fatigued defenders lose a step — up to 15 % reduction at stamina=40.
   // Hard cap at 5 STL/game; wider noise (1.5) creates organic nightly variance.
-  const STL_OPP_SCALE = 48;
+  const STL_OPP_SCALE = 36; // reduced 48→36: targets 7.0–9.0 team STL/game, leader ≤ 2.8/game
   const stlBase    = getStealChance(player.attributes.steals, player.position, player.attributes.defensiveIQ)
     * STL_OPP_SCALE * minFac * (1 + tm.stlBoost) * (1 + moraleEffMod);
   const stlFatigue = Math.max(0, (65 - (player.attributes.stamina ?? 70)) / 100 * 0.15);
-  const stl        = Math.min(5, Math.max(0, Math.floor(stlBase * (1 - stlFatigue) + Math.random() * 1.5)));
+  const stl        = Math.min(4, Math.max(0, Math.floor(stlBase * (1 - stlFatigue) + Math.random() * 1.5)));
 
   // BLK: getBlockChance × 35 block-opportunities per 48 min × minutes fraction.
   // Reduced from 65 → 35 so league leaders average 2.5–3.5 BPG (NBA realistic range).
   // Wemby-tier (blocks=97+): ~3.5 BPG; solid rim protector (blocks=85): ~2.0 BPG.
   // blkBoost from helpDefender/physicality tendencies; stamina reduction for tired bigs.
   // Hard cap at 7 BLK/game; wider noise (1.5) creates organic nightly variance.
-  const BLK_OPP_SCALE = 35;
+  const BLK_OPP_SCALE = 26; // reduced 35→26: targets 4.5–6.0 team BLK/game, leader ≤ 2.5/game
   const blkBase    = getBlockChance(player.attributes.blocks, player.position, player.attributes.defensiveIQ)
     * BLK_OPP_SCALE * minFac * (1 + tm.blkBoost) * (1 + moraleEffMod);
   const blkFatigue = Math.max(0, (65 - (player.attributes.stamina ?? 70)) / 100 * 0.12);
-  const blk        = Math.min(7, Math.max(0, Math.floor(blkBase * (1 - blkFatigue) + Math.random() * 1.5)));
+  const blk        = Math.min(5, Math.max(0, Math.floor(blkBase * (1 - blkFatigue) + Math.random() * 1.5)));
   const pf  = Math.min(6, Math.round((Math.floor(Math.random() * 4 * minFac + 1)) * (1 + tm.foulRisk)));
 
   // TOV: scaled by position-based touch multiplier so ball-handlers accrue
@@ -3687,6 +3687,7 @@ export const simulateGame = (
   awayB2B = false,
   rivalryLevel = 'Ice Cold',
   settings?: Pick<LeagueSettings, 'injuryFrequency' | 'homeCourt' | 'b2bFrequency' | 'quarterLength' | 'wnbaStatRealism' | 'upsetFrequency' | 'b2bFatigueEnabled' | 'fatigueImpact'>,
+  isPreseason = false,
 ): GameResult => {
   // ── Settings-driven constants ──────────────────────────────────────────────
   const quarterLength = settings?.quarterLength ?? 12; // minutes per quarter
@@ -4227,6 +4228,23 @@ export const simulateGame = (
         }
       }
 
+      // ── Preseason: evaluate young talent, rest veterans ───────────────────
+      // Rookies and first/second-year players get extended run; veterans ≥ 30
+      // in starting slots are pulled early so coaches can assess depth.
+      if (isPreseason) {
+        const pAge      = p.age ?? 25;
+        const pYearsPro = p.yearsPro ?? 5;
+        const isYoung   = pAge <= 22 || pYearsPro <= 1;
+        const isVet     = pAge >= 30 && i < 5;
+        if (isYoung && mins > 0) {
+          const boost = Math.round((8 + Math.floor(Math.random() * 6)) * quarterLengthScale);
+          mins = Math.min(Math.round(42 * quarterLengthScale), mins + boost);
+        } else if (isVet) {
+          const cut = Math.round((7 + Math.floor(Math.random() * 5)) * quarterLengthScale);
+          mins = Math.max(0, mins - cut);
+        }
+      }
+
       const ftBonus    = isHome ? 0.03 : 0;
       const varRoll    = playerVariance.get(p.id) ?? 0;
       const usageShare = usageShares[i];
@@ -4441,9 +4459,10 @@ export const simulateGame = (
           // Season-level flagrant count drives suspension decision
           const seasonFlagrants = (player.stats?.flagrants ?? 0) + 1; // +1 for this game
           const isRepeatOffender = seasonFlagrants >= 2;
-          const suspChance = isRepeatOffender ? 1.0 : 0.25; // first offense 25%, repeat = guaranteed
+          // First F2 of the season: rare 8% suspension; repeat offenders: 75%, still 1-game max.
+          const suspChance = isRepeatOffender ? 0.75 : 0.08;
           if (Math.random() < suspChance) {
-            const f2Games = isRepeatOffender ? 1 + Math.floor(Math.random() * 3) : 1; // 1–3 games for repeat, 1 for first
+            const f2Games = 1; // single-game max; egregious repeat escalation is handled by tech accumulation
             gameSuspensions.push({ playerId: player.id, playerName: player.name, teamId: teamRef.id, games: f2Games, reason: isRepeatOffender ? `repeat Flagrant 2 foul (${seasonFlagrants} this season)` : 'Flagrant 2 foul' });
           }
         }
@@ -4604,7 +4623,7 @@ export const simulateGame = (
   // B2B ceiling raised to 21 to allow the extra turnovers injected above.
   const clampTeamTov = (lines: typeof homePlayerStats, isB2B: boolean): typeof homePlayerStats => {
     const TOV_FLOOR   = 10;
-    const TOV_CEILING = (isB2B && b2bFatigueScale > 0) ? 21 : 18;
+    const TOV_CEILING = (isB2B && b2bFatigueScale > 0) ? 18 : 16; // targets 13–14.5 avg, max 15.5–17.5
     const total = lines.reduce((s, p) => s + (p.tov ?? 0), 0);
     if (total >= TOV_FLOOR && total <= TOV_CEILING) return lines;
 

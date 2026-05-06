@@ -116,7 +116,8 @@ export function buildPreseasonHeadline(
 }
 
 /**
- * Build a "rookie shines" or "notable performer" headline for preseason.
+ * Build a "rookie shines / struggles" or "notable young performer" headline for preseason.
+ * Covers both standout performances and learning-curve struggles to give narrative depth.
  */
 export function buildPreseasonRookieHeadline(
   playerName: string,
@@ -126,20 +127,62 @@ export function buildPreseasonRookieHeadline(
   ast: number,
   playerAge: number,
 ): { headline: string; content: string } {
-  const label = playerAge <= 21 ? 'Rookie' : 'Young Gun';
-  const headlines = [
-    `${label} ${playerName} Shines in Preseason Exhibition`,
-    `${playerName} Impresses in Exhibition Debut for ${teamName}`,
-    `${label} ${playerName} Drops ${pts} Points in Preseason Showcase`,
-  ];
+  const label    = playerAge <= 21 ? 'Rookie' : 'Young Gun';
   const statLine = `${pts} pts / ${reb} reb / ${ast} ast`;
-  const contents = [
-    `${playerName} (${statLine}) made a strong impression in preseason action, giving the ${teamName} plenty to be excited about heading into the regular season.`,
-    `The ${teamName}'s ${label.toLowerCase()} ${playerName} put up an eye-catching ${statLine} line in exhibition play. Coaches are taking notice.`,
-    `Early-season hype is building around ${playerName} after a ${statLine} performance. The ${teamName} may have found a key piece of their rotation.`,
+  const isStrong = pts >= 18 || reb >= 12 || ast >= 9;
+
+  if (isStrong) {
+    const headlines = [
+      `${label} ${playerName} Turns Heads With ${pts}-Point Preseason Showcase`,
+      `${playerName} Looks Ready: ${statLine} in Exhibition Win for ${teamName}`,
+      `Early Standout: ${playerName} Dominates Preseason Stage for ${teamName}`,
+      `${teamName} Prospect ${playerName} Delivers Career-Best Preseason Line`,
+      `${label} ${playerName} Impresses Coaches With ${statLine} Effort`,
+    ];
+    const contents = [
+      `${playerName} (${statLine}) put the league on notice in preseason action, making a compelling case for serious rotation minutes when the regular season tips off. The ${teamName} coaching staff is impressed.`,
+      `The ${teamName}'s ${label.toLowerCase()} ${playerName} delivered a statement performance, finishing with ${statLine}. Expect him to push for a starting role if he keeps this up.`,
+      `Early-season hype is fully justified after ${playerName} posted ${statLine}. Scouts who watched him during the draft are not surprised — the ${teamName} may have a gem on their hands.`,
+      `${playerName} looked every bit the prospect that had the ${teamName} excited at draft night. The ${statLine} line in exhibition play suggests he is ahead of schedule.`,
+    ];
+    return { headline: pickRandom(headlines), content: pickRandom(contents) };
+  }
+
+  const headlines = [
+    `${label} ${playerName} Shows Flashes for ${teamName} in Exhibition`,
+    `${playerName} Continues Preseason Audition With ${statLine} Line`,
+    `${teamName} Watching Closely as ${playerName} Navigates Exhibition Play`,
+    `Preseason Reps Valuable for ${teamName}'s ${playerName}`,
   ];
-  return {
-    headline: pickRandom(headlines),
-    content: pickRandom(contents),
-  };
+  const contents = [
+    `${playerName} (${statLine}) showed why the ${teamName} are high on him despite a few rough stretches. Preseason is the right time to learn, and coaches appreciate his effort and activity level.`,
+    `It was not a perfect night for ${playerName}, but the ${teamName} saw enough to stay optimistic. The ${statLine} line masked some impressive plays that won't show up in the box score.`,
+    `The ${teamName}'s ${label.toLowerCase()} ${playerName} is getting valuable exhibition reps. Finishing with ${statLine}, he is still clearly adjusting to the speed of the pro game — but the tools are there.`,
+    `Coaches view ${playerName}'s preseason as a work in progress. The ${statLine} showing has highs and lows, exactly what you'd expect from a young player earning his stripes.`,
+  ];
+  return { headline: pickRandom(headlines), content: pickRandom(contents) };
+}
+
+/**
+ * Build a note when a young player struggles badly in preseason — adds narrative balance.
+ */
+export function buildPreseasonRookieStruggleHeadline(
+  playerName: string,
+  teamName: string,
+  pts: number,
+  tov: number,
+  playerAge: number,
+): { headline: string; content: string } {
+  const label = playerAge <= 21 ? 'Rookie' : 'Young Player';
+  const headlines = [
+    `${label} ${playerName} Has Learning-Curve Night for ${teamName}`,
+    `${teamName}'s ${playerName} Battles Through Rough Preseason Outing`,
+    `${playerName} Faces Pro Adjustment: ${pts} Pts, ${tov} Turnovers in Exhibition`,
+  ];
+  const contents = [
+    `${playerName} struggled to find his footing with ${pts} points and ${tov} turnovers in a tough preseason night. Coaches aren't worried — this is exactly what exhibition games are for.`,
+    `Not every preseason game will go well for a ${label.toLowerCase()}, and ${playerName} learned that the hard way tonight. The ${teamName} staff sees the growing pains as part of the development process.`,
+    `${playerName} posted just ${pts} points while turning it over ${tov} times. The ${teamName} coaching staff remains confident this is normal development — the regular season is still weeks away.`,
+  ];
+  return { headline: pickRandom(headlines), content: pickRandom(contents) };
 }
