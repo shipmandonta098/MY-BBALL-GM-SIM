@@ -713,7 +713,6 @@ export interface LeagueSettings {
   expansionTeamCount?: 1 | 2 | 4;
   expansionDraftRules?: 'Standard' | 'Protected' | 'Open';
   expansionEnabled?: boolean;
-  numTeams?: number;
 
   // ── Roster & Draft Extended ───────────────────────────────────────────────
   minRosterSize?: number;          // default 10
