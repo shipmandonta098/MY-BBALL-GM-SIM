@@ -80,144 +80,137 @@ export const getRandomTraits = (): PersonalityTrait[] => {
 };
 
 export const generateTendencies = (pos: Position, traits: PersonalityTrait[]): PlayerTendencies => {
-  type Base = {
-    pullUpThree: number; postUp: number; driveToBasket: number; midRangeJumper: number;
-    kickOutPasser: number; isoHeavy: number; transitionHunter: number;
-    spotUp: number; cutter: number; offScreen: number;
-    attackCloseOuts: number; drawFoul: number; dribbleHandOff: number; pullUpOffPnr: number;
-    gambles: number; helpDefender: number; physicality: number; faceUpGuard: number;
-    onBallPest: number; denyThePass: number; shotContestDiscipline: number;
-    clutchShotTaker: number;
-    rollVsPop?: number; // PF/C only
-  };
+  type Base = PlayerTendencies;
   const baseMap: Record<Position, Base> = {
-    PG: { pullUpThree: 78, postUp: 20, driveToBasket: 74, midRangeJumper: 62, kickOutPasser: 68, isoHeavy: 65, transitionHunter: 74,
-          spotUp: 58, cutter: 57, offScreen: 58, attackCloseOuts: 80, drawFoul: 65, dribbleHandOff: 55, pullUpOffPnr: 80,
-          gambles: 50, helpDefender: 65, physicality: 40, faceUpGuard: 60,
-          onBallPest: 62, denyThePass: 60, shotContestDiscipline: 62, clutchShotTaker: 58 },
-    SG: { pullUpThree: 85, postUp: 35, driveToBasket: 68, midRangeJumper: 72, kickOutPasser: 42, isoHeavy: 82, transitionHunter: 60,
-          spotUp: 87, cutter: 52, offScreen: 74, attackCloseOuts: 82, drawFoul: 65, dribbleHandOff: 50, pullUpOffPnr: 78,
-          gambles: 55, helpDefender: 55, physicality: 50, faceUpGuard: 65,
-          onBallPest: 62, denyThePass: 65, shotContestDiscipline: 62, clutchShotTaker: 62 },
-    SF: { pullUpThree: 72, postUp: 50, driveToBasket: 63, midRangeJumper: 73, kickOutPasser: 48, isoHeavy: 75, transitionHunter: 53,
-          spotUp: 72, cutter: 62, offScreen: 60, attackCloseOuts: 80, drawFoul: 65, dribbleHandOff: 45, pullUpOffPnr: 65,
-          gambles: 50, helpDefender: 60, physicality: 60, faceUpGuard: 55,
-          onBallPest: 57, denyThePass: 60, shotContestDiscipline: 67, clutchShotTaker: 58 },
-    PF: { pullUpThree: 35, postUp: 70, driveToBasket: 45, midRangeJumper: 55, kickOutPasser: 40, isoHeavy: 45, transitionHunter: 35,
-          spotUp: 42, cutter: 65, offScreen: 32, attackCloseOuts: 52, drawFoul: 62, dribbleHandOff: 47, pullUpOffPnr: 32,
-          gambles: 45, helpDefender: 70, physicality: 75, faceUpGuard: 45,
-          onBallPest: 47, denyThePass: 50, shotContestDiscipline: 67, clutchShotTaker: 50,
-          rollVsPop: 50 },
-    C:  { pullUpThree: 15, postUp: 85, driveToBasket: 35, midRangeJumper: 40, kickOutPasser: 30, isoHeavy: 40, transitionHunter: 25,
-          spotUp: 27, cutter: 70, offScreen: 20, attackCloseOuts: 37, drawFoul: 62, dribbleHandOff: 55, pullUpOffPnr: 20,
-          gambles: 40, helpDefender: 80, physicality: 85, faceUpGuard: 30,
-          onBallPest: 37, denyThePass: 40, shotContestDiscipline: 72, clutchShotTaker: 50,
-          rollVsPop: 60 },
+    PG: { threePoint:75, midRange:62, foulDrawing:65, postUp:20,  layup:68, dunk:45,
+          spotUp:60, drive:74, offScreenThree:55, offScreenMidRange:50, cutToBasket:55,
+          pass:70, isolation:62, onBallSteal:52, block:28, alleyOop:45,
+          shotContest:60, putback:32, pullUpJumper:72, pullUpThree:78, playPassLane:62 },
+    SG: { threePoint:85, midRange:72, foulDrawing:63, postUp:35,  layup:62, dunk:58,
+          spotUp:85, drive:65, offScreenThree:72, offScreenMidRange:65, cutToBasket:50,
+          pass:42, isolation:80, onBallSteal:55, block:32, alleyOop:42,
+          shotContest:62, putback:38, pullUpJumper:72, pullUpThree:82, playPassLane:60 },
+    SF: { threePoint:70, midRange:70, foulDrawing:65, postUp:50,  layup:62, dunk:60,
+          spotUp:70, drive:62, offScreenThree:58, offScreenMidRange:60, cutToBasket:60,
+          pass:48, isolation:72, onBallSteal:50, block:45, alleyOop:52,
+          shotContest:65, putback:48, pullUpJumper:62, pullUpThree:68, playPassLane:58 },
+    PF: { threePoint:35, midRange:55, foulDrawing:62, postUp:70,  layup:55, dunk:68,
+          spotUp:42, drive:45, offScreenThree:30, offScreenMidRange:38, cutToBasket:65,
+          pass:38, isolation:45, onBallSteal:45, block:68, alleyOop:65,
+          shotContest:67, putback:72, pullUpJumper:30, pullUpThree:32, playPassLane:55 },
+    C:  { threePoint:15, midRange:40, foulDrawing:62, postUp:85,  layup:55, dunk:78,
+          spotUp:27, drive:35, offScreenThree:18, offScreenMidRange:25, cutToBasket:68,
+          pass:30, isolation:38, onBallSteal:38, block:82, alleyOop:75,
+          shotContest:72, putback:80, pullUpJumper:20, pullUpThree:15, playPassLane:50 },
   };
+
   const b = baseMap[pos];
   const rand = (base: number) => Math.min(100, Math.max(0, base + Math.floor(Math.random() * 21) - 10));
-
-  let off: PlayerTendencies['offensiveTendencies'] = {
-    pullUpThree:      rand(b.pullUpThree),
-    postUp:           rand(b.postUp),
-    driveToBasket:    rand(b.driveToBasket),
-    midRangeJumper:   rand(b.midRangeJumper),
-    kickOutPasser:    rand(b.kickOutPasser),
-    isoHeavy:         rand(b.isoHeavy),
-    transitionHunter: rand(b.transitionHunter),
-    spotUp:           rand(b.spotUp),
-    cutter:           rand(b.cutter),
-    offScreen:        rand(b.offScreen),
-    attackCloseOuts:  rand(b.attackCloseOuts),
-    drawFoul:         rand(b.drawFoul),
-    dribbleHandOff:   rand(b.dribbleHandOff),
-    pullUpOffPnr:     rand(b.pullUpOffPnr),
-    ...(b.rollVsPop !== undefined ? { rollVsPop: rand(b.rollVsPop) } : {}),
-  };
-  let def: PlayerTendencies['defensiveTendencies'] = {
-    gambles:               rand(b.gambles),
-    helpDefender:          rand(b.helpDefender),
-    physicality:           rand(b.physicality),
-    faceUpGuard:           rand(b.faceUpGuard),
-    onBallPest:            rand(b.onBallPest),
-    denyThePass:           rand(b.denyThePass),
-    shotContestDiscipline: rand(b.shotContestDiscipline),
-  };
-  let sit: PlayerTendencies['situationalTendencies'] = {
-    clutchShotTaker: rand(b.clutchShotTaker),
-  };
-
-  // ── Existing personality trait modifiers (unchanged) ─────────────────────
-  if (traits.includes('Lazy'))                 { off.isoHeavy        = Math.min(100, off.isoHeavy        + 15); def.gambles      = Math.max(0,   def.gambles      - 10); }
-  if (traits.includes('Workhorse'))            { off.driveToBasket   = Math.min(100, off.driveToBasket   + 10); def.helpDefender = Math.min(100, def.helpDefender  + 10); }
-  if (traits.includes('Leader'))               { off.kickOutPasser   = Math.min(100, off.kickOutPasser   + 15); off.isoHeavy     = Math.max(0,   off.isoHeavy     - 10); }
-  if (traits.includes('Friendly/Team First'))  { off.kickOutPasser   = Math.min(100, off.kickOutPasser   + 12); def.helpDefender = Math.min(100, def.helpDefender  + 12); }
-  if (traits.includes('Diva/Star'))            { off.isoHeavy        = Math.min(100, off.isoHeavy        + 20); off.kickOutPasser = Math.max(0,  off.kickOutPasser - 15); }
-  if (traits.includes('Tough/Alpha'))          { def.physicality     = Math.min(100, def.physicality     + 15); def.gambles      = Math.min(100, def.gambles      + 10); }
-  if (traits.includes('Hot Head'))             { def.gambles         = Math.min(100, def.gambles         + 15); off.isoHeavy     = Math.min(100, off.isoHeavy     + 10); }
-  if (traits.includes('Professional'))         { off.midRangeJumper  = Math.min(100, off.midRangeJumper  + 10); def.helpDefender = Math.min(100, def.helpDefender + 10); }
-  if (traits.includes('Gym Rat'))              { off.driveToBasket   = Math.min(100, off.driveToBasket   + 10); def.helpDefender = Math.min(100, def.helpDefender + 10); }
-  if (traits.includes('Streaky'))              { off.pullUpThree     = Math.min(100, off.pullUpThree     + 12); off.midRangeJumper = Math.min(100, off.midRangeJumper + 8); }
-
-  // ── New personality modifiers ─────────────────────────────────────────────
   const clamp = (v: number) => Math.min(100, Math.max(0, v));
 
+  const t: PlayerTendencies = {
+    threePoint:        rand(b.threePoint),
+    midRange:          rand(b.midRange),
+    foulDrawing:       rand(b.foulDrawing),
+    postUp:            rand(b.postUp),
+    layup:             rand(b.layup),
+    dunk:              rand(b.dunk),
+    spotUp:            rand(b.spotUp),
+    drive:             rand(b.drive),
+    offScreenThree:    rand(b.offScreenThree),
+    offScreenMidRange: rand(b.offScreenMidRange),
+    cutToBasket:       rand(b.cutToBasket),
+    pass:              rand(b.pass),
+    isolation:         rand(b.isolation),
+    onBallSteal:       rand(b.onBallSteal),
+    block:             rand(b.block),
+    alleyOop:          rand(b.alleyOop),
+    shotContest:       rand(b.shotContest),
+    putback:           rand(b.putback),
+    pullUpJumper:      rand(b.pullUpJumper),
+    pullUpThree:       rand(b.pullUpThree),
+    playPassLane:      rand(b.playPassLane),
+  };
+
+  // ── Personality trait modifiers ───────────────────────────────────────────
   if (traits.includes('Lazy')) {
-    off.spotUp         = clamp(off.spotUp         - 10);
-    off.cutter         = clamp(off.cutter         - 15);
-    off.offScreen      = clamp(off.offScreen       - 10);
-    def.onBallPest     = clamp(def.onBallPest      - 20);
-    def.denyThePass    = clamp(def.denyThePass     - 15);
-    off.drawFoul       = clamp(off.drawFoul        - 10);
+    t.isolation    = clamp(t.isolation    + 15);
+    t.onBallSteal  = clamp(t.onBallSteal  - 10);
+    t.spotUp       = clamp(t.spotUp       - 10);
+    t.cutToBasket  = clamp(t.cutToBasket  - 15);
+    t.offScreenThree    = clamp(t.offScreenThree    - 10);
+    t.offScreenMidRange = clamp(t.offScreenMidRange - 10);
+    t.playPassLane = clamp(t.playPassLane - 15);
+    t.foulDrawing  = clamp(t.foulDrawing  - 10);
   }
   if (traits.includes('Workhorse')) {
-    def.onBallPest     = clamp(def.onBallPest      + 15);
-    def.denyThePass    = clamp(def.denyThePass     + 12);
-    off.cutter         = clamp(off.cutter          + 10);
-    off.attackCloseOuts= clamp(off.attackCloseOuts + 10);
-    off.drawFoul       = clamp(off.drawFoul        +  8);
-  }
-  if (traits.includes('Diva/Star')) {
-    sit.clutchShotTaker= clamp(sit.clutchShotTaker + 20);
-    off.spotUp         = clamp(off.spotUp          - 15);
-    off.cutter         = clamp(off.cutter          - 15);
-    def.denyThePass    = clamp(def.denyThePass     - 10);
+    t.drive        = clamp(t.drive        + 10);
+    t.playPassLane = clamp(t.playPassLane + 10);
+    t.onBallSteal  = clamp(t.onBallSteal  + 15);
+    t.cutToBasket  = clamp(t.cutToBasket  + 10);
+    t.foulDrawing  = clamp(t.foulDrawing  +  8);
+    t.putback      = clamp(t.putback      +  8);
   }
   if (traits.includes('Leader')) {
-    off.kickOutPasser  = clamp(off.kickOutPasser   + 10); // already bumped, stack intentional
-    off.cutter         = clamp(off.cutter          +  8);
-    def.denyThePass    = clamp(def.denyThePass     +  8);
-    sit.clutchShotTaker= clamp(sit.clutchShotTaker + 10);
-    def.onBallPest     = clamp(def.onBallPest      +  5);
+    t.pass         = clamp(t.pass         + 20);
+    t.isolation    = clamp(t.isolation    - 10);
+    t.cutToBasket  = clamp(t.cutToBasket  +  8);
+    t.playPassLane = clamp(t.playPassLane + 12);
+    t.onBallSteal  = clamp(t.onBallSteal  +  5);
+  }
+  if (traits.includes('Friendly/Team First')) {
+    t.pass         = clamp(t.pass         + 12);
+    t.playPassLane = clamp(t.playPassLane + 12);
+    t.cutToBasket  = clamp(t.cutToBasket  +  6);
+  }
+  if (traits.includes('Diva/Star')) {
+    t.isolation    = clamp(t.isolation    + 30);
+    t.pass         = clamp(t.pass         - 15);
+    t.spotUp       = clamp(t.spotUp       - 15);
+    t.cutToBasket  = clamp(t.cutToBasket  - 15);
+    t.playPassLane = clamp(t.playPassLane - 10);
+  }
+  if (traits.includes('Tough/Alpha')) {
+    t.block        = clamp(t.block        + 15);
+    t.onBallSteal  = clamp(t.onBallSteal  + 10);
+    t.foulDrawing  = clamp(t.foulDrawing  +  8);
   }
   if (traits.includes('Hot Head')) {
-    def.shotContestDiscipline = clamp(def.shotContestDiscipline - 25);
-    def.onBallPest     = clamp(def.onBallPest      + 15);
-    sit.clutchShotTaker= clamp(sit.clutchShotTaker + 15);
+    t.onBallSteal  = clamp(t.onBallSteal  + 15);
+    t.isolation    = clamp(t.isolation    + 20);
+    t.shotContest  = clamp(t.shotContest  - 25);
   }
   if (traits.includes('Professional')) {
-    def.shotContestDiscipline = clamp(def.shotContestDiscipline + 20);
-    def.faceUpGuard    = clamp(def.faceUpGuard     + 10);
-    def.onBallPest     = clamp(def.onBallPest      +  8);
-    def.denyThePass    = clamp(def.denyThePass     + 10);
-    def.gambles        = clamp(def.gambles         - 15);
-    off.isoHeavy       = clamp(off.isoHeavy        - 10);
-    sit.clutchShotTaker= clamp(sit.clutchShotTaker +  5);
-  }
-  if (traits.includes('Streaky')) {
-    sit.clutchShotTaker= clamp(sit.clutchShotTaker + 15);
-    off.spotUp         = clamp(off.spotUp          + 10);
-    // pullUpThree already boosted above
+    t.midRange     = clamp(t.midRange     + 10);
+    t.playPassLane = clamp(t.playPassLane + 18);
+    t.shotContest  = clamp(t.shotContest  + 20);
+    t.onBallSteal  = clamp(t.onBallSteal  +  8);
+    t.isolation    = clamp(t.isolation    - 10);
   }
   if (traits.includes('Gym Rat')) {
-    def.onBallPest     = clamp(def.onBallPest      + 10);
-    def.denyThePass    = clamp(def.denyThePass     + 10);
-    def.shotContestDiscipline = clamp(def.shotContestDiscipline + 10);
-    off.attackCloseOuts= clamp(off.attackCloseOuts + 10);
-    off.cutter         = clamp(off.cutter          +  8);
+    t.drive        = clamp(t.drive        + 10);
+    t.playPassLane = clamp(t.playPassLane + 10);
+    t.onBallSteal  = clamp(t.onBallSteal  + 10);
+    t.shotContest  = clamp(t.shotContest  + 10);
+    t.cutToBasket  = clamp(t.cutToBasket  +  8);
+  }
+  if (traits.includes('Streaky')) {
+    t.pullUpThree  = clamp(t.pullUpThree  + 12);
+    t.midRange     = clamp(t.midRange     +  8);
+    t.isolation    = clamp(t.isolation    + 15);
+    t.spotUp       = clamp(t.spotUp       + 10);
+  }
+  if (traits.includes('Clutch')) {
+    t.isolation    = clamp(t.isolation    + 15);
+    t.pullUpJumper = clamp(t.pullUpJumper + 10);
+    t.pullUpThree  = clamp(t.pullUpThree  + 10);
+  }
+  if (traits.includes('Money Hungry')) {
+    t.foulDrawing  = clamp(t.foulDrawing  + 12);
+    t.isolation    = clamp(t.isolation    + 10);
   }
 
-  return { offensiveTendencies: off, defensiveTendencies: def, situationalTendencies: sit };
+  return t;
 };
 
 export const COACH_BADGES: CoachBadge[] = [

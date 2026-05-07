@@ -527,16 +527,16 @@ const LiveGameModal: React.FC<LiveGameModalProps> = ({
         : !streakData.lastMade && streakData.consecutive >= 2 ?  -8 : 0)
       : 0;
     // Conflict: iso-heavy vs Offensive Architect
-    if (badge.offArch && (shooterTend?.offensiveTendencies.isoHeavy ?? 50) > 60) {
+    if (badge.offArch && (shooterTend?.isolation ?? 50) > 60) {
       const isoProb = shooterTraits.includes('Lazy') ? 0.50 : shooterTraits.includes('Professional') ? 0.10 : 0.30;
       if (Math.random() < isoProb) coachFrustrationRef.current[frustSide] = Math.min(100, coachFrustrationRef.current[frustSide] + 3);
     }
     // Conflict: post-up vs Pace Master
-    if (badge.paceMaster && (shooterTend?.offensiveTendencies.postUp ?? 50) > 65 && !shooterTraits.includes('Leader')) {
+    if (badge.paceMaster && (shooterTend?.postUp ?? 50) > 65 && !shooterTraits.includes('Leader')) {
       if (Math.random() < 0.25) coachFrustrationRef.current[frustSide] = Math.min(100, coachFrustrationRef.current[frustSide] + 2);
     }
     // Conflict: gambles vs Defensive Guru → defensive breakdown event
-    if (badge.defGuru && (shooterTend?.defensiveTendencies.gambles ?? 50) > 60) {
+    if (badge.defGuru && (shooterTend?.onBallSteal ?? 50) > 60) {
       const gambleProb = shooterTraits.includes('Hot Head') ? 0.40 : 0.25;
       if (Math.random() < gambleProb) {
         coachFrustrationRef.current[frustSide] = Math.min(100, coachFrustrationRef.current[frustSide] + 4);
@@ -671,10 +671,9 @@ const LiveGameModal: React.FC<LiveGameModalProps> = ({
 
       // ── Cinematic ISO / Drive / Post-Up pre-event (non-3pt, ~50% chance) ──────
       if (!isThree && Math.random() < 0.50) {
-        const tendOff  = shooterTend?.offensiveTendencies;
-        const isoW     = tendOff?.isoHeavy       ?? 50;
-        const driveW   = tendOff?.driveToBasket  ?? 50;
-        const postW    = tendOff?.postUp          ?? 50;
+        const isoW     = shooterTend?.isolation ?? 50;
+        const driveW   = shooterTend?.drive     ?? 50;
+        const postW    = shooterTend?.postUp     ?? 50;
         const totalW   = isoW + driveW + postW;
         const roll2    = Math.random() * totalW;
         const action   = roll2 < isoW ? 'ISO' : roll2 < isoW + driveW ? 'DRIVE' : 'POST_UP';

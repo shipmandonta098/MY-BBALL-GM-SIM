@@ -11,37 +11,31 @@ export type PersonalityTrait = 'Leader' | 'Diva/Star' | 'Loyal' | 'Professional'
 export type TrainingFocusArea = 'Shooting / 3PT' | 'Playmaking / Passing' | 'Defense / Rebounding' | 'Post Scoring / Interior' | 'Athleticism / Dunking' | 'Finishing / Layups' | 'Free Throws' | 'Mental / Leadership';
 
 export interface PlayerTendencies {
-  offensiveTendencies: {
-    pullUpThree: number;          // 0-100
-    postUp: number;
-    driveToBasket: number;
-    midRangeJumper: number;
-    kickOutPasser: number;
-    isoHeavy: number;
-    transitionHunter: number;
-    // ── New offensive tendencies ──────────────────────────────────
-    spotUp: number;               // relocate off-ball for C&S
-    cutter: number;               // backdoor / basket cuts off-ball
-    offScreen: number;            // uses off-ball screens for open looks
-    rollVsPop?: number;           // C/PF only: 70+ = rolls, <40 = pops
-    attackCloseOuts: number;      // attacks when defender closes out hard
-    drawFoul: number;             // seeks contact / gets to the line
-    dribbleHandOff: number;       // initiates offense via DHOs
-    pullUpOffPnr: number;         // pulls up for jumper off ball-screen
-  };
-  defensiveTendencies: {
-    gambles: number;
-    helpDefender: number;
-    physicality: number;
-    faceUpGuard: number;
-    // ── New defensive tendencies ──────────────────────────────────
-    onBallPest: number;           // full pressure on ball handler
-    denyThePass: number;          // aggressively denies man from receiving
-    shotContestDiscipline: number;// contests without biting pump fakes
-  };
-  situationalTendencies: {
-    clutchShotTaker: number;      // demands ball / takes big shot in clutch
-  };
+  // Shooting tendencies
+  threePoint: number;        // catch-and-shoot 3PT attempts
+  midRange: number;          // mid-range jumper frequency
+  layup: number;             // drives and finishes at the rim
+  dunk: number;              // dunks when able vs. lays it up
+  postUp: number;            // posts up and scores in the paint
+  pullUpJumper: number;      // pull-up mid-range off the dribble
+  pullUpThree: number;       // pull-up 3PT off the dribble
+  // Off-ball movement
+  spotUp: number;            // catch-and-shoot from set position
+  cutToBasket: number;       // backdoor / basket cuts
+  offScreenThree: number;    // uses screens to get open 3PT looks
+  offScreenMidRange: number; // uses screens to get open mid-range looks
+  alleyOop: number;          // finishes alley-oops
+  putback: number;           // crashes boards for putback attempts
+  // Creation & passing
+  drive: number;             // attacks the basket off the dribble
+  isolation: number;         // plays one-on-one isolation ball
+  pass: number;              // tendency to pass vs. shoot; kick-out frequency
+  foulDrawing: number;       // seeks contact; draws fouls / takes charges
+  // Defense
+  onBallSteal: number;       // gambles for on-ball steals
+  block: number;             // goes for shot blocks
+  shotContest: number;       // contests shots without biting pump fakes
+  playPassLane: number;      // stays in passing lanes; intercepts / denies
 }
 export type CoachBadge = 'Developmental Genius' | 'Pace Master' | 'Star Handler' | 'Defensive Guru' | 'Offensive Architect' | 'Clutch Specialist' | 'Recruiting Ace';
 
