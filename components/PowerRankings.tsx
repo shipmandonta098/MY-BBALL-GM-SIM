@@ -12,6 +12,84 @@ interface PowerRankingsProps {
   onManageTeam: (teamId: string) => void;
 }
 
+interface TeamTag { label: string; color: string; }
+interface TeamProfile { strengths: TeamTag[]; weaknesses: TeamTag[]; }
+
+const computeTeamProfile = (team: Team, league: LeagueState): TeamProfile => {
+  const active = team.roster.filter(p => p.status !== 'Injured');
+  const injured = team.roster.filter(p => p.status === 'Injured');
+  const sorted = [...team.roster].sort((a, b) => getEffectiveRating(b) - getEffectiveRating(a));
+  const bench = sorted.slice(6, 12);
+  const guards = active.filter(p => p.position === 'PG' || p.position === 'SG');
+  const bigs   = active.filter(p => p.position === 'C'  || p.position === 'PF');
+
+  const avgAttr = (arr: typeof active, key: keyof typeof active[0]['attributes']) =>
+    arr.length === 0 ? 60 : arr.reduce((s, p) => s + (p.attributes[key] as number ?? 60), 0) / arr.length;
+
+  const starRating  = sorted[0] ? getEffectiveRating(sorted[0]) : 0;
+  const avgRating   = active.length === 0 ? 70 : active.reduce((s, p) => s + getEffectiveRating(p), 0) / active.length;
+  const benchAvg    = bench.length === 0 ? 60 : bench.reduce((s, p) => s + getEffectiveRating(p), 0) / bench.length;
+  const guardAvg    = guards.length === 0 ? 70 : guards.reduce((s, p) => s + getEffectiveRating(p), 0) / guards.length;
+  const bigsAvg     = bigs.length === 0 ? 70 : bigs.reduce((s, p) => s + getEffectiveRating(p), 0) / bigs.length;
+  const avgMorale   = active.length === 0 ? 65 : active.reduce((s, p) => s + (p.morale ?? 70), 0) / active.length;
+  const avgAge      = active.length === 0 ? 25 : active.reduce((s, p) => s + (p.age ?? 25), 0) / active.length;
+
+  const avgDef  = (avgAttr(active, 'perimeterDef') + avgAttr(active, 'interiorDef') + avgAttr(active, 'defensiveIQ')) / 3;
+  const avg3pt  = avgAttr(active, 'shooting3pt');
+  const avgReb  = (avgAttr(active, 'offReb') + avgAttr(active, 'defReb')) / 2;
+  const avgPlay = (avgAttr(active, 'passing') + avgAttr(active, 'ballHandling')) / 2;
+
+  const recentGames = league.history.filter(g => g.homeTeamId === team.id || g.awayTeamId === team.id).slice(-10);
+  const ptsFor    = recentGames.length === 0 ? 105 : recentGames.reduce((s, g) => s + (g.homeTeamId === team.id ? g.homeScore : g.awayScore), 0) / recentGames.length;
+  const ptsAgainst = recentGames.length === 0 ? 105 : recentGames.reduce((s, g) => s + (g.homeTeamId === team.id ? g.awayScore : g.homeScore), 0) / recentGames.length;
+  const netRtg = ptsFor - ptsAgainst;
+
+  const str: TeamTag[] = [];
+  const wk:  TeamTag[] = [];
+
+  if (starRating >= 87) str.push({ label: 'Star Power', color: 'bg-amber-500/20 text-amber-300 border-amber-500/30' });
+  if (starRating < 79)  wk.push({ label: 'No Star Power', color: 'bg-slate-700/40 text-slate-400 border-slate-600/40' });
+
+  if (avgDef >= 76) str.push({ label: 'Elite Defense', color: 'bg-sky-500/20 text-sky-300 border-sky-500/30' });
+  else if (avgDef < 67) wk.push({ label: 'Porous Defense', color: 'bg-rose-500/20 text-rose-300 border-rose-500/30' });
+
+  if (avg3pt >= 75) str.push({ label: 'Pace & Space', color: 'bg-violet-500/20 text-violet-300 border-violet-500/30' });
+  else if (avg3pt < 63) wk.push({ label: 'Poor 3PT Shooting', color: 'bg-rose-500/20 text-rose-300 border-rose-500/30' });
+
+  if (avgReb >= 75) str.push({ label: 'Glass Dominators', color: 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30' });
+  else if (avgReb < 63) wk.push({ label: 'Poor Rebounding', color: 'bg-rose-500/20 text-rose-300 border-rose-500/30' });
+
+  if (benchAvg >= 74) str.push({ label: 'Strong Bench', color: 'bg-teal-500/20 text-teal-300 border-teal-500/30' });
+  else if (benchAvg < 64) wk.push({ label: 'Thin Bench', color: 'bg-orange-500/20 text-orange-300 border-orange-500/30' });
+
+  if (guardAvg >= 80) str.push({ label: 'Dynamic Backcourt', color: 'bg-blue-500/20 text-blue-300 border-blue-500/30' });
+  else if (guardAvg < 71) wk.push({ label: 'Weak Backcourt', color: 'bg-rose-500/20 text-rose-300 border-rose-500/30' });
+
+  if (bigsAvg >= 79) str.push({ label: 'Interior Force', color: 'bg-orange-500/20 text-orange-300 border-orange-500/30' });
+
+  if (avgPlay >= 76) str.push({ label: 'Elite Playmaking', color: 'bg-indigo-500/20 text-indigo-300 border-indigo-500/30' });
+
+  if (avgMorale >= 77) str.push({ label: 'High Morale', color: 'bg-pink-500/20 text-pink-300 border-pink-500/30' });
+  else if (avgMorale < 58) wk.push({ label: 'Low Morale', color: 'bg-slate-700/40 text-slate-400 border-slate-600/40' });
+
+  if (injured.length === 0 && active.length >= 12) str.push({ label: 'Full Strength', color: 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30' });
+  if (injured.filter(p => getEffectiveRating(p) >= 80).length >= 1) wk.push({ label: 'Key Player Injured', color: 'bg-rose-500/20 text-rose-300 border-rose-500/30' });
+  else if (injured.length >= 3) wk.push({ label: 'Injury Ravaged', color: 'bg-rose-500/20 text-rose-300 border-rose-500/30' });
+
+  if (recentGames.length >= 5) {
+    if (netRtg > 8) str.push({ label: 'Dominant Net Rating', color: 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30' });
+    else if (netRtg < -8) wk.push({ label: 'Negative Net Rating', color: 'bg-rose-500/20 text-rose-300 border-rose-500/30' });
+  }
+
+  if (avgAge > 30 && avgRating < 76) wk.push({ label: 'Aging Core', color: 'bg-orange-500/20 text-orange-300 border-orange-500/30' });
+  else if (avgAge < 23) wk.push({ label: 'Youth & Inexperience', color: 'bg-slate-700/40 text-slate-400 border-slate-600/40' });
+
+  const cap = team.budget - team.roster.reduce((s, p) => s + p.salary, 0);
+  if (cap < 0) wk.push({ label: 'Over the Cap', color: 'bg-orange-500/20 text-orange-300 border-orange-500/30' });
+
+  return { strengths: str.slice(0, 5), weaknesses: wk.slice(0, 4) };
+};
+
 const PowerRankings: React.FC<PowerRankingsProps> = ({ league, onViewRoster, onManageTeam }) => {
   const [activeTab, setActiveTab] = useState<'rankings' | 'comparison'>('rankings');
   const [compareId1, setCompareId1] = useState<string>(league.userTeamId);
@@ -78,9 +156,12 @@ const PowerRankings: React.FC<PowerRankingsProps> = ({ league, onViewRoster, onM
     const ovr = calcTeamEffectiveOVR(team.roster);
     const top5 = [...team.roster].sort((a,b)=>getEffectiveRating(b)-getEffectiveRating(a)).slice(0, 5);
     const cap = team.budget - team.roster.reduce((s,p)=>s+p.salary,0);
+    const profile = computeTeamProfile(team, league);
+    const accentBorder = side === 'left' ? 'hover:border-amber-500/30' : 'hover:border-blue-500/30';
 
     return (
-      <div className={`bg-slate-900/50 border border-slate-800 rounded-[2rem] p-8 flex flex-col gap-8 transition-all ${side === 'left' ? 'hover:border-amber-500/30' : 'hover:border-blue-500/30'}`}>
+      <div className={`bg-slate-900/50 border border-slate-800 rounded-[2rem] p-8 flex flex-col gap-6 transition-all ${accentBorder}`}>
+        {/* Header */}
         <div className="flex items-center gap-6">
           <div className="w-20 h-20 bg-slate-800 rounded-2xl flex items-center justify-center border border-slate-700 shrink-0">
              <TeamBadge team={team} size="xl" />
@@ -91,6 +172,7 @@ const PowerRankings: React.FC<PowerRankingsProps> = ({ league, onViewRoster, onM
           </div>
         </div>
 
+        {/* Stats row */}
         <div className="grid grid-cols-2 gap-4">
            <div className="bg-slate-950 p-4 rounded-xl border border-slate-800">
               <p className="text-[10px] text-slate-500 font-black uppercase mb-1">OVR Rating</p>
@@ -102,7 +184,8 @@ const PowerRankings: React.FC<PowerRankingsProps> = ({ league, onViewRoster, onM
            </div>
         </div>
 
-        <div className="space-y-4">
+        {/* Franchise core */}
+        <div className="space-y-3">
            <h4 className="text-[10px] font-black uppercase tracking-widest text-slate-600 border-b border-slate-800 pb-2">Franchise Core</h4>
            {top5.map(p => (
               <div key={p.id} className="flex justify-between items-center">
@@ -112,7 +195,40 @@ const PowerRankings: React.FC<PowerRankingsProps> = ({ league, onViewRoster, onM
            ))}
         </div>
 
-        <div className="mt-auto pt-6 border-t border-slate-800 flex justify-between items-center">
+        {/* ── Strengths ── */}
+        <div className="space-y-2">
+          <h4 className="text-[10px] font-black uppercase tracking-widest text-emerald-600 border-b border-slate-800 pb-2">Strengths</h4>
+          {profile.strengths.length === 0 ? (
+            <p className="text-xs text-slate-600 italic">No clear strengths identified.</p>
+          ) : (
+            <div className="flex flex-wrap gap-2">
+              {profile.strengths.map((tag, i) => (
+                <span key={i} className={`px-3 py-1 rounded-full text-[11px] font-black uppercase tracking-wide border ${tag.color}`}>
+                  {tag.label}
+                </span>
+              ))}
+            </div>
+          )}
+        </div>
+
+        {/* ── Weaknesses ── */}
+        <div className="space-y-2">
+          <h4 className="text-[10px] font-black uppercase tracking-widest text-rose-700 border-b border-slate-800 pb-2">Weaknesses</h4>
+          {profile.weaknesses.length === 0 ? (
+            <p className="text-xs text-slate-600 italic">No glaring weaknesses.</p>
+          ) : (
+            <div className="flex flex-wrap gap-2">
+              {profile.weaknesses.map((tag, i) => (
+                <span key={i} className={`px-3 py-1 rounded-full text-[11px] font-black uppercase tracking-wide border ${tag.color}`}>
+                  {tag.label}
+                </span>
+              ))}
+            </div>
+          )}
+        </div>
+
+        {/* Footer */}
+        <div className="mt-auto pt-4 border-t border-slate-800 flex justify-between items-center">
            <div>
               <p className="text-[10px] text-slate-500 font-black uppercase">Coach Scheme</p>
               <p className="text-sm font-bold text-white uppercase">{team.activeScheme}</p>
