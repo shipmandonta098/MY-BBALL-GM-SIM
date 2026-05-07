@@ -1377,24 +1377,24 @@ export const normalizeLeagueOVRs = (state: LeagueState): LeagueState => {
     t.roster.slice().sort((a, b) => b.rating - a.rating).slice(0, 10)
       .reduce((s, p) => s + p.rating, 0) / Math.min(10, t.roster.length || 1);
 
-  // Hard clamp: no team below 76 (top-10 avg) or above 92
+  // Hard clamp: no team below 72 (top-10 avg) or above 86.
+  // Lowered from 76/92 to match the tighter OVR distribution where 90+ is rare.
   teams.forEach(t => {
     let ovr = teamOVR(t);
-    if (ovr < 76) {
-      // Boost weakest players +3 until we reach 76
+    if (ovr < 72) {
       const sorted = t.roster.slice().sort((a, b) => a.rating - b.rating);
       for (const p of sorted) {
-        if (teamOVR(t) >= 76) break;
+        if (teamOVR(t) >= 72) break;
         const real = t.roster.find(r => r.id === p.id)!;
-        real.rating = Math.min(92, real.rating + 3);
+        real.rating = Math.min(86, real.rating + 3);
         real.attributes.shooting = Math.min(99, real.attributes.shooting + 2);
       }
-    } else if (ovr > 92) {
+    } else if (ovr > 86) {
       const sorted = t.roster.slice().sort((a, b) => b.rating - a.rating);
       for (const p of sorted) {
-        if (teamOVR(t) <= 92) break;
+        if (teamOVR(t) <= 86) break;
         const real = t.roster.find(r => r.id === p.id)!;
-        real.rating = Math.max(76, real.rating - 3);
+        real.rating = Math.max(72, real.rating - 3);
       }
     }
   });

@@ -1585,12 +1585,13 @@ export const generatePlayer = (id: string, ageRange: [number, number] = [19, 38]
   const lastNames = gender === 'Male' ? region.lastNamesMale : NAMES_FEMALE.last;
 
   const rand = Math.random();
-  // Shifted distribution — avg ~77, includes G-League-caliber fringe players
-  let baseRating = rand > 0.97 ? 91 + Math.floor(Math.random() * 8)  // 3%:  91–98 (stars)
-                 : rand > 0.83 ? 83 + Math.floor(Math.random() * 9)  // 14%: 83–91 (good starters)
-                 : rand > 0.50 ? 76 + Math.floor(Math.random() * 8)  // 33%: 76–83 (starters/rotation)
-                 : rand > 0.15 ? 68 + Math.floor(Math.random() * 9)  // 35%: 68–76 (role players)
-                               : 58 + Math.floor(Math.random() * 10); // 15%: 58–67 (fringe/G-League)
+  // Tight distribution — only ~1% of players reach 90+ (4–8 league-wide).
+  // 83–89 "All-Star" tier is limited to ~6% so it stays exclusive (~27 players per 30-team league).
+  let baseRating = rand > 0.99 ? 90 + Math.floor(Math.random() * 7)  // 1%:   90–96 (rare superstars)
+                 : rand > 0.93 ? 83 + Math.floor(Math.random() * 7)  // 6%:   83–89 (All-Star tier)
+                 : rand > 0.58 ? 75 + Math.floor(Math.random() * 8)  // 35%:  75–82 (solid starters)
+                 : rand > 0.20 ? 65 + Math.floor(Math.random() * 10) // 38%:  65–74 (role players)
+                               : 54 + Math.floor(Math.random() * 11); // 20%: 54–64 (fringe/G-League)
   const rating = Math.min(99, Math.max(minRating, baseRating));
   const potential = Math.min(99, rating + Math.floor(Math.random() * 12));
   const pos = POSITIONS[Math.floor(Math.random() * POSITIONS.length)];
@@ -1761,44 +1762,46 @@ export const generateProspects = (year: number, count: number = 100, genderRatio
     const badCount  = prospectTraits.filter(t => (t === 'Lazy' || t === 'Hot Head' || t === 'Money Hungry' || t === 'Diva/Star')).length;
     const goodCount = prospectTraits.filter(t => (t === 'Gym Rat' || t === 'Workhorse' || t === 'Leader' || t === 'Professional' || t === 'Clutch')).length;
 
-    // ── OVR by pick slot (realistic rookie ranges — strong prospects, not superstars) ─
+    // ── OVR by pick slot — rookies are raw; superstars develop, not arrive ──
+    // #1 pick: 83–88 (rarely 90 with elite traits). True 90+ OVR must be earned.
     let rating: number;
     if (i === 0) {
-      rating = 88 + Math.floor(Math.random() * 7);          // #1 overall: 88-94
+      rating = 83 + Math.floor(Math.random() * 6);          // #1 overall:  83–88
     } else if (i < 5) {
-      rating = 82 + Math.floor(Math.random() * 8);          // Top 5: 82-89
+      rating = 79 + Math.floor(Math.random() * 6);          // Top 5:       79–84
     } else if (i < 14) {
-      rating = 76 + Math.floor(Math.random() * 8);          // Lottery 6-14: 76-83
+      rating = 73 + Math.floor(Math.random() * 7);          // Lottery 6–13: 73–79
     } else if (i < 30) {
-      rating = 71 + Math.floor(Math.random() * 8);          // Late first: 71-78
+      rating = 67 + Math.floor(Math.random() * 7);          // Late first:  67–73
     } else if (i < 60) {
       rating = Math.random() < 0.08                         // 2nd round: sleeper or normal
-        ? 74 + Math.floor(Math.random() * 5)                //   sleeper:  74-78
-        : 63 + Math.floor(Math.random() * 10);              //   normal:   63-72
+        ? 68 + Math.floor(Math.random() * 6)                //   sleeper:  68–73
+        : 57 + Math.floor(Math.random() * 10);              //   normal:   57–66
     } else {
-      rating = 58 + Math.floor(Math.random() * 9);          // Undrafted: 58-66
+      rating = 52 + Math.floor(Math.random() * 9);          // Undrafted:   52–60
     }
 
     // ── Trait bust-risk modifier ─────────────────────────────────────────
-    // Late picks are more sensitive — less polish, more variance from character flaws.
-    // Good traits (Gym Rat, Workhorse…) can nudge a player above their slot ceiling.
+    // Good traits (Gym Rat, Workhorse…) can push a prospect above their slot.
+    // Bad traits create bust risk — harsh for late picks, mild for top picks.
     const bustMultiplier = i >= 14 ? 2.0 : i >= 5 ? 1.0 : 0.5;
     const traitDelta     = Math.round((goodCount - badCount * 1.5) * bustMultiplier);
+    // #1 pick trait ceiling capped at +2 (84–90 max with elite traits — very rare 90)
     const maxAdjust      = i === 0 ? 2 : i < 5 ? 3 : i < 14 ? 4 : 6;
-    rating = Math.min(99, Math.max(55, rating + Math.max(-maxAdjust, Math.min(maxAdjust, traitDelta))));
+    rating = Math.min(99, Math.max(50, rating + Math.max(-maxAdjust, Math.min(maxAdjust, traitDelta))));
 
-    // ── Potential: high ceiling for top prospects, tiered down for late picks ─
+    // ── Potential: development ceiling — high for top picks, earned for late picks ─
     let potential: number;
     if (i === 0) {
-      potential = 92 + Math.floor(Math.random() * 8);                // #1 pick:    92-99
+      potential = 88 + Math.floor(Math.random() * 10);               // #1 pick:    88–97 (can become a star)
     } else if (i < 5) {
-      potential = Math.min(99, 88 + Math.floor(Math.random() * 12)); // Top 5:      88-99
+      potential = Math.min(99, 85 + Math.floor(Math.random() * 12)); // Top 5:      85–96
     } else if (i < 14) {
-      potential = Math.min(99, rating + Math.floor(Math.random() * 16) + 6); // Lottery: good upside
+      potential = Math.min(99, rating + Math.floor(Math.random() * 16) + 7); // Lottery: high upside
     } else if (i < 30) {
-      potential = Math.min(99, rating + Math.floor(Math.random() * 13) + 4); // Late 1st: moderate
+      potential = Math.min(99, rating + Math.floor(Math.random() * 13) + 5); // Late 1st: moderate
     } else {
-      potential = Math.min(99, rating + Math.floor(Math.random() * 10) + 2); // 2nd rd / undrafted
+      potential = Math.min(99, rating + Math.floor(Math.random() * 10) + 3); // 2nd rd / undrafted
     }
     // Bad traits erode ceiling for mid/late picks — bust signal
     if (badCount > 0 && i >= 5) {
@@ -1975,14 +1978,18 @@ export const generateDefaultRotation = (roster: Player[]): TeamRotation => {
 // 14 values per tier, sorted best-to-worst (franchise player → 14th man).
 // These are minimum ratings per roster slot so teams have a realistic spread.
 const TIER_SLOT_FLOORS: Record<string, number[]> = {
-  // elite: full-roster avg ≈ 85–87  (2–4 per 30-team league)
-  elite:      [96, 93, 90, 88, 87, 86, 85, 84, 83, 83, 82, 80, 76, 70],
-  // solid: full-roster avg ≈ 82–84  (6–8 teams)
-  solid:      [92, 89, 87, 85, 84, 83, 82, 81, 80, 79, 77, 74, 70, 64],
-  // average: full-roster avg ≈ 78–80 (bulk of the league)
-  average:    [87, 84, 82, 80, 79, 78, 77, 76, 75, 74, 72, 69, 64, 60],
-  // rebuilding: full-roster avg ≈ 74–76 (floor teams)
-  rebuilding: [84, 81, 79, 77, 76, 75, 74, 73, 72, 71, 68, 65, 61, 58],
+  // elite: 2–3 contenders — no guaranteed 90+; stars emerge through random roll
+  // top-10 floor avg ≈ 77, actual avg ≈ 80–83 with natural variance
+  elite:      [84, 82, 80, 78, 77, 76, 75, 74, 73, 72, 70, 67, 63, 59],
+  // solid: strong rosters — reliable starters, 1 potential All-Star
+  // top-10 floor avg ≈ 74, actual avg ≈ 77–80
+  solid:      [80, 78, 76, 74, 73, 72, 71, 70, 69, 68, 66, 63, 59, 56],
+  // average: the bulk of the league — steady starters, decent depth
+  // top-10 floor avg ≈ 70, actual avg ≈ 73–77
+  average:    [76, 74, 72, 70, 69, 68, 67, 66, 65, 64, 62, 59, 55, 52],
+  // rebuilding: young/cheap roster; top star is a project
+  // top-10 floor avg ≈ 66, actual avg ≈ 69–73
+  rebuilding: [72, 70, 68, 66, 65, 64, 63, 62, 61, 60, 57, 54, 51, 48],
 };
 
 // ── Executive (GM) name generation ───────────────────────────────────────────
