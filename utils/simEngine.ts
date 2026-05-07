@@ -1,5 +1,42 @@
 import { Team, GameResult, Player, GamePlayerLine, ClutchGameLine, CoachScheme, PlayByPlayEvent, InjuryType, LeagueState, QuarterDetail, LeagueSettings } from '../types';
 
+// ─── Tendency adapters ────────────────────────────────────────────────────────
+// Map the flat PlayerTendencies to legacy field names used throughout simEngine
+function getOT(p: Player) {
+  const t = p.tendencies;
+  const offScreen = t ? (t.offScreenThree + t.offScreenMidRange) / 2 : 50;
+  return {
+    pullUpThree:      t?.pullUpThree   ?? 50,
+    postUp:           t?.postUp        ?? 50,
+    driveToBasket:    t?.drive         ?? 50,
+    midRangeJumper:   t?.midRange      ?? 50,
+    kickOutPasser:    t?.pass          ?? 50,
+    isoHeavy:         t?.isolation     ?? 50,
+    transitionHunter: t?.drive         ?? 50,
+    spotUp:           t?.spotUp        ?? 50,
+    cutter:           t?.cutToBasket   ?? 50,
+    offScreen,
+    attackCloseOuts:  t?.drive         ?? 50,
+    drawFoul:         t?.foulDrawing   ?? 50,
+    dribbleHandOff:   t?.pass          ?? 50,
+    pullUpOffPnr:     t?.pullUpJumper  ?? 50,
+    clutchShotTaker:  t?.isolation     ?? 50,
+  };
+}
+
+function getDT(p: Player) {
+  const t = p.tendencies;
+  return {
+    gambles:               t?.onBallSteal  ?? 50,
+    helpDefender:          t?.playPassLane ?? 50,
+    physicality:           t?.block        ?? 50,
+    faceUpGuard:           t?.shotContest  ?? 50,
+    onBallPest:            t?.onBallSteal  ?? 50,
+    denyThePass:           t?.playPassLane ?? 50,
+    shotContestDiscipline: t?.shotContest  ?? 50,
+  };
+}
+
 // ─── Constants ───────────────────────────────────────────────────────────────
 const BASE_PPP       = 1.06;
 const SCORE_VARIANCE = 0.12;  // ±12 pts of PPP randomness — wider band drives realistic upsets
@@ -1305,7 +1342,7 @@ const simulateQuarterClock = (
 
   for (let i = 0; i < possessions; i++) {
     const handler = rotation[Math.floor(Math.random() * rotation.length)];
-    const ot = handler.tendencies?.offensiveTendencies;
+    const ot = getOT(handler);
 
     // Dominant tendency
     const doms: [string, number][] = [
@@ -1511,7 +1548,7 @@ interface DefActionContext {
  *   × (1 − defIQ × IQ_FOUL_DAMPEN)              ← smart players avoid bad fouls
  */
 function calculateDefFoulChance(
-  dt: NonNullable<Player['tendencies']>['defensiveTendencies'] | undefined,
+  dt: ReturnType<typeof getDT> | undefined,
   attrs: Player['attributes'],
   actionType: 'steal' | 'block',
   ctx: DefActionContext,
@@ -1559,10 +1596,10 @@ function attemptDefensiveSteal(
   offHandler: Player,
   ctx: DefActionContext,
 ): DefStealResult {
-  const dt      = defender.tendencies?.defensiveTendencies;
-  const gambles = dt?.gambles      ?? 50;
-  const helpDef = dt?.helpDefender ?? 50;
-  const pest    = dt?.onBallPest   ?? 50;
+  const dt      = getDT(defender);
+  const gambles = dt.gambles;
+  const helpDef = dt.helpDefender;
+  const pest    = dt.onBallPest;
   const defLn   = defender.name.split(' ').at(-1) ?? defender.name;
 
   // Attribute-driven base steal chance — defIQ amplifies anticipation/positioning
@@ -1638,10 +1675,10 @@ function attemptDefensiveBlock(
   offAction: OffAction,
   ctx: DefActionContext,
 ): DefBlockResult {
-  const dt          = defender.tendencies?.defensiveTendencies;
-  const discipline  = dt?.shotContestDiscipline ?? 50;
-  const helpDef     = dt?.helpDefender          ?? 50;
-  const physicality = dt?.physicality           ?? 50;
+  const dt          = getDT(defender);
+  const discipline  = dt.shotContestDiscipline;
+  const helpDef     = dt.helpDefender;
+  const physicality = dt.physicality;
   const defLn       = defender.name.split(' ').at(-1) ?? defender.name;
 
   // Base block % from attribute curve — defIQ improves help-side timing and footwork
@@ -1701,11 +1738,11 @@ const simulatePossession = (
   /** External situational boost (+comeback, -complacency, +clutch) applied to final shot prob */
   situationalBoost = 0,
 ): PossessionResult => {
-  const ot = offHandler.tendencies?.offensiveTendencies;
+  const ot = getOT(offHandler);
   const ln = lastName(offHandler);
   const defIdx   = Math.floor(Math.random() * Math.min(8, defense.roster.length));
   const defender = defense.roster[defIdx];
-  const dt       = defender?.tendencies?.defensiveTendencies;
+  const dt       = defender ? getDT(defender) : undefined;
   const defLn    = defender ? lastName(defender) : 'Defender';
   const oP       = pronouns(offHandler);   // offender pronouns
   const dP       = pronouns(defender);     // defender pronouns
@@ -2028,7 +2065,7 @@ const simulatePossession = (
 
   // Step 4.5: Draw Foul -- contact-seeker gets to the line
   {
-    const drawFoulTend = ot?.drawFoul ?? 50;
+    const drawFoulTend = ot.drawFoul;
     if ((shotType === 'DRIVE_LAYUP' || shotType === 'POST_FADE') && drawFoulTend >= 55 && !isTransition) {
       // Offensive IQ amplifies foul-drawing: smart players know how to absorb contact,
       // time their body lean, and sell the call without flopping (sustainable technique).
@@ -2409,7 +2446,7 @@ const simulatePossession = (
     }
 
     // Shot Contest Discipline -- low = bites pump fakes; high = disciplined contests
-    const contestDisc = dt.shotContestDiscipline ?? 50;
+    const contestDisc = dt?.shotContestDiscipline ?? 50;
     if (contestDisc < 35 && (shotType === 'MID_RANGE' || shotType === 'PULL_UP_3') && offAction !== 'TRANSITION') {
       if (Math.random() < (40 - contestDisc) / 100 * 0.22) {
         return {
@@ -2532,11 +2569,11 @@ const calculateFoulChance = (
   actionType: DefensiveActionType,
   context: FoulContext,
 ): number => {
-  const dt  = defender.tendencies?.defensiveTendencies;
-  const gambles           = dt?.gambles              ?? 50;
-  const physicality       = dt?.physicality          ?? 50;
-  const contestDiscipline = dt?.shotContestDiscipline ?? 50;
-  const helpDefender      = dt?.helpDefender         ?? 50;
+  const dt  = getDT(defender);
+  const gambles           = dt.gambles;
+  const physicality       = dt.physicality;
+  const contestDiscipline = dt.shotContestDiscipline;
+  const helpDefender      = dt.helpDefender;
   const defensiveIQ       = defender.attributes.defensiveIQ ?? 65;
 
   // ── Base risk: every aggressive defensive action carries some foul risk ──────
@@ -2588,39 +2625,39 @@ interface TendencyModifiers {
   foulRisk:     number;
 }
 const computeTendencyModifiers = (p: Player): TendencyModifiers => {
-  const ot = p.tendencies?.offensiveTendencies;
-  const dt = p.tendencies?.defensiveTendencies;
+  const ot = getOT(p);
+  const dt = getDT(p);
   const diq = p.attributes.defensiveIQ ?? 65;
   return {
-    threepaBoost: (( ot?.pullUpThree    ?? 50) - 50) / 100 * 0.40,
-    insideBoost:  (( ot?.driveToBasket  ?? 50) - 50) / 100 * 0.30
-                + ((ot?.cutter         ?? 50) - 50) / 100 * 0.12,
-    usageBoost:   (( ot?.isoHeavy       ?? 50) - 50) / 100 * 0.45   // primary scorer lever
-                + ((ot?.attackCloseOuts ?? 50) - 50) / 100 * 0.10   // off-ball creation
-                + ((ot?.pullUpOffPnr    ?? 50) - 50) / 100 * 0.08   // PnR volume
-                - ((ot?.kickOutPasser   ?? 50) - 50) / 100 * 0.08   // pass-first penalty
-                + ((ot?.drawFoul        ?? 50) - 50) / 100 * 0.08,  // FTA-getter = more touches
-    astBoost:     (( ot?.kickOutPasser  ?? 50) - 50) / 100 * 0.35
-                + ((ot?.spotUp          ?? 50) - 50) / 100 * 0.08,
+    threepaBoost: (ot.pullUpThree    - 50) / 100 * 0.40,
+    insideBoost:  (ot.driveToBasket  - 50) / 100 * 0.30
+                + (ot.cutter         - 50) / 100 * 0.12,
+    usageBoost:   (ot.isoHeavy       - 50) / 100 * 0.45   // primary scorer lever
+                + (ot.attackCloseOuts - 50) / 100 * 0.10  // off-ball creation
+                + (ot.pullUpOffPnr    - 50) / 100 * 0.08  // PnR volume
+                - (ot.kickOutPasser   - 50) / 100 * 0.08  // pass-first penalty
+                + (ot.drawFoul        - 50) / 100 * 0.08, // FTA-getter = more touches
+    astBoost:     (ot.kickOutPasser  - 50) / 100 * 0.35
+                + (ot.spotUp         - 50) / 100 * 0.08,
 
     // stlBoost: gambles (reach frequency) + denyThePass (passing-lane reads)
     //           + helpDefender (rotation intercepts from weak side)
-    stlBoost:     (( dt?.gambles        ?? 50) - 50) / 100 * 0.30
-                + ((dt?.denyThePass     ?? 50) - 50) / 100 * 0.10
-                + ((dt?.helpDefender    ?? 50) - 50) / 100 * 0.08,
+    stlBoost:     (dt.gambles        - 50) / 100 * 0.30
+                + (dt.denyThePass    - 50) / 100 * 0.10
+                + (dt.helpDefender   - 50) / 100 * 0.08,
 
     // blkBoost: help rotations generate most blocks; physicality adds contested
     //           rejection power; disciplined contests rarely get pump-faked.
-    blkBoost:     (( dt?.helpDefender   ?? 50) - 50) / 100 * 0.25
-                + ((dt?.physicality     ?? 50) - 50) / 100 * 0.10
-                + ((dt?.shotContestDiscipline ?? 50) - 50) / 100 * 0.05,
+    blkBoost:     (dt.helpDefender         - 50) / 100 * 0.25
+                + (dt.physicality          - 50) / 100 * 0.10
+                + (dt.shotContestDiscipline - 50) / 100 * 0.05,
 
     // foulRisk: tendency-driven raw risk.  Now also reduced by Defensive IQ
     //   so smart defenders who are physical still commit fewer dumb fouls.
-    foulRisk:     (( dt?.physicality             ?? 50) - 50) / 100 * 0.25
-                + ((dt?.gambles                  ?? 50) - 50) / 100 * 0.15
-                + ((dt?.onBallPest               ?? 50) - 50) / 100 * 0.10
-                - ((dt?.shotContestDiscipline    ?? 50) - 50) / 100 * 0.12
+    foulRisk:     (dt.physicality             - 50) / 100 * 0.25
+                + (dt.gambles                 - 50) / 100 * 0.15
+                + (dt.onBallPest              - 50) / 100 * 0.10
+                - (dt.shotContestDiscipline   - 50) / 100 * 0.12
                 - ((diq - 50) / 100) * 0.18,
   };
 };
@@ -2645,8 +2682,7 @@ const computeTendencyModifiers = (p: Player): TendencyModifiers => {
  *   transitionHunter > 65 in G&G    → up to −8    (not enough fast-break chances)
  */
 const calcPlaybookMismatch = (player: Player, scheme: CoachScheme): number => {
-  const ot = player.tendencies?.offensiveTendencies;
-  if (!ot) return 0;
+  const ot = getOT(player);
 
   // Returns 0–10 penalty proportional to how far a tendency exceeds its threshold.
   const excess = (val: number, threshold: number, weight: number): number =>
@@ -2655,22 +2691,22 @@ const calcPlaybookMismatch = (player: Player, scheme: CoachScheme): number => {
   let penalty = 0;
   switch (scheme) {
     case 'Pace and Space':
-      penalty += excess(ot.postUp          ?? 50, 55, 1.2); // post-heavy player stalls spacing
-      penalty += excess(ot.isoHeavy        ?? 50, 60, 0.8); // iso ball-stopper disrupts motion
+      penalty += excess(ot.postUp,   55, 1.2); // post-heavy player stalls spacing
+      penalty += excess(ot.isoHeavy, 60, 0.8); // iso ball-stopper disrupts motion
       break;
     case 'Grit and Grind':
-      penalty += excess(ot.pullUpThree     ?? 50, 60, 1.0); // shooter can't find 3PT looks
-      penalty += excess(ot.transitionHunter ?? 50, 65, 0.8); // transition hunter vs. half-court grind
-      penalty += excess(ot.spotUp          ?? 50, 65, 0.6); // spot-up guy loses corner touches
+      penalty += excess(ot.pullUpThree,     60, 1.0); // shooter can't find 3PT looks
+      penalty += excess(ot.transitionHunter, 65, 0.8); // transition hunter vs. half-court grind
+      penalty += excess(ot.spotUp,          65, 0.6); // spot-up guy loses corner touches
       break;
     case 'Triangle':
-      penalty += excess(ot.isoHeavy        ?? 50, 55, 1.2); // iso breaks Triangle ball movement
+      penalty += excess(ot.isoHeavy, 55, 1.2); // iso breaks Triangle ball movement
       break;
     case 'Small Ball':
-      penalty += excess(ot.postUp          ?? 50, 60, 1.0); // post player clogs small-ball lanes
+      penalty += excess(ot.postUp, 60, 1.0); // post player clogs small-ball lanes
       break;
     case 'Showtime':
-      penalty += excess(ot.postUp          ?? 50, 60, 0.8); // post-up stalls the fast break
+      penalty += excess(ot.postUp, 60, 0.8); // post-up stalls the fast break
       break;
     default:
       break; // Balanced: no tendency mismatches
@@ -3527,10 +3563,9 @@ const simulatePlayerGameLine = (
 
   // FTA: linear scale off drawFoul attribute so volumes match real NBA tiers.
   //   drawFoul 90, 15 FGA → ~7–10 FTA  |  drawFoul 50, 10 FGA → ~3–5 FTA  |  drawFoul 25, 6 FGA → ~1–2 FTA
-  const ot_fta      = player.tendencies?.offensiveTendencies;
-  const drawFoulTend = ot_fta?.drawFoul      ?? 50;
-  const driveTend    = ot_fta?.driveToBasket ?? 50;
-  const postTend     = ot_fta?.postUp        ?? 50;
+  const drawFoulTend = player.tendencies?.foulDrawing ?? 50;
+  const driveTend    = player.tendencies?.drive       ?? 50;
+  const postTend     = player.tendencies?.postUp      ?? 50;
   const drawFoulBase = drawFoulTend / 100 * 0.65;
   const driveBonus   = Math.max(0, driveTend - 50) / 100 * 0.10;
   const postBonus    = Math.max(0, postTend  - 50) / 100 * 0.08;
@@ -3553,7 +3588,7 @@ const simulatePlayerGameLine = (
     isHome:            ftBonus > 0,
     stamina:           player.attributes.stamina,
     personalityTraits: player.personalityTraits,
-    clutchTendency:    player.tendencies?.situationalTendencies?.clutchShotTaker,
+    clutchTendency:    player.tendencies?.isolation,
   });
   const ftNoise   = getFreeThrowNoiseWidth(player.personalityTraits);
   const ftPct     = Math.max(0.45, Math.min(0.94,
@@ -3595,7 +3630,7 @@ const simulatePlayerGameLine = (
   // Primary efficiency: passing + playmaking + ball handling + IQ + kick-out tendency.
   // adjAstShare capped at 0.42 so even an elite PG never exceeds ~10 APG season avg
   // (teamAst 24 × 0.42 = 10.1). Per-game cap of 18 prevents freak stat-padding games.
-  const kickOutTendency = player.tendencies?.kickOutPasser ?? 50;
+  const kickOutTendency = player.tendencies?.pass ?? 50;
   const astEff = getAssistEfficiency(
     player.attributes.passing,
     player.attributes.playmaking,
@@ -3924,8 +3959,8 @@ export const simulateGame = (
       awayOff += hasClutchCoach(away) ? 0.10 : 0.05;
       // Clutch Shot Taker tendency: roster-average score adjusts Q4 scoring output in close games
       const rosterSz = (t: Team) => Math.min(8, t.roster.length);
-      const homeClutch = home.roster.slice(0, 8).reduce((s, p) => s + (p.tendencies?.situationalTendencies?.clutchShotTaker ?? 50), 0) / rosterSz(home);
-      const awayClutch = away.roster.slice(0, 8).reduce((s, p) => s + (p.tendencies?.situationalTendencies?.clutchShotTaker ?? 50), 0) / rosterSz(away);
+      const homeClutch = home.roster.slice(0, 8).reduce((s, p) => s + (p.tendencies?.isolation ?? 50), 0) / rosterSz(home);
+      const awayClutch = away.roster.slice(0, 8).reduce((s, p) => s + (p.tendencies?.isolation ?? 50), 0) / rosterSz(away);
       homeOff += (homeClutch - 50) / 100 * 0.08;
       awayOff += (awayClutch - 50) / 100 * 0.08;
     }
@@ -4264,7 +4299,7 @@ export const simulateGame = (
                          + (p.attributes.offensiveIQ  ?? 70) * 0.2;
         if (avgScoring >= 68) {
           const starScore    = Math.max(0, Math.min(1, (p.rating - 78) / 19)); // 0 at OVR 78, 1.0 at OVR 97
-          const isoTend      = p.tendencies?.offensiveTendencies?.isoHeavy ?? 50;
+          const isoTend      = p.tendencies?.isolation ?? 50;
           const defVulnMod   = -(oppPerimDefMod + oppInteriorDefMod) * 0.5;    // positive = softer defense
           const ctxBonus     = (isHome ? 0.02 : 0)
                              + Math.max(0, defVulnMod * 0.06)
@@ -4697,7 +4732,7 @@ export const simulateGame = (
       // Weight = minuteShare × clutchShotTaker tendency (default 50 → weight 1.0)
       const weights = active.map(s => {
         const p = team.roster.find(r => r.id === s.playerId);
-        const clutchTendency = p?.tendencies?.situationalTendencies?.clutchShotTaker ?? 50;
+        const clutchTendency = p?.tendencies?.isolation ?? 50;
         return (s.min / 48) * (clutchTendency / 50);
       });
       const totalWeight = weights.reduce((a, b) => a + b, 0);
