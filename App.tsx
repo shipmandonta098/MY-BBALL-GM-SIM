@@ -142,6 +142,7 @@ const App: React.FC = () => {
   const [showOffseasonAlerts, setShowOffseasonAlerts] = useState(false);
   const [pendingRelease, setPendingRelease] = useState<{ playerId: string; reaction: OwnerReaction } | null>(null);
   const [viewingFranchiseId, setViewingFranchiseId] = useState<string | null>(null);
+  const [mobileNavOpen, setMobileNavOpen] = useState(false);
   const [bulkSummary, setBulkSummary] = useState<BulkSimSummary | null>(null);
   const leagueRef = React.useRef<LeagueState | null>(null);
   leagueRef.current = league;
@@ -4414,8 +4415,39 @@ const App: React.FC = () => {
   return (
     <NavigationProvider value={navValue}>
     <div className="flex h-screen overflow-hidden bg-slate-950 text-slate-50 relative">
-      <Sidebar activeTab={activeTab} setActiveTab={setActiveTab} team={userTeam} onQuit={() => setStatus('title')} league={league} isExpansionActive={league.expansionDraft?.active} />
-      <main className="flex-1 overflow-y-auto p-6 md:p-10 space-y-8 pb-32 transition-all duration-300 ease-in-out">
+      <Sidebar
+        activeTab={activeTab}
+        setActiveTab={setActiveTab}
+        team={userTeam}
+        onQuit={() => setStatus('title')}
+        league={league}
+        isExpansionActive={league.expansionDraft?.active}
+        mobileOpen={mobileNavOpen}
+        onMobileClose={() => setMobileNavOpen(false)}
+      />
+      {/* Mobile top header */}
+      <div className="md:hidden fixed top-0 left-0 right-0 z-40 flex items-center justify-between px-4 h-14 bg-slate-900 border-b border-slate-800 shrink-0">
+        <button
+          onClick={() => setMobileNavOpen(true)}
+          className="p-2 -ml-2 text-slate-400 hover:text-white transition-colors"
+          aria-label="Open menu"
+        >
+          <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 6h16M4 12h16M4 18h16" />
+          </svg>
+        </button>
+        <div className="flex items-center gap-2">
+          <div
+            className="w-7 h-7 rounded-md flex items-center justify-center font-bold text-slate-950 font-display text-sm shrink-0"
+            style={{ backgroundColor: userTeam.primaryColor }}
+          >
+            {userTeam.name.charAt(0)}
+          </div>
+          <span className="font-display font-bold text-base tracking-wider">HOOPS DYNASTY</span>
+        </div>
+        <div className="w-10" />
+      </div>
+      <main className="flex-1 overflow-y-auto p-4 pt-[4.5rem] md:p-10 md:pt-10 space-y-6 md:space-y-8 pb-32 transition-all duration-300 ease-in-out">
         <div key={activeTab} className="animate-in fade-in slide-in-from-bottom-2 duration-500">
           {activeTab === 'dashboard' && <Dashboard league={league} news={news} onSimulate={handleSimulate} onScout={handleViewPlayer} scoutingReport={scoutingReport} setActiveTab={setActiveTab} onViewRoster={handleViewRoster} onManageTeam={handleManageTeam} onAdvanceToRegularSeason={handleAdvanceToRegularSeason} onOpenOffseasonAlerts={() => setShowOffseasonAlerts(true)} />}
           {activeTab === 'gm_profile' && <GMProfileView league={league} updateLeague={updateLeagueState} onResign={handleResign} />}

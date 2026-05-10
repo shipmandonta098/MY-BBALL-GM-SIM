@@ -9,6 +9,8 @@ interface SidebarProps {
   onQuit: () => void;
   league: LeagueState;
   isExpansionActive?: boolean;
+  mobileOpen?: boolean;
+  onMobileClose?: () => void;
 }
 
 const PHASE_ICONS: Record<string, string> = {
@@ -27,8 +29,15 @@ const Sidebar: React.FC<SidebarProps> = ({
   onQuit,
   league,
   isExpansionActive,
+  mobileOpen = false,
+  onMobileClose,
 }) => {
   const [isCollapsed, setIsCollapsed] = useState(false);
+
+  const handleNavClick = (id: string) => {
+    setActiveTab(id);
+    onMobileClose?.();
+  };
 
   const isOffseason = league.isOffseason;
   const draftPhase = league.draftPhase;
@@ -83,8 +92,21 @@ const Sidebar: React.FC<SidebarProps> = ({
   const phaseIdx = PHASE_ORDER.indexOf(currentPhase);
 
   return (
+    <>
+      {/* Mobile backdrop */}
+      {mobileOpen && (
+        <div
+          className="fixed inset-0 z-40 bg-black/60 md:hidden"
+          onClick={onMobileClose}
+        />
+      )}
     <div
-      className={`bg-slate-900 border-r border-slate-800 flex flex-col h-full shrink-0 relative transition-all duration-300 ease-in-out ${isCollapsed ? 'w-20' : 'w-64'}`}
+      className={`bg-slate-900 border-r border-slate-800 flex flex-col h-screen shrink-0 transition-all duration-300 ease-in-out
+        fixed inset-y-0 left-0 z-50 w-72
+        md:relative md:inset-auto md:h-full md:z-auto md:translate-x-0
+        ${mobileOpen ? 'translate-x-0' : '-translate-x-full'}
+        ${isCollapsed ? 'md:w-20' : 'md:w-64'}
+      `}
     >
       {/* ── Logo / Team ── */}
       <div className="p-6 border-b border-slate-800 flex items-center gap-3 overflow-hidden">
@@ -101,10 +123,10 @@ const Sidebar: React.FC<SidebarProps> = ({
         )}
       </div>
 
-      {/* ── Collapse toggle ── */}
+      {/* ── Collapse toggle (desktop only) ── */}
       <button
         onClick={() => setIsCollapsed(!isCollapsed)}
-        className="absolute -right-3 top-20 w-6 h-6 bg-slate-800 border border-slate-700 rounded-full flex items-center justify-center text-slate-400 hover:text-white transition-colors z-50"
+        className="hidden md:flex absolute -right-3 top-20 w-6 h-6 bg-slate-800 border border-slate-700 rounded-full items-center justify-center text-slate-400 hover:text-white transition-colors z-50"
       >
         <svg className={`w-4 h-4 transition-transform duration-300 ${isCollapsed ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15 19l-7-7 7-7" />
@@ -143,9 +165,9 @@ const Sidebar: React.FC<SidebarProps> = ({
                   )}
                   <button
                     onClick={() => {
-                      if (phase === 'All-Star Weekend' && league.allStarWeekend) setActiveTab('allstar');
-                      else if (phase === 'Playoffs' && league.playoffBracket) setActiveTab('playoffs');
-                      else if (phase === 'Offseason' && league.isOffseason) setActiveTab('draft');
+                      if (phase === 'All-Star Weekend' && league.allStarWeekend) handleNavClick('allstar');
+                      else if (phase === 'Playoffs' && league.playoffBracket) handleNavClick('playoffs');
+                      else if (phase === 'Offseason' && league.isOffseason) handleNavClick('draft');
                     }}
                     title={PHASE_LABELS[phase]}
                     className={`w-2 h-2 rounded-full shrink-0 transition-all ${
@@ -214,7 +236,7 @@ const Sidebar: React.FC<SidebarProps> = ({
           return (
             <button
               key={item.id}
-              onClick={isLocked ? undefined : () => setActiveTab(item.id)}
+              onClick={isLocked ? undefined : () => handleNavClick(item.id)}
               disabled={isLocked}
               title={isLocked ? lockedTooltip : isCollapsed ? item.label : ''}
               className={`w-full flex items-center gap-3 p-3 rounded-lg transition-all group relative ${
@@ -257,7 +279,7 @@ const Sidebar: React.FC<SidebarProps> = ({
       {/* ── Quit ── */}
       <div className="p-4 border-t border-slate-800 overflow-hidden">
         <button
-          onClick={onQuit}
+          onClick={() => { onMobileClose?.(); onQuit(); }}
           className="w-full flex items-center gap-3 p-3 rounded-lg text-slate-500 hover:text-rose-500 hover:bg-rose-500/5 transition-all group"
           title={isCollapsed ? 'Quit Career' : ''}
         >
@@ -274,6 +296,7 @@ const Sidebar: React.FC<SidebarProps> = ({
         </button>
       </div>
     </div>
+    </>
   );
 };
 
