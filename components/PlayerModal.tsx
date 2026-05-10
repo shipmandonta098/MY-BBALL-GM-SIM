@@ -431,15 +431,15 @@ const PlayerModal: React.FC<PlayerModalProps> = ({
 
   if (isEditing) {
     return (
-      <div 
-        className="fixed inset-0 z-[1000] bg-slate-950/90 backdrop-blur-xl flex items-center justify-center p-4 md:p-10 animate-in fade-in duration-300"
+      <div
+        className="fixed inset-0 z-[1000] bg-slate-950/90 backdrop-blur-xl flex items-end md:items-center justify-center md:p-10 animate-in fade-in duration-300"
         onClick={onClose}
       >
-        <div 
-          className="bg-slate-900 border border-slate-800 rounded-[3rem] w-full max-w-7xl h-full max-h-[92vh] overflow-hidden flex flex-col shadow-[0_0_80px_rgba(0,0,0,0.6)] relative"
+        <div
+          className="bg-slate-900 border border-slate-800 rounded-t-[2rem] md:rounded-[3rem] w-full max-w-7xl max-h-[95dvh] md:max-h-[92vh] overflow-hidden flex flex-col shadow-[0_0_80px_rgba(0,0,0,0.6)] relative"
           onClick={e => e.stopPropagation()}
         >
-          <header className="p-8 border-b border-slate-800 flex justify-between items-center shrink-0">
+          <header className="p-4 md:p-8 border-b border-slate-800 flex justify-between items-center shrink-0">
             <div>
               <h2 className="text-3xl font-display font-bold uppercase tracking-tight text-white">Edit <span className="text-amber-500">Player</span></h2>
               <p className="text-xs text-slate-500 mt-1 uppercase tracking-widest">God Mode: Full Data Access</p>
@@ -983,34 +983,34 @@ const PlayerModal: React.FC<PlayerModalProps> = ({
   }
 
   return (
-    <div 
-      className="fixed inset-0 z-[1000] bg-slate-950/90 backdrop-blur-xl flex items-center justify-center p-4 md:p-10 animate-in fade-in duration-300"
+    <div
+      className="fixed inset-0 z-[1000] bg-slate-950/90 backdrop-blur-xl flex items-end md:items-center justify-center md:p-10 animate-in fade-in slide-in-from-bottom-4 md:slide-in-from-bottom-0 duration-300"
       onClick={onClose}
     >
-      <div 
-        className="bg-slate-900 border border-slate-800 rounded-[3rem] w-full max-w-7xl h-full max-h-[92vh] overflow-hidden flex flex-col shadow-[0_0_80px_rgba(0,0,0,0.6)] relative"
+      <div
+        className="bg-slate-900 border border-slate-800 rounded-t-[2rem] md:rounded-[3rem] w-full max-w-7xl max-h-[95dvh] md:max-h-[92vh] overflow-hidden flex flex-col shadow-[0_0_80px_rgba(0,0,0,0.6)] relative"
         onClick={e => e.stopPropagation()}
       >
-        <div className="absolute top-8 right-8 z-[1100] flex gap-3">
+        <div className="absolute top-4 right-4 md:top-8 md:right-8 z-[1100] flex gap-2 md:gap-3">
           {godMode && (
-            <button 
+            <button
               onClick={() => setIsEditing(true)}
-              className="p-4 bg-amber-500 hover:bg-amber-400 rounded-full text-slate-950 transition-all shadow-xl border border-amber-600"
+              className="p-2 md:p-4 bg-amber-500 hover:bg-amber-400 rounded-full text-slate-950 transition-all shadow-xl border border-amber-600"
               title="God Mode: Edit Player"
             >
-              <svg className="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" /></svg>
+              <svg className="w-5 h-5 md:w-8 md:h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" /></svg>
             </button>
           )}
-          <button 
+          <button
             onClick={onClose}
-            className="p-4 bg-slate-800 hover:bg-slate-700 rounded-full text-slate-300 hover:text-white transition-all shadow-xl border border-slate-700"
+            className="p-2 md:p-4 bg-slate-800 hover:bg-slate-700 rounded-full text-slate-300 hover:text-white transition-all shadow-xl border border-slate-700"
           >
-            <svg className="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12" /></svg>
+            <svg className="w-5 h-5 md:w-8 md:h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12" /></svg>
           </button>
         </div>
 
         <div
-          className="relative h-64 shrink-0 overflow-hidden"
+          className="relative h-44 md:h-64 shrink-0 overflow-hidden"
           style={leagueContext?.teamPrimaryColor
             ? { background: `linear-gradient(135deg, #0f172a 0%, ${leagueContext.teamPrimaryColor}30 100%)` }
             : { backgroundColor: '#0f172a' }}
@@ -1034,10 +1034,10 @@ const PlayerModal: React.FC<PlayerModalProps> = ({
           {/* Gradient overlays — keep left-side text crisp */}
           <div className="absolute inset-0 bg-gradient-to-r from-slate-950 via-slate-950/70 to-transparent" />
           <div className="absolute inset-0 bg-gradient-to-t from-slate-950 via-transparent to-slate-950/20" />
-          <div className="absolute bottom-8 left-10 md:bottom-10 md:left-12 flex items-end gap-8">
+          <div className="absolute bottom-4 left-4 md:bottom-10 md:left-12 flex items-end gap-8 pr-20 md:pr-0">
 
             <div className="relative z-10 flex flex-col">
-              <h2 className="text-5xl md:text-8xl font-display font-bold uppercase tracking-tighter text-white drop-shadow-lg leading-tight flex items-baseline gap-3">
+              <h2 className="text-3xl md:text-5xl lg:text-8xl font-display font-bold uppercase tracking-tighter text-white drop-shadow-lg leading-tight flex items-baseline gap-3">
                 {player.name}
                 {(player.allStarSelections?.length ?? 0) > 0 && (
                   <span
@@ -1046,9 +1046,9 @@ const PlayerModal: React.FC<PlayerModalProps> = ({
                   >★</span>
                 )}
               </h2>
-              <div className="flex flex-wrap items-center gap-4 mt-2">
-                <span className="px-4 py-1.5 bg-amber-500 text-slate-950 text-xs font-black uppercase rounded-lg shadow-lg shadow-amber-500/20">{player.position}</span>
-                <span className="text-slate-100 font-display font-bold text-xl uppercase tracking-wider">
+              <div className="flex flex-wrap items-center gap-2 md:gap-4 mt-1 md:mt-2">
+                <span className="px-3 py-1 md:px-4 md:py-1.5 bg-amber-500 text-slate-950 text-xs font-black uppercase rounded-lg shadow-lg shadow-amber-500/20">{player.position}</span>
+                <span className="text-slate-100 font-display font-bold text-sm md:text-xl uppercase tracking-wider">
                    {formatPhysicals(player.height, player.weight)}
                 </span>
                 {(() => {
@@ -1088,9 +1088,9 @@ const PlayerModal: React.FC<PlayerModalProps> = ({
                   </span>
                 )}
               </div>
-              <div className="flex flex-wrap gap-2 mt-4">
+              <div className="flex flex-wrap gap-1.5 mt-2 md:mt-4">
                 {player.personalityTraits.map(trait => (
-                  <span key={trait} className="px-3 py-1 bg-amber-600/20 text-amber-500 border border-amber-500/30 text-[10px] font-black uppercase tracking-widest rounded-full shadow-lg shadow-amber-900/20 flex items-center gap-1.5">
+                  <span key={trait} className="px-2.5 py-0.5 md:px-3 md:py-1 bg-amber-600/20 text-amber-500 border border-amber-500/30 text-[10px] font-black uppercase tracking-widest rounded-full shadow-lg shadow-amber-900/20 flex items-center gap-1">
                     <span>{traitIcons[trait]}</span>
                     {trait}
                   </span>
@@ -1105,8 +1105,8 @@ const PlayerModal: React.FC<PlayerModalProps> = ({
           </div>
         </div>
 
-        <div id="modal-scroll-container" className="flex-1 overflow-y-auto p-8 md:p-12 space-y-12 scrollbar-thin scrollbar-thumb-slate-800">
-          <section className="bg-slate-950/40 border border-slate-800/60 rounded-[2.5rem] p-8 shadow-inner grid grid-cols-1 md:grid-cols-2 gap-8">
+        <div id="modal-scroll-container" className="flex-1 overflow-y-auto p-4 md:p-8 lg:p-12 space-y-6 md:space-y-12 scrollbar-thin scrollbar-thumb-slate-800">
+          <section className="bg-slate-950/40 border border-slate-800/60 rounded-2xl md:rounded-[2.5rem] p-4 md:p-8 shadow-inner grid grid-cols-1 md:grid-cols-2 gap-6 md:gap-8">
              <div className="space-y-4">
                 <div className="flex items-center gap-4">
                    <span className="text-[10px] text-slate-500 font-black uppercase tracking-[0.2em] w-24">Archetype</span>
@@ -1247,7 +1247,7 @@ const PlayerModal: React.FC<PlayerModalProps> = ({
              </div>
           </section>
 
-          <section className="space-y-8">
+          <section className="space-y-5 md:space-y-8">
             <div className="flex items-center gap-4 flex-wrap">
               <h3 className="text-[10px] font-black text-amber-500 uppercase tracking-[0.5em] whitespace-nowrap">
                 {attrTab === 'attributes' ? 'Technical Attribute Matrix' : 'Player Tendencies'}
@@ -2690,8 +2690,8 @@ const PlayerModal: React.FC<PlayerModalProps> = ({
         </div>
 
         {isUserTeam && (
-           <div className="p-10 bg-slate-950/80 border-t border-slate-800 flex flex-wrap justify-between items-center gap-6">
-              <div className="flex items-center gap-6 flex-wrap">
+           <div className="p-4 md:p-10 bg-slate-950/80 border-t border-slate-800 flex flex-col md:flex-row md:flex-wrap md:justify-between items-stretch md:items-center gap-3 md:gap-6">
+              <div className="flex flex-wrap items-center gap-3 md:gap-6">
                  <div className="space-y-2">
                     <label className="text-[10px] font-black uppercase text-slate-500 tracking-widest">Roster Status</label>
                     <select
@@ -2727,32 +2727,32 @@ const PlayerModal: React.FC<PlayerModalProps> = ({
                    </div>
                  )}
               </div>
-              <div className="flex items-center gap-4 flex-wrap">
+              <div className="flex flex-col md:flex-row items-stretch md:items-center gap-3 md:gap-4">
                 {onExtend && !draftLocked && (isOffseason || player.contractYears <= 1) && (
                   <button
                     onClick={() => { setExtendSalary(player.salary || (isWomensLeague ? 75_000 : 5_000_000)); setExtendYears(2); setShowExtendPanel(true); }}
-                    className="px-10 py-5 bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 hover:text-emerald-300 border border-emerald-500/30 font-display font-bold uppercase rounded-2xl transition-all"
+                    className="px-6 py-4 md:px-10 md:py-5 bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 hover:text-emerald-300 border border-emerald-500/30 font-display font-bold uppercase rounded-2xl transition-all text-center"
                   >
                     Extend Contract
                   </button>
                 )}
                 {draftLocked ? (
-                  <div className="flex flex-col items-end gap-1">
+                  <div className="flex flex-col items-stretch md:items-end gap-1">
                     <button
                       disabled
-                      className="px-10 py-5 bg-slate-800/50 text-slate-600 border border-slate-700/50 font-display font-bold uppercase rounded-2xl cursor-not-allowed opacity-60"
+                      className="px-6 py-4 md:px-10 md:py-5 bg-slate-800/50 text-slate-600 border border-slate-700/50 font-display font-bold uppercase rounded-2xl cursor-not-allowed opacity-60"
                       title="Roster moves are locked during the draft"
                     >
                       Waive Player
                     </button>
-                    <span className="text-[10px] text-amber-500/70 font-bold uppercase tracking-widest">
+                    <span className="text-[10px] text-amber-500/70 font-bold uppercase tracking-widest text-center">
                       🔒 Locked · Draft in Progress
                     </span>
                   </div>
                 ) : (
                   <button
                      onClick={() => onRelease(player.id)}
-                     className="px-10 py-5 bg-rose-500/10 hover:bg-rose-500 text-rose-500 hover:text-white border border-rose-500/20 font-display font-bold uppercase rounded-2xl transition-all"
+                     className="px-6 py-4 md:px-10 md:py-5 bg-rose-500/10 hover:bg-rose-500 text-rose-500 hover:text-white border border-rose-500/20 font-display font-bold uppercase rounded-2xl transition-all"
                   >
                      Waive Player
                   </button>
@@ -2761,14 +2761,14 @@ const PlayerModal: React.FC<PlayerModalProps> = ({
               {player.isSuspended && (player.suspensionGames ?? 0) > 0 && !player.suspensionAppealed && onAppealSuspension && (
                 <button
                   onClick={() => onAppealSuspension(player.id)}
-                  className="px-10 py-5 bg-amber-500/10 hover:bg-amber-500/20 text-amber-400 hover:text-amber-300 border border-amber-500/30 font-display font-bold uppercase rounded-2xl transition-all flex items-center gap-2"
+                  className="px-6 py-4 md:px-10 md:py-5 bg-amber-500/10 hover:bg-amber-500/20 text-amber-400 hover:text-amber-300 border border-amber-500/30 font-display font-bold uppercase rounded-2xl transition-all flex items-center justify-center gap-2"
                   title="25% chance to reduce suspension by 1 game. Costs 3 Owner Patience. One appeal per suspension."
                 >
                   ⚖️ Appeal Suspension
                 </button>
               )}
               {player.isSuspended && player.suspensionAppealed && (
-                <span className="px-6 py-3 text-xs font-bold uppercase text-slate-500 border border-slate-700/50 rounded-2xl tracking-widest">
+                <span className="px-6 py-3 text-xs font-bold uppercase text-slate-500 border border-slate-700/50 rounded-2xl tracking-widest text-center">
                   Appeal Filed
                 </span>
               )}
