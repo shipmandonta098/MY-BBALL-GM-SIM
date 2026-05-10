@@ -332,17 +332,18 @@ const Dashboard: React.FC<DashboardProps> = ({ league, news, onSimulate, onScout
           </div>
         </div>
 
-        <div className="flex flex-wrap gap-6 relative z-10 sm:ml-auto">
+        {/* Stats — horizontal scroll on mobile */}
+        <div className="flex gap-5 overflow-x-auto scrollbar-none relative z-10 sm:ml-auto pb-0.5 sm:pb-0">
           {[
-            { label: 'Salary Cap', val: formatMoney(salaryCap), color: 'text-slate-300' },
-            { label: 'Cap Space', val: formatMoney(capSpace), color: capSpace > 0 ? 'text-emerald-400' : 'text-rose-400' },
-            { label: 'Luxury Tax', val: isOverLux ? `+${formatMoney(totalSalaryUsed - luxuryTax)}` : 'Under', color: isOverLux ? 'text-rose-400' : 'text-emerald-400' },
             { label: 'Record', val: `${userTeam.wins}–${userTeam.losses}`, color: 'text-white' },
             { label: 'Streak', val: userTeam.streak >= 0 ? `W${userTeam.streak}` : `L${Math.abs(userTeam.streak)}`, color: userTeam.streak > 0 ? 'text-emerald-400' : userTeam.streak < 0 ? 'text-rose-400' : 'text-slate-400' },
+            { label: 'Cap Space', val: formatMoney(capSpace), color: capSpace > 0 ? 'text-emerald-400' : 'text-rose-400' },
+            { label: 'Luxury Tax', val: isOverLux ? `+${formatMoney(totalSalaryUsed - luxuryTax)}` : 'Under', color: isOverLux ? 'text-rose-400' : 'text-emerald-400' },
+            { label: 'Salary Cap', val: formatMoney(salaryCap), color: 'text-slate-300' },
           ].map(({ label, val, color }) => (
-            <div key={label} className="text-center sm:text-left">
-              <p className="text-[9px] font-black uppercase tracking-widest text-slate-600 mb-0.5">{label}</p>
-              <p className={`text-sm font-bold font-mono ${color}`}>{val}</p>
+            <div key={label} className="shrink-0">
+              <p className="text-[9px] font-black uppercase tracking-widest text-slate-600 mb-0.5 whitespace-nowrap">{label}</p>
+              <p className={`text-sm font-bold font-mono whitespace-nowrap ${color}`}>{val}</p>
             </div>
           ))}
         </div>
@@ -381,10 +382,10 @@ const Dashboard: React.FC<DashboardProps> = ({ league, news, onSimulate, onScout
       )}
 
       {/* ── Main 3-column grid ── */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
 
-        {/* COL 1: Sim Controls + Tasks */}
-        <div className="space-y-4">
+        {/* COL 1: Sim Controls + Tasks (order-last on mobile so team overview comes first) */}
+        <div className="space-y-4 order-last lg:order-first">
 
           {/* Offseason Ready → Start Preseason */}
           {league.isOffseason && league.draftPhase === 'completed' && onAdvanceToRegularSeason && (
@@ -707,7 +708,8 @@ const Dashboard: React.FC<DashboardProps> = ({ league, news, onSimulate, onScout
           <p className="text-[10px] font-black uppercase tracking-widest text-slate-500">Top Players</p>
           <button onClick={() => setActiveTab('roster')} className="text-[10px] font-black uppercase tracking-widest text-slate-600 hover:text-slate-300 transition-colors">Full Roster →</button>
         </div>
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+        {/* Horizontal scroll on mobile, 3-col grid on sm+ */}
+        <div className="flex gap-3 overflow-x-auto scrollbar-none sm:grid sm:grid-cols-3 sm:gap-4 pb-1 sm:pb-0">
           {topPlayers.map((player, i) => {
             const isInj = player.status === 'Injured' || (player.injuryDaysLeft != null && player.injuryDaysLeft > 0);
             const effOvr = isInj && player.injuryOVRPenalty != null ? Math.max(40, player.rating - player.injuryOVRPenalty) : player.rating;
@@ -717,7 +719,7 @@ const Dashboard: React.FC<DashboardProps> = ({ league, news, onSimulate, onScout
             return (
               <div
                 key={player.id}
-                className="rounded-xl border border-white/5 p-4 cursor-pointer hover:border-white/15 transition-all group"
+                className="rounded-xl border border-white/5 p-4 cursor-pointer hover:border-white/15 active:scale-[0.98] transition-all group shrink-0 w-64 sm:w-auto"
                 style={{ backgroundColor: i === 0 ? `${userTeam.primaryColor}12` : '#0c1220', borderColor: i === 0 ? `${userTeam.primaryColor}30` : undefined }}
                 onClick={() => onScout(player)}
               >
@@ -761,15 +763,13 @@ const Dashboard: React.FC<DashboardProps> = ({ league, news, onSimulate, onScout
           <table className="w-full text-left">
             <thead>
               <tr className="text-[9px] text-slate-600 font-black uppercase tracking-widest border-b border-white/5">
-                <th className="px-5 py-3">Player</th>
-                <th className="px-3 py-3">Pos</th>
-                <th className="px-3 py-3 text-center">Age</th>
-                <th className="px-3 py-3 text-center">OVR</th>
-                <th className="px-3 py-3 text-center">POT</th>
-                <th className="px-3 py-3 text-center">PPG</th>
-                <th className="px-3 py-3 text-center">RPG</th>
-                <th className="px-3 py-3 text-center">APG</th>
-                <th className="px-3 py-3 text-right">Contract</th>
+                <th className="px-4 py-3">Player</th>
+                <th className="px-2 py-3 text-center">OVR</th>
+                <th className="px-2 py-3 text-center hidden sm:table-cell">POT</th>
+                <th className="px-2 py-3 text-center">PPG</th>
+                <th className="px-2 py-3 text-center hidden sm:table-cell">RPG</th>
+                <th className="px-2 py-3 text-center hidden sm:table-cell">APG</th>
+                <th className="px-2 py-3 text-right hidden md:table-cell">Contract</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-white/5">
@@ -781,29 +781,24 @@ const Dashboard: React.FC<DashboardProps> = ({ league, news, onSimulate, onScout
                 const isInj = player.status === 'Injured' || (player.injuryDaysLeft != null && player.injuryDaysLeft > 0);
                 const eff = isInj && player.injuryOVRPenalty != null ? Math.max(40, player.rating - player.injuryOVRPenalty) : player.rating;
                 return (
-                  <tr key={player.id} className="hover:bg-white/5 transition-all cursor-pointer group" onClick={() => onScout(player)}>
-                    <td className="px-5 py-3">
+                  <tr key={player.id} className="hover:bg-white/5 active:bg-white/8 transition-all cursor-pointer group" onClick={() => onScout(player)}>
+                    <td className="px-4 py-3">
                       <div className="flex items-center gap-2">
-                        <div className="w-0.5 h-6 rounded-full shrink-0" style={{ backgroundColor: i < 5 ? userTeam.primaryColor : 'transparent' }} />
+                        <div className="w-0.5 h-5 rounded-full shrink-0" style={{ backgroundColor: i < 5 ? userTeam.primaryColor : 'transparent' }} />
                         <div>
-                          <p className="text-xs font-bold text-slate-100 group-hover:text-amber-400 transition-colors uppercase">{player.name}</p>
-                          <p className="text-[9px] text-slate-600 font-bold uppercase">{i < 5 ? 'Starter' : 'Bench'}</p>
+                          <p className="text-xs font-bold text-slate-100 group-hover:text-amber-400 transition-colors uppercase leading-tight">{player.name}</p>
+                          <p className="text-[9px] text-slate-600 font-bold uppercase">{player.position} · {i < 5 ? 'S' : 'B'}</p>
                         </div>
                       </div>
                     </td>
-                    <td className="px-3 py-3 text-[11px] font-bold text-slate-500">{player.position}</td>
-                    <td className="px-3 py-3 text-center text-xs font-medium text-slate-400">{player.age}</td>
-                    <td className="px-3 py-3 text-center">
+                    <td className="px-2 py-3 text-center">
                       <span className="font-display font-bold text-sm" style={{ color: isInj ? '#f43f5e' : 'white' }}>{eff}</span>
-                      {isInj && player.injuryOVRPenalty != null && (
-                        <span className="ml-1 text-[8px] text-rose-500 font-black">-{player.injuryOVRPenalty}</span>
-                      )}
                     </td>
-                    <td className="px-3 py-3 text-center text-xs font-bold text-slate-500">{player.potential}</td>
-                    <td className="px-3 py-3 text-center font-mono text-xs text-slate-300">{(player.stats.points / (player.stats.gamesPlayed || 1)).toFixed(1)}</td>
-                    <td className="px-3 py-3 text-center font-mono text-xs text-slate-300">{(player.stats.rebounds / (player.stats.gamesPlayed || 1)).toFixed(1)}</td>
-                    <td className="px-3 py-3 text-center font-mono text-xs text-slate-300">{(player.stats.assists / (player.stats.gamesPlayed || 1)).toFixed(1)}</td>
-                    <td className="px-3 py-3 text-right">
+                    <td className="px-2 py-3 text-center text-xs font-bold text-slate-500 hidden sm:table-cell">{player.potential}</td>
+                    <td className="px-2 py-3 text-center font-mono text-xs text-slate-300">{(player.stats.points / (player.stats.gamesPlayed || 1)).toFixed(1)}</td>
+                    <td className="px-2 py-3 text-center font-mono text-xs text-slate-300 hidden sm:table-cell">{(player.stats.rebounds / (player.stats.gamesPlayed || 1)).toFixed(1)}</td>
+                    <td className="px-2 py-3 text-center font-mono text-xs text-slate-300 hidden sm:table-cell">{(player.stats.assists / (player.stats.gamesPlayed || 1)).toFixed(1)}</td>
+                    <td className="px-2 py-3 text-right hidden md:table-cell">
                       <p className="text-xs font-bold text-slate-300">{formatMoney(player.salary)}</p>
                       <p className="text-[9px] text-slate-600 font-bold uppercase">{player.contractYears}Y</p>
                     </td>
