@@ -251,562 +251,635 @@ const Dashboard: React.FC<DashboardProps> = ({ league, news, onSimulate, onScout
 
   const formatMoney = fmtSalary;
 
-  // Compute top players by OVR
-  const topPlayers = [...userTeam.roster]
-    .sort((a, b) => b.rating - a.rating)
-    .slice(0, 3);
-
-  // Compute team offense/defense/potential averages (0-100)
-  const avgOff = Math.round(userTeam.roster.reduce((s, p) => s + p.attributes.shooting, 0) / (userTeam.roster.length || 1));
-  const avgDef = Math.round(userTeam.roster.reduce((s, p) => s + p.attributes.defense, 0) / (userTeam.roster.length || 1));
-  const avgPot = Math.round(userTeam.roster.reduce((s, p) => s + (typeof p.potential === 'number' ? p.potential : 75), 0) / (userTeam.roster.length || 1));
-
-  // Recent results (last 5)
-  const recentResults = [...safeHistory]
-    .filter(g => g.homeTeamId === userTeam.id || g.awayTeamId === userTeam.id)
-    .sort((a, b) => b.date - a.date)
-    .slice(0, 5);
-
-  // Upcoming schedule events
-  const upcomingGames = safeSchedule
-    .filter(g => !g.played && (g.homeTeamId === userTeam.id || g.awayTeamId === userTeam.id))
-    .sort((a, b) => a.day - b.day)
-    .slice(0, 4);
-
-  // Salary info
-  const totalSalaryUsed = userTeam.roster.reduce((s, p) => s + p.salary, 0);
-  const salaryCap = league.settings?.salaryCap ?? userTeam.budget ?? 136_000_000;
-  const capSpace = salaryCap - totalSalaryUsed;
-  const luxuryTax = league.settings?.luxuryTax ?? salaryCap * 1.21;
-  const isOverLux = totalSalaryUsed > luxuryTax;
-
-  // Conference standing
-  const confTeams = [...league.teams]
-    .filter(t => t.conference === userTeam.conference)
-    .sort((a, b) => b.wins - a.wins || a.losses - b.losses);
-  const confRank = confTeams.findIndex(t => t.id === userTeam.id) + 1;
-
-  // Preseason state
-  const preSched = league.preseasonSchedule ?? [];
-  const preRecord = league.preseasonRecord ?? { wins: 0, losses: 0 };
-  const totalPre = preSched.length;
-  const playedPre = preSched.filter(g => g.played).length;
-  const unplayedPre = preSched.filter(g => !g.played && (g.homeTeamId === league.userTeamId || g.awayTeamId === league.userTeamId));
-  const nextPreGame = unplayedPre[0] ?? null;
-  const nextPreOpp = nextPreGame
-    ? league.teams.find(t => t.id === (nextPreGame.homeTeamId === league.userTeamId ? nextPreGame.awayTeamId : nextPreGame.homeTeamId))
-    : null;
-
-  const cardBase = 'rounded-xl border border-white/5 p-5';
-  const cardBg = { backgroundColor: '#0c1220' };
-
   return (
-    <div className="space-y-5 animate-in fade-in slide-in-from-bottom-2 duration-500">
-
-      {/* ── Team Header Strip ── */}
-      <div
-        className="rounded-xl border border-white/5 p-4 flex flex-col sm:flex-row items-start sm:items-center gap-4 relative overflow-hidden"
-        style={{ backgroundColor: '#0c1220' }}
-      >
-        {/* Faint team color background glow */}
-        <div
-          className="absolute inset-0 opacity-5 pointer-events-none"
-          style={{ background: `radial-gradient(ellipse at left, ${userTeam.primaryColor}, transparent 60%)` }}
-        />
-
-        <div className="flex items-center gap-4 relative z-10">
-          <div
-            className="w-14 h-14 rounded-lg flex items-center justify-center shrink-0 cursor-pointer"
-            style={{ backgroundColor: `${userTeam.primaryColor}22`, border: `2px solid ${userTeam.primaryColor}55` }}
-            onClick={() => onManageTeam(userTeam.id)}
-          >
-            <TeamBadge team={userTeam} size="lg" />
-          </div>
-          <div>
-            <h1 className="font-display font-bold text-xl uppercase tracking-wider text-white leading-none">
-              {userTeam.city} {userTeam.name}
-            </h1>
-            <p className="text-[10px] font-bold tracking-[0.2em] uppercase mt-0.5" style={{ color: userTeam.primaryColor }}>
-              {userTeam.conference} · #{confRank} Seed
-            </p>
-          </div>
-        </div>
-
-        {/* Stats — horizontal scroll on mobile */}
-        <div className="flex gap-5 overflow-x-auto scrollbar-none relative z-10 sm:ml-auto pb-0.5 sm:pb-0">
-          {[
-            { label: 'Record', val: `${userTeam.wins}–${userTeam.losses}`, color: 'text-white' },
-            { label: 'Streak', val: userTeam.streak >= 0 ? `W${userTeam.streak}` : `L${Math.abs(userTeam.streak)}`, color: userTeam.streak > 0 ? 'text-emerald-400' : userTeam.streak < 0 ? 'text-rose-400' : 'text-slate-400' },
-            { label: 'Cap Space', val: formatMoney(capSpace), color: capSpace > 0 ? 'text-emerald-400' : 'text-rose-400' },
-            { label: 'Luxury Tax', val: isOverLux ? `+${formatMoney(totalSalaryUsed - luxuryTax)}` : 'Under', color: isOverLux ? 'text-rose-400' : 'text-emerald-400' },
-            { label: 'Salary Cap', val: formatMoney(salaryCap), color: 'text-slate-300' },
-          ].map(({ label, val, color }) => (
-            <div key={label} className="shrink-0">
-              <p className="text-[9px] font-black uppercase tracking-widest text-slate-600 mb-0.5 whitespace-nowrap">{label}</p>
-              <p className={`text-sm font-bold font-mono whitespace-nowrap ${color}`}>{val}</p>
-            </div>
-          ))}
-        </div>
-      </div>
-
-      {/* ── Alerts Bar ── */}
+    <div className="space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-700">
+      
+      {/* Alerts Bar */}
       {alerts.length > 0 && (
-        <div className="flex flex-wrap gap-2">
+        <div className="flex flex-wrap gap-3">
           {alerts.map((alert, i) => {
-            const isB2B = alert.type === 'b2b';
-            const bg = alert.type === 'critical' ? 'rgba(185,28,28,0.15)' : alert.type === 'danger' ? 'rgba(244,63,94,0.10)' : isB2B ? 'rgba(249,115,22,0.12)' : 'rgba(245,158,11,0.10)';
-            const border = alert.type === 'critical' ? 'rgba(220,38,38,0.40)' : alert.type === 'danger' ? 'rgba(244,63,94,0.20)' : isB2B ? 'rgba(249,115,22,0.35)' : 'rgba(245,158,11,0.20)';
-            const color = alert.type === 'critical' ? '#ef4444' : alert.type === 'danger' ? '#f43f5e' : isB2B ? '#fb923c' : '#f59e0b';
+            const isB2BAlert = alert.type === 'b2b';
+            const bgColor = alert.type === 'critical' ? 'rgba(185, 28, 28, 0.15)'
+              : alert.type === 'danger' ? 'rgba(244, 63, 94, 0.1)'
+              : isB2BAlert ? 'rgba(249, 115, 22, 0.12)'
+              : 'rgba(245, 158, 11, 0.1)';
+            const borderColor = alert.type === 'critical' ? 'rgba(220, 38, 38, 0.4)'
+              : alert.type === 'danger' ? 'rgba(244, 63, 94, 0.2)'
+              : isB2BAlert ? 'rgba(249, 115, 22, 0.35)'
+              : 'rgba(245, 158, 11, 0.2)';
+            const textColor = alert.type === 'critical' ? '#ef4444'
+              : alert.type === 'danger' ? '#f43f5e'
+              : isB2BAlert ? '#fb923c'
+              : '#f59e0b';
             return (
-              <div key={i} className="flex items-center gap-2 px-3 py-1.5 rounded-lg border text-[11px] font-black uppercase tracking-widest" style={{ backgroundColor: bg, borderColor: border, color }}>
-                {isB2B ? <span>🔥</span> : <svg className="w-3.5 h-3.5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" /></svg>}
+              <div
+                key={i}
+                className={`flex items-center gap-2 px-4 py-2 rounded-xl border text-xs font-black uppercase tracking-widest animate-in slide-in-from-top-2 duration-500 delay-${i * 100}${isB2BAlert ? ' ring-1 ring-orange-500/20' : ''}`}
+                style={{ backgroundColor: bgColor, borderColor, color: textColor }}
+              >
+                {isB2BAlert
+                  ? <span className="text-sm">🔥</span>
+                  : <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" /></svg>
+                }
                 {alert.text}
               </div>
             );
           })}
         </div>
       )}
-
-      {/* ── Offseason / Preseason Banners ── */}
-      {league.isOffseason && onOpenOffseasonAlerts && (league.offseasonAlerts ?? []).some(a => !a.dismissed) && (
-        <button onClick={onOpenOffseasonAlerts} className="w-full flex items-center gap-3 bg-amber-500/10 hover:bg-amber-500/18 border border-amber-500/30 rounded-xl px-4 py-3 transition-all text-left group">
-          <span className="text-xl">🔔</span>
-          <div className="flex-1 min-w-0">
-            <p className="text-[10px] font-black uppercase tracking-widest text-amber-400">Offseason Alerts</p>
-            <p className="text-sm font-bold text-white truncate">
-              {(league.offseasonAlerts ?? []).filter(a => !a.dismissed).length} pending alert{(league.offseasonAlerts ?? []).filter(a => !a.dismissed).length > 1 ? 's' : ''} — tap to review
-            </p>
+      
+      {/* Top Banner: Vitals & Next Game */}
+      <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
+        {/* Next Game Preview */}
+        <div 
+          className="xl:col-span-2 relative group overflow-hidden bg-slate-900 border border-slate-800 rounded-3xl p-8 shadow-2xl"
+          style={{ borderLeft: `8px solid ${userTeam.primaryColor}` }}
+        >
+          <div className="absolute top-0 right-0 p-8 opacity-10 pointer-events-none group-hover:scale-110 transition-transform duration-1000">
+            <svg className="w-48 h-48" fill="currentColor" viewBox="0 0 24 24" style={{ color: userTeam.primaryColor }}><path d="M12 2L4.5 20.29l.71.71L12 18l6.79 3 .71-.71z"/></svg>
           </div>
-          <span className="text-amber-500 group-hover:translate-x-1 transition-transform">›</span>
-        </button>
-      )}
+          
+          <div className="relative z-10 flex flex-col md:flex-row items-center justify-between gap-12">
+            <div className="flex items-center gap-8">
+              <div className="text-center">
+                <div
+                  className="w-24 h-24 bg-slate-800 rounded-2xl flex items-center justify-center border border-slate-700 mb-2 cursor-pointer hover:border-amber-500 transition-colors"
+                  style={{ borderColor: userTeam.primaryColor }}
+                  onClick={() => onManageTeam(userTeam.id)}
+                >
+                  <TeamBadge team={userTeam} size="xl" />
+                </div>
+                <p
+                  className="font-display font-bold text-lg uppercase cursor-pointer hover:text-amber-500 transition-colors"
+                  onClick={() => onManageTeam(userTeam.id)}
+                >
+                  {userTeam.name}
+                </p>
+                <p className="text-xs text-slate-500 font-bold tracking-widest">{userTeam.wins}-{userTeam.losses}</p>
+              </div>
 
-      {/* ── Main 3-column grid ── */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+              <div className="text-4xl font-display font-black text-slate-700 italic">VS</div>
 
-        {/* COL 1: Sim Controls + Tasks (order-last on mobile so team overview comes first) */}
-        <div className="space-y-4 order-last lg:order-first">
+              {nextOpponent ? (
+              <div className="text-center">
+                <div
+                  className="w-24 h-24 bg-slate-800 rounded-2xl flex items-center justify-center border border-slate-700 mb-2 cursor-pointer hover:border-amber-500 transition-colors"
+                  style={{ borderColor: nextOpponent.primaryColor }}
+                  onClick={() => onManageTeam(nextOpponent.id)}
+                >
+                  <TeamBadge team={nextOpponent} size="xl" />
+                </div>
+                <p
+                  className="font-display font-bold text-lg uppercase cursor-pointer hover:text-amber-500 transition-colors"
+                  onClick={() => onManageTeam(nextOpponent.id)}
+                >
+                  {nextOpponent.name}
+                </p>
+                <p className="text-xs text-slate-500 font-bold tracking-widest">{nextOpponent.wins}-{nextOpponent.losses}</p>
+              </div>
+              ) : (
+              <div className="text-center">
+                <div className="w-24 h-24 bg-slate-800 rounded-2xl flex items-center justify-center border border-slate-700 mb-2">
+                  <span className="text-slate-600 font-bold text-xs uppercase">TBD</span>
+                </div>
+                <p className="font-display font-bold text-lg uppercase text-slate-600">Opponent TBD</p>
+              </div>
+              )}
+            </div>
 
-          {/* Offseason Ready → Start Preseason */}
-          {league.isOffseason && league.draftPhase === 'completed' && onAdvanceToRegularSeason && (
-            <div className={`${cardBase} border-amber-500/30`} style={{ ...cardBg, background: 'linear-gradient(135deg, rgba(180,83,9,0.2), #0c1220)' }}>
-              <p className="text-[10px] font-black uppercase tracking-widest text-amber-500 mb-1">Offseason Complete</p>
-              <p className="font-display font-bold text-white text-lg uppercase mb-3">Ready to Tip Off</p>
-              <button onClick={onAdvanceToRegularSeason} className="w-full py-2.5 text-slate-950 font-display font-bold uppercase text-sm rounded-lg transition-all active:scale-95 flex items-center justify-center gap-2" style={{ backgroundColor: userTeam.primaryColor }}>
-                <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24"><path d="M8 5v14l11-7z" /></svg>
+            <div className="flex-1 space-y-4 max-w-sm">
+              <div>
+                <h3 className="text-xs font-black uppercase tracking-[0.3em] mb-1" style={{ color: userTeam.primaryColor }}>Game Preview</h3>
+                <p className="text-slate-300 text-sm leading-relaxed">
+                  {nextOpponent
+                    ? <>The <span className="text-white font-bold">{userTeam.city} {userTeam.name}</span> face off against the <span className="text-white font-bold">{nextOpponent.name}</span> in a crucial {userTeam.conference} matchup. Win Probability: <span className="text-emerald-400 font-bold">{teamOvr > calcTeamEffectiveOVR(nextOpponent.roster) ? '68%' : '42%'}</span>.</>
+                    : <>The <span className="text-white font-bold">{userTeam.city} {userTeam.name}</span> are gearing up for the season.</>
+                  }
+                </p>
+              </div>
+              <div className="flex gap-3">
+                <button 
+                  onClick={() => onSimulate('next')}
+                  className="px-6 py-3 text-slate-950 font-display font-bold uppercase rounded-xl transition-all shadow-lg active:scale-95"
+                  style={{ backgroundColor: userTeam.primaryColor }}
+                >
+                  Tip Off Now
+                </button>
+                {nextOpponent && (
+                <button
+                   onClick={() => onViewRoster(nextOpponent.id)}
+                   className="px-6 py-3 bg-slate-800 hover:bg-slate-700 text-slate-300 font-display font-bold uppercase rounded-xl transition-all"
+                >
+                  Scout Roster
+                </button>
+                )}
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* Team Vitals Sidebar */}
+        <div className="bg-slate-900 border border-slate-800 rounded-3xl p-6 flex flex-col justify-between shadow-2xl">
+          <div className="space-y-6">
+            <h3 className="text-[10px] font-black uppercase tracking-[0.4em] text-slate-500">Franchise Vitals</h3>
+            <div className="grid grid-cols-2 gap-4">
+              <div className="bg-slate-950/50 p-4 rounded-2xl border border-slate-800">
+                <p className="text-[10px] text-slate-500 font-bold uppercase mb-1">Team OVR</p>
+                <div className="flex items-baseline gap-2">
+                  <span className="text-3xl font-display font-black" style={{ color: userTeam.primaryColor }}>{teamOvr}</span>
+                </div>
+                {teamOvrInjuryNote && (
+                  <p className="text-[9px] text-rose-400 font-bold mt-1 leading-tight">{teamOvrInjuryNote}</p>
+                )}
+              </div>
+              <div className="bg-slate-950/50 p-4 rounded-2xl border border-slate-800">
+                <p className="text-[10px] text-slate-500 font-bold uppercase mb-1">Team Morale</p>
+                <div className="flex items-center gap-2">
+                  <span className="text-3xl font-display font-black" style={{ color: teamMorale < 50 ? '#ef4444' : teamMorale < 65 ? '#f43f5e' : teamMorale < 80 ? '#f59e0b' : '#22c55e' }}>{teamMorale}%</span>
+                  <div className="flex-1 h-1 bg-slate-800 rounded-full overflow-hidden">
+                    <div className="h-full" style={{ width: `${teamMorale}%`, backgroundColor: teamMorale < 50 ? '#ef4444' : teamMorale < 65 ? '#f43f5e' : teamMorale < 80 ? '#f59e0b' : '#22c55e' }}></div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div className="mt-6 pt-6 border-t border-slate-800 space-y-4">
+             <div className="flex justify-between items-center">
+                <span className="text-xs font-bold text-slate-400 uppercase">Cap Space</span>
+                <span className="text-sm font-mono text-emerald-400 font-bold">{formatMoney(userTeam.budget - userTeam.roster.reduce((s,p) => s+p.salary, 0))}</span>
+             </div>
+             <div className="flex justify-between items-center">
+                <span className="text-xs font-bold text-slate-400 uppercase">Standing</span>
+                <span className="text-sm font-display text-white font-bold italic">#4 {userTeam.conference}</span>
+             </div>
+             <div className="flex justify-between items-center">
+                <span className="text-xs font-bold text-slate-400 uppercase">Streak</span>
+                <span className={`text-sm font-bold ${userTeam.streak >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
+                  {userTeam.streak >= 0 ? `W${userTeam.streak}` : `L${Math.abs(userTeam.streak)}`}
+                </span>
+             </div>
+             <div className="flex justify-between items-center border-t border-slate-800 pt-3 mt-1" title="Record against teams with .500 or better win% at time of game">
+                <div>
+                  <span className="text-xs font-bold text-slate-400 uppercase">vs .500+ Teams</span>
+                  <p className="text-[9px] text-slate-600 font-bold uppercase mt-0.5">Contender test</p>
+                </div>
+                <div className="text-right">
+                  <span className={`text-sm font-mono font-bold ${vsColor}`}>{vsRecord}</span>
+                  {vsPct !== null && (
+                    <p className={`text-[10px] font-black ${vsColor}`}>({vsPct.toFixed(3)})</p>
+                  )}
+                </div>
+             </div>
+          </div>
+        </div>
+      </div>
+
+      {/* Professional Dashboard Panels */}
+      <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-6">
+        {/* Team Ratings */}
+        <div className="bg-slate-900 border border-slate-800 rounded-3xl p-6 shadow-2xl">
+          <h3 className="text-[10px] font-black uppercase tracking-[0.4em] text-slate-500 mb-6">Team Ratings</h3>
+          <div className="flex justify-around items-center">
+            <CircularGauge value={Math.round(userTeam.roster.reduce((a,b)=>a+b.attributes.shooting,0)/userTeam.roster.length)} label="Offense" color="#10b981" />
+            <CircularGauge value={Math.round(userTeam.roster.reduce((a,b)=>a+b.attributes.defense,0)/userTeam.roster.length)} label="Defense" color="#3b82f6" />
+            <CircularGauge value={teamOvr} label="Overall" color={userTeam.primaryColor} />
+          </div>
+        </div>
+
+        {/* Efficiency 4-Factors */}
+        <div className="bg-slate-900 border border-slate-800 rounded-3xl p-6 shadow-2xl">
+          <h3 className="text-[10px] font-black uppercase tracking-[0.4em] text-slate-500 mb-6">Efficiency (4-Factors)</h3>
+          <div className="grid grid-cols-2 gap-3">
+            {([
+              { key: 'eFG',    label: 'eFG%',    val: eFG,    rank: ffRanks.eFG    },
+              { key: 'tovPct', label: 'TOV%',    val: tovPct, rank: ffRanks.tovPct  },
+              { key: 'orbPct', label: 'ORB%',    val: orbPct, rank: ffRanks.orbPct  },
+              { key: 'ftRate', label: 'FT Rate', val: ftRate, rank: ffRanks.ftRate  },
+            ] as const).map(({ key, label, val, rank }) => (
+              <div key={key} className="bg-slate-950/50 p-3 rounded-xl border border-slate-800">
+                <p className="text-[8px] text-slate-500 font-black uppercase mb-1">{label}</p>
+                <p className={`text-xl font-display font-black ${rankColor(rank, numTeams)}`}>{val}%</p>
+                {numTeams > 0 && rank > 0 && (
+                  <p className={`text-[9px] font-black mt-0.5 ${rankColor(rank, numTeams)}`}>
+                    {rankLabel(rank)} in {label}
+                  </p>
+                )}
+              </div>
+            ))}
+          </div>
+        </div>
+
+        {/* Strength of Schedule */}
+        <div className="bg-slate-900 border border-slate-800 rounded-3xl p-6 shadow-2xl">
+          <h3 className="text-[10px] font-black uppercase tracking-[0.4em] text-slate-500 mb-6">Strength of Schedule</h3>
+          <div className="space-y-4">
+            <div>
+              <div className="flex justify-between items-end mb-1">
+                <span className="text-[10px] font-bold text-slate-400 uppercase">Last 10 Opponents</span>
+                <span className="text-xs font-mono text-white font-bold">{last10AvgOvr} OVR</span>
+              </div>
+              <div className="h-2 bg-slate-800 rounded-full overflow-hidden">
+                <div className="h-full bg-slate-600" style={{ width: `${last10AvgOvr}%` }}></div>
+              </div>
+            </div>
+            <div>
+              <div className="flex justify-between items-end mb-1">
+                <span className="text-[10px] font-bold text-slate-400 uppercase">Next 10 Opponents</span>
+                <span className="text-xs font-mono text-amber-500 font-bold">{next10AvgOvr} OVR</span>
+              </div>
+              <div className="h-2 bg-slate-800 rounded-full overflow-hidden">
+                <div className="h-full bg-amber-500" style={{ width: `${next10AvgOvr}%` }}></div>
+              </div>
+              <p className="text-[9px] text-slate-500 mt-2 italic">
+                {next10AvgOvr > 82 ? "⚠️ Brutal stretch ahead" : next10AvgOvr < 78 ? "✅ Soft schedule upcoming" : "Balanced schedule"}
+              </p>
+            </div>
+          </div>
+        </div>
+
+        {/* Finals Odds */}
+        <div className="bg-slate-900 border border-slate-800 rounded-3xl p-6 shadow-2xl">
+          <h3 className="text-[10px] font-black uppercase tracking-[0.4em] text-slate-500 mb-6">Finals Odds</h3>
+          <div className="space-y-3">
+            <div className="flex justify-between items-center p-2 bg-slate-950/50 rounded-xl border border-slate-800">
+              <span className="text-xs font-bold text-slate-400 uppercase">Championship</span>
+              <div className="text-right">
+                <span className="text-sm font-mono text-emerald-400 font-bold">{formatOdds(champOdds)}</span>
+                <span className="ml-2 text-[10px] text-slate-500 font-bold">({champOdds}%)</span>
+              </div>
+            </div>
+            <div className="flex justify-between items-center p-2 bg-slate-950/50 rounded-xl border border-slate-800">
+              <span className="text-xs font-bold text-slate-400 uppercase">Conference</span>
+              <div className="text-right">
+                <span className="text-sm font-mono text-emerald-400 font-bold">{formatOdds(confOdds)}</span>
+                <span className="ml-2 text-[10px] text-slate-500 font-bold">({confOdds}%)</span>
+              </div>
+            </div>
+            {userTeam.division && (
+              <div className="flex justify-between items-center p-2 bg-slate-950/50 rounded-xl border border-slate-800">
+                <div>
+                  <span className="text-xs font-bold text-slate-400 uppercase">Division</span>
+                  <p className="text-[9px] text-slate-600 font-bold mt-0.5">{userTeam.division}</p>
+                </div>
+                <div className="text-right">
+                  <span className="text-sm font-mono text-emerald-400 font-bold">{formatOdds(divOdds)}</span>
+                  <span className="ml-2 text-[10px] text-slate-500 font-bold">({divOdds}%)</span>
+                </div>
+              </div>
+            )}
+            <div className="flex justify-between items-center p-2 bg-slate-950/50 rounded-xl border border-slate-800">
+              <span className="text-xs font-bold text-slate-400 uppercase">Playoffs</span>
+              <div className="text-right">
+                <span className="text-sm font-mono text-emerald-400 font-bold">{formatOdds(playoffOdds)}</span>
+                <span className="ml-2 text-[10px] text-slate-500 font-bold">({playoffOdds}%)</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* Attendance Summary Card */}
+      {(() => {
+        const { homeGames, avgAttendance, capacityPct } = teamSeasonAttendance(userTeam, safeSchedule);
+        const allRanked = [...league.teams]
+          .map(t => ({ id: t.id, avg: teamSeasonAttendance(t, safeSchedule).avgAttendance }))
+          .sort((a, b) => b.avg - a.avg);
+        const rank = allRanked.findIndex(r => r.id === userTeam.id) + 1;
+        const fmt = (n: number) => n.toLocaleString('en-US');
+        if (homeGames === 0) return null;
+        return (
+          <div className="bg-slate-900 border border-slate-800 rounded-3xl p-6 shadow-2xl">
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-[10px] font-black uppercase tracking-[0.4em] text-slate-500">Home Attendance</h3>
+              <button
+                onClick={() => setActiveTab('stats')}
+                className="text-[10px] font-black uppercase tracking-widest text-amber-500 hover:text-amber-400 transition-colors"
+              >
+                Rankings →
+              </button>
+            </div>
+            <div className="grid grid-cols-3 gap-4">
+              <div className="text-center">
+                <p className="text-[10px] text-slate-500 font-black uppercase mb-1">Avg / Game</p>
+                <p className="text-2xl font-display font-black text-white">{fmt(avgAttendance)}</p>
+              </div>
+              <div className="text-center">
+                <p className="text-[10px] text-slate-500 font-black uppercase mb-1">% Capacity</p>
+                <p className={`text-2xl font-display font-black ${
+                  capacityPct >= 95 ? 'text-emerald-400' :
+                  capacityPct >= 80 ? 'text-amber-400' :
+                  capacityPct >= 60 ? 'text-slate-300' : 'text-rose-400'
+                }`}>{capacityPct.toFixed(1)}%</p>
+              </div>
+              <div className="text-center">
+                <p className="text-[10px] text-slate-500 font-black uppercase mb-1">League Rank</p>
+                <p className="text-2xl font-display font-black" style={{ color: userTeam.primaryColor }}>#{rank}</p>
+              </div>
+            </div>
+            <div className="mt-4 h-1.5 bg-slate-800 rounded-full overflow-hidden">
+              <div
+                className="h-full rounded-full transition-all duration-500"
+                style={{
+                  width: `${Math.min(100, capacityPct)}%`,
+                  backgroundColor: capacityPct >= 95 ? '#34d399' : capacityPct >= 80 ? '#f59e0b' : capacityPct >= 60 ? '#94a3b8' : '#f43f5e',
+                }}
+              />
+            </div>
+            <p className="text-[10px] text-slate-600 font-bold mt-1.5">{homeGames} home games played · Arena cap: {fmt(userTeam.stadiumCapacity || 19_000)}</p>
+          </div>
+        );
+      })()}
+
+      {/* Main Grid: Depth Chart & Quick Actions */}
+      <div className="grid grid-cols-1 lg:grid-cols-4 gap-8">
+        
+        {/* Depth Chart / Starting Lineup */}
+        <div className="lg:col-span-3 space-y-8">
+          <section className="bg-slate-900 border border-slate-800 rounded-3xl overflow-hidden shadow-2xl">
+            <div className="p-6 border-b border-slate-800 flex justify-between items-center">
+              <h2 className="font-display font-bold text-2xl uppercase tracking-tight">Active Roster & <span style={{ color: userTeam.primaryColor }}>Stats</span></h2>
+              <button 
+                onClick={() => setActiveTab('roster')}
+                className="text-xs font-black uppercase tracking-widest transition-colors"
+                style={{ color: userTeam.primaryColor }}
+              >
+                Manage Depth Chart →
+              </button>
+            </div>
+            
+            <div className="overflow-x-auto">
+              <table className="w-full text-left">
+                <thead>
+                  <tr className="text-[10px] text-slate-500 font-black uppercase tracking-widest border-b border-slate-800">
+                    <th className="px-6 py-4">Player</th>
+                    <th className="px-6 py-4">Pos</th>
+                    <th className="px-6 py-4 text-center">Age</th>
+                    <th className="px-6 py-4 text-center">OVR</th>
+                    <th className="px-6 py-4 text-center">POT</th>
+                    <th className="px-6 py-4 text-center">PPG</th>
+                    <th className="px-6 py-4 text-center">RPG</th>
+                    <th className="px-6 py-4 text-center">APG</th>
+                    <th className="px-6 py-4 text-right">Contract</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-800/50">
+                  {[...userTeam.roster].sort((a,b) => {
+                    const effA = a.injuryOVRPenalty != null && (a.status === 'Injured' || (a.injuryDaysLeft ?? 0) > 0) ? Math.max(40, a.rating - a.injuryOVRPenalty) : a.rating;
+                    const effB = b.injuryOVRPenalty != null && (b.status === 'Injured' || (b.injuryDaysLeft ?? 0) > 0) ? Math.max(40, b.rating - b.injuryOVRPenalty) : b.rating;
+                    return effB - effA;
+                  }).map((player, i) => (
+                    <tr 
+                      key={player.id} 
+                      className={`group hover:bg-slate-800/30 transition-all cursor-pointer ${i < 5 ? 'bg-slate-800/10' : ''}`}
+                      onClick={() => onScout(player)}
+                    >
+                      <td className="px-6 py-4">
+                        <div className="flex items-center gap-3">
+                          <div className={`w-1 h-8 rounded-full`} style={{ backgroundColor: i < 5 ? userTeam.primaryColor : 'transparent' }}></div>
+                          <div>
+                            <div className="font-display font-bold text-slate-100 group-hover:text-amber-500 transition-colors uppercase">{player.name}</div>
+                            <div className="text-[10px] text-slate-500 font-bold uppercase">{i < 5 ? 'Starter' : 'Bench'}</div>
+                          </div>
+                        </div>
+                      </td>
+                      <td className="px-6 py-4 text-xs font-bold text-slate-400">{player.position}</td>
+                      <td className="px-6 py-4 text-center text-sm font-medium">{player.age}</td>
+                      <td className="px-6 py-4 text-center">
+                        {(() => {
+                          const isInj = player.status === 'Injured' || (player.injuryDaysLeft != null && player.injuryDaysLeft > 0);
+                          const eff = isInj && player.injuryOVRPenalty != null ? Math.max(40, player.rating - player.injuryOVRPenalty) : player.rating;
+                          return (
+                            <div>
+                              <span className="font-display font-bold text-lg" style={{ color: isInj ? '#f43f5e' : 'white' }}>{eff}</span>
+                              {isInj && player.injuryOVRPenalty != null && (
+                                <div className="text-[8px] font-black text-rose-500 uppercase leading-none">(INJ -{player.injuryOVRPenalty})</div>
+                              )}
+                            </div>
+                          );
+                        })()}
+                      </td>
+                      <td className="px-6 py-4 text-center">
+                        <span className="font-display font-bold text-sm text-slate-500">{player.potential}</span>
+                        {player.potentialLossNote && (
+                          <div className="text-[8px] font-black text-rose-400 leading-tight">{player.potentialLossNote}</div>
+                        )}
+                      </td>
+                      <td className="px-6 py-4 text-center font-mono text-sm text-slate-300">{(player.stats.points / (player.stats.gamesPlayed || 1)).toFixed(1)}</td>
+                      <td className="px-6 py-4 text-center font-mono text-sm text-slate-300">{(player.stats.rebounds / (player.stats.gamesPlayed || 1)).toFixed(1)}</td>
+                      <td className="px-6 py-4 text-center font-mono text-sm text-slate-300">{(player.stats.assists / (player.stats.gamesPlayed || 1)).toFixed(1)}</td>
+                      <td className="px-6 py-4 text-right">
+                        <div className="text-xs font-bold text-slate-300">{formatMoney(player.salary)}</div>
+                        <div className="text-[10px] text-slate-500 uppercase">{player.contractYears}Y Left</div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </section>
+
+          {/* AI Narrative Bulletin Feed */}
+          <div className="bg-slate-900 border border-slate-800 rounded-3xl p-8 shadow-2xl relative overflow-hidden">
+            <div className="absolute top-0 left-0 w-2 h-full" style={{ backgroundColor: userTeam.primaryColor }}></div>
+            <div className="flex items-start gap-6">
+              <div className="w-16 h-16 bg-slate-800 rounded-2xl flex items-center justify-center flex-shrink-0 border border-slate-700">
+                <svg className="w-8 h-8" fill="currentColor" viewBox="0 0 24 24" style={{ color: userTeam.primaryColor }}><path d="M20 2H4c-1.1 0-2 .9-2 2v18l4-4h14c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2z"/></svg>
+              </div>
+              <div className="space-y-2">
+                <h3 className="text-[10px] font-black uppercase tracking-[0.4em]" style={{ color: userTeam.primaryColor }}>League Intelligence Report</h3>
+                <p className="text-xl font-medium leading-relaxed italic text-slate-200">
+                  {news}
+                </p>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* Right Panel: Quick Actions & News */}
+        <div className="space-y-8">
+
+          {/* ── Offseason Alerts Re-open Banner ── */}
+          {league.isOffseason && onOpenOffseasonAlerts && (league.offseasonAlerts ?? []).some(a => !a.dismissed) && (
+            <button
+              onClick={onOpenOffseasonAlerts}
+              className="w-full flex items-center gap-3 bg-amber-500/10 hover:bg-amber-500/20 border border-amber-500/30 hover:border-amber-500/60 rounded-2xl px-5 py-4 transition-all text-left group"
+            >
+              <span className="text-2xl">🔔</span>
+              <div className="flex-1 min-w-0">
+                <p className="text-[10px] font-black uppercase tracking-[0.3em] text-amber-400">Offseason Alerts</p>
+                <p className="text-sm font-bold text-white truncate">
+                  {(league.offseasonAlerts ?? []).filter(a => !a.dismissed).length} pending alert{(league.offseasonAlerts ?? []).filter(a => !a.dismissed).length > 1 ? 's' : ''} — tap to review
+                </p>
+              </div>
+              <span className="text-amber-500 group-hover:translate-x-1 transition-transform text-lg">›</span>
+            </button>
+          )}
+
+          {/* ── Preseason / Offseason Banner ── */}
+          {(league.isOffseason && league.draftPhase === 'completed') && onAdvanceToRegularSeason && (
+            <div className="bg-gradient-to-br from-amber-900/30 to-slate-900 border border-amber-500/30 rounded-3xl p-6 shadow-2xl animate-in slide-in-from-top-2">
+              <div className="flex items-center gap-3 mb-4">
+                <span className="text-2xl">🏀</span>
+                <div>
+                  <p className="text-[10px] font-black uppercase tracking-[0.4em] text-amber-500">Offseason Complete</p>
+                  <h3 className="text-lg font-display font-black text-white uppercase">Ready to Tip Off</h3>
+                </div>
+              </div>
+              <p className="text-slate-400 text-xs mb-5 leading-relaxed">
+                Draft and free agency are complete. Start the preseason exhibition slate and get your squad game-ready before the regular season.
+              </p>
+              <button
+                onClick={onAdvanceToRegularSeason}
+                className="w-full py-4 bg-amber-500 hover:bg-amber-400 active:scale-95 text-slate-950 font-display font-black uppercase text-sm rounded-2xl transition-all shadow-lg shadow-amber-500/20 flex items-center justify-center gap-2"
+              >
+                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z" />
+                </svg>
                 Start Preseason
               </button>
             </div>
           )}
 
-          {/* Active Preseason Banner */}
-          {league.seasonPhase === 'Preseason' && !league.isOffseason && totalPre > 0 && (
-            <div className={`${cardBase} border-amber-500/25`} style={{ ...cardBg }}>
-              <div className="flex items-center justify-between mb-2">
-                <p className="text-[10px] font-black uppercase tracking-widest text-amber-500">Preseason</p>
-                <p className="font-mono text-sm font-bold text-white">{preRecord.wins}–{preRecord.losses}</p>
-              </div>
-              <div className="h-1 bg-slate-800 rounded-full mb-3 overflow-hidden">
-                <div className="h-full rounded-full transition-all" style={{ width: `${totalPre > 0 ? (playedPre / totalPre) * 100 : 0}%`, backgroundColor: userTeam.primaryColor }} />
-              </div>
-              {nextPreGame && nextPreOpp && (
-                <p className="text-xs text-slate-400 mb-3">Next: vs <span className="text-white font-bold">{nextPreOpp.name}</span></p>
-              )}
-              <div className="flex gap-2">
-                <button onClick={() => onSimulate('next')} className="flex-1 py-2 text-slate-950 font-display font-bold uppercase text-xs rounded-lg transition-all" style={{ backgroundColor: userTeam.primaryColor }}>
-                  Sim Next
-                </button>
-                {onAdvanceToRegularSeason && playedPre < totalPre && (
-                  <button onClick={onAdvanceToRegularSeason} className="px-4 py-2 bg-white/5 hover:bg-white/10 text-slate-400 font-bold text-xs rounded-lg transition-all border border-white/10">
-                    Skip
-                  </button>
-                )}
-              </div>
-            </div>
-          )}
+          {/* ── Live Preseason Banner (active preseason games) ── */}
+          {league.seasonPhase === 'Preseason' && !league.isOffseason && (() => {
+            const preSched   = league.preseasonSchedule ?? [];
+            const preRecord  = league.preseasonRecord ?? { wins: 0, losses: 0 };
+            const totalPre   = preSched.length;
+            const playedPre  = preSched.filter(g => g.played).length;
+            const unplayed   = preSched.filter(
+              g => !g.played && (g.homeTeamId === league.userTeamId || g.awayTeamId === league.userTeamId)
+            );
+            const nextPreGame = unplayed[0] ?? null;
+            const nextOpp    = nextPreGame
+              ? league.teams.find(t => t.id === (nextPreGame.homeTeamId === league.userTeamId ? nextPreGame.awayTeamId : nextPreGame.homeTeamId))
+              : null;
+            const nextIsHome = nextPreGame ? nextPreGame.homeTeamId === league.userTeamId : false;
 
-          {/* Simulation Hub */}
-          <div className={cardBase} style={cardBg}>
-            <p className="text-[10px] font-black uppercase tracking-widest text-slate-500 mb-3">Simulate</p>
-            <div className="space-y-2">
-              {[
-                { label: 'Next Game', mode: 'next' as const, icon: 'M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z' },
-                { label: 'Next Week', mode: 'week' as const, icon: 'M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z' },
-                { label: 'Next Month', mode: 'month' as const, icon: 'M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z' },
-                { label: 'End of Season', mode: 'season' as const, icon: 'M13 10V3L4 14h7v7l9-11h-7z' },
-              ].map(({ label, mode, icon }) => (
-                <button
-                  key={mode}
-                  onClick={() => onSimulate(mode)}
-                  className="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg bg-white/5 hover:bg-white/10 transition-all text-slate-300 hover:text-white group"
-                >
-                  <svg className="w-4 h-4 shrink-0 transition-colors" style={{ color: userTeam.primaryColor }} fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d={icon} />
-                  </svg>
-                  <span className="text-xs font-bold uppercase tracking-wide">{label}</span>
-                </button>
-              ))}
-            </div>
-          </div>
+            if (totalPre === 0) return null;
 
-          {/* Front Office shortcuts */}
-          <div className={cardBase} style={cardBg}>
-            <p className="text-[10px] font-black uppercase tracking-widest text-slate-500 mb-3">Front Office</p>
-            <div className="space-y-1">
-              {[
-                { label: 'Manage Roster', tab: 'roster' },
-                { label: 'Trade Machine', tab: 'trade' },
-                { label: 'Draft Hub', tab: 'draft' },
-                { label: 'Free Agency', tab: 'free_agency' },
-                { label: 'Finances', tab: 'finances' },
-              ].map(({ label, tab }) => (
-                <button key={tab} onClick={() => setActiveTab(tab)} className="w-full flex items-center justify-between px-3 py-2 rounded-lg hover:bg-white/5 transition-all text-slate-400 hover:text-white text-xs font-bold uppercase tracking-wide group">
-                  <span>{label}</span>
-                  <svg className="w-3.5 h-3.5 opacity-0 group-hover:opacity-100 transition-opacity" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 5l7 7-7 7" /></svg>
-                </button>
-              ))}
-            </div>
-          </div>
-        </div>
-
-        {/* COL 2: Team Overview */}
-        <div className="space-y-4">
-          <div className={cardBase} style={cardBg}>
-            <p className="text-[10px] font-black uppercase tracking-widest text-slate-500 mb-4">Team Overview</p>
-
-            {/* OVR gauge + stat bars */}
-            <div className="flex items-center gap-6 mb-5">
-              {/* Circular OVR */}
-              <div className="shrink-0">
-                <CircularGauge value={teamOvr} label="OVR" color={userTeam.primaryColor} size={90} />
-              </div>
-              {/* OFF / DEF / POT bars */}
-              <div className="flex-1 space-y-3">
-                {[
-                  { label: 'OFF', value: avgOff, color: '#10b981' },
-                  { label: 'DEF', value: avgDef, color: '#3b82f6' },
-                  { label: 'POT', value: avgPot, color: userTeam.primaryColor },
-                ].map(({ label, value, color }) => (
-                  <div key={label}>
-                    <div className="flex justify-between text-[10px] font-black uppercase tracking-widest mb-1">
-                      <span className="text-slate-500">{label}</span>
-                      <span style={{ color }}>{value}</span>
-                    </div>
-                    <div className="h-1.5 bg-slate-800 rounded-full overflow-hidden">
-                      <div className="h-full rounded-full transition-all duration-700" style={{ width: `${value}%`, backgroundColor: color }} />
+            return (
+              <div className="bg-gradient-to-br from-amber-900/25 to-slate-900 border border-amber-500/30 rounded-3xl p-6 shadow-2xl animate-in slide-in-from-top-2">
+                <div className="flex items-center justify-between mb-4">
+                  <div className="flex items-center gap-3">
+                    <span className="text-2xl">🏋️</span>
+                    <div>
+                      <p className="text-[10px] font-black uppercase tracking-[0.4em] text-amber-500">Preseason — Exhibition</p>
+                      <h3 className="text-lg font-display font-black text-white uppercase">
+                        {playedPre === totalPre ? 'Preseason Complete!' : `${totalPre - playedPre} Game${totalPre - playedPre !== 1 ? 's' : ''} Left`}
+                      </h3>
                     </div>
                   </div>
-                ))}
-              </div>
-            </div>
-
-            {teamOvrInjuryNote && (
-              <p className="text-[10px] text-rose-400 font-bold mb-4 px-2 py-1.5 bg-rose-500/10 border border-rose-500/20 rounded-lg">{teamOvrInjuryNote}</p>
-            )}
-
-            {/* Morale + vs .500 */}
-            <div className="border-t border-white/5 pt-4 space-y-3">
-              <div>
-                <div className="flex justify-between text-[10px] font-black uppercase tracking-widest mb-1">
-                  <span className="text-slate-500">Team Morale</span>
-                  <span style={{ color: teamMorale < 50 ? '#ef4444' : teamMorale < 65 ? '#f43f5e' : teamMorale < 80 ? '#f59e0b' : '#22c55e' }}>{teamMorale}%</span>
+                  <div className="text-right">
+                    <p className="text-2xl font-display font-black text-white">{preRecord.wins}–{preRecord.losses}</p>
+                    <p className="text-[9px] text-slate-500 font-bold uppercase tracking-widest">Preseason Record</p>
+                  </div>
                 </div>
-                <div className="h-1.5 bg-slate-800 rounded-full overflow-hidden">
-                  <div className="h-full rounded-full" style={{ width: `${teamMorale}%`, backgroundColor: teamMorale < 50 ? '#ef4444' : teamMorale < 65 ? '#f43f5e' : teamMorale < 80 ? '#f59e0b' : '#22c55e' }} />
-                </div>
-              </div>
-              <div className="flex justify-between text-xs">
-                <span className="text-slate-500 font-bold uppercase text-[10px]">vs .500+ Teams</span>
-                <span className={`font-mono font-bold text-[11px] ${vsColor}`}>{vsRecord}{vsPct !== null ? ` (${vsPct.toFixed(3)})` : ''}</span>
-              </div>
-            </div>
-          </div>
 
-          {/* 4-Factors */}
-          <div className={cardBase} style={cardBg}>
-            <p className="text-[10px] font-black uppercase tracking-widest text-slate-500 mb-3">Efficiency (4-Factors)</p>
-            <div className="grid grid-cols-2 gap-2">
-              {([
-                { key: 'eFG', label: 'eFG%', val: eFG, rank: ffRanks.eFG },
-                { key: 'tovPct', label: 'TOV%', val: tovPct, rank: ffRanks.tovPct },
-                { key: 'orbPct', label: 'ORB%', val: orbPct, rank: ffRanks.orbPct },
-                { key: 'ftRate', label: 'FT Rate', val: ftRate, rank: ffRanks.ftRate },
-              ] as const).map(({ key, label, val, rank }) => (
-                <div key={key} className="bg-white/5 p-3 rounded-lg">
-                  <p className="text-[9px] text-slate-500 font-black uppercase mb-1">{label}</p>
-                  <p className={`text-lg font-display font-black ${rankColor(rank, numTeams)}`}>{val}%</p>
-                  {numTeams > 0 && rank > 0 && (
-                    <p className={`text-[9px] font-black mt-0.5 ${rankColor(rank, numTeams)}`}>{rankLabel(rank)}</p>
+                {/* Progress bar */}
+                <div className="h-1 bg-slate-800 rounded-full mb-4 overflow-hidden">
+                  <div className="h-full bg-amber-500 rounded-full transition-all duration-500" style={{ width: `${totalPre > 0 ? (playedPre / totalPre) * 100 : 0}%` }} />
+                </div>
+
+                {/* Next game */}
+                {nextPreGame && nextOpp && (
+                  <div className="bg-slate-950/60 border border-slate-800 rounded-2xl p-3 mb-4 flex items-center gap-3">
+                    <span className="text-xl">{nextOpp.logo}</span>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-[9px] text-slate-500 font-black uppercase tracking-widest">
+                        Next Preseason Game — {nextIsHome ? '🏠 Home' : '🛫 Away'}
+                      </p>
+                      <p className="text-sm font-bold text-white truncate">{nextOpp.city} {nextOpp.name}</p>
+                    </div>
+                    <span className="px-2 py-1 bg-amber-500/10 border border-amber-500/20 rounded-lg text-[8px] text-amber-500 font-black uppercase whitespace-nowrap">
+                      No standings impact
+                    </span>
+                  </div>
+                )}
+
+                <div className="flex gap-2">
+                  <button
+                    onClick={() => onSimulate('next')}
+                    className="flex-1 py-3 bg-amber-500 hover:bg-amber-400 active:scale-95 text-slate-950 font-display font-black uppercase text-xs rounded-2xl transition-all shadow-lg shadow-amber-500/20 flex items-center justify-center gap-2"
+                  >
+                    <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24"><path d="M8 5v14l11-7z" /></svg>
+                    {playedPre === totalPre ? 'Start Regular Season' : 'Sim Next Exhibition'}
+                  </button>
+                  {onAdvanceToRegularSeason && playedPre < totalPre && (
+                    <button
+                      onClick={onAdvanceToRegularSeason}
+                      className="px-4 py-3 bg-slate-800 hover:bg-slate-700 text-slate-400 font-display font-black uppercase text-xs rounded-2xl transition-all border border-slate-700 whitespace-nowrap"
+                      title="Skip remaining preseason games"
+                    >
+                      Skip
+                    </button>
                   )}
                 </div>
-              ))}
-            </div>
-          </div>
-
-          {/* Finals Odds */}
-          <div className={cardBase} style={cardBg}>
-            <p className="text-[10px] font-black uppercase tracking-widest text-slate-500 mb-3">Finals Odds</p>
-            <div className="space-y-2">
-              {[
-                { label: 'Championship', odds: champOdds },
-                { label: 'Conference', odds: confOdds },
-                { label: 'Playoffs', odds: playoffOdds },
-              ].map(({ label, odds }) => (
-                <div key={label} className="flex justify-between items-center py-1.5 border-b border-white/5 last:border-0">
-                  <span className="text-[11px] text-slate-400 font-bold uppercase">{label}</span>
-                  <div className="flex items-center gap-2">
-                    <span className="text-sm font-mono text-emerald-400 font-bold">{formatOdds(odds)}</span>
-                    <span className="text-[10px] text-slate-600 font-bold">({odds}%)</span>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
-        </div>
-
-        {/* COL 3: Upcoming + Recent + News */}
-        <div className="space-y-4">
-
-          {/* Scouting Report if active */}
-          {scoutingReport && (
-            <div className="rounded-xl border p-4 animate-in zoom-in-95 duration-300" style={{ backgroundColor: `${userTeam.primaryColor}18`, borderColor: `${userTeam.primaryColor}40` }}>
-              <p className="text-[10px] font-black uppercase tracking-widest mb-2" style={{ color: userTeam.primaryColor }}>Scout Report</p>
-              <p className="text-xs text-slate-200 italic leading-relaxed">{scoutingReport.report}</p>
-            </div>
-          )}
-
-          {/* Upcoming Games */}
-          <div className={cardBase} style={cardBg}>
-            <div className="flex items-center justify-between mb-3">
-              <p className="text-[10px] font-black uppercase tracking-widest text-slate-500">Upcoming</p>
-              <button onClick={() => setActiveTab('schedule')} className="text-[10px] font-black uppercase tracking-widest text-slate-600 hover:text-slate-300 transition-colors">Full Schedule →</button>
-            </div>
-            {upcomingGames.length === 0 ? (
-              <p className="text-xs text-slate-600 italic">No upcoming games</p>
-            ) : (
-              <div className="space-y-2">
-                {upcomingGames.map((game, i) => {
-                  const isHome = game.homeTeamId === userTeam.id;
-                  const opp = league.teams.find(t => t.id === (isHome ? game.awayTeamId : game.homeTeamId));
-                  if (!opp) return null;
-                  return (
-                    <div key={game.id} className={`flex items-center gap-3 px-2 py-1.5 rounded-lg ${i === 0 ? 'bg-white/8' : 'hover:bg-white/5'} transition-all`}>
-                      <div className="w-6 h-6 rounded flex items-center justify-center text-xs" style={{ backgroundColor: `${opp.primaryColor}22` }}>
-                        <TeamBadge team={opp} size="xs" />
-                      </div>
-                      <div className="flex-1 min-w-0">
-                        <p className="text-xs font-bold text-white truncate">{isHome ? 'vs' : '@'} {opp.name}</p>
-                        <p className="text-[9px] text-slate-600 font-bold uppercase">Day {game.day}</p>
-                      </div>
-                      {i === 0 && (
-                        <button onClick={() => onSimulate('next')} className="text-[9px] font-black uppercase px-2 py-1 rounded transition-all shrink-0" style={{ backgroundColor: `${userTeam.primaryColor}22`, color: userTeam.primaryColor }}>
-                          Sim
-                        </button>
-                      )}
-                    </div>
-                  );
-                })}
-              </div>
-            )}
-          </div>
-
-          {/* Recent Results */}
-          <div className={cardBase} style={cardBg}>
-            <div className="flex items-center justify-between mb-3">
-              <p className="text-[10px] font-black uppercase tracking-widest text-slate-500">Recent Results</p>
-              <button onClick={() => setActiveTab('results')} className="text-[10px] font-black uppercase tracking-widest text-slate-600 hover:text-slate-300 transition-colors">All →</button>
-            </div>
-            {recentResults.length === 0 ? (
-              <p className="text-xs text-slate-600 italic">No games played yet</p>
-            ) : (
-              <div className="space-y-1.5">
-                {recentResults.map(game => {
-                  const isHome = game.homeTeamId === userTeam.id;
-                  const myScore = isHome ? game.homeScore : game.awayScore;
-                  const oppScore = isHome ? game.awayScore : game.homeScore;
-                  const opp = league.teams.find(t => t.id === (isHome ? game.awayTeamId : game.homeTeamId));
-                  const won = myScore > oppScore;
-                  return (
-                    <div key={game.id} className="flex items-center gap-3 py-1">
-                      <span className={`text-[10px] font-black w-4 shrink-0 ${won ? 'text-emerald-400' : 'text-rose-400'}`}>{won ? 'W' : 'L'}</span>
-                      <span className="text-[10px] text-slate-500 font-bold flex-1 truncate">{isHome ? 'vs' : '@'} {opp?.name ?? '—'}</span>
-                      <span className={`text-xs font-mono font-bold ${won ? 'text-emerald-400' : 'text-rose-400'}`}>{myScore}–{oppScore}</span>
-                    </div>
-                  );
-                })}
-              </div>
-            )}
-          </div>
-
-          {/* Strength of Schedule */}
-          <div className={cardBase} style={cardBg}>
-            <p className="text-[10px] font-black uppercase tracking-widest text-slate-500 mb-3">Strength of Schedule</p>
-            <div className="space-y-3">
-              {[
-                { label: 'Last 10 Opponents', val: last10AvgOvr, color: '#94a3b8' },
-                { label: 'Next 10 Opponents', val: next10AvgOvr, color: userTeam.primaryColor },
-              ].map(({ label, val, color }) => (
-                <div key={label}>
-                  <div className="flex justify-between text-[10px] font-bold uppercase mb-1">
-                    <span className="text-slate-500">{label}</span>
-                    <span className="font-mono" style={{ color }}>{val} OVR</span>
-                  </div>
-                  <div className="h-1.5 bg-slate-800 rounded-full overflow-hidden">
-                    <div className="h-full rounded-full" style={{ width: `${val}%`, backgroundColor: color }} />
-                  </div>
-                </div>
-              ))}
-              <p className="text-[9px] text-slate-600 italic">
-                {next10AvgOvr > 82 ? '⚠️ Brutal stretch ahead' : next10AvgOvr < 78 ? '✅ Soft schedule upcoming' : 'Balanced schedule ahead'}
-              </p>
-            </div>
-          </div>
-
-          {/* News Feed */}
-          <div className={cardBase} style={{ ...cardBg, borderLeft: `3px solid ${userTeam.primaryColor}` }}>
-            <p className="text-[10px] font-black uppercase tracking-widest mb-2" style={{ color: userTeam.primaryColor }}>League Intel</p>
-            <p className="text-xs text-slate-300 italic leading-relaxed">{news}</p>
-            <button onClick={() => setActiveTab('news')} className="mt-2 text-[10px] font-black uppercase tracking-widest text-slate-600 hover:text-slate-300 transition-colors">Full News Feed →</button>
-          </div>
-        </div>
-      </div>
-
-      {/* ── Attendance (if games played) ── */}
-      {(() => {
-        const { homeGames, avgAttendance, capacityPct } = teamSeasonAttendance(userTeam, safeSchedule);
-        if (homeGames === 0) return null;
-        const allRanked = [...league.teams].map(t => ({ id: t.id, avg: teamSeasonAttendance(t, safeSchedule).avgAttendance })).sort((a, b) => b.avg - a.avg);
-        const rank = allRanked.findIndex(r => r.id === userTeam.id) + 1;
-        const fmt = (n: number) => n.toLocaleString('en-US');
-        return (
-          <div className={`${cardBase} flex flex-wrap gap-6 items-center`} style={cardBg}>
-            <p className="text-[10px] font-black uppercase tracking-widest text-slate-500 w-full sm:w-auto">Home Attendance</p>
-            {[
-              { label: 'Avg / Game', val: fmt(avgAttendance), color: 'text-white' },
-              { label: '% Capacity', val: `${capacityPct.toFixed(1)}%`, color: capacityPct >= 95 ? 'text-emerald-400' : capacityPct >= 80 ? 'text-amber-400' : 'text-rose-400' },
-              { label: 'League Rank', val: `#${rank}`, color: 'text-white' },
-            ].map(({ label, val, color }) => (
-              <div key={label}>
-                <p className="text-[9px] text-slate-600 font-black uppercase mb-0.5">{label}</p>
-                <p className={`text-lg font-display font-black ${color}`}>{val}</p>
-              </div>
-            ))}
-            <div className="flex-1 min-w-[120px]">
-              <div className="h-1.5 bg-slate-800 rounded-full overflow-hidden">
-                <div className="h-full rounded-full" style={{ width: `${Math.min(100, capacityPct)}%`, backgroundColor: capacityPct >= 95 ? '#34d399' : capacityPct >= 80 ? '#f59e0b' : '#f43f5e' }} />
-              </div>
-              <p className="text-[9px] text-slate-600 font-bold mt-1">{homeGames} home games · Cap: {fmt(userTeam.stadiumCapacity || 19_000)}</p>
-            </div>
-            <button onClick={() => setActiveTab('stats')} className="text-[10px] font-black uppercase tracking-widest text-slate-600 hover:text-slate-300 transition-colors ml-auto">Rankings →</button>
-          </div>
-        );
-      })()}
-
-      {/* ── Top Players row ── */}
-      <div>
-        <div className="flex items-center justify-between mb-3">
-          <p className="text-[10px] font-black uppercase tracking-widest text-slate-500">Top Players</p>
-          <button onClick={() => setActiveTab('roster')} className="text-[10px] font-black uppercase tracking-widest text-slate-600 hover:text-slate-300 transition-colors">Full Roster →</button>
-        </div>
-        {/* Horizontal scroll on mobile, 3-col grid on sm+ */}
-        <div className="flex gap-3 overflow-x-auto scrollbar-none sm:grid sm:grid-cols-3 sm:gap-4 pb-1 sm:pb-0">
-          {topPlayers.map((player, i) => {
-            const isInj = player.status === 'Injured' || (player.injuryDaysLeft != null && player.injuryDaysLeft > 0);
-            const effOvr = isInj && player.injuryOVRPenalty != null ? Math.max(40, player.rating - player.injuryOVRPenalty) : player.rating;
-            const ppg = (player.stats.points / (player.stats.gamesPlayed || 1)).toFixed(1);
-            const rpg = (player.stats.rebounds / (player.stats.gamesPlayed || 1)).toFixed(1);
-            const apg = (player.stats.assists / (player.stats.gamesPlayed || 1)).toFixed(1);
-            return (
-              <div
-                key={player.id}
-                className="rounded-xl border border-white/5 p-4 cursor-pointer hover:border-white/15 active:scale-[0.98] transition-all group shrink-0 w-64 sm:w-auto"
-                style={{ backgroundColor: i === 0 ? `${userTeam.primaryColor}12` : '#0c1220', borderColor: i === 0 ? `${userTeam.primaryColor}30` : undefined }}
-                onClick={() => onScout(player)}
-              >
-                <div className="flex items-start justify-between mb-3">
-                  <div>
-                    <p className="font-display font-bold text-white text-sm uppercase group-hover:text-amber-400 transition-colors leading-tight">{player.name}</p>
-                    <p className="text-[10px] text-slate-500 font-bold uppercase mt-0.5">{player.position} · {player.age}y · {player.status}</p>
-                  </div>
-                  <div className="text-right shrink-0">
-                    <p className="font-display font-black text-2xl leading-none" style={{ color: isInj ? '#f43f5e' : i === 0 ? userTeam.primaryColor : 'white' }}>{effOvr}</p>
-                    <p className="text-[9px] text-slate-600 font-black uppercase">OVR</p>
-                  </div>
-                </div>
-                <div className="grid grid-cols-3 gap-2">
-                  {[{ label: 'PPG', val: ppg }, { label: 'RPG', val: rpg }, { label: 'APG', val: apg }].map(({ label, val }) => (
-                    <div key={label} className="text-center bg-white/5 rounded-lg py-1.5">
-                      <p className="text-[9px] text-slate-600 font-black uppercase">{label}</p>
-                      <p className="text-sm font-mono font-bold text-slate-200">{val}</p>
-                    </div>
-                  ))}
-                </div>
-                {isInj && (
-                  <p className="mt-2 text-[10px] text-rose-400 font-bold uppercase">⚠ {player.injuryType ?? 'Injured'}{player.injuryDaysLeft ? ` · ${player.injuryDaysLeft}d` : ''}</p>
-                )}
-                {player.personalityTraits?.includes('Leader') && !isInj && (
-                  <p className="mt-2 text-[10px] text-amber-500 font-bold uppercase">★ Team Leader</p>
-                )}
               </div>
             );
-          })}
-        </div>
-      </div>
+          })()}
 
-      {/* ── Full Roster Table ── */}
-      <div className="rounded-xl border border-white/5 overflow-hidden" style={{ backgroundColor: '#0c1220' }}>
-        <div className="px-5 py-4 border-b border-white/5 flex items-center justify-between">
-          <p className="font-display font-bold text-base uppercase tracking-wide text-white">Active Roster <span style={{ color: userTeam.primaryColor }}>& Stats</span></p>
-          <button onClick={() => setActiveTab('roster')} className="text-[10px] font-black uppercase tracking-widest transition-colors hover:text-slate-300" style={{ color: userTeam.primaryColor }}>Manage →</button>
-        </div>
-        <div className="overflow-x-auto">
-          <table className="w-full text-left">
-            <thead>
-              <tr className="text-[9px] text-slate-600 font-black uppercase tracking-widest border-b border-white/5">
-                <th className="px-4 py-3">Player</th>
-                <th className="px-2 py-3 text-center">OVR</th>
-                <th className="px-2 py-3 text-center hidden sm:table-cell">POT</th>
-                <th className="px-2 py-3 text-center">PPG</th>
-                <th className="px-2 py-3 text-center hidden sm:table-cell">RPG</th>
-                <th className="px-2 py-3 text-center hidden sm:table-cell">APG</th>
-                <th className="px-2 py-3 text-right hidden md:table-cell">Contract</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-white/5">
-              {[...userTeam.roster].sort((a, b) => {
-                const ea = a.injuryOVRPenalty != null && (a.status === 'Injured' || (a.injuryDaysLeft ?? 0) > 0) ? Math.max(40, a.rating - a.injuryOVRPenalty) : a.rating;
-                const eb = b.injuryOVRPenalty != null && (b.status === 'Injured' || (b.injuryDaysLeft ?? 0) > 0) ? Math.max(40, b.rating - b.injuryOVRPenalty) : b.rating;
-                return eb - ea;
-              }).map((player, i) => {
-                const isInj = player.status === 'Injured' || (player.injuryDaysLeft != null && player.injuryDaysLeft > 0);
-                const eff = isInj && player.injuryOVRPenalty != null ? Math.max(40, player.rating - player.injuryOVRPenalty) : player.rating;
-                return (
-                  <tr key={player.id} className="hover:bg-white/5 active:bg-white/8 transition-all cursor-pointer group" onClick={() => onScout(player)}>
-                    <td className="px-4 py-3">
-                      <div className="flex items-center gap-2">
-                        <div className="w-0.5 h-5 rounded-full shrink-0" style={{ backgroundColor: i < 5 ? userTeam.primaryColor : 'transparent' }} />
-                        <div>
-                          <p className="text-xs font-bold text-slate-100 group-hover:text-amber-400 transition-colors uppercase leading-tight">{player.name}</p>
-                          <p className="text-[9px] text-slate-600 font-bold uppercase">{player.position} · {i < 5 ? 'S' : 'B'}</p>
-                        </div>
-                      </div>
-                    </td>
-                    <td className="px-2 py-3 text-center">
-                      <span className="font-display font-bold text-sm" style={{ color: isInj ? '#f43f5e' : 'white' }}>{eff}</span>
-                    </td>
-                    <td className="px-2 py-3 text-center text-xs font-bold text-slate-500 hidden sm:table-cell">{player.potential}</td>
-                    <td className="px-2 py-3 text-center font-mono text-xs text-slate-300">{(player.stats.points / (player.stats.gamesPlayed || 1)).toFixed(1)}</td>
-                    <td className="px-2 py-3 text-center font-mono text-xs text-slate-300 hidden sm:table-cell">{(player.stats.rebounds / (player.stats.gamesPlayed || 1)).toFixed(1)}</td>
-                    <td className="px-2 py-3 text-center font-mono text-xs text-slate-300 hidden sm:table-cell">{(player.stats.assists / (player.stats.gamesPlayed || 1)).toFixed(1)}</td>
-                    <td className="px-2 py-3 text-right hidden md:table-cell">
-                      <p className="text-xs font-bold text-slate-300">{formatMoney(player.salary)}</p>
-                      <p className="text-[9px] text-slate-600 font-bold uppercase">{player.contractYears}Y</p>
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
+          <section className="bg-slate-900 border border-slate-800 rounded-3xl p-6 shadow-2xl">
+            <h3 className="text-xs font-black uppercase tracking-[0.2em] text-slate-500 mb-6 pb-2 border-b border-slate-800">Simulation Hub</h3>
+            <div className="space-y-3">
+              <button 
+                onClick={() => onSimulate('next')}
+                className="w-full flex items-center justify-between p-4 bg-slate-800 group transition-all rounded-2xl"
+                style={{ hoverBackgroundColor: userTeam.primaryColor }}
+              >
+                <div className="flex items-center gap-3 text-slate-300 group-hover:text-white">
+                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z" /></svg>
+                  <span className="font-display font-bold uppercase">Next Game</span>
+                </div>
+                <span 
+                  className="text-[10px] font-black bg-slate-700 px-2 py-0.5 rounded text-slate-500 uppercase tracking-widest"
+                >Sim</span>
+              </button>
+              
+              <button 
+                onClick={() => onSimulate('week')}
+                className="w-full flex items-center justify-between p-4 bg-slate-800 hover:bg-slate-700 transition-all rounded-2xl"
+              >
+                <div className="flex items-center gap-3 text-slate-300">
+                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" /></svg>
+                  <span className="font-display font-bold uppercase">Sim 1 Week</span>
+                </div>
+              </button>
+
+              <button 
+                onClick={() => onSimulate('season')}
+                className="w-full flex items-center justify-between p-4 bg-slate-800 hover:bg-slate-700 transition-all rounded-2xl"
+              >
+                <div className="flex items-center gap-3 text-slate-300">
+                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M13 10V3L4 14h7v7l9-11h-7z" /></svg>
+                  <span className="font-display font-bold uppercase">Sim Season</span>
+                </div>
+              </button>
+            </div>
+          </section>
+
+          <section className="bg-slate-900 border border-slate-800 rounded-3xl p-6 shadow-2xl">
+            <h3 className="text-xs font-black uppercase tracking-[0.2em] text-slate-500 mb-6 pb-2 border-b border-slate-800">Front Office</h3>
+            <div className="space-y-2">
+              <button onClick={() => setActiveTab('roster')} className="w-full text-left p-3 hover:bg-slate-800 rounded-xl transition-colors text-sm font-bold text-slate-300">Manage Roster</button>
+              <button onClick={() => setActiveTab('marketplace')} className="w-full text-left p-3 hover:bg-slate-800 rounded-xl transition-colors text-sm font-bold text-slate-300">Marketplace</button>
+              <button onClick={() => setActiveTab('draft')} className="w-full text-left p-3 hover:bg-slate-800 rounded-xl transition-colors text-sm font-bold text-slate-300">Draft Scouting</button>
+              <button onClick={() => setActiveTab('trade')} className="w-full text-left p-3 hover:bg-slate-800 rounded-xl transition-colors text-sm font-bold text-slate-300">Trade Machine</button>
+            </div>
+          </section>
+
+          {/* Scouting Report Preview (if selected) */}
+          {scoutingReport && (
+            <div 
+              className="border rounded-3xl p-6 shadow-2xl animate-in zoom-in-95 duration-300"
+              style={{ backgroundColor: userTeam.primaryColor, borderColor: userTeam.secondaryColor }}
+            >
+              <h3 className="text-[10px] font-black uppercase tracking-[0.4em] text-slate-950 mb-4">Gemini Scout Analysis</h3>
+              <div className="text-slate-950 text-sm italic font-medium leading-relaxed whitespace-pre-line">
+                {scoutingReport.report}
+              </div>
+            </div>
+          )}
         </div>
       </div>
     </div>
