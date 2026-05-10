@@ -38,7 +38,7 @@ function getDT(p: Player) {
 }
 
 // ─── Constants ───────────────────────────────────────────────────────────────
-const BASE_PPP       = 1.06;
+const BASE_PPP       = 1.10;
 const SCORE_VARIANCE = 0.12;  // ±12 pts of PPP randomness — wider band drives realistic upsets
 const HOME_COURT_ADV = 0.040; // +4.0% for home team (NBA home teams win ~60% empirically)
 const VISIT_TOV_PEN  = 0.008;  // road team slight TOV penalty
@@ -3477,7 +3477,7 @@ const simulatePlayerGameLine = (
   // Hot/Cold-night scalars: explosiveMod drives big/historic nights; coldMod drives cold/ice-cold.
   // Hot and cold are mutually exclusive — only one will be non-zero per player per game.
   // WNBA: max big night FGA cap 22 (vs 29), historic cap 26 (vs 35) — no 50-60 pt games.
-  const hotFgaCap     = explosiveMod >= 1.0 ? (isWNBA ? 26 : 35) : explosiveMod >= 0.5 ? (isWNBA ? 22 : 29) : coldMod >= 1.0 ? (isWNBA ? 11 : 14) : coldMod >= 0.5 ? (isWNBA ? 14 : 18) : (isWNBA ? 18 : 22);
+  const hotFgaCap     = explosiveMod >= 1.0 ? (isWNBA ? 26 : 38) : explosiveMod >= 0.5 ? (isWNBA ? 22 : 32) : coldMod >= 1.0 ? (isWNBA ? 11 : 14) : coldMod >= 0.5 ? (isWNBA ? 14 : 20) : (isWNBA ? 18 : 26);
   const hotUsageMul   = explosiveMod >= 1.0 ? 1.40 : explosiveMod >= 0.5 ? 1.20 : coldMod >= 1.0 ? 0.65 : coldMod >= 0.5 ? 0.82 : 1.0;
   const hotFgPctBoost = explosiveMod >= 1.0 ? 0.08 : explosiveMod >= 0.5 ? 0.045 : coldMod >= 1.0 ? -0.08 : coldMod >= 0.5 ? -0.045 : 0;
   const fga      = Math.min(hotFgaCap, Math.max(0, Math.round(teamFga * adjUsage * hotUsageMul * (minutes / 32))));
@@ -3495,15 +3495,23 @@ const simulatePlayerGameLine = (
   ) - moraleTovMod);
 
   // 3PA share: tendency-driven base × playbook multiplier.
+  // Coefficient raised 0.50→0.58 to target league avg 35–43 3PA/team (NBA 2025-26 ~38).
   // Pace and Space (×1.28) pumps up three-point volume; Grit and Grind (×0.62) suppresses it.
-  const threePaShare = Math.max(0, Math.min(0.90,
-    ((player.attributes.shooting3pt / 100) * 0.5 + tm.threepaBoost) * pbMults.threePaShareMult));
+  const threePaShare = Math.max(0, Math.min(0.85,
+    ((player.attributes.shooting3pt / 100) * 0.58 + tm.threepaBoost) * pbMults.threePaShareMult));
   const threepa = Math.round(fga * threePaShare);
 
-  // Inside / mid split: inside share scaled by playbook multiplier.
-  // Grit and Grind (×1.38) creates more post/drive looks; Pace and Space (×0.68) pulls players out.
-  const insideShare = Math.max(0, Math.min(0.70,
-    (((player.attributes.layups + player.attributes.dunks) / 2 / 100) * 0.3 + tm.insideBoost) * pbMults.insideShareMult));
+  // Inside / mid split: position-based base ensures bigs get realistic inside shot share
+  // (C ~50%, PF ~35%) instead of the previous formula which gave bigs only 21% inside.
+  // Attribute modifier shifts ±30% from league-average finishing (attr 70 = neutral).
+  const posInsideBase =
+    player.position === 'C'  ? 0.50 :
+    player.position === 'PF' ? 0.35 :
+    player.position === 'SF' ? 0.22 :
+    player.position === 'SG' ? 0.16 : 0.12;
+  const insideAttrMod = ((player.attributes.layups + player.attributes.dunks) / 2 / 100 - 0.70) * 0.30;
+  const insideShare = Math.max(0, Math.min(0.75,
+    (posInsideBase + insideAttrMod + tm.insideBoost) * pbMults.insideShareMult));
   const insFga  = Math.round(fga * insideShare);
   const midFga  = Math.max(0, fga - threepa - insFga);
 
@@ -3566,7 +3574,8 @@ const simulatePlayerGameLine = (
   const drawFoulTend = player.tendencies?.foulDrawing ?? 50;
   const driveTend    = player.tendencies?.drive       ?? 50;
   const postTend     = player.tendencies?.postUp      ?? 50;
-  const drawFoulBase = drawFoulTend / 100 * 0.65;
+  // Coefficient reduced 0.65→0.50 so that higher FGA (88–92 target) still yields 20–25 team FTA.
+  const drawFoulBase = drawFoulTend / 100 * 0.50;
   const driveBonus   = Math.max(0, driveTend - 50) / 100 * 0.10;
   const postBonus    = Math.max(0, postTend  - 50) / 100 * 0.08;
   const schemeFtaMult =
@@ -4118,11 +4127,11 @@ export const simulateGame = (
   const distributeToPlayers = (team: Team, totalPts: number, isHome: boolean, isGT: boolean, teamScoreDiff: number) => {
     const roster      = team.roster;
     const totalRating = roster.reduce((acc, p) => acc + p.rating, 0);
-    // WNBA FGA: ~75-80 per team vs NBA ~88-95. Coefficient 0.80 vs 1.10.
-    const teamFga     = Math.round(statPace * (isWNBA ? 0.80 : 1.10));
+    // WNBA FGA: ~75-80 per team vs NBA ~88-92. Coefficient 0.80 vs 1.20.
+    const teamFga     = Math.round(statPace * (isWNBA ? 0.80 : 1.20));
     // Assists: WNBA ~20 APG. With totalPts~82: (82/2.2)*0.54 ≈ 20 ✓
-    // NBA: (112/2.2)*0.46 ≈ 23 ✓ (2024-25 range 22-26)
-    const teamAstBase = Math.round((totalPts / 2.2) * (isWNBA ? 0.54 : 0.46));
+    // NBA: (112/2.2)*0.52 ≈ 26 ✓ (2024-25 range 24-28)
+    const teamAstBase = Math.round((totalPts / 2.2) * (isWNBA ? 0.54 : 0.52));
 
     // ── B2B fatigue team-stat penalties ──────────────────────────────────────
     // Rebounds: up to -7.5% | Assists: up to -15% (stacked with PPP penalty)
@@ -4651,14 +4660,14 @@ export const simulateGame = (
   homePlayerStats = assignPlusMinuses(homePlayerStats, margin);
   awayPlayerStats = assignPlusMinuses(awayPlayerStats, -margin);
 
-  // ── Team TOV hard caps: floor 10 / ceiling 18 per game (21 on B2B) ──────────
-  // Ensures season averages stay in the 9.8–17.8 realistic range regardless of
-  // attribute distribution.  Floor deficit is spread across the highest-minute
-  // active players (+1 each); ceiling excess is scaled down proportionally.
-  // B2B ceiling raised to 21 to allow the extra turnovers injected above.
+  // ── Team TOV hard caps: floor 13 / ceiling 20 per game (23 on B2B) ─────────
+  // Ensures season averages stay in the 13–18 realistic range (NBA 2024-25: ~13.5/game).
+  // Floor raised from 10→13 to match modern NBA pace; ceiling raised 16→20.
+  // Floor deficit is spread across the highest-minute active players (+1 each);
+  // ceiling excess is scaled down proportionally.
   const clampTeamTov = (lines: typeof homePlayerStats, isB2B: boolean): typeof homePlayerStats => {
-    const TOV_FLOOR   = 10;
-    const TOV_CEILING = (isB2B && b2bFatigueScale > 0) ? 18 : 16; // targets 13–14.5 avg, max 15.5–17.5
+    const TOV_FLOOR   = 13;
+    const TOV_CEILING = (isB2B && b2bFatigueScale > 0) ? 23 : 20; // targets 14–16 avg
     const total = lines.reduce((s, p) => s + (p.tov ?? 0), 0);
     if (total >= TOV_FLOOR && total <= TOV_CEILING) return lines;
 
@@ -4703,6 +4712,52 @@ export const simulateGame = (
         `Score: ${totalHome}-${totalAway} | POSSIBLE SIMULATION BIAS DETECTED`
       );
     }
+  })();
+
+  // ── League Calibration Report (dev console — never affects sim math) ──────
+  // Logs per-team stat totals against 2025-26 NBA target ranges after every game.
+  // Use these numbers to tune possession engine constants when league averages drift.
+  // Targets: PPG 110–118 | FGA 88–92 | 3PA 35–43 | FTA 20–25 | TOV 13–16
+  //          OREB 9–12 | DREB 32–36 | AST 24–28 | STL 6–9 | BLK 4–6 | PF 18–23
+  (() => {
+    const teamStats = (stats: typeof homePlayerStats, pts: number) => {
+      const fga    = stats.reduce((s, p) => s + (p.fga    ?? 0), 0);
+      const fgm    = stats.reduce((s, p) => s + (p.fgm    ?? 0), 0);
+      const tpa    = stats.reduce((s, p) => s + (p.threepa ?? 0), 0);
+      const fta    = stats.reduce((s, p) => s + (p.fta    ?? 0), 0);
+      const tov    = stats.reduce((s, p) => s + (p.tov    ?? 0), 0);
+      const oreb   = stats.reduce((s, p) => s + (p.offReb ?? 0), 0);
+      const dreb   = stats.reduce((s, p) => s + (p.defReb ?? 0), 0);
+      const ast    = stats.reduce((s, p) => s + (p.ast    ?? 0), 0);
+      const stl    = stats.reduce((s, p) => s + (p.stl    ?? 0), 0);
+      const blk    = stats.reduce((s, p) => s + (p.blk    ?? 0), 0);
+      const pf     = stats.reduce((s, p) => s + (p.pf     ?? 0), 0);
+      const fgPct  = fga > 0 ? ((fgm / fga) * 100).toFixed(1) : '-';
+      // possession formula: FGA + 0.44*FTA + TOV - OREB
+      const poss   = fga + 0.44 * fta + tov - oreb;
+      const inRange = (v: number, lo: number, hi: number) => v >= lo && v <= hi ? '✓' : `✗(${lo}–${hi})`;
+      return { pts, fga, tpa, fta, tov, oreb, dreb, ast, stl, blk, pf, fgPct, poss, inRange };
+    };
+    const h = teamStats(homePlayerStats, totalHome);
+    const a = teamStats(awayPlayerStats, totalAway);
+    const log = (label: string, hv: number, av: number, lo: number, hi: number) =>
+      console.log(`  ${label.padEnd(8)} H:${String(hv).padStart(4)} ${h.inRange(hv,lo,hi)}  A:${String(av).padStart(4)} ${a.inRange(av,lo,hi)}`);
+    console.groupCollapsed(
+      `[CALIB] ${home.name} ${totalHome}–${totalAway} ${away.name} | pace ${gamePace} | poss H:${h.poss.toFixed(0)} A:${a.poss.toFixed(0)}`
+    );
+    log('PPG',  totalHome, totalAway, 110, 118);
+    log('FGA',  h.fga, a.fga, 88, 92);
+    log('3PA',  h.tpa, a.tpa, 35, 43);
+    log('FTA',  h.fta, a.fta, 20, 25);
+    log('TOV',  h.tov, a.tov, 13, 16);
+    log('OREB', h.oreb, a.oreb, 9, 12);
+    log('DREB', h.dreb, a.dreb, 32, 36);
+    log('AST',  h.ast, a.ast, 24, 28);
+    log('STL',  h.stl, a.stl, 6, 9);
+    log('BLK',  h.blk, a.blk, 4, 6);
+    log('PF',   h.pf, a.pf, 18, 23);
+    console.log(`  FG%     H:${h.fgPct}%    A:${a.fgPct}%`);
+    console.groupEnd();
   })();
 
   // ── 12. Clutch Stats Injection ────────────────────────────────────────────
