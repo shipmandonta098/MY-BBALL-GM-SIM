@@ -28,7 +28,6 @@ import DevReportModal from './components/DevReportModal';
 
 // Components
 import Sidebar from './components/Sidebar';
-import TopNav from './components/TopNav';
 import Dashboard from './components/Dashboard';
 import Roster from './components/Roster';
 import FreeAgency from './components/FreeAgency';
@@ -4414,9 +4413,9 @@ const App: React.FC = () => {
 
   return (
     <NavigationProvider value={navValue}>
-    <div className="flex flex-col h-screen overflow-hidden text-slate-50 relative" style={{ backgroundColor: '#060b14' }}>
-      <TopNav activeTab={activeTab} setActiveTab={setActiveTab} team={userTeam} onQuit={() => setStatus('title')} league={league} isExpansionActive={league.expansionDraft?.active} />
-      <main className="flex-1 overflow-y-auto p-5 md:p-8 space-y-6 pb-24 transition-all duration-300 ease-in-out">
+    <div className="flex h-screen overflow-hidden bg-slate-950 text-slate-50 relative">
+      <Sidebar activeTab={activeTab} setActiveTab={setActiveTab} team={userTeam} onQuit={() => setStatus('title')} league={league} isExpansionActive={league.expansionDraft?.active} />
+      <main className="flex-1 overflow-y-auto p-6 md:p-10 space-y-8 pb-32 transition-all duration-300 ease-in-out">
         <div key={activeTab} className="animate-in fade-in slide-in-from-bottom-2 duration-500">
           {activeTab === 'dashboard' && <Dashboard league={league} news={news} onSimulate={handleSimulate} onScout={handleViewPlayer} scoutingReport={scoutingReport} setActiveTab={setActiveTab} onViewRoster={handleViewRoster} onManageTeam={handleManageTeam} onAdvanceToRegularSeason={handleAdvanceToRegularSeason} onOpenOffseasonAlerts={() => setShowOffseasonAlerts(true)} />}
           {activeTab === 'gm_profile' && <GMProfileView league={league} updateLeague={updateLeagueState} onResign={handleResign} />}
