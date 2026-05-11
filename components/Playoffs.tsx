@@ -2,6 +2,7 @@ import React, { useState, useMemo } from 'react';
 import { LeagueState, Team, PlayoffBracket, PlayoffSeries, GameResult, Player, AwardWinner, RivalryStats, ChampionshipRecord } from '../types';
 import TeamBadge from './TeamBadge';
 import { simulateGame } from '../utils/simEngine';
+import LiveGameModal from './LiveGameModal';
 
 interface PlayoffsProps {
   league: LeagueState;
@@ -14,6 +15,7 @@ interface PlayoffsProps {
 
 const Playoffs: React.FC<PlayoffsProps> = ({ league, updateLeague, onStartOffseason, onScout, onViewBoxScore, onAddNews }) => {
   const [isSimulating, setIsSimulating] = useState(false);
+  const [watchingLiveSeriesId, setWatchingLiveSeriesId] = useState<string | null>(null);
   const bracket = league.playoffBracket;
 
   if (!bracket) {
@@ -25,7 +27,7 @@ const Playoffs: React.FC<PlayoffsProps> = ({ league, updateLeague, onStartOffsea
     );
   }
 
-  const simulatePlayoffGameInternal = async (state: LeagueState, seriesId: string): Promise<LeagueState> => {
+  const simulatePlayoffGameInternal = async (state: LeagueState, seriesId: string, preComputedResult?: GameResult): Promise<LeagueState> => {
     const currentBracket = state.playoffBracket;
     if (!currentBracket) return state;
 
@@ -39,7 +41,7 @@ const Playoffs: React.FC<PlayoffsProps> = ({ league, updateLeague, onStartOffsea
     const isT1Home = [0, 1, 4, 6].includes(totalGames);
 
     const rivalryStats = state.rivalryHistory?.find(r => (r.team1Id === t1.id && r.team2Id === t2.id) || (r.team1Id === t2.id && r.team2Id === t1.id));
-    
+
     const getRivalryLevel = (stats: RivalryStats | undefined): string => {
       if (!stats || stats.totalGames <= 2) return 'Ice Cold';
       const score = stats.totalGames + (stats.playoffSeriesCount * 5) + (stats.buzzerBeaters * 3) + (stats.comebacks * 2) + (stats.otGames * 2) + stats.badBloodScore;
@@ -52,7 +54,7 @@ const Playoffs: React.FC<PlayoffsProps> = ({ league, updateLeague, onStartOffsea
 
     const rivalryLevel = getRivalryLevel(rivalryStats);
 
-    const result = simulateGame(isT1Home ? t1 : t2, isT1Home ? t2 : t1, state.currentDay, state.season, false, false, rivalryLevel);
+    const result = preComputedResult ?? simulateGame(isT1Home ? t1 : t2, isT1Home ? t2 : t1, state.currentDay, state.season, false, false, rivalryLevel);
     // Ensure unique ID for playoff games
     result.id = `playoff-${state.season}-${series.id}-G${totalGames + 1}`;
     
@@ -660,13 +662,22 @@ const Playoffs: React.FC<PlayoffsProps> = ({ league, updateLeague, onStartOffsea
         )}
 
         {!series.winnerId && (
-          <button
-            onClick={() => simulatePlayoffGame(series.id)}
-            disabled={isSimulating}
-            className="w-full py-1.5 bg-slate-800 hover:bg-amber-500 hover:text-slate-950 text-[9px] font-black uppercase rounded-lg transition-all"
-          >
-            Sim Game
-          </button>
+          <div className="flex gap-2">
+            <button
+              onClick={() => simulatePlayoffGame(series.id)}
+              disabled={isSimulating}
+              className="flex-1 py-1.5 bg-slate-800 hover:bg-amber-500 hover:text-slate-950 text-[9px] font-black uppercase rounded-lg transition-all"
+            >
+              Sim Game
+            </button>
+            <button
+              onClick={() => setWatchingLiveSeriesId(series.id)}
+              disabled={isSimulating}
+              className="flex-1 py-1.5 bg-slate-800 hover:bg-green-500 hover:text-slate-950 text-[9px] font-black uppercase rounded-lg transition-all flex items-center justify-center gap-1"
+            >
+              <span>▶</span> Watch Live
+            </button>
+          </div>
         )}
       </div>
     );
@@ -821,6 +832,54 @@ const Playoffs: React.FC<PlayoffsProps> = ({ league, updateLeague, onStartOffsea
           border-style: solid;
         }
       `}} />
+
+      {/* ── Watch Live modal for playoff games ── */}
+      {watchingLiveSeriesId && (() => {
+        const liveSeries = bracket.series.find(s => s.id === watchingLiveSeriesId);
+        if (!liveSeries) return null;
+        const totalGames = liveSeries.team1Wins + liveSeries.team2Wins;
+        const isT1Home   = [0, 1, 4, 6].includes(totalGames);
+        const liveHome   = league.teams.find(t => t.id === (isT1Home ? liveSeries.team1Id : liveSeries.team2Id))!;
+        const liveAway   = league.teams.find(t => t.id === (isT1Home ? liveSeries.team2Id : liveSeries.team1Id))!;
+        const rivalryStats = league.rivalryHistory?.find(r =>
+          (r.team1Id === liveHome.id && r.team2Id === liveAway.id) ||
+          (r.team1Id === liveAway.id && r.team2Id === liveHome.id));
+        const getRivalryLevel = (stats: RivalryStats | undefined) => {
+          if (!stats || stats.totalGames <= 2) return 'Ice Cold';
+          const score = stats.totalGames + stats.playoffSeriesCount * 5 + stats.buzzerBeaters * 3 + stats.comebacks * 2 + stats.otGames * 2 + stats.badBloodScore;
+          if (stats.totalGames >= 20 && score >= 30) return 'Red Hot';
+          if (stats.totalGames >= 16) return 'Hot';
+          if (stats.totalGames >= 8) return 'Warm';
+          if (stats.totalGames >= 3) return 'Cold';
+          return 'Ice Cold';
+        };
+        return (
+          <LiveGameModal
+            game={{
+              id: `playoff-${league.season}-${watchingLiveSeriesId}-G${totalGames + 1}`,
+              day: league.currentDay,
+              homeTeamId: liveHome.id,
+              awayTeamId: liveAway.id,
+              played: false,
+              homeB2B: false,
+              awayB2B: false,
+              homeB2BCount: 0,
+              awayB2BCount: 0,
+            }}
+            homeTeam={liveHome}
+            awayTeam={liveAway}
+            season={league.season}
+            league={league}
+            rivalryLevel={getRivalryLevel(rivalryStats)}
+            onComplete={async (result) => {
+              const updated = await simulatePlayoffGameInternal(league, watchingLiveSeriesId, result);
+              updateLeague(updated);
+              setWatchingLiveSeriesId(null);
+            }}
+            onClose={() => setWatchingLiveSeriesId(null)}
+          />
+        );
+      })()}
     </div>
   );
 };
