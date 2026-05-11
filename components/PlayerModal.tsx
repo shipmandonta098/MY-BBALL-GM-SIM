@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { Player, PlayerStatus, PersonalityTrait, Position, PlayerTendencies, TeamRotation, TrainingFocusArea, SeasonAwards } from '../types';
-import { getFlag, countryFromHometown, POS_ATTR_RANGES, PosAttrRangeKey, enforcePositionalBounds, FEMALE_ATTR_CAPS, NAMES_MALE, NAMES_FEMALE, COLLEGES_HIGH_MAJOR, COLLEGES_MID_MAJOR, ALL_HOMETOWNS, deriveComposites, deriveArchetype } from '../constants';
+import { getFlag, countryFromHometown, POS_ATTR_RANGES, PosAttrRangeKey, enforcePositionalBounds, FEMALE_ATTR_CAPS, NAMES_MALE, NAMES_FEMALE, COLLEGES_HIGH_MAJOR, COLLEGES_MID_MAJOR, ALL_HOMETOWNS, deriveComposites, deriveArchetype, getArchetypeFitScores } from '../constants';
 import { fmtSalary } from '../utils/formatters';
 import { getEffectiveRating, canPlayThrough, getInjurySeverity } from '../utils/injuryEffects';
 import { computeHofProbability } from '../utils/hofEngine';
@@ -90,6 +90,98 @@ const traitIcons: Record<PersonalityTrait, string> = {
   'Hot Head': '🔥',
   'Workhorse': '🐴',
   'Streaky': '📈'
+};
+
+// ── Archetype Fit Debug Panel ────────────────────────────────────────────────
+const ArchetypeDebugPanel: React.FC<{ player: Player }> = ({ player }) => {
+  const [open, setOpen] = React.useState(false);
+  const fitScores = React.useMemo(
+    () => getArchetypeFitScores(player.position, player.attributes as Record<string, number>, player.rating),
+    [player.position, player.attributes, player.rating],
+  );
+  const top5 = fitScores.slice(0, 5);
+
+  // Primary / secondary skill identity
+  const attrs = player.attributes as Record<string, number>;
+  const skillGroups: [string, string[]][] = [
+    ['Scoring',   ['shooting3pt', 'shootingMid', 'postScoring', 'layups']],
+    ['Defense',   ['perimeterDef', 'interiorDef', 'blocks', 'steals', 'defensiveIQ']],
+    ['Playmaking',['ballHandling', 'passing', 'offensiveIQ']],
+    ['Rebounding',['offReb', 'defReb']],
+    ['Athleticism',['speed', 'jumping', 'strength', 'stamina', 'athleticism']],
+  ];
+  const groupAverages = skillGroups.map(([label, keys]) => ({
+    label,
+    avg: Math.round(keys.reduce((s, k) => s + (attrs[k] ?? 50), 0) / keys.length),
+  })).sort((a, b) => b.avg - a.avg);
+
+  // Outlier warnings
+  const archetype = player.archetype ?? 'Role Player';
+  const warnings: string[] = [];
+  if (archetype === 'Rim Protector' && (attrs.postScoring ?? 50) >= 85) {
+    warnings.push(`High postScoring (${attrs.postScoring}) for a Rim Protector`);
+  }
+  if (archetype === 'Glass Cleaner' && (attrs.postScoring ?? 50) >= 85) {
+    warnings.push(`High postScoring (${attrs.postScoring}) for a Glass Cleaner`);
+  }
+  if ((archetype === 'Playmaking Guard' || archetype === 'Pure Scorer') && (attrs.blocks ?? 50) >= 80) {
+    warnings.push(`Unusually high blocks (${attrs.blocks}) for a ${archetype}`);
+  }
+  if (archetype === 'Stretch Big' && (attrs.blocks ?? 50) >= 85) {
+    warnings.push(`High blocks (${attrs.blocks}) unusual for a Stretch Big`);
+  }
+
+  return (
+    <div className="mt-2">
+      <button
+        onClick={() => setOpen(o => !o)}
+        className="text-[10px] text-slate-500 hover:text-amber-400 uppercase tracking-widest flex items-center gap-1 transition-colors"
+      >
+        <span>{open ? '▾' : '▸'}</span> Archetype Fit
+      </button>
+      {open && (
+        <div className="mt-2 bg-slate-900/80 border border-slate-700/50 rounded-xl p-3 space-y-3 text-xs">
+          {/* Top 5 fit scores */}
+          <div>
+            <p className="text-slate-400 uppercase tracking-wider mb-1 font-semibold">Top Archetype Fits</p>
+            <div className="space-y-1">
+              {top5.map(({ archetype: arc, score, isPrimary }) => (
+                <div key={arc} className="flex items-center gap-2">
+                  <div className="w-36 truncate text-slate-300 font-medium">{arc}</div>
+                  <div className="flex-1 bg-slate-800 rounded-full h-1.5 overflow-hidden">
+                    <div
+                      className={`h-full rounded-full ${isPrimary ? 'bg-amber-400' : 'bg-slate-500'}`}
+                      style={{ width: `${Math.min(100, score)}%` }}
+                    />
+                  </div>
+                  <div className={`w-8 text-right font-mono ${isPrimary ? 'text-amber-400' : 'text-slate-400'}`}>{score}</div>
+                </div>
+              ))}
+            </div>
+          </div>
+          {/* Skill identity */}
+          <div>
+            <p className="text-slate-400 uppercase tracking-wider mb-1 font-semibold">Skill Identity</p>
+            <p className="text-white">
+              Primary: <span className="text-amber-400 font-bold">{groupAverages[0].label}</span> <span className="text-slate-400">({groupAverages[0].avg})</span>
+            </p>
+            <p className="text-white">
+              Secondary: <span className="text-sky-400 font-semibold">{groupAverages[1].label}</span> <span className="text-slate-400">({groupAverages[1].avg})</span>
+            </p>
+          </div>
+          {/* Outlier warnings */}
+          {warnings.length > 0 && (
+            <div>
+              <p className="text-slate-400 uppercase tracking-wider mb-1 font-semibold">Outlier Warnings</p>
+              {warnings.map((w, i) => (
+                <p key={i} className="text-yellow-400">⚠ {w}</p>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
 };
 
 const PlayerModal: React.FC<PlayerModalProps> = ({
@@ -1112,6 +1204,7 @@ const PlayerModal: React.FC<PlayerModalProps> = ({
                    <span className="text-[10px] text-slate-500 font-black uppercase tracking-[0.2em] w-24">Archetype</span>
                    <span className="text-amber-500 text-base font-bold uppercase tracking-widest">{player.archetype || 'Role Player'}</span>
                 </div>
+                <ArchetypeDebugPanel player={player} />
                 <div className="flex items-center gap-4">
                    <span className="text-[10px] text-slate-500 font-black uppercase tracking-[0.2em] w-24">
                       {(player as any).school ? 'School/Origin' : 'College'}
