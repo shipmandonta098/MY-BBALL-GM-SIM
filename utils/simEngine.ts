@@ -3797,8 +3797,8 @@ function runOffenseEngine(
       // ── Block check: ALL on-court defenders checked in descending blocks order ─
       // Checking all defenders (instead of picking one) lets teams with multiple
       // shot-blockers reach the 4–6 team BPG target organically.
-      // Scale 1.8: calibrated so an elite C (blocks=85, C-pos) averages ~2.2 BPG,
-      // a Wemby-tier (blocks=97) averages ~3.2 BPG, and an average roster reaches 4–6 team BPG.
+      // Scale 0.80: targets elite C (blocks=85) ~2.0 BPG, Wemby-tier (blocks=97) ~3.5 BPG,
+      // average roster 4–6 team BPG. (was 1.8, producing 7+ BPG for top individual).
       // Mid-range post-up shots are also contestable by interior defenders.
       let blocked = false;
       if ((zone === 'inside' || (zone === 'mid' && possType === 'POST_UP')) && dCourt.length > 0) {
@@ -3810,7 +3810,7 @@ function runOffenseEngine(
             blocker.p.attributes.blocks,
             blocker.p.position,
             blocker.p.attributes.defensiveIQ,
-          ) * 1.8 * (1 + (dt.helpDefender - 50) / 200);
+          ) * 0.80 * (1 + (dt.helpDefender - 50) / 200);
           if (Math.random() < blkProb) {
             blocked = true;
             blocker.blk++;
