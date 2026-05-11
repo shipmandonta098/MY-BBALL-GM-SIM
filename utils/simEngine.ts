@@ -3859,21 +3859,20 @@ function runOffenseEngine(
           + (Math.random() * 0.06 - 0.03)));
 
         // ── Foul check ────────────────────────────────────────────────────
-        // Reduced: coefficient 0.50→0.22, cap 0.36→0.15.
-        // Old cap (36%) meant every 3rd shot in the paint drew a foul, inflating
-        // star PPG by 10–15pts via FTA. New rate (avg ~11%, elite ~13%) is NBA-realistic.
-        // Target: 20–25 team FTA/game on 88–92 FGA.
+        // Coefficient 0.35, cap 0.22: avg player (drawFoulTend=50) → ~17.5% per shot,
+        // elite foul-drawer (tend=85) capped at 22%. Targets ~16 shot fouls/team/game
+        // on 88–92 FGA. Combined with ~3–4 background fouls → 18–22 team PF/game.
         // WNBA: fouls still drawn but at 85% rate (slightly less physical contact).
         const drawFoulTend = shooter.p.tendencies?.foulDrawing ?? 50;
         const driveTend    = shooter.p.tendencies?.drive       ?? 50;
         const postTend     = shooter.p.tendencies?.postUp      ?? 50;
-        const foulRate = (drawFoulTend / 100 * 0.22)
+        const foulRate = (drawFoulTend / 100 * 0.35)
           + (zone === 'inside' ? Math.max(0, driveTend - 50) / 100 * 0.04 : 0)
           + (possType === 'POST_UP' ? Math.max(0, postTend - 50) / 100 * 0.03 : 0);
         const schemeFtaMult = scheme === 'Grit and Grind' ? 1.18
           : (scheme === 'Pace and Space' || scheme === 'Showtime') ? 1.08 : 1.0;
         const wnbaFoulMod   = isWNBA ? 0.85 : 1.0;
-        const foulChance    = Math.min(0.15, foulRate * schemeFtaMult * wnbaFoulMod);
+        const foulChance    = Math.min(0.22, foulRate * schemeFtaMult * wnbaFoulMod);
 
         if (Math.random() < foulChance) {
           const andOne = Math.random() < finalPct;
@@ -3954,7 +3953,7 @@ function runOffenseEngine(
   defActive.forEach(s => {
     const dt = getDT(s.p);
     const diq = s.p.attributes.defensiveIQ ?? 65;
-    const bgFoulRate = (dt.physicality + dt.onBallPest) / 200 * 0.08
+    const bgFoulRate = (dt.physicality + dt.onBallPest) / 200 * 0.12
       - (diq - 50) / 100 * 0.03;
     const bgFouls = Math.round(
       Math.max(0, bgFoulRate) * (s.minFrac * 6) * (0.7 + Math.random() * 0.6));
