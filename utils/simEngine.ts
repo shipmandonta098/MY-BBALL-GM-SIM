@@ -328,24 +328,24 @@ export function getTurnoverPercentage(
   // ── Primary driver: ball handling (inverse — better BH = lower TO%) ───────
   let base: number;
   if (bh <= 60) {
-    // Sloppy: 27 % at 0 → 21 % at 60
-    base = 0.27 - (bh / 60) * 0.06;
+    // Sloppy: 17 % at 0 → 13 % at 60
+    base = 0.17 - (bh / 60) * 0.04;
   } else if (bh <= 80) {
-    // Average: 21 % at 60 → 15 % at 80
-    base = 0.21 - ((bh - 60) / 20) * 0.06;
+    // Average: 13 % at 60 → 9.5 % at 80
+    base = 0.13 - ((bh - 60) / 20) * 0.035;
   } else if (bh <= 94) {
-    // Plus → elite: 18 % at 80 → 13 % at 94 (raised +3 pp to lift team floor)
-    base = 0.18 - ((bh - 80) / 14) * 0.05;
+    // Plus → elite: 9.5 % at 80 → 7 % at 94
+    base = 0.095 - ((bh - 80) / 14) * 0.025;
   } else {
-    // God-tier: 13 % at 95 → 12 % at 100 (raised from 10/8.5 to ensure realistic team min)
-    base = 0.13 - ((bh - 95) / 5) * 0.01;
+    // God-tier: 7 % at 95 → 6 % at 100
+    base = 0.07 - ((bh - 95) / 5) * 0.01;
   }
 
   // ── Passing: vision vs. ball-security balance ─────────────────────────────
   const passDelta = passing - bh;
   let passMod: number;
   if (passDelta > 10) {
-    passMod = Math.min(0.025, (passDelta - 10) / 100 * 0.04);
+    passMod = Math.min(0.015, (passDelta - 10) / 100 * 0.04);
   } else if (passDelta >= -10) {
     passMod = -0.005;
   } else {
@@ -359,13 +359,13 @@ export function getTurnoverPercentage(
   base += -(offIQ - 70) / 100 * 0.040;
 
   // ── Positional pressure ────────────────────────────────────────────────────
-  if (position === 'PG') base += 0.025;  // primary ball-handler; most pressure
-  else if (position === 'SG') base += 0.010;
-  else if (position === 'C' || position === 'PF') base -= 0.015;
+  if (position === 'PG') base += 0.015;  // primary ball-handler; most pressure
+  else if (position === 'SG') base += 0.005;
+  else if (position === 'C' || position === 'PF') base -= 0.010;
 
   // ── Fatigue: low-stamina players lose ball security late in games ─────────
   if (stamina !== undefined) {
-    base += Math.max(0, (60 - stamina) / 100 * 0.030);
+    base += Math.max(0, (60 - stamina) / 100 * 0.015);
   }
 
   // ── Personality trait modifiers ───────────────────────────────────────────
@@ -378,7 +378,7 @@ export function getTurnoverPercentage(
     if (personalityTraits.includes('Friendly/Team First')) base *= 0.90; // careful ball-mover
   }
 
-  return Math.max(0.13, Math.min(0.32, base));
+  return Math.max(0.06, Math.min(0.22, base));
 }
 
 /**
@@ -3668,8 +3668,8 @@ function runOffenseEngine(
         (primaryDef.p.attributes.defensiveIQ  ?? 50) * 0.40 +
         (dt.onBallPest + dt.denyThePass) / 200 * 100 * 0.20
       ) / 100;
-      // Threshold 0.55 = average defender; elite (0.80+) applies 5% TOV + 8% FG suppression.
-      defPressureBoost = Math.max(0, (defQuality - 0.55) * 0.20);
+      // Threshold 0.55 = average defender; elite (0.80+) applies ~2% TOV + 8% FG suppression.
+      defPressureBoost = Math.max(0, (defQuality - 0.55) * 0.08);
       contestBoost     = Math.max(0, (defQuality - 0.50) * 0.18);
     }
 
@@ -4531,7 +4531,7 @@ export const simulateGame = (
   let homePlayerStats = statesToLines(homeStates);
   let awayPlayerStats = statesToLines(awayStates);
 
-  // ── B2B extra turnovers (+1.2 to +2.5 per team per game) ─────────────────
+  // ── B2B extra turnovers (+1 per team per game) ──────────────────────────
   // Distributed to top-minute active players; runs BEFORE the TOV clamp so the
   // elevated ceiling on B2B nights is reflected in the final clamp pass.
   if (b2bFatigueScale > 0) {
@@ -4549,11 +4549,11 @@ export const simulateGame = (
       return lines;
     };
     if (homeB2B) {
-      const extra = Math.round(1.2 + b2bFatigueScale * 1.3);
+      const extra = Math.round(0.5 + b2bFatigueScale * 0.8);
       homePlayerStats = addB2BTovs([...homePlayerStats], extra);
     }
     if (awayB2B) {
-      const extra = Math.round(1.2 + b2bFatigueScale * 1.3);
+      const extra = Math.round(0.5 + b2bFatigueScale * 0.8);
       awayPlayerStats = addB2BTovs([...awayPlayerStats], extra);
     }
   }
