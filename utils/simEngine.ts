@@ -3689,7 +3689,7 @@ function runOffenseEngine(
       else if (r < 0.78) bh._tovLostBall++;
       else               bh._tovOffFoul++;
       // Steal credit: defender with best deny-the-pass + gambles tendency.
-      // Scale 3.5 (was 2.8): more turnovers should be recorded as steals (NBA ~55–65% rate).
+      // Scale 12: targets ~35–50% steal-credit rate per turnover (NBA ~50–60%).
       if (dCourt.length > 0) {
         const stealerCand = pickWeighted(dCourt, s => {
           const dt = getDT(s.p);
@@ -3699,7 +3699,7 @@ function runOffenseEngine(
           stealerCand.p.attributes.steals,
           stealerCand.p.position,
           stealerCand.p.attributes.defensiveIQ,
-        ) * 3.5) {
+        ) * 12) {
           stealerCand.stl++;
           stealerCand._defEvents++;
         }
@@ -3709,8 +3709,7 @@ function runOffenseEngine(
 
     // ── Pass-lane steal check ─────────────────────────────────────────────
     // Runs before the shooter receives the ball on all pass-heavy possessions.
-    // Scale 1.6: pass-lane steals are harder than live-ball steals but add
-    // meaningful volume to reach 6–9 team STL/game target.
+    // Scale 2.2: pass-lane steals contribute ~2.5/game to reach 6–9 team STL/game target.
     const isPassPlay = possType === 'PNR_ROLL' || possType === 'SPOT_UP'
       || possType === 'CUT' || possType === 'DRIVE_KICK' || possType === 'OFF_SCREEN';
     if (isPassPlay && dCourt.length > 0) {
@@ -3725,7 +3724,7 @@ function runOffenseEngine(
         passLaneDef.p.attributes.steals,
         passLaneDef.p.position,
         passLaneDef.p.attributes.defensiveIQ,
-      ) * 1.6) {
+      ) * 2.2) {
         bh.tov++;
         bh._tovBadPass++;
         passLaneDef.stl++;
