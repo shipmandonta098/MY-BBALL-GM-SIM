@@ -79,7 +79,226 @@ export const getRandomTraits = (): PersonalityTrait[] => {
   return [...PERSONALITY_TRAITS].sort(() => 0.5 - Math.random()).slice(0, count);
 };
 
-export const generateTendencies = (pos: Position, traits: PersonalityTrait[]): PlayerTendencies => {
+// ── Archetype-first: weighted archetype pool per position ────────────────────
+export const ARCHETYPE_POSITION_WEIGHTS: Record<string, [string, number][]> = {
+  PG: [
+    ['Playmaking Guard', 26], ['Pure Scorer', 18], ['Scoring Playmaker', 10],
+    ['Combo Guard', 12], ['3&D Wing', 10], ['Lockdown Defender', 8],
+    ['Role Player', 10], ['Bench Spark', 6],
+  ],
+  SG: [
+    ['Pure Scorer', 24], ['3&D Wing', 22], ['Two-Way Wing', 12], ['Combo Guard', 12],
+    ['Playmaking Guard', 10], ['Lockdown Defender', 8], ['Role Player', 8], ['Bench Spark', 4],
+  ],
+  SF: [
+    ['3&D Wing', 24], ['Two-Way Forward', 20], ['Pure Scorer', 14], ['Lockdown Defender', 10],
+    ['Stretch Big', 8], ['Two-Way Wing', 8], ['Role Player', 10], ['Bench Spark', 6],
+  ],
+  PF: [
+    ['Two-Way Forward', 16], ['Stretch Big', 16], ['Rim Protector', 12],
+    ['Two-Way Interior Star', 12], ['Post Scorer', 10], ['3&D Wing', 10],
+    ['Glass Cleaner', 8], ['Lockdown Defender', 6], ['Role Player', 6], ['Bench Spark', 4],
+  ],
+  C: [
+    ['Rim Protector', 24], ['Two-Way Interior Star', 18], ['Post Scorer', 14],
+    ['Glass Cleaner', 12], ['Stretch Big', 10], ['Lockdown Defender', 6],
+    ['Stretch Rim Protector', 5], ['Role Player', 7], ['Bench Spark', 4],
+  ],
+};
+
+// ── Per-archetype attribute shaping: boost primary, suppress weakness ────────
+// Applied in generatePlayer after base attr generation, before position bounds.
+// Boost increases raw attr value; suppress decreases it.
+// Position hard floors still guarantee minimum competency (e.g. C postScoring >= 76).
+export const ARCHETYPE_ATTR_SHAPE: Record<string, {
+  boost: Partial<Record<string, number>>;
+  suppress: Partial<Record<string, number>>;
+}> = {
+  'Rim Protector':        { boost: { blocks: 20, interiorDef: 18, defReb: 12, defensiveIQ: 10, strength: 8 },      suppress: { postScoring: 22, shootingMid: 16, shooting3pt: 22, ballHandling: 20, passing: 10, offReb: 6 } },
+  'Two-Way Interior Star':{ boost: { postScoring: 16, interiorDef: 16, blocks: 12, defReb: 14, offReb: 10, strength: 12, offensiveIQ: 8 }, suppress: { ballHandling: 16, shooting3pt: 18, speed: 8, passing: 6 } },
+  'Post Scorer':          { boost: { postScoring: 22, strength: 14, layups: 10, offensiveIQ: 8, foulDrawing: 8 },  suppress: { shooting3pt: 20, ballHandling: 16, perimeterDef: 10, speed: 8, blocks: 8 } },
+  'Glass Cleaner':        { boost: { offReb: 24, defReb: 20, strength: 10, stamina: 8, dunks: 8 },                suppress: { postScoring: 16, shooting3pt: 22, ballHandling: 18, shootingMid: 14, perimeterDef: 8 } },
+  'Stretch Big':          { boost: { shooting3pt: 22, shootingMid: 16, offensiveIQ: 8, freeThrow: 10 },           suppress: { blocks: 12, strength: 8, postScoring: 12, offReb: 8, interiorDef: 6 } },
+  'Stretch Rim Protector':{ boost: { blocks: 18, interiorDef: 16, shooting3pt: 16, defReb: 10 },                  suppress: { postScoring: 14, ballHandling: 16, speed: 8, passing: 8 } },
+  '3&D Wing':             { boost: { shooting3pt: 16, perimeterDef: 14, defensiveIQ: 8, steals: 10 },             suppress: { postScoring: 14, blocks: 8, ballHandling: 6, strength: 6 } },
+  'Lockdown Defender':    { boost: { perimeterDef: 20, defensiveIQ: 14, steals: 12, interiorDef: 8, speed: 6 },   suppress: { shooting3pt: 14, ballHandling: 10, shootingMid: 10, offensiveIQ: 6 } },
+  'Playmaking Guard':     { boost: { ballHandling: 20, passing: 18, offensiveIQ: 10 },                            suppress: { blocks: 16, interiorDef: 16, postScoring: 14, strength: 12, offReb: 8 } },
+  'Scoring Playmaker':    { boost: { ballHandling: 14, passing: 12, shooting3pt: 12, shootingMid: 10, offensiveIQ: 12 }, suppress: { blocks: 12, interiorDef: 12, postScoring: 10, strength: 10 } },
+  'Pure Scorer':          { boost: { shooting3pt: 14, shootingMid: 12, offensiveIQ: 10, shooting: 10, freeThrow: 6 }, suppress: { blocks: 10, interiorDef: 10, passing: 6, strength: 6 } },
+  'Two-Way Forward':      { boost: { perimeterDef: 12, athleticism: 10, interiorDef: 8, steals: 10, shooting3pt: 8 }, suppress: { postScoring: 10, ballHandling: 6 } },
+  'Two-Way Wing':         { boost: { perimeterDef: 14, shooting3pt: 12, steals: 10, athleticism: 8 },             suppress: { postScoring: 12, blocks: 8, strength: 6 } },
+  'Combo Guard':          { boost: { shooting3pt: 10, ballHandling: 10, passing: 8, shootingMid: 8 },             suppress: { blocks: 12, interiorDef: 12, postScoring: 10, strength: 10 } },
+  'Hybrid Star':          { boost: {}, suppress: {} },
+  'Role Player':          { boost: {}, suppress: {} },
+  'Bench Spark':          { boost: {}, suppress: {} },
+};
+
+// ── Per-archetype tendency overrides (delta from position base) ──────────────
+export const ARCHETYPE_TENDENCY_OVERRIDES: Record<string, Partial<PlayerTendencies>> = {
+  'Rim Protector':        { block: 25, shotContest: 22, putback: 14, postUp: -18, isolation: -22, pullUpJumper: -28, pullUpThree: -32, offScreenThree: -28 },
+  'Two-Way Interior Star':{ block: 18, shotContest: 16, postUp: 22, putback: 18, isolation: 8, pullUpThree: -22, offScreenThree: -20, pullUpJumper: -14 },
+  'Post Scorer':          { postUp: 30, foulDrawing: 18, putback: 16, isolation: 10, pullUpThree: -28, offScreenThree: -28, block: -10, drive: 8 },
+  'Glass Cleaner':        { putback: 30, block: 10, shotContest: 12, isolation: -28, pullUpJumper: -22, pullUpThree: -32, offScreenThree: -28, spotUp: -12 },
+  'Stretch Big':          { spotUp: 28, offScreenThree: 18, pullUpThree: 12, postUp: -22, isolation: -18, block: -12, putback: -10, drive: -8 },
+  'Stretch Rim Protector':{ block: 22, shotContest: 18, spotUp: 16, offScreenThree: 12, postUp: -16, isolation: -12, pullUpJumper: -16, drive: -8 },
+  '3&D Wing':             { spotUp: 22, onBallSteal: 16, shotContest: 12, playPassLane: 14, isolation: -18, postUp: -16, pullUpJumper: -10, drive: -6 },
+  'Lockdown Defender':    { onBallSteal: 22, shotContest: 22, playPassLane: 18, isolation: -18, pullUpJumper: -16, pullUpThree: -18, drive: -8 },
+  'Playmaking Guard':     { pass: 22, cutToBasket: 14, playPassLane: 14, isolation: -12, postUp: -18, block: -18, pullUpJumper: -8 },
+  'Scoring Playmaker':    { pass: 16, pullUpJumper: 14, isolation: 14, drive: 12, spotUp: 10, block: -18, postUp: -12 },
+  'Pure Scorer':          { isolation: 22, pullUpJumper: 16, drive: 12, spotUp: 12, pass: -12, block: -18, putback: -12, postUp: -8 },
+  'Two-Way Forward':      { onBallSteal: 14, shotContest: 12, spotUp: 12, drive: 10, playPassLane: 10, postUp: -12, block: -6 },
+  'Two-Way Wing':         { onBallSteal: 16, spotUp: 14, shotContest: 12, drive: 8, postUp: -14, block: -10, isolation: -8 },
+  'Combo Guard':          { drive: 8, pullUpJumper: 10, pass: 10, spotUp: 10, block: -12, postUp: -12, isolation: -8 },
+  'Hybrid Star':          {},
+  'Role Player':          {},
+  'Bench Spark':          {},
+};
+
+export const getArchetypeFitScores = (
+  pos: string,
+  attrs: Record<string, number>,
+  rating: number,
+): Array<{ archetype: string; score: number; isPrimary: boolean }> => {
+  const sht3 = attrs.shooting3pt ?? 50;
+  const mid  = attrs.shootingMid ?? 50;
+  const sht  = attrs.shooting ?? 50;
+  const blk  = attrs.blocks ?? 50;
+  const iDef = attrs.interiorDef ?? 50;
+  const pDef = attrs.perimeterDef ?? 50;
+  const dIQ  = attrs.defensiveIQ ?? 50;
+  const bh   = attrs.ballHandling ?? 50;
+  const pass = attrs.passing ?? 50;
+  const post = attrs.postScoring ?? 50;
+  const ath  = attrs.athleticism ?? 50;
+  const str  = attrs.strength ?? 50;
+  const oReb = attrs.offReb ?? 50;
+  const dReb = attrs.defReb ?? 50;
+  const stl  = attrs.steals ?? 50;
+  const oIQ  = attrs.offensiveIQ ?? 50;
+  const spd  = attrs.speed ?? 50;
+
+  const isBig   = pos === 'C' || pos === 'PF';
+  const isGuard = pos === 'PG' || pos === 'SG';
+  const isWing  = pos === 'SF' || pos === 'SG';
+  const isPG    = pos === 'PG';
+  const isSG    = pos === 'SG';
+  const isC     = pos === 'C';
+  const isPF    = pos === 'PF';
+  const isSF    = pos === 'SF';
+
+  const surplus = (v: number, threshold: number) => Math.max(0, v - threshold);
+
+  const entries: [string, number][] = [];
+
+  // Two-Way Interior Star: BOTH post AND interior defense must be elite
+  entries.push(['Two-Way Interior Star',
+    isBig
+      ? surplus(post, 78) * 0.55 + surplus(iDef, 78) * 0.55 + surplus(blk, 70) * 0.3 + surplus(dReb, 72) * 0.2 - Math.max(0, 78 - post) * 0.5 - Math.max(0, 78 - iDef) * 0.5
+      : -100
+  ]);
+
+  // Rim Protector: elite blocks+interior, penalized for elite post scoring
+  entries.push(['Rim Protector',
+    isBig
+      ? surplus(blk, 72) * 0.65 + surplus(iDef, 72) * 0.55 + surplus(dIQ, 60) * 0.25 - surplus(post, 78) * 0.5 - surplus(sht3, 68) * 0.3
+      : -100
+  ]);
+
+  // Post Scorer: elite post, penalized for no interior defense
+  entries.push(['Post Scorer',
+    isBig
+      ? surplus(post, 72) * 0.7 + surplus(str, 68) * 0.4 + ((attrs.layups ?? 50) > 65 ? 5 : 0) - Math.max(0, 65 - post) * 0.5
+      : -100
+  ]);
+
+  // Glass Cleaner: elite BOTH reb, penalized for elite post
+  entries.push(['Glass Cleaner',
+    isBig
+      ? surplus(oReb, 74) * 0.65 + surplus(dReb, 74) * 0.55 + surplus(str, 70) * 0.2 - surplus(post, 78) * 0.4 - surplus(sht3, 68) * 0.3
+      : -100
+  ]);
+
+  // Stretch Rim Protector: elite blocks + meaningful 3PT (rare hybrid)
+  entries.push(['Stretch Rim Protector',
+    isBig
+      ? surplus(blk, 78) * 0.55 + surplus(iDef, 72) * 0.45 + surplus(sht3, 68) * 0.6 - 15
+      : -100
+  ]);
+
+  // Stretch Big: elite perimeter shooting for a big
+  entries.push(['Stretch Big',
+    (isBig || isSF)
+      ? surplus(sht3, 68) * 0.7 + surplus(mid, 65) * 0.4 - surplus(blk, 78) * 0.3 - surplus(post, 82) * 0.4
+      : -100
+  ]);
+
+  // 3&D Wing: 3PT + perimeter defense
+  entries.push(['3&D Wing',
+    (!isBig || isPF)
+      ? surplus(sht3, 68) * 0.55 + surplus(pDef, 68) * 0.5 + surplus(dIQ, 60) * 0.2 - (isBig ? 15 : 0)
+      : -100
+  ]);
+
+  // Lockdown Defender: elite perimeter defense, any position
+  entries.push(['Lockdown Defender',
+    surplus(pDef, 75) * 0.65 + surplus(dIQ, 68) * 0.5 + surplus(stl, 65) * 0.3 - surplus(sht3, 78) * 0.2
+  ]);
+
+  // Playmaking Guard: elite BH + passing
+  entries.push(['Playmaking Guard',
+    isGuard
+      ? surplus(bh, 72) * 0.6 + surplus(pass, 70) * 0.55 + surplus(oIQ, 65) * 0.2 - (isSG ? 5 : 0)
+      : -100
+  ]);
+
+  // Scoring Playmaker: elite in both scoring AND playmaking (PG)
+  entries.push(['Scoring Playmaker',
+    isPG
+      ? surplus(bh, 76) * 0.4 + surplus(pass, 74) * 0.4 + surplus(sht3, 74) * 0.5 + surplus(mid, 72) * 0.3 - 12
+      : -100
+  ]);
+
+  // Pure Scorer: high shooting, any guard/wing
+  entries.push(['Pure Scorer',
+    !isBig
+      ? surplus(sht3, 70) * 0.45 + surplus(mid, 68) * 0.4 + surplus(oIQ, 65) * 0.3 + surplus(sht, 68) * 0.3
+      : surplus(post, 78) * 0.3 - 10  // bigs can score but not "pure scorer"
+  ]);
+
+  // Two-Way Forward (SF/PF wings with both offense and defense)
+  entries.push(['Two-Way Forward',
+    (isSF || isPF)
+      ? surplus(pDef, 68) * 0.4 + surplus(ath, 70) * 0.4 + surplus(iDef, 62) * 0.25 + surplus(stl, 60) * 0.2 + surplus(sht3, 62) * 0.2
+      : -100
+  ]);
+
+  // Two-Way Wing (SG/SF with scoring + defense)
+  entries.push(['Two-Way Wing',
+    (isSG || isSF)
+      ? surplus(pDef, 70) * 0.45 + surplus(sht3, 68) * 0.4 + surplus(ath, 68) * 0.3 + surplus(stl, 62) * 0.2 - 5
+      : -100
+  ]);
+
+  // Combo Guard (balanced, neither pure scorer nor pure playmaker)
+  entries.push(['Combo Guard',
+    isGuard
+      ? surplus(bh, 68) * 0.3 + surplus(sht3, 68) * 0.3 + surplus(pass, 65) * 0.2 + surplus(mid, 65) * 0.2 - 8
+      : -100
+  ]);
+
+  // Hybrid Star: any elite player (rating-gated)
+  entries.push(['Hybrid Star', rating >= 85 ? (rating - 85) * 4 : -100]);
+
+  // Fallbacks
+  entries.push(['Role Player', 5]);
+  entries.push(['Bench Spark', 4]);
+
+  return entries
+    .sort((a, b) => b[1] - a[1])
+    .map(([archetype, score], i) => ({ archetype, score: Math.max(0, Math.round(score)), isPrimary: i === 0 }));
+};
+
+export const generateTendencies = (pos: Position, traits: PersonalityTrait[], archetype?: string): PlayerTendencies => {
   type Base = PlayerTendencies;
   const baseMap: Record<Position, Base> = {
     PG: { threePoint:75, midRange:62, foulDrawing:65, postUp:20,  layup:68, dunk:45,
@@ -208,6 +427,16 @@ export const generateTendencies = (pos: Position, traits: PersonalityTrait[]): P
   if (traits.includes('Money Hungry')) {
     t.foulDrawing  = clamp(t.foulDrawing  + 12);
     t.isolation    = clamp(t.isolation    + 10);
+  }
+
+  // ── Archetype tendency overrides ─────────────────────────────────────────
+  if (archetype && ARCHETYPE_TENDENCY_OVERRIDES[archetype]) {
+    const overrides = ARCHETYPE_TENDENCY_OVERRIDES[archetype];
+    for (const [key, delta] of Object.entries(overrides)) {
+      if (key in t) {
+        (t as any)[key] = clamp((t as any)[key] + (delta as number));
+      }
+    }
   }
 
   return t;
@@ -1401,71 +1630,15 @@ const assignArchetype = (pos: Position, attrs: Record<string, number>, rating: n
   return clamped[clamped.length - 1][0];
 };
 
-/** Deterministic archetype derivation — picks highest-weight archetype for the given position + attributes.
+/** Archetype derivation — uses getArchetypeFitScores to pick the best-fitting archetype.
  *  Pass `isStarterRole = true` when the player is in the starting 5 so "Bench Spark" is never assigned. */
 export const deriveArchetype = (pos: Position, attrs: Record<string, number>, rating: number, isStarterRole = false): string => {
-  const sht  = attrs.shooting3pt ?? 50;
-  const def  = attrs.defense ?? 50;
-  const blk  = attrs.blocks ?? 50;
-  const bh   = attrs.ballHandling ?? 50;
-  const pass = attrs.passing ?? 50;
-  const post = attrs.postScoring ?? 50;
-  const ath  = attrs.athleticism ?? 50;
-  const pDef = attrs.perimeterDef ?? 50;
-  const shooting = attrs.shooting ?? 50;
-
-  const w: [string, number][] = [];
-
-  if (pos === 'PG') {
-    w.push(['Playmaking Guard', 30 + (bh + pass - 100) * 0.15]);
-    w.push(['Pure Scorer',      20 + shooting * 0.10]);
-    w.push(['Lockdown Defender', 8 + (pDef + def - 100) * 0.08]);
-    w.push(['Bench Spark',       8]);
-    w.push(['Role Player',       6]);
-    w.push(['Hybrid Star',       rating >= 82 ? 15 : 3]);
-    w.push(['Two-Way Forward',   5]);
-    w.push(['3&D Wing',          8 + sht * 0.06]);
-  } else if (pos === 'SG') {
-    w.push(['Pure Scorer',      25 + shooting * 0.12]);
-    w.push(['3&D Wing',         22 + sht * 0.08]);
-    w.push(['Playmaking Guard', 12 + (bh + pass - 100) * 0.08]);
-    w.push(['Lockdown Defender', 8 + (pDef + def - 100) * 0.08]);
-    w.push(['Bench Spark',       8]);
-    w.push(['Hybrid Star',       rating >= 82 ? 12 : 3]);
-    w.push(['Role Player',       6]);
-    w.push(['Two-Way Forward',   9 + (def + ath - 100) * 0.04]);
-  } else if (pos === 'SF') {
-    w.push(['3&D Wing',          25 + sht * 0.07]);
-    w.push(['Two-Way Forward',   20 + (def + ath - 100) * 0.08]);
-    w.push(['Pure Scorer',       14 + shooting * 0.06]);
-    w.push(['Lockdown Defender', 10 + (pDef + def - 100) * 0.08]);
-    w.push(['Hybrid Star',       rating >= 82 ? 12 : 3]);
-    w.push(['Bench Spark',        6]);
-    w.push(['Role Player',        8]);
-    w.push(['Stretch Big',        5 + sht * 0.03]);
-  } else if (pos === 'PF') {
-    w.push(['Stretch Big',       22 + sht * 0.09]);
-    w.push(['Two-Way Forward',   18 + (def + ath - 100) * 0.06]);
-    w.push(['Rim Protector',     15 + (blk + def - 100) * 0.10]);
-    w.push(['Lockdown Defender', 10 + (def - 50) * 0.08]);
-    w.push(['Pure Scorer',        8 + post * 0.05]);
-    w.push(['Hybrid Star',        rating >= 82 ? 10 : 2]);
-    w.push(['Role Player',        8]);
-    w.push(['Bench Spark',        5]);
-  } else {
-    w.push(['Rim Protector',     30 + (blk + def - 100) * 0.12]);
-    w.push(['Stretch Big',       18 + sht * 0.08]);
-    w.push(['Two-Way Forward',   12 + (def + ath - 100) * 0.05]);
-    w.push(['Lockdown Defender',  8 + (def - 50) * 0.06]);
-    w.push(['Pure Scorer',        6 + post * 0.06]);
-    w.push(['Role Player',        10]);
-    w.push(['Bench Spark',         6]);
-    w.push(['Hybrid Star',        rating >= 82 ? 8 : 2]);
-  }
-
-  // Starters should never receive "Bench Spark" — zero its weight out
-  const eligible = isStarterRole ? w.filter(([name]) => name !== 'Bench Spark') : w;
-  return eligible.reduce((best, cur) => (cur[1] > best[1] ? cur : best), eligible[0])[0];
+  const scores = getArchetypeFitScores(pos, attrs, rating);
+  const eligible = isStarterRole
+    ? scores.filter(s => s.archetype !== 'Bench Spark')
+    : scores;
+  if (eligible.length === 0) return 'Role Player';
+  return eligible[0].archetype;
 };
 
 type AttrMap = Record<string, number>;
@@ -1589,6 +1762,18 @@ export const generatePlayer = (id: string, ageRange: [number, number] = [19, 38]
   const potential = Math.min(99, rating + Math.floor(Math.random() * 12));
   const pos = POSITIONS[Math.floor(Math.random() * POSITIONS.length)];
 
+  // Pick archetype first so attributes can be shaped toward it
+  const archetypePool = ARCHETYPE_POSITION_WEIGHTS[pos] ?? [['Role Player', 1]];
+  const archetypeTotalWeight = archetypePool.reduce((s, [, w]) => s + w, 0);
+  let archetypeRoll = Math.random() * archetypeTotalWeight;
+  let chosenArchetype = archetypePool[archetypePool.length - 1][0];
+  for (const [name, weight] of archetypePool) {
+    archetypeRoll -= weight;
+    if (archetypeRoll <= 0) { chosenArchetype = name; break; }
+  }
+  // Elite players (90+) always upgrade to Hybrid Star
+  if (rating >= 90 && Math.random() < 0.4) chosenArchetype = 'Hybrid Star';
+
   // WNBA age eligibility: domestic (U.S.) ≥ 22, international ≥ 20.
   // Enforced here so every code path that calls generatePlayer automatically respects WNBA rules.
   const isWomensGen = genderRatio === 100;
@@ -1641,9 +1826,29 @@ export const generatePlayer = (id: string, ageRange: [number, number] = [19, 38]
     // Durability is independent of skill — wide random spread (30–95)
     durability: Math.min(99, Math.max(20, Math.floor(55 + (Math.random() * 60 - 15)))),
   };
+
+  // Apply archetype attribute shaping
+  const shape = ARCHETYPE_ATTR_SHAPE[chosenArchetype];
+  if (shape) {
+    for (const [key, boost] of Object.entries(shape.boost)) {
+      if (key in rawAttrs) rawAttrs[key] = Math.min(99, (rawAttrs[key] ?? 50) + boost);
+    }
+    for (const [key, suppress] of Object.entries(shape.suppress)) {
+      if (key in rawAttrs) rawAttrs[key] = Math.max(25, (rawAttrs[key] ?? 50) - suppress);
+    }
+  }
+
   const pAttrs = applyPhysical(rawAttrs, pos, physGender, phys.heightIn, phys.weight);
   const playerTraits = getRandomTraits();
-  
+
+  // Validate archetype: if natural fit is significantly higher than chosen, upgrade
+  const fitScores = getArchetypeFitScores(pos, pAttrs as Record<string, number>, rating);
+  const topFit = fitScores[0];
+  const chosenFitScore = fitScores.find(s => s.archetype === chosenArchetype)?.score ?? 0;
+  const finalArchetype = (topFit.score > chosenFitScore + 15 && topFit.score > 20)
+    ? topFit.archetype
+    : chosenArchetype;
+
   const rawPlayer: Player = {
     id,
     name: `${firstNames[Math.floor(Math.random() * firstNames.length)]} ${lastNames[Math.floor(Math.random() * lastNames.length)]}`,
@@ -1681,11 +1886,11 @@ export const generatePlayer = (id: string, ageRange: [number, number] = [19, 38]
     morale: 75 + Math.floor(Math.random() * 20),
     jerseyNumber: Math.floor(Math.random() * 99),
     height: phys.heightStr, weight: phys.weight,
-    archetype: deriveArchetype(pos, pAttrs as Record<string, number>, rating, false),
+    archetype: finalArchetype,
     secondaryPositions: assignSecondaryPositions(pos, pAttrs as Record<string, number>, phys.heightIn),
     status: 'Bench',
     personalityTraits: playerTraits,
-    tendencies: generateTendencies(pos, playerTraits),
+    tendencies: generateTendencies(pos, playerTraits, finalArchetype),
     hometown: playerHometown,
     country: countryFromHometown(playerHometown),
     birthdate: randomBirthdate(age, _leagueYear),
@@ -1813,6 +2018,17 @@ export const generateProspects = (year: number, count: number = 100, genderRatio
     const gb = POS_GRANULAR_BIAS[pos] ?? {};
     const ba = (base: number, flavor: number = 0, key?: string) =>
       getRandomAttr(base, flavor + (key !== undefined && gb[key] !== undefined ? (gb[key] as number) : 0));
+
+    // Pick archetype first so attributes can be shaped toward it
+    const draftArchPool = ARCHETYPE_POSITION_WEIGHTS[pos] ?? [['Role Player', 1]];
+    const draftArchTotal = draftArchPool.reduce((s, [, w]) => s + w, 0);
+    let draftArchRoll = Math.random() * draftArchTotal;
+    let draftChosenArch = draftArchPool[draftArchPool.length - 1][0];
+    for (const [name, weight] of draftArchPool) {
+      draftArchRoll -= weight;
+      if (draftArchRoll <= 0) { draftChosenArch = name; break; }
+    }
+
     const rawAttrs: AttrMap = {
       shooting:    clampPos(rating + f.shooting,    'shooting'),
       defense:     clampPos(rating,                 'defense'),
@@ -1841,11 +2057,24 @@ export const generateProspects = (year: number, count: number = 100, genderRatio
       defReb:       ba(rating, 0,             'defReb'),
       durability: Math.min(99, Math.max(20, Math.floor(55 + (Math.random() * 60 - 15)))),
     };
+
+    // Apply archetype shaping to draft prospect
+    const draftShape = ARCHETYPE_ATTR_SHAPE[draftChosenArch];
+    if (draftShape) {
+      for (const [key, boost] of Object.entries(draftShape.boost)) {
+        if (key in rawAttrs) rawAttrs[key] = Math.min(99, (rawAttrs[key] ?? 50) + boost);
+      }
+      for (const [key, suppress] of Object.entries(draftShape.suppress)) {
+        if (key in rawAttrs) rawAttrs[key] = Math.max(25, (rawAttrs[key] ?? 50) - suppress);
+      }
+    }
+
     const pAttrs = applyPhysical(rawAttrs, pos, physGender, phys.heightIn, phys.weight);
     const bAttrsRaw = applyAttrBounds(pAttrs as Player['attributes'], pos, {
       heightBonus: phys.heightIn >= (HEIGHT_WEIGHT[pos]?.[physGender]?.avgH ?? 0) + 3 ? 5 : 0,
     });
     const bAttrs = gender === 'Female' ? applyFemaleAttrCaps(bAttrsRaw) : bAttrsRaw;
+    const prospectArchetype = deriveArchetype(pos, bAttrs as Record<string, number>, rating, false);
 
     // WNBA draft eligibility: domestic (U.S.) prospects must be ≥ 22; international ≥ 20.
     // The caller's ageMin/ageMax is still honoured if it enforces a stricter floor.
@@ -1871,10 +2100,10 @@ export const generateProspects = (year: number, count: number = 100, genderRatio
       attributes: bAttrs,
       jerseyNumber: Math.floor(Math.random() * 99),
       height: phys.heightStr, weight: phys.weight,
-      archetype: deriveArchetype(pos, bAttrs as Record<string, number>, rating, false),
+      archetype: prospectArchetype,
       secondaryPositions: assignSecondaryPositions(pos, bAttrs as Record<string, number>, phys.heightIn),
       personalityTraits: prospectTraits,
-      tendencies: generateTendencies(pos, prospectTraits),
+      tendencies: generateTendencies(pos, prospectTraits, prospectArchetype),
       hometown: prospectHometown,
       country: countryFromHometown(prospectHometown),
       birthdate: randomBirthdate(prospectAge, year),
