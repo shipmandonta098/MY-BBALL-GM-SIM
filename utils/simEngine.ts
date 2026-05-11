@@ -3520,11 +3520,13 @@ function getInsideFgPctForPlayer(p: Player): number {
   return layupBase * Math.max(0, 1 - dunkW - postW) + dunkBase * 0.75 * dunkW + postBase * postW;
 }
 
-/** Defender's per-zone FG-suppression mod (negative = harder to score). */
+/** Defender's per-zone FG-suppression mod (negative = harder to score).
+ *  Uses per-possession contexts (CATCH_AND_SHOOT_3, DRIVE_LAYUP, ELBOW_FADE) which
+ *  are calibrated for individual matchups rather than team-game averages. */
 function zoneDefMod(def: Player, zone: 'inside' | 'mid' | 'three'): number {
-  if (zone === 'three')  return get3PTContestMod(def.attributes.perimeterDef ?? 50, 'TEAM_BOX_SCORE', def.attributes.defensiveIQ ?? 50);
-  if (zone === 'inside') return getRimProtectionMod(def.attributes.interiorDef ?? 50, 'TEAM_BOX_SCORE');
-  return getMidRangeContestMod(def.attributes.perimeterDef ?? 50, 'TEAM_BOX_SCORE_MID', def.attributes.defensiveIQ ?? 50);
+  if (zone === 'three')  return get3PTContestMod(def.attributes.perimeterDef ?? 50, 'CATCH_AND_SHOOT_3', def.attributes.defensiveIQ ?? 50);
+  if (zone === 'inside') return getRimProtectionMod(def.attributes.interiorDef ?? 50, 'DRIVE_LAYUP');
+  return getMidRangeContestMod(def.attributes.perimeterDef ?? 50, 'ELBOW_FADE', def.attributes.defensiveIQ ?? 50);
 }
 
 // Fraction of made baskets that earn an assist, keyed by possession type.
@@ -3637,7 +3639,7 @@ function runOffenseEngine(
     wMap.SPOT_UP    = Math.max(0, wMap.SPOT_UP    * (1 + (ot.spotUp          - 50) / 100));
     wMap.CUT        = Math.max(0, wMap.CUT        * (1 + (ot.cutter          - 50) / 100));
     wMap.TRANSITION = Math.max(0, wMap.TRANSITION * (1 + (ot.transitionHunter - 50) / 100));
-    wMap.PNR_BH     = Math.max(0, wMap.PNR_BH     * (1 + (ot.pullUpOffPnr    - 50) / 100));
+    wMap.PNR_BH     = Math.max(0, wMap.PNR_BH     * (1 + (ot.pullUpOffPnr    - 50) / 100 + (ot.midRangeJumper - 50) / 200));
     wMap.DRIVE_KICK = Math.max(0, wMap.DRIVE_KICK * (1 + (ot.kickOutPasser   - 50) / 100));
     wMap.OFF_SCREEN = Math.max(0, wMap.OFF_SCREEN * (1 + (ot.offScreen       - 50) / 50));
     const entries  = Object.entries(wMap) as [PossessionType, number][];
@@ -3763,21 +3765,31 @@ function runOffenseEngine(
       if (['POST_UP', 'PNR_ROLL', 'CUT'].includes(possType) || shotN > 0) {
         zone = 'inside';
       } else if (['SPOT_UP', 'OFF_SCREEN', 'DRIVE_KICK'].includes(possType)) {
-        zone = 'three';
+        // Catch-and-shoot plays: decide three vs. mid based on shooter's relative shooting attributes.
+        // Mid-range specialists (e.g. high shootingMid, low shooting3pt) spot up at the elbow;
+        // 3PT specialists fire from downtown. 0.55 multiplier biases toward three in modern ball.
+        const sht3 = shooter.p.attributes.shooting3pt ?? 50;
+        const mid  = shooter.p.attributes.shootingMid  ?? 50;
+        zone = Math.random() < sht3 / (sht3 + mid * 0.55) ? 'three' : 'mid';
       } else if (possType === 'TRANSITION') {
         zone = Math.random() < 0.52 ? 'inside' : Math.random() < 0.50 ? 'three' : 'mid';
       } else {
+        // Normalize three weights so shootingMid properly competes with shooting3pt.
+        // Each attribute drives its zone's weight; inside uses position baseline + athleticism.
         const ot2 = getOT(shooter.p);
         const posInsideBase =
           shooter.p.position === 'C'  ? 0.50 : shooter.p.position === 'PF' ? 0.35 :
           shooter.p.position === 'SF' ? 0.22 : shooter.p.position === 'SG' ? 0.16 : 0.12;
         const insideAttrMod = ((shooter.p.attributes.layups + shooter.p.attributes.dunks) / 2 / 100 - 0.70) * 0.30;
-        const insideProb = Math.max(0, Math.min(0.75,
-          (posInsideBase + insideAttrMod + (ot2.driveToBasket - 50) / 100 * 0.30) * pbMults.insideShareMult));
-        const threeProb = Math.max(0, Math.min(0.85,
-          (shooter.p.attributes.shooting3pt / 100 * 0.58 + (ot2.pullUpThree - 50) / 100 * 0.40) * pbMults.threePaShareMult));
-        const r = Math.random();
-        zone = r < insideProb ? 'inside' : r < insideProb + threeProb ? 'three' : 'mid';
+        const insideW = Math.max(0.02,
+          (posInsideBase + insideAttrMod + (ot2.driveToBasket - 50) / 100 * 0.30) * pbMults.insideShareMult);
+        const threeW  = Math.max(0.01,
+          (shooter.p.attributes.shooting3pt / 100 * 0.52 + (ot2.pullUpThree - 50) / 100 * 0.35) * pbMults.threePaShareMult);
+        const midW    = Math.max(0.01,
+          shooter.p.attributes.shootingMid / 100 * 0.45 + (ot2.midRangeJumper - 50) / 100 * 0.35);
+        const totalW  = insideW + threeW + midW;
+        const r = Math.random() * totalW;
+        zone = r < insideW ? 'inside' : r < insideW + threeW ? 'three' : 'mid';
       }
       if (zone === 'inside') shooter._shotInside++;
       else if (zone === 'three') shooter._shotThree++;
@@ -3810,13 +3822,21 @@ function runOffenseEngine(
       }
 
       // ── Defender for FG% contest ─────────────────────────────────────────
+      // Zone-appropriate position bias: C/PF are the natural contest on inside shots;
+      // PG/SG/SF are the natural closeout on three-point and mid-range jumpers.
       const defPlayer = dCourt.length > 0
         ? pickWeighted(dCourt, s => {
             const dAttr = zone === 'inside'
               ? (s.p.attributes.interiorDef  ?? 50) * 0.6 + (s.p.attributes.defensiveIQ ?? 50) * 0.4
               : (s.p.attributes.perimeterDef ?? 50) * 0.6 + (s.p.attributes.defensiveIQ ?? 50) * 0.4;
-            const posMatch = s.p.position === shooter.p.position ? 1.5 : 1.0;
-            return Math.max(0.01, dAttr / 100 * posMatch * s.minFrac);
+            const posMatch = s.p.position === shooter.p.position ? 1.4 : 1.0;
+            const zonePos =
+              zone === 'inside' && (s.p.position === 'C'  || s.p.position === 'PF') ? 1.8 :
+              zone === 'inside' && (s.p.position === 'PG' || s.p.position === 'SG') ? 0.5 :
+              (zone === 'three' || zone === 'mid') && (s.p.position === 'PG' || s.p.position === 'SG' || s.p.position === 'SF') ? 1.6 :
+              (zone === 'three' || zone === 'mid') && (s.p.position === 'C'  || s.p.position === 'PF') ? 0.4 :
+              1.0;
+            return Math.max(0.01, dAttr / 100 * posMatch * zonePos * s.minFrac);
           })
         : null;
 
@@ -3830,10 +3850,11 @@ function runOffenseEngine(
           zone === 'mid'    ? getMidRangePercentage(shooter.p.attributes.shootingMid, shooter.p.position,
                                shooter.p.attributes.offensiveIQ, shooter.p.attributes.ballHandling) :
                               getThreePointPercentage(shooter.p.attributes.shooting3pt);
-        // defMod scaled 2.5×: zoneDefMod outputs were calibrated for team-level box scores.
-        // At per-player resolution, elite defenders need to suppress FG% by 5–12pp,
-        // not the 2–4pp the raw function returns.
-        const defMod     = defPlayer ? zoneDefMod(defPlayer.p, zone) * 2.5 : 0;
+        // defMod scaled 1.4×: zoneDefMod now uses per-possession contexts (DRIVE_LAYUP,
+        // CATCH_AND_SHOOT_3, ELBOW_FADE) which produce 2–3× larger raw values than the
+        // team-box-score contexts, so a smaller multiplier achieves equivalent suppression
+        // while keeping each elite defender's individual impact realistic (8–13 pp).
+        const defMod     = defPlayer ? zoneDefMod(defPlayer.p, zone) * 1.4 : 0;
         const contestMod = -contestBoost;      // on-ball pressure suppression
         const noiseMod   = shooter.varRoll / 100 * 0.35;
         const fatigueMod = -(shooter.fatigue * 0.05);
