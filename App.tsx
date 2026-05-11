@@ -3,7 +3,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { LeagueState, Player, Team, GameResult, PlayerStatus, ScheduleGame, BulkSimSummary, Prospect, Coach, TradeProposal, Position, NewsItem, NewsCategory, LeagueSettings, SeasonAwards, PlayoffBracket, PlayoffSeries, Transaction, TransactionType, PowerRankingSnapshot, PowerRankingEntry, GMProfile, GMMilestone, RivalryStats, InjuryType, SeasonPhase, AllStarWeekendData, AllStarVoteEntry, PreviousSeasonStanding, TrainingFocusArea, PlayerDevChange } from './types';
 import { generateLeagueTeams, generateSeasonSchedule, generateProspects, generateFreeAgentPool, generateCoachPool, EXPANSION_TEAM_POOL, generateCoach, generatePlayer, generateDefaultRotation, enforcePositionalBounds, ageFromBirthdate, getCoachPreferredScheme, generateGMName, STAFF_CONFIG, getStaffTierIndex } from './constants';
 import { generatePreseasonSchedule, buildPreseasonHeadline, buildPreseasonRookieHeadline } from './utils/preseasonEngine';
-import { simulateGame, normalizeLeagueOVRs } from './utils/simEngine';
+import { simulateGame, normalizeLeagueOVRs, computeLeagueCalibration } from './utils/simEngine';
 import { computeGameAttendance } from './utils/attendanceEngine';
 import { autoSimAllStarWeekend } from './utils/allStarSim';
 import { snapshotPlayerStats } from './utils/playerUtils';
@@ -2675,8 +2675,10 @@ const App: React.FC = () => {
     setLoading(true);
     let tempState = { ...league };
     let summary: BulkSimSummary = { gamesPlayed: 0, userWins: 0, userLosses: 0, notablePerformances: [], news: [] };
+    const batchResults: GameResult[] = [];
     const processResults = (results: GameResult[]) => {
       results.forEach(r => {
+        batchResults.push(r);
         summary.gamesPlayed++;
         const isHome = r.homeTeamId === league.userTeamId;
         const win = isHome ? r.homeScore > r.awayScore : r.awayScore > r.homeScore;
@@ -2716,12 +2718,14 @@ const App: React.FC = () => {
         tempState = step.newState;
         processResults(step.dayResults);
       }
+      computeLeagueCalibration(batchResults, 'WEEK');
     } else if (mode === 'month') {
       for (let i = 0; i < 30; i++) {
         const step = await executeSimDay(tempState);
         tempState = step.newState;
         processResults(step.dayResults);
       }
+      computeLeagueCalibration(batchResults, 'MONTH');
     } else if (mode === 'season') {
       // Sim through preseason AND regular season
       while (tempState.currentDay < 500 && hasAnyGamesLeft(tempState)) {
@@ -2729,6 +2733,7 @@ const App: React.FC = () => {
         tempState = step.newState;
         processResults(step.dayResults);
       }
+      computeLeagueCalibration(batchResults, 'SEASON');
     } else if (mode === 'to-deadline') {
       // Sim until the trade deadline triggers (tradeDeadlinePassed flips to true)
       while (tempState.currentDay < 500 && !tempState.tradeDeadlinePassed && tempState.schedule.some(g => !g.played)) {
