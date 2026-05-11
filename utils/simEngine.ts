@@ -3521,12 +3521,11 @@ function getInsideFgPctForPlayer(p: Player): number {
 }
 
 /** Defender's per-zone FG-suppression mod (negative = harder to score).
- *  Uses per-possession contexts (CATCH_AND_SHOOT_3, DRIVE_LAYUP, ELBOW_FADE) which
- *  are calibrated for individual matchups rather than team-game averages. */
+ *  Uses TEAM_BOX_SCORE contexts calibrated for game-average suppression. */
 function zoneDefMod(def: Player, zone: 'inside' | 'mid' | 'three'): number {
-  if (zone === 'three')  return get3PTContestMod(def.attributes.perimeterDef ?? 50, 'CATCH_AND_SHOOT_3', def.attributes.defensiveIQ ?? 50);
-  if (zone === 'inside') return getRimProtectionMod(def.attributes.interiorDef ?? 50, 'DRIVE_LAYUP');
-  return getMidRangeContestMod(def.attributes.perimeterDef ?? 50, 'ELBOW_FADE', def.attributes.defensiveIQ ?? 50);
+  if (zone === 'three')  return get3PTContestMod(def.attributes.perimeterDef ?? 50, 'TEAM_BOX_SCORE', def.attributes.defensiveIQ ?? 50);
+  if (zone === 'inside') return getRimProtectionMod(def.attributes.interiorDef ?? 50, 'TEAM_BOX_SCORE');
+  return getMidRangeContestMod(def.attributes.perimeterDef ?? 50, 'TEAM_BOX_SCORE_MID', def.attributes.defensiveIQ ?? 50);
 }
 
 // Fraction of made baskets that earn an assist, keyed by possession type.
@@ -3670,7 +3669,7 @@ function runOffenseEngine(
       ) / 100;
       // Threshold 0.55 = average defender; elite (0.80+) applies ~2% TOV + 8% FG suppression.
       defPressureBoost = Math.max(0, (defQuality - 0.55) * 0.08);
-      contestBoost     = Math.max(0, (defQuality - 0.50) * 0.18);
+      contestBoost     = Math.max(0, (defQuality - 0.50) * 0.08);
     }
 
     // ── Turnover check ─────────────────────────────────────────────────────
@@ -3850,11 +3849,7 @@ function runOffenseEngine(
           zone === 'mid'    ? getMidRangePercentage(shooter.p.attributes.shootingMid, shooter.p.position,
                                shooter.p.attributes.offensiveIQ, shooter.p.attributes.ballHandling) :
                               getThreePointPercentage(shooter.p.attributes.shooting3pt);
-        // defMod scaled 1.4×: zoneDefMod now uses per-possession contexts (DRIVE_LAYUP,
-        // CATCH_AND_SHOOT_3, ELBOW_FADE) which produce 2–3× larger raw values than the
-        // team-box-score contexts, so a smaller multiplier achieves equivalent suppression
-        // while keeping each elite defender's individual impact realistic (8–13 pp).
-        const defMod     = defPlayer ? zoneDefMod(defPlayer.p, zone) * 1.4 : 0;
+        const defMod     = defPlayer ? zoneDefMod(defPlayer.p, zone) : 0;
         const contestMod = -contestBoost;      // on-ball pressure suppression
         const noiseMod   = shooter.varRoll / 100 * 0.35;
         const fatigueMod = -(shooter.fatigue * 0.05);
