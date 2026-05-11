@@ -140,23 +140,23 @@ export function getThreePointPercentage(attr: number): number {
 
   let base: number;
   if (a <= 59) {
-    // Non-shooters / big men: 25% at 0 → 32% at 59
-    base = 0.25 + (a / 59) * 0.07;
+    // Non-shooters / big men: 28% at 0 → 35% at 59
+    base = 0.28 + (a / 59) * 0.07;
   } else if (a <= 74) {
-    // Below-avg to league-avg: 32% at 60 → 34.5% at 74
-    base = 0.32 + ((a - 60) / 14) * 0.025;
+    // Below-avg to league-avg: 35% at 60 → 37.5% at 74
+    base = 0.35 + ((a - 60) / 14) * 0.025;
   } else if (a <= 89) {
-    // Solid starter to plus shooter: 34.5% at 75 → 40% at 89
-    base = 0.345 + ((a - 75) / 14) * 0.055;
+    // Solid starter to plus shooter: 37.5% at 75 → 43% at 89
+    base = 0.375 + ((a - 75) / 14) * 0.055;
   } else if (a <= 94) {
-    // Elite: 40% at 90 → 43% at 94
-    base = 0.40 + ((a - 90) / 4) * 0.030;
+    // Elite: 43% at 90 → 46% at 94
+    base = 0.43 + ((a - 90) / 4) * 0.030;
   } else {
-    // God-tier: 43% at 95 → 46% at 100 (max for any player on volume)
-    base = 0.43 + ((a - 95) / 5) * 0.03;
+    // God-tier: 46% at 95 → 49% at 100 (max for any player on volume)
+    base = 0.46 + ((a - 95) / 5) * 0.03;
   }
 
-  return Math.max(0.20, Math.min(0.48, base));
+  return Math.max(0.23, Math.min(0.51, base));
 }
 
 // ─── Rebound Chance Functions ────────────────────────────────────────────────
@@ -3916,31 +3916,35 @@ function runOffenseEngine(
 
       // ── Miss / block → rebound battle ────────────────────────────────────
       shooter.fatigue = Math.min(0.45, shooter.fatigue + 0.004);
+      // Offensive weights kept low so team ORB rate targets NBA average ~24-26%.
       const offOrbScore = court.reduce((sum, s) => {
-        const posB = s.p.position === 'C' || s.p.position === 'PF' ? 0.27
-          : s.p.position === 'SF' ? 0.23 : 0.19;
+        const posB = s.p.position === 'C' || s.p.position === 'PF' ? 0.09
+          : s.p.position === 'SF' ? 0.08 : 0.07;
         return sum + posB * (s.p.attributes.offReb ?? 50) / 100;
       }, 0);
       const defRebScore = dCourt.reduce((sum, s) => {
-        const posB = s.p.position === 'C' || s.p.position === 'PF' ? 0.38
-          : s.p.position === 'SF' ? 0.30 : 0.24;
+        const posB = s.p.position === 'C' || s.p.position === 'PF' ? 0.30
+          : s.p.position === 'SF' ? 0.24 : 0.18;
         return sum + posB * (s.p.attributes.defReb ?? 50) / 100;
       }, 0);
-      const orbProb = Math.max(0.10, Math.min(0.36,
+      const orbProb = Math.max(0.08, Math.min(0.28,
         offOrbScore / Math.max(0.01, offOrbScore + defRebScore)));
 
       if (Math.random() < orbProb && shotN < 2) {
         const rebounder = pickWeighted(court, s => {
-          const posW = s.p.position === 'C' ? 0.42 : s.p.position === 'PF' ? 0.30 : 0.09;
-          return Math.max(0.01, posW * (s.p.attributes.offReb ?? 50) / 100 * s.minFrac);
+          // sqrt compresses attribute range so elite rebounders don't monopolise boards.
+          const posW = s.p.position === 'C' ? 0.20 : s.p.position === 'PF' ? 0.18
+            : s.p.position === 'SF' ? 0.15 : s.p.position === 'SG' ? 0.14 : 0.13;
+          return Math.max(0.01, posW * Math.sqrt((s.p.attributes.offReb ?? 50) / 100) * s.minFrac);
         });
         rebounder.oreb++;
         rebounder._rebChances++;
       } else {
         if (dCourt.length > 0) {
           const dReb = pickWeighted(dCourt, s => {
-            const posW = s.p.position === 'C' ? 0.42 : s.p.position === 'PF' ? 0.30 : 0.09;
-            return Math.max(0.01, posW * (s.p.attributes.defReb ?? 50) / 100 * s.minFrac);
+            const posW = s.p.position === 'C' ? 0.20 : s.p.position === 'PF' ? 0.18
+              : s.p.position === 'SF' ? 0.15 : s.p.position === 'SG' ? 0.14 : 0.13;
+            return Math.max(0.01, posW * Math.sqrt((s.p.attributes.defReb ?? 50) / 100) * s.minFrac);
           });
           dReb.dreb++;
           dReb._rebChances++;
