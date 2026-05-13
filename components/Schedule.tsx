@@ -263,10 +263,132 @@ const Schedule: React.FC<ScheduleProps> = ({ league, onSimulate, onScout, onWatc
           </div>
         )}
 
-        <div 
+        <div
           id={`game-${game.id}`}
           className={`group relative bg-slate-900 border ${isNext ? 'border-amber-500 ring-2 ring-amber-500/20 shadow-xl' : 'border-slate-800'} rounded-3xl p-6 transition-all hover:border-slate-600 ${game.played ? 'opacity-70' : ''}`}
         >
+          {viewMode === 'league' ? (
+            /* ── League mode: two-team matchup card ─────────────────────────── */
+            <div className="space-y-3">
+              {/* Teams row */}
+              <div className="flex items-center gap-3">
+                {/* Away team */}
+                <div className="flex-1 flex items-center gap-3 min-w-0">
+                  <div
+                    className="w-12 h-12 bg-slate-800 rounded-2xl flex items-center justify-center border shrink-0"
+                    style={{ borderColor: (awayTeam.primaryColor ?? '#94a3b8') + '40' }}
+                  >
+                    <TeamBadge team={awayTeam} size="md" useSecondary />
+                  </div>
+                  <div className="min-w-0">
+                    <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest leading-none mb-0.5">🛫 Away</p>
+                    <p className="text-sm font-bold text-white leading-tight truncate">
+                      {awayTeam.city} <span className="font-black" style={{ color: awayTeam.primaryColor ?? '#f59e0b' }}>{awayTeam.name}</span>
+                    </p>
+                    <p className={`text-[10px] font-bold ${!spread.homeFavored ? 'text-emerald-500' : 'text-slate-600'}`}>
+                      {awayTeam.wins}–{awayTeam.losses}
+                      {!spread.homeFavored && <span className="ml-1 font-mono">{spread.awaySpread}</span>}
+                      {' '}• OVR {awayTeam.roster.length > 0 ? Math.round(awayTeam.roster.reduce((s, p) => s + p.rating, 0) / awayTeam.roster.length) : '—'}
+                    </p>
+                  </div>
+                </div>
+
+                {/* Center: score or spread */}
+                <div className="shrink-0 flex flex-col items-center gap-0.5 min-w-[52px]">
+                  {result ? (
+                    <div className="text-center leading-none">
+                      <p className="text-base font-black font-mono text-white">{result.awayScore}</p>
+                      <p className="text-[9px] text-slate-700 font-bold my-0.5">—</p>
+                      <p className="text-base font-black font-mono text-white">{result.homeScore}</p>
+                    </div>
+                  ) : (
+                    <div className="text-center">
+                      <p className="text-[10px] font-black text-slate-600">@</p>
+                      <p className={`text-sm font-black font-mono ${spread.homeFavored ? 'text-emerald-400' : 'text-orange-400'}`}>
+                        {spread.homeFavored ? spread.homeSpread : spread.awaySpread}
+                      </p>
+                    </div>
+                  )}
+                </div>
+
+                {/* Home team */}
+                <div className="flex-1 flex items-center gap-3 flex-row-reverse text-right min-w-0">
+                  <div
+                    className="w-12 h-12 bg-slate-800 rounded-2xl flex items-center justify-center border shrink-0"
+                    style={{ borderColor: (homeTeam.primaryColor ?? '#94a3b8') + '40' }}
+                  >
+                    <TeamBadge team={homeTeam} size="md" />
+                  </div>
+                  <div className="min-w-0">
+                    <p className="text-[10px] font-black text-emerald-500 uppercase tracking-widest leading-none mb-0.5">🏠 Home</p>
+                    <p className="text-sm font-bold text-white leading-tight truncate">
+                      <span className="text-slate-400">{homeTeam.city}</span>{' '}
+                      <span className="font-black" style={{ color: homeTeam.primaryColor ?? '#f59e0b' }}>{homeTeam.name}</span>
+                    </p>
+                    <p className={`text-[10px] font-bold ${spread.homeFavored ? 'text-emerald-500' : 'text-slate-600'}`}>
+                      {homeTeam.wins}–{homeTeam.losses}
+                      {spread.homeFavored && <span className="ml-1 font-mono">{spread.homeSpread}</span>}
+                      {' '}• OVR {homeTeam.roster.length > 0 ? Math.round(homeTeam.roster.reduce((s, p) => s + p.rating, 0) / homeTeam.roster.length) : '—'}
+                    </p>
+                  </div>
+                </div>
+              </div>
+
+              {/* Bottom bar: badges + actions */}
+              <div className="flex items-center justify-between gap-3 border-t border-slate-800 pt-3">
+                <div className="flex items-center gap-2 flex-wrap">
+                  {result && covered !== null && (
+                    <span className={`px-2 py-0.5 rounded-full text-[9px] font-black uppercase tracking-widest border ${
+                      covered
+                        ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400'
+                        : 'bg-rose-500/10 border-rose-500/30 text-rose-400'
+                    }`}>
+                      {spread.homeFavored ? homeTeam.abbreviation : awayTeam.abbreviation} {covered ? '✓ cover' : '✗ no cover'}
+                    </span>
+                  )}
+                  {!result && isNext && (
+                    <span className="px-2 py-0.5 rounded-full bg-amber-500/10 border border-amber-500/30 text-amber-400 text-[9px] font-black uppercase tracking-widest">
+                      Next
+                    </span>
+                  )}
+                  {injuredPlayers.length > 0 && (
+                    <span className="text-[9px] text-rose-400 font-bold">
+                      🩹 {injuredPlayers.length} injured
+                    </span>
+                  )}
+                </div>
+                <div className="flex gap-2 shrink-0">
+                  {result ? (
+                    <button
+                      onClick={() => onViewBoxScore(result, homeTeam, awayTeam)}
+                      className="px-3 py-1.5 bg-amber-500/10 hover:bg-amber-500 text-amber-500 hover:text-slate-950 text-[9px] font-black uppercase tracking-widest rounded-lg border border-amber-500/20 transition-all"
+                    >
+                      Box Score
+                    </button>
+                  ) : (
+                    <>
+                      <button
+                        onClick={() => onSimulate('single-instant', game.id)}
+                        className="px-3 py-1.5 bg-amber-500/10 hover:bg-amber-500 text-amber-500 hover:text-slate-950 text-[9px] font-black uppercase tracking-widest rounded-xl border border-amber-500/20 transition-all"
+                      >
+                        Simulate
+                      </button>
+                      {onWatchLive && (
+                        <button
+                          onClick={() => onWatchLive && onWatchLive(game.id)}
+                          className="px-3 py-1.5 bg-emerald-500/10 hover:bg-emerald-500 text-emerald-500 hover:text-slate-950 text-[9px] font-black uppercase tracking-widest rounded-xl border border-emerald-500/20 transition-all flex items-center gap-1"
+                        >
+                          <svg className="w-2.5 h-2.5" fill="currentColor" viewBox="0 0 24 24"><path d="M8 5v14l11-7z" /></svg>
+                          Watch
+                        </button>
+                      )}
+                    </>
+                  )}
+                </div>
+              </div>
+            </div>
+          ) : (
+          /* ── Team mode: single-team perspective layout ───────────────────── */
           <div className="flex flex-col md:flex-row items-center gap-6">
             <div className="flex flex-col items-center md:items-start min-w-[120px]">
               <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-1">
@@ -454,9 +576,10 @@ const Schedule: React.FC<ScheduleProps> = ({ league, onSimulate, onScout, onWatc
               </div>
             </div>
           </div>
+          )} {/* end team-mode branch */}
 
-          {/* ── Injury Report ──────────────────────────────────────── */}
-          {injuredPlayers.length > 0 && (
+          {/* ── Injury Report (team mode only) ─────────────────────── */}
+          {viewMode !== 'league' && injuredPlayers.length > 0 && (
             <div className="border-t border-slate-800 pt-4">
               <button
                 onClick={() => setInjuryOpen(o => !o)}
