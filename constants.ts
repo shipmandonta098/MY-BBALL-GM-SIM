@@ -1732,7 +1732,7 @@ const calcNBASalary = (rating: number, year: number): number => {
   return Math.round((market * (0.80 + Math.random() * 0.40)) / unit) * unit;
 };
 
-export const generatePlayer = (id: string, ageRange: [number, number] = [19, 38], genderRatio: number = 0, draftCtx?: DraftContext, leagueYear?: number, minRating = 58): Player => {
+export const generatePlayer = (id: string, ageRange: [number, number] = [19, 38], genderRatio: number = 0, draftCtx?: DraftContext, leagueYear?: number, minRating = 60): Player => {
   const gender = getRandomGender(genderRatio);
   
   // Pick a region based on weights
@@ -1751,13 +1751,14 @@ export const generatePlayer = (id: string, ageRange: [number, number] = [19, 38]
   const lastNames = gender === 'Male' ? region.lastNamesMale : NAMES_FEMALE.last;
 
   const rand = Math.random();
-  // Tight distribution — only ~1% of players reach 90+ (4–8 league-wide).
-  // 83–89 "All-Star" tier is limited to ~6% so it stays exclusive (~27 players per 30-team league).
-  let baseRating = rand > 0.99 ? 90 + Math.floor(Math.random() * 7)  // 1%:   90–96 (rare superstars)
-                 : rand > 0.93 ? 83 + Math.floor(Math.random() * 7)  // 6%:   83–89 (All-Star tier)
-                 : rand > 0.58 ? 75 + Math.floor(Math.random() * 8)  // 35%:  75–82 (solid starters)
-                 : rand > 0.20 ? 65 + Math.floor(Math.random() * 10) // 38%:  65–74 (role players)
-                               : 54 + Math.floor(Math.random() * 11); // 20%: 54–64 (fringe/G-League)
+  // Target distribution (30 teams × 15 = 450 players):
+  //   ≥20  players at 90+  → 5%  × 450 ≈ 22
+  //   ≥100 players at 80+  → 27% × 450 ≈ 121  (cumulative 90+ + 80-89)
+  //   rest 60–79, no players below 60
+  let baseRating = rand > 0.95 ? 90 + Math.floor(Math.random() * 7)  // 5%:  90–96 (superstars)
+                 : rand > 0.73 ? 80 + Math.floor(Math.random() * 10) // 22%: 80–89 (All-Star / star tier)
+                 : rand > 0.35 ? 70 + Math.floor(Math.random() * 10) // 38%: 70–79 (solid starters)
+                               : 60 + Math.floor(Math.random() * 10); // 35%: 60–69 (bench / role players)
   const rating = Math.min(99, Math.max(minRating, baseRating));
   const potential = Math.min(99, rating + Math.floor(Math.random() * 12));
   const pos = POSITIONS[Math.floor(Math.random() * POSITIONS.length)];
@@ -2200,18 +2201,14 @@ export const generateDefaultRotation = (roster: Player[]): TeamRotation => {
 // 14 values per tier, sorted best-to-worst (franchise player → 14th man).
 // These are minimum ratings per roster slot so teams have a realistic spread.
 const TIER_SLOT_FLOORS: Record<string, number[]> = {
-  // elite: 2–3 contenders — no guaranteed 90+; stars emerge through random roll
-  // top-10 floor avg ≈ 77, actual avg ≈ 80–83 with natural variance
-  elite:      [84, 82, 80, 78, 77, 76, 75, 74, 73, 72, 70, 67, 63, 59],
-  // solid: strong rosters — reliable starters, 1 potential All-Star
-  // top-10 floor avg ≈ 74, actual avg ≈ 77–80
-  solid:      [80, 78, 76, 74, 73, 72, 71, 70, 69, 68, 66, 63, 59, 56],
-  // average: the bulk of the league — steady starters, decent depth
-  // top-10 floor avg ≈ 70, actual avg ≈ 73–77
-  average:    [76, 74, 72, 70, 69, 68, 67, 66, 65, 64, 62, 59, 55, 52],
-  // rebuilding: young/cheap roster; top star is a project
-  // top-10 floor avg ≈ 66, actual avg ≈ 69–73
-  rebuilding: [72, 70, 68, 66, 65, 64, 63, 62, 61, 60, 57, 54, 51, 48],
+  // elite: top contenders — slot 0 guaranteed near-star (88+); bench 60+ floor
+  elite:      [88, 85, 82, 80, 78, 76, 74, 72, 70, 68, 66, 64, 62, 60],
+  // solid: strong rosters — 1 star-level starter (82+), deep bench 60+
+  solid:      [82, 80, 78, 76, 74, 72, 70, 68, 66, 64, 62, 61, 60, 60],
+  // average: steady starters (76+), full bench 60+
+  average:    [76, 74, 72, 70, 68, 66, 64, 62, 61, 60, 60, 60, 60, 60],
+  // rebuilding: young project roster — starter 70+, full bench 60+
+  rebuilding: [72, 70, 68, 66, 64, 62, 61, 60, 60, 60, 60, 60, 60, 60],
 };
 
 // ── Executive (GM) name generation ───────────────────────────────────────────
