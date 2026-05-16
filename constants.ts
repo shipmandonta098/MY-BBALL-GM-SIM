@@ -1752,13 +1752,26 @@ export const generatePlayer = (id: string, ageRange: [number, number] = [19, 38]
 
   const rand = Math.random();
   // Target distribution (30 teams × 15 = 450 players):
-  //   ≥20  players at 90+  → 5%  × 450 ≈ 22
-  //   ≥100 players at 80+  → 27% × 450 ≈ 121  (cumulative 90+ + 80-89)
+  //   ≤25  players at 90+  → 5%  × 450 ≈ 22
+  //   ≥100 players at 80–89 → 22% × 450 ≈ 99
   //   rest 60–79, no players below 60
-  let baseRating = rand > 0.95 ? 90 + Math.floor(Math.random() * 7)  // 5%:  90–96 (superstars)
-                 : rand > 0.73 ? 80 + Math.floor(Math.random() * 10) // 22%: 80–89 (All-Star / star tier)
-                 : rand > 0.35 ? 70 + Math.floor(Math.random() * 10) // 38%: 70–79 (solid starters)
-                               : 60 + Math.floor(Math.random() * 10); // 35%: 60–69 (bench / role players)
+  // tierCeiling enforced after enforcePositionalBounds so attribute variance
+  // cannot push 80-tier players into the 90+ superstar bracket.
+  let baseRating: number;
+  let tierCeiling: number;
+  if (rand > 0.95) {
+    baseRating = 90 + Math.floor(Math.random() * 7);   // 5%:  90–96 (superstars)
+    tierCeiling = 99;
+  } else if (rand > 0.73) {
+    baseRating = 80 + Math.floor(Math.random() * 10);  // 22%: 80–89 (All-Star / star tier)
+    tierCeiling = 89;
+  } else if (rand > 0.35) {
+    baseRating = 70 + Math.floor(Math.random() * 10);  // 38%: 70–79 (solid starters)
+    tierCeiling = 79;
+  } else {
+    baseRating = 60 + Math.floor(Math.random() * 10);  // 35%: 60–69 (bench / role players)
+    tierCeiling = 69;
+  }
   const rating = Math.min(99, Math.max(minRating, baseRating));
   const potential = Math.min(99, rating + Math.floor(Math.random() * 12));
   const pos = POSITIONS[Math.floor(Math.random() * POSITIONS.length)];
@@ -1900,7 +1913,13 @@ export const generatePlayer = (id: string, ageRange: [number, number] = [19, 38]
       ? generateDraftInfo(rating, age, draftCtx)
       : { team: "Undrafted", round: 0, pick: 0, year: 0 }
   };
-  return enforcePositionalBounds(rawPlayer);
+  const raw = enforcePositionalBounds(rawPlayer);
+  // Clamp the recalculated rating back to the intended tier. minRating slot
+  // constraints take priority (e.g. elite team slot 0 = 88 floor), but cannot
+  // push a lower-tier player into the 90+ superstar bracket.
+  const effectiveCeiling = Math.max(minRating, tierCeiling);
+  const clampedRating = Math.max(minRating, Math.min(effectiveCeiling, raw.rating));
+  return clampedRating !== raw.rating ? { ...raw, rating: clampedRating } : raw;
 };
 
 export const generateFreeAgentPool = (count: number, season: number, genderRatio: number = 0, extraTeamNames: string[] = []): Player[] => {
