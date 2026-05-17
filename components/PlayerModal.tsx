@@ -74,6 +74,10 @@ interface PlayerModalProps {
   isHofMember?: boolean;
   /** Year the player was inducted (if HOF member) */
   hofYearInducted?: number;
+  /** Called when GM wants to trade this player — opens trade machine pre-loaded */
+  onTrade?: (player: Player) => void;
+  /** True when trade deadline has passed — disables the Trade button */
+  tradeDeadlinePassed?: boolean;
 }
 
 const traitIcons: Record<PersonalityTrait, string> = {
@@ -214,6 +218,8 @@ const PlayerModal: React.FC<PlayerModalProps> = ({
   awardHistory = [],
   isHofMember = false,
   hofYearInducted,
+  onTrade,
+  tradeDeadlinePassed = false,
 }) => {
   const [isEditing, setIsEditing] = React.useState(false);
   const [statsTab, setStatsTab] = useState<'season' | 'career' | 'advanced' | 'playoffs'>('season');
@@ -2827,6 +2833,20 @@ const PlayerModal: React.FC<PlayerModalProps> = ({
                     className="px-6 py-4 md:px-10 md:py-5 bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 hover:text-emerald-300 border border-emerald-500/30 font-display font-bold uppercase rounded-2xl transition-all text-center"
                   >
                     Extend Contract
+                  </button>
+                )}
+                {onTrade && (
+                  <button
+                    onClick={() => onTrade(player)}
+                    disabled={tradeDeadlinePassed || draftLocked}
+                    title={tradeDeadlinePassed ? 'Trade deadline has passed' : draftLocked ? 'Trades are locked during the draft' : `Open trade machine with ${player.name}`}
+                    className={`px-6 py-4 md:px-10 md:py-5 font-display font-bold uppercase rounded-2xl transition-all text-center ${
+                      tradeDeadlinePassed || draftLocked
+                        ? 'bg-slate-800/50 text-slate-600 border border-slate-700/50 cursor-not-allowed opacity-60'
+                        : 'bg-sky-500/10 hover:bg-sky-500/20 text-sky-400 hover:text-sky-300 border border-sky-500/30'
+                    }`}
+                  >
+                    Trade Player
                   </button>
                 )}
                 {draftLocked ? (

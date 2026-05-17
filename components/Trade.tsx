@@ -12,9 +12,12 @@ interface TradeProps {
   recordTransaction: (state: LeagueState, type: any, teamIds: string[], description: string, playerIds?: string[], value?: number) => Transaction[];
   initialProposal?: TradeProposal | null;
   onClearInitialProposal?: () => void;
+  /** Pre-load this player into the user's trade package and open the trade machine */
+  initialTradePlayer?: Player | null;
+  onClearInitialTradePlayer?: () => void;
 }
 
-const Trade: React.FC<TradeProps> = ({ league, updateLeague, recordTransaction, initialProposal, onClearInitialProposal }) => {
+const Trade: React.FC<TradeProps> = ({ league, updateLeague, recordTransaction, initialProposal, onClearInitialProposal, initialTradePlayer, onClearInitialTradePlayer }) => {
   const [activeSubTab, setActiveSubTab] = useState<'machine' | 'finder' | 'block' | 'saved'>('machine');
   const [partnerTeamId, setPartnerTeamId] = useState<string>(
     league.teams.find(t => t.id !== league.userTeamId)?.id || ''
@@ -63,6 +66,26 @@ const Trade: React.FC<TradeProps> = ({ league, updateLeague, recordTransaction, 
     setActiveSubTab('machine');
     onClearInitialProposal?.();
   }, [initialProposal]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Pre-fill the user's side when opening trade from the player profile
+  useEffect(() => {
+    if (!initialTradePlayer) return;
+    // Pick the best partner: prefer teams with positional need, then highest cap space
+    const otherTeams = league.teams.filter(t => t.id !== league.userTeamId);
+    const capLimit = 140_000_000;
+    const bestPartner = otherTeams.reduce((best, t) => {
+      const capSpace = Math.max(0, capLimit - t.roster.reduce((s, p) => s + p.salary, 0));
+      const needsPos = (t.needs ?? []).includes(initialTradePlayer.position);
+      const score = capSpace / 1_000_000 + (needsPos ? 30 : 0);
+      return score > best.score ? { id: t.id, score } : best;
+    }, { id: otherTeams[0]?.id ?? '', score: -Infinity });
+    setPartnerTeamId(bestPartner.id);
+    setUserPieces([{ type: 'player', data: initialTradePlayer }]);
+    setPartnerPieces([]);
+    setActiveSubTab('machine');
+    setAiResponse({ status: 'neutral', message: 'Assemble a package to start negotiations.' });
+    onClearInitialTradePlayer?.();
+  }, [initialTradePlayer]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Asset Value Calculation
   const getAssetValue = (piece: TradePiece, forTeam: Team): number => {

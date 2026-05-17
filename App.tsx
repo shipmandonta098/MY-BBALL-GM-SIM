@@ -127,6 +127,7 @@ const App: React.FC = () => {
   const [pendingTeamId, setPendingTeamId] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<'dashboard' | 'news' | 'roster' | 'rotations' | 'free_agency' | 'results' | 'standings' | 'schedule' | 'draft' | 'coaching' | 'stats' | 'finances' | 'trade' | 'trade_proposals' | 'expansion' | 'settings' | 'coach_market' | 'awards' | 'playoffs' | 'transactions' | 'power_rankings' | 'gm_profile' | 'team_management' | 'players' | 'allstar' | 'league_history' | 'franchise_history' | 'hof'>('dashboard');
   const [counterProposal, setCounterProposal] = useState<import('./types').TradeProposal | null>(null);
+  const [initialTradePlayer, setInitialTradePlayer] = useState<import('./types').Player | null>(null);
   const [rosterTeamId, setRosterTeamId] = useState<string>('');
   const [teamManagementId, setTeamManagementId] = useState<string>('');
   const [loading, setLoading] = useState(false);
@@ -4222,6 +4223,12 @@ const App: React.FC = () => {
   
   const handleViewRoster = (teamId: string) => { setRosterTeamId(teamId); setActiveTab('roster'); };
 
+  const handleTradePlayer = (player: import('./types').Player) => {
+    setSelectedPlayer(null);
+    setInitialTradePlayer(player);
+    setActiveTab('trade');
+  };
+
   const handleAppealSuspension = (playerId: string) => {
     if (!league || !league.userTeamId) return;
     const userTeam = league.teams.find(t => t.id === league.userTeamId)!;
@@ -4567,7 +4574,7 @@ const App: React.FC = () => {
           {activeTab === 'stats' && <Stats league={league} onViewRoster={handleViewRoster} onManageTeam={handleManageTeam} onViewPlayer={p => setSelectedPlayer(p)} />}
           {activeTab === 'players' && <Players league={league} onViewPlayer={p => setSelectedPlayer(p)} watchList={league.watchList ?? []} onToggleWatch={handleToggleWatch} />}
           {activeTab === 'finances' && <Finances league={league} updateLeague={updateLeagueState} />}
-          {activeTab === 'trade' && <Trade league={league} updateLeague={updateLeagueState} recordTransaction={recordTransaction} initialProposal={counterProposal} onClearInitialProposal={() => setCounterProposal(null)} />}
+          {activeTab === 'trade' && <Trade league={league} updateLeague={updateLeagueState} recordTransaction={recordTransaction} initialProposal={counterProposal} onClearInitialProposal={() => setCounterProposal(null)} initialTradePlayer={initialTradePlayer} onClearInitialTradePlayer={() => setInitialTradePlayer(null)} />}
           {activeTab === 'trade_proposals' && (
             <TradeProposals
               league={league}
@@ -4705,6 +4712,12 @@ const App: React.FC = () => {
             awardHistory={league.awardHistory ?? []}
             isHofMember={(league.hallOfFame ?? []).some(h => h.id === selectedPlayer.id)}
             hofYearInducted={(league.hallOfFame ?? []).find(h => h.id === selectedPlayer.id)?.yearInducted}
+            onTrade={
+              (league.teams.find(t => t.id === league.userTeamId)?.roster.some(p => p.id === selectedPlayer.id))
+                ? handleTradePlayer
+                : undefined
+            }
+            tradeDeadlinePassed={!!league.tradeDeadlinePassed}
           />
         );
       })()}
