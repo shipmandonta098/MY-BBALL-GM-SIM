@@ -82,52 +82,83 @@ export const getRandomTraits = (): PersonalityTrait[] => {
 // ── Archetype-first: weighted archetype pool per position ────────────────────
 export const ARCHETYPE_POSITION_WEIGHTS: Record<string, [string, number][]> = {
   PG: [
-    ['Playmaking Guard', 26], ['Pure Scorer', 18], ['Scoring Playmaker', 10],
-    ['Combo Guard', 12], ['3&D Wing', 10], ['Lockdown Defender', 8],
-    ['Role Player', 10], ['Bench Spark', 6],
+    ['Playmaking Guard', 22], ['Pure Scorer', 14], ['Scoring Playmaker', 10],
+    ['Combo Guard', 10], ['3&D Wing', 8], ['Lockdown Defender', 6],
+    ['Defensive Floor General', 6], ['Shot-Creating Guard', 8], ['Slashing Playmaker', 8],
+    ['Role Player', 6], ['Bench Spark', 4],
   ],
   SG: [
-    ['Pure Scorer', 24], ['3&D Wing', 22], ['Two-Way Wing', 12], ['Combo Guard', 12],
-    ['Playmaking Guard', 10], ['Lockdown Defender', 8], ['Role Player', 8], ['Bench Spark', 4],
+    ['Pure Scorer', 20], ['3&D Wing', 18], ['Two-Way Wing', 12], ['Combo Guard', 12],
+    ['Shot-Creating Guard', 12], ['Playmaking Guard', 8], ['Lockdown Defender', 8],
+    ['Role Player', 6], ['Bench Spark', 4],
   ],
   SF: [
-    ['3&D Wing', 24], ['Two-Way Forward', 20], ['Pure Scorer', 14], ['Lockdown Defender', 10],
-    ['Stretch Big', 8], ['Two-Way Wing', 8], ['Role Player', 10], ['Bench Spark', 6],
+    ['3&D Wing', 22], ['Two-Way Forward', 18], ['Pure Scorer', 12], ['Lockdown Defender', 8],
+    ['Slashing Playmaker', 8], ['Stretch Big', 7], ['Two-Way Wing', 8],
+    ['Role Player', 10], ['Bench Spark', 7],
   ],
   PF: [
-    ['Two-Way Forward', 16], ['Stretch Big', 16], ['Rim Protector', 12],
-    ['Two-Way Interior Star', 12], ['Post Scorer', 10], ['3&D Wing', 10],
-    ['Glass Cleaner', 8], ['Lockdown Defender', 6], ['Role Player', 6], ['Bench Spark', 4],
+    ['Two-Way Forward', 14], ['Stretch Big', 14], ['Rim Protector', 10],
+    ['Two-Way Interior Star', 10], ['Post Scorer', 10], ['3&D Wing', 8],
+    ['Glass Cleaner', 8], ['Pick-and-Roll Big', 8], ['Lockdown Defender', 6],
+    ['Athletic Rim Runner', 4], ['Role Player', 6], ['Bench Spark', 4],
   ],
   C: [
-    ['Rim Protector', 24], ['Two-Way Interior Star', 18], ['Post Scorer', 14],
-    ['Glass Cleaner', 12], ['Stretch Big', 10], ['Lockdown Defender', 6],
-    ['Stretch Rim Protector', 5], ['Role Player', 7], ['Bench Spark', 4],
+    ['Rim Protector', 22], ['Two-Way Interior Star', 16], ['Post Scorer', 12],
+    ['Glass Cleaner', 12], ['Stretch Big', 8], ['Pick-and-Roll Big', 8],
+    ['Athletic Rim Runner', 6], ['Stretch Rim Protector', 4],
+    ['Lockdown Defender', 4], ['Role Player', 5], ['Bench Spark', 3],
   ],
 };
 
 // ── Per-archetype attribute shaping: boost primary, suppress weakness ────────
 // Applied in generatePlayer after base attr generation, before position bounds.
 // Boost increases raw attr value; suppress decreases it.
-// Position hard floors still guarantee minimum competency (e.g. C postScoring >= 76).
+// The archetype-aware floor bypass in applyAttrBounds skips position floors for
+// suppressed attributes, allowing genuine archetypical weaknesses to persist.
 export const ARCHETYPE_ATTR_SHAPE: Record<string, {
   boost: Partial<Record<string, number>>;
   suppress: Partial<Record<string, number>>;
 }> = {
-  'Rim Protector':        { boost: { blocks: 20, interiorDef: 18, defReb: 12, defensiveIQ: 10, strength: 8 },      suppress: { postScoring: 22, shootingMid: 16, shooting3pt: 22, ballHandling: 20, passing: 10, offReb: 6 } },
-  'Two-Way Interior Star':{ boost: { postScoring: 16, interiorDef: 16, blocks: 12, defReb: 14, offReb: 10, strength: 12, offensiveIQ: 8 }, suppress: { ballHandling: 16, shooting3pt: 18, speed: 8, passing: 6 } },
-  'Post Scorer':          { boost: { postScoring: 22, strength: 14, layups: 10, offensiveIQ: 8, foulDrawing: 8 },  suppress: { shooting3pt: 20, ballHandling: 16, perimeterDef: 10, speed: 8, blocks: 8 } },
-  'Glass Cleaner':        { boost: { offReb: 24, defReb: 20, strength: 10, stamina: 8, dunks: 8 },                suppress: { postScoring: 16, shooting3pt: 22, ballHandling: 18, shootingMid: 14, perimeterDef: 8 } },
-  'Stretch Big':          { boost: { shooting3pt: 22, shootingMid: 16, offensiveIQ: 8, freeThrow: 10 },           suppress: { blocks: 12, strength: 8, postScoring: 12, offReb: 8, interiorDef: 6 } },
-  'Stretch Rim Protector':{ boost: { blocks: 18, interiorDef: 16, shooting3pt: 16, defReb: 10 },                  suppress: { postScoring: 14, ballHandling: 16, speed: 8, passing: 8 } },
-  '3&D Wing':             { boost: { shooting3pt: 16, perimeterDef: 14, defensiveIQ: 8, steals: 10 },             suppress: { postScoring: 14, blocks: 8, ballHandling: 6, strength: 6 } },
-  'Lockdown Defender':    { boost: { perimeterDef: 20, defensiveIQ: 14, steals: 12, interiorDef: 8, speed: 6 },   suppress: { shooting3pt: 14, ballHandling: 10, shootingMid: 10, offensiveIQ: 6 } },
-  'Playmaking Guard':     { boost: { ballHandling: 20, passing: 18, offensiveIQ: 10 },                            suppress: { blocks: 16, interiorDef: 16, postScoring: 14, strength: 12, offReb: 8 } },
-  'Scoring Playmaker':    { boost: { ballHandling: 14, passing: 12, shooting3pt: 12, shootingMid: 10, offensiveIQ: 12 }, suppress: { blocks: 12, interiorDef: 12, postScoring: 10, strength: 10 } },
-  'Pure Scorer':          { boost: { shooting3pt: 14, shootingMid: 12, offensiveIQ: 10, shooting: 10, freeThrow: 6 }, suppress: { blocks: 10, interiorDef: 10, passing: 6, strength: 6 } },
-  'Two-Way Forward':      { boost: { perimeterDef: 12, athleticism: 10, interiorDef: 8, steals: 10, shooting3pt: 8 }, suppress: { postScoring: 10, ballHandling: 6 } },
-  'Two-Way Wing':         { boost: { perimeterDef: 14, shooting3pt: 12, steals: 10, athleticism: 8 },             suppress: { postScoring: 12, blocks: 8, strength: 6 } },
-  'Combo Guard':          { boost: { shooting3pt: 10, ballHandling: 10, passing: 8, shootingMid: 8 },             suppress: { blocks: 12, interiorDef: 12, postScoring: 10, strength: 10 } },
+  'Rim Protector':        { boost: { blocks: 22, interiorDef: 20, defReb: 14, defensiveIQ: 12, strength: 10, stamina: 8 },
+                            suppress: { postScoring: 35, shootingMid: 28, shooting3pt: 38, ballHandling: 32, passing: 18, offReb: 8, perimeterDef: 12, speed: 10 } },
+  'Two-Way Interior Star':{ boost: { postScoring: 16, interiorDef: 18, blocks: 14, defReb: 16, offReb: 12, strength: 14, offensiveIQ: 10 },
+                            suppress: { ballHandling: 24, shooting3pt: 28, perimeterDef: 14, speed: 12, passing: 8 } },
+  'Post Scorer':          { boost: { postScoring: 24, strength: 16, layups: 12, offensiveIQ: 10, foulDrawing: 10 },
+                            suppress: { shooting3pt: 35, ballHandling: 22, perimeterDef: 18, speed: 14, blocks: 14, jumping: 10 } },
+  'Glass Cleaner':        { boost: { offReb: 26, defReb: 22, strength: 12, stamina: 10, dunks: 10 },
+                            suppress: { postScoring: 18, shooting3pt: 38, ballHandling: 28, shootingMid: 26, perimeterDef: 14, passing: 10 } },
+  'Stretch Big':          { boost: { shooting3pt: 26, shootingMid: 18, offensiveIQ: 10, freeThrow: 12 },
+                            suppress: { blocks: 25, strength: 18, postScoring: 30, interiorDef: 22, offReb: 18, defReb: 12 } },
+  'Stretch Rim Protector':{ boost: { blocks: 20, interiorDef: 18, shooting3pt: 18, defReb: 12 },
+                            suppress: { postScoring: 22, ballHandling: 20, speed: 10, passing: 10, offReb: 10, strength: 8 } },
+  '3&D Wing':             { boost: { shooting3pt: 18, perimeterDef: 16, defensiveIQ: 10, steals: 12 },
+                            suppress: { postScoring: 22, blocks: 16, ballHandling: 14, strength: 14, passing: 10 } },
+  'Lockdown Defender':    { boost: { perimeterDef: 22, defensiveIQ: 16, steals: 14, interiorDef: 10, speed: 8 },
+                            suppress: { shooting3pt: 28, ballHandling: 14, shootingMid: 20, offensiveIQ: 14, passing: 10 } },
+  'Playmaking Guard':     { boost: { ballHandling: 22, passing: 20, offensiveIQ: 12 },
+                            suppress: { blocks: 20, interiorDef: 18, postScoring: 18, strength: 16, offReb: 10, shootingMid: 10 } },
+  'Scoring Playmaker':    { boost: { ballHandling: 16, passing: 14, shooting3pt: 14, shootingMid: 12, offensiveIQ: 14 },
+                            suppress: { blocks: 16, interiorDef: 16, postScoring: 16, strength: 14, perimeterDef: 10, defReb: 8 } },
+  'Pure Scorer':          { boost: { shooting3pt: 16, shootingMid: 14, offensiveIQ: 12, freeThrow: 8 },
+                            suppress: { blocks: 18, interiorDef: 16, passing: 20, strength: 14, defensiveIQ: 12, perimeterDef: 10 } },
+  'Two-Way Forward':      { boost: { perimeterDef: 14, athleticism: 12, interiorDef: 10, steals: 12, shooting3pt: 10 },
+                            suppress: { postScoring: 16, ballHandling: 12, blocks: 8, passing: 8 } },
+  'Two-Way Wing':         { boost: { perimeterDef: 16, shooting3pt: 14, steals: 12, athleticism: 10 },
+                            suppress: { postScoring: 18, blocks: 14, strength: 14, ballHandling: 8, passing: 8 } },
+  'Combo Guard':          { boost: { shooting3pt: 10, ballHandling: 12, passing: 10, shootingMid: 10 },
+                            suppress: { blocks: 18, interiorDef: 16, postScoring: 14, strength: 14, perimeterDef: 10 } },
+  // New sub-archetypes
+  'Shot-Creating Guard':  { boost: { ballHandling: 16, shootingMid: 18, shooting3pt: 12, offensiveIQ: 12, freeThrow: 10, speed: 6 },
+                            suppress: { passing: 20, perimeterDef: 18, defensiveIQ: 14, blocks: 22, interiorDef: 20, postScoring: 12 } },
+  'Slashing Playmaker':   { boost: { ballHandling: 18, passing: 14, speed: 12, jumping: 10, layups: 16, athleticism: 12, offensiveIQ: 10 },
+                            suppress: { shooting3pt: 30, shootingMid: 20, freeThrow: 16, blocks: 14, strength: 10 } },
+  'Defensive Floor General': { boost: { perimeterDef: 24, defensiveIQ: 20, steals: 16, passing: 12, speed: 10, ballHandling: 8 },
+                                suppress: { shooting3pt: 32, shootingMid: 24, offensiveIQ: 10, postScoring: 18, layups: 10 } },
+  'Pick-and-Roll Big':    { boost: { postScoring: 16, strength: 14, offReb: 12, defReb: 12, offensiveIQ: 14, passing: 10 },
+                            suppress: { shooting3pt: 32, shootingMid: 18, perimeterDef: 16, blocks: 12, speed: 12 } },
+  'Athletic Rim Runner':  { boost: { dunks: 26, jumping: 22, athleticism: 18, speed: 12, offReb: 16, blocks: 14 },
+                            suppress: { shooting3pt: 42, shootingMid: 32, freeThrow: 20, ballHandling: 24, passing: 16, postScoring: 18 } },
   'Hybrid Star':          { boost: {}, suppress: {} },
   'Role Player':          { boost: {}, suppress: {} },
   'Bench Spark':          { boost: {}, suppress: {} },
@@ -135,20 +166,26 @@ export const ARCHETYPE_ATTR_SHAPE: Record<string, {
 
 // ── Per-archetype tendency overrides (delta from position base) ──────────────
 export const ARCHETYPE_TENDENCY_OVERRIDES: Record<string, Partial<PlayerTendencies>> = {
-  'Rim Protector':        { block: 25, shotContest: 22, putback: 14, postUp: -18, isolation: -22, pullUpJumper: -28, pullUpThree: -32, offScreenThree: -28 },
+  'Rim Protector':        { block: 25, shotContest: 22, putback: 14, postUp: -20, isolation: -24, pullUpJumper: -30, pullUpThree: -35, offScreenThree: -30 },
   'Two-Way Interior Star':{ block: 18, shotContest: 16, postUp: 22, putback: 18, isolation: 8, pullUpThree: -22, offScreenThree: -20, pullUpJumper: -14 },
-  'Post Scorer':          { postUp: 30, foulDrawing: 18, putback: 16, isolation: 10, pullUpThree: -28, offScreenThree: -28, block: -10, drive: 8 },
-  'Glass Cleaner':        { putback: 30, block: 10, shotContest: 12, isolation: -28, pullUpJumper: -22, pullUpThree: -32, offScreenThree: -28, spotUp: -12 },
-  'Stretch Big':          { spotUp: 28, offScreenThree: 18, pullUpThree: 12, postUp: -22, isolation: -18, block: -12, putback: -10, drive: -8 },
+  'Post Scorer':          { postUp: 32, foulDrawing: 20, putback: 16, isolation: 10, pullUpThree: -30, offScreenThree: -30, block: -12, drive: 8 },
+  'Glass Cleaner':        { putback: 32, block: 10, shotContest: 12, isolation: -30, pullUpJumper: -25, pullUpThree: -35, offScreenThree: -30, spotUp: -14 },
+  'Stretch Big':          { spotUp: 30, offScreenThree: 22, pullUpThree: 14, postUp: -25, isolation: -20, block: -14, putback: -12, drive: -10 },
   'Stretch Rim Protector':{ block: 22, shotContest: 18, spotUp: 16, offScreenThree: 12, postUp: -16, isolation: -12, pullUpJumper: -16, drive: -8 },
-  '3&D Wing':             { spotUp: 22, onBallSteal: 16, shotContest: 12, playPassLane: 14, isolation: -18, postUp: -16, pullUpJumper: -10, drive: -6 },
-  'Lockdown Defender':    { onBallSteal: 22, shotContest: 22, playPassLane: 18, isolation: -18, pullUpJumper: -16, pullUpThree: -18, drive: -8 },
-  'Playmaking Guard':     { pass: 22, cutToBasket: 14, playPassLane: 14, isolation: -12, postUp: -18, block: -18, pullUpJumper: -8 },
+  '3&D Wing':             { spotUp: 24, onBallSteal: 16, shotContest: 14, playPassLane: 16, isolation: -20, postUp: -18, pullUpJumper: -12, drive: -8 },
+  'Lockdown Defender':    { onBallSteal: 24, shotContest: 24, playPassLane: 20, isolation: -20, pullUpJumper: -18, pullUpThree: -22, drive: -10, threePoint: -18 },
+  'Playmaking Guard':     { pass: 24, cutToBasket: 16, playPassLane: 16, isolation: -14, postUp: -20, block: -18, pullUpJumper: -10 },
   'Scoring Playmaker':    { pass: 16, pullUpJumper: 14, isolation: 14, drive: 12, spotUp: 10, block: -18, postUp: -12 },
-  'Pure Scorer':          { isolation: 22, pullUpJumper: 16, drive: 12, spotUp: 12, pass: -12, block: -18, putback: -12, postUp: -8 },
-  'Two-Way Forward':      { onBallSteal: 14, shotContest: 12, spotUp: 12, drive: 10, playPassLane: 10, postUp: -12, block: -6 },
-  'Two-Way Wing':         { onBallSteal: 16, spotUp: 14, shotContest: 12, drive: 8, postUp: -14, block: -10, isolation: -8 },
+  'Pure Scorer':          { isolation: 24, pullUpJumper: 18, drive: 14, spotUp: 14, pass: -18, block: -20, putback: -14, postUp: -10 },
+  'Two-Way Forward':      { onBallSteal: 14, shotContest: 12, spotUp: 12, drive: 10, playPassLane: 12, postUp: -14, block: -6 },
+  'Two-Way Wing':         { onBallSteal: 16, spotUp: 14, shotContest: 14, drive: 10, postUp: -16, block: -12, isolation: -8 },
   'Combo Guard':          { drive: 8, pullUpJumper: 10, pass: 10, spotUp: 10, block: -12, postUp: -12, isolation: -8 },
+  // New sub-archetypes
+  'Shot-Creating Guard':  { pullUpJumper: 26, drive: 18, isolation: 22, midRange: 18, foulDrawing: 14, pass: -16, onBallSteal: -10, shotContest: -14, playPassLane: -12 },
+  'Slashing Playmaker':   { drive: 32, cutToBasket: 22, pass: 20, alleyOop: 16, layup: 14, threePoint: -30, pullUpThree: -28, spotUp: -20, offScreenThree: -22 },
+  'Defensive Floor General': { onBallSteal: 28, playPassLane: 24, shotContest: 20, pass: 16, threePoint: -30, pullUpThree: -32, isolation: -18, spotUp: -20 },
+  'Pick-and-Roll Big':    { alleyOop: 28, cutToBasket: 22, putback: 18, foulDrawing: 12, offScreenThree: -26, pullUpThree: -32, isolation: -16, spotUp: -10 },
+  'Athletic Rim Runner':  { alleyOop: 35, dunk: 32, cutToBasket: 28, putback: 24, threePoint: -38, pullUpThree: -38, spotUp: -28, offScreenThree: -30, pullUpJumper: -24 },
   'Hybrid Star':          {},
   'Role Player':          {},
   'Bench Spark':          {},
@@ -286,8 +323,43 @@ export const getArchetypeFitScores = (
       : -100
   ]);
 
-  // Hybrid Star: any elite player (rating-gated)
-  entries.push(['Hybrid Star', rating >= 85 ? (rating - 85) * 4 : -100]);
+  // Shot-Creating Guard: off-dribble scorer, penalized for elite passing
+  entries.push(['Shot-Creating Guard',
+    isGuard
+      ? surplus(bh, 70) * 0.5 + surplus(mid, 70) * 0.55 + surplus(oIQ, 65) * 0.3 - surplus(pass, 76) * 0.3 - 8
+      : -100
+  ]);
+
+  // Slashing Playmaker: speed + handles + layups, penalized for elite 3PT
+  entries.push(['Slashing Playmaker',
+    (isGuard || isSF)
+      ? surplus(bh, 70) * 0.5 + surplus(spd, 72) * 0.4 + surplus(pass, 68) * 0.35 - surplus(sht3, 78) * 0.55 - 8
+      : -100
+  ]);
+
+  // Defensive Floor General: elite D + passing, heavily penalized for shooting
+  entries.push(['Defensive Floor General',
+    isPG
+      ? surplus(pDef, 72) * 0.6 + surplus(dIQ, 68) * 0.55 + surplus(stl, 65) * 0.3 + surplus(pass, 68) * 0.3 - surplus(sht3, 72) * 0.7 - 10
+      : -100
+  ]);
+
+  // Pick-and-Roll Big: post + rebounding + offense, penalized for 3PT
+  entries.push(['Pick-and-Roll Big',
+    isBig
+      ? surplus(post, 70) * 0.4 + surplus(oReb, 68) * 0.35 + surplus(dReb, 68) * 0.35 + surplus(str, 68) * 0.3 - surplus(sht3, 68) * 0.45 - 8
+      : -100
+  ]);
+
+  // Athletic Rim Runner: elite athleticism + dunks + speed, penalized for shooting
+  entries.push(['Athletic Rim Runner',
+    isBig
+      ? surplus(ath, 78) * 0.65 + surplus(spd, 70) * 0.4 + surplus(oReb, 65) * 0.3 - surplus(sht3, 65) * 0.2 - 12
+      : -100
+  ]);
+
+  // Hybrid Star: any elite player (rating-gated) — only true elites qualify
+  entries.push(['Hybrid Star', rating >= 92 ? (rating - 92) * 6 : -100]);
 
   // Fallbacks
   entries.push(['Role Player', 5]);
@@ -465,12 +537,14 @@ export const POSITION_HARD_CAPS: Record<Position, AttrBounds> = {
   PF: { shooting3pt: 82, ballHandling: 74, speed: 80, perimeterDef: 78, passing: 75, freeThrow: 88 },
   C:  { shooting3pt: 72, ballHandling: 68, speed: 72, perimeterDef: 70, passing: 68, freeThrow: 79 },
 };
+// Floors ensure positional competency but are lower than before so archetype
+// suppressions (bypassed for suppressed attributes) can create real weaknesses.
 export const POSITION_HARD_FLOORS: Record<Position, AttrBounds> = {
-  PG: { ballHandling: 78, speed: 80, passing: 75, perimeterDef: 72, shooting3pt: 75, freeThrow: 65 },
-  SG: { shooting3pt: 76, speed: 76, perimeterDef: 74, ballHandling: 70, freeThrow: 63 },
-  SF: { speed: 60, perimeterDef: 72, athleticism: 76, freeThrow: 52 },
-  PF: { strength: 78, interiorDef: 76, offReb: 72, defReb: 75, freeThrow: 44 },
-  C:  { strength: 82, interiorDef: 80, offReb: 76, defReb: 78, blocks: 76, postScoring: 76, freeThrow: 36 },
+  PG: { ballHandling: 72, speed: 74, passing: 68, perimeterDef: 65, shooting3pt: 68, freeThrow: 60 },
+  SG: { shooting3pt: 68, speed: 70, perimeterDef: 66, ballHandling: 64, freeThrow: 58 },
+  SF: { speed: 56, perimeterDef: 64, athleticism: 68, freeThrow: 48 },
+  PF: { strength: 72, interiorDef: 68, offReb: 64, defReb: 68, freeThrow: 38 },
+  C:  { strength: 76, interiorDef: 70, offReb: 66, defReb: 70, blocks: 68, postScoring: 65, freeThrow: 30 },
 };
 
 // ── Per-attribute generation bias by position ────────────────────────────────
@@ -671,7 +745,7 @@ export const applyFemaleAttrCaps = (attrs: Player['attributes']): Player['attrib
 export const applyAttrBounds = (
   attrs: Player['attributes'],
   pos: Position,
-  opts?: { capBonus?: number; heightBonus?: number; stretchBig?: boolean; glassCleaner?: boolean }
+  opts?: { capBonus?: number; heightBonus?: number; stretchBig?: boolean; glassCleaner?: boolean; archetype?: string }
 ): Player['attributes'] => {
   const caps   = POSITION_HARD_CAPS[pos]  ?? {};
   const floors = POSITION_HARD_FLOORS[pos] ?? {};
@@ -681,6 +755,13 @@ export const applyAttrBounds = (
   const stretchBigOverride = opts?.stretchBig ?? false;
   // GLASS CLEANER badge → reb caps +8 for PG/SG
   const glassBonus = (opts?.glassCleaner && (pos === 'PG' || pos === 'SG')) ? 8 : 0;
+  // Archetype-aware floor bypass: skip position floors for attributes the archetype
+  // explicitly suppresses. This allows genuine archetypical weaknesses to persist
+  // (e.g. Rim Protector can have truly low postScoring, Lockdown Defender can have
+  // truly low shooting3pt) without position floors fighting the intended identity.
+  const archetypeSuppressed = opts?.archetype && ARCHETYPE_ATTR_SHAPE[opts.archetype]
+    ? new Set(Object.keys(ARCHETYPE_ATTR_SHAPE[opts.archetype].suppress))
+    : new Set<string>();
   const heightBonusKeys = new Set(['blocks', 'offReb', 'defReb', 'rebounding']);
   const rebBonusKeys    = new Set(['offReb', 'defReb', 'rebounding']);
   const a = { ...attrs } as any;
@@ -694,6 +775,8 @@ export const applyAttrBounds = (
     if (a[key] > adj) a[key] = adj;
   }
   for (const [key, floor] of Object.entries(floors)) {
+    // Skip floor enforcement for attributes the archetype is designed to suppress.
+    if (archetypeSuppressed.has(key)) continue;
     if (a[key] !== undefined && a[key] < (floor as number)) a[key] = floor as number;
   }
   return a as Player['attributes'];
@@ -715,7 +798,8 @@ export const enforcePositionalBounds = (player: Player): Player => {
     ((pos === 'PF' || pos === 'C') && player.archetype?.toLowerCase().includes('stretch'));
   // GLASS CLEANER badge → reb caps +8 for PG/SG
   const glassCleaner = playerBadges.includes('Glass Cleaner');
-  const newAttrs = applyAttrBounds(player.attributes, pos, { capBonus, heightBonus, stretchBig, glassCleaner });
+  // Pass archetype so floor bypass can skip suppressed attributes
+  const newAttrs = applyAttrBounds(player.attributes, pos, { capBonus, heightBonus, stretchBig, glassCleaner, archetype: player.archetype });
   const cappedAttrs = player.gender === 'Female' ? applyFemaleAttrCaps(newAttrs) : newAttrs;
   const newRating = calcPositionRating(pos, cappedAttrs);
   return { ...player, attributes: cappedAttrs, rating: newRating };
@@ -1732,7 +1816,7 @@ const calcNBASalary = (rating: number, year: number): number => {
   return Math.round((market * (0.80 + Math.random() * 0.40)) / unit) * unit;
 };
 
-export const generatePlayer = (id: string, ageRange: [number, number] = [19, 38], genderRatio: number = 0, draftCtx?: DraftContext, leagueYear?: number, minRating = 60): Player => {
+export const generatePlayer = (id: string, ageRange: [number, number] = [19, 38], genderRatio: number = 0, draftCtx?: DraftContext, leagueYear?: number, minRating = 60, genOpts?: { archetypeBias?: Record<string, number> }): Player => {
   const gender = getRandomGender(genderRatio);
   
   // Pick a region based on weights
@@ -1751,42 +1835,60 @@ export const generatePlayer = (id: string, ageRange: [number, number] = [19, 38]
   const lastNames = gender === 'Male' ? region.lastNamesMale : NAMES_FEMALE.last;
 
   const rand = Math.random();
-  // Target distribution (30 teams × 15 = 450 players):
-  //   ≤25  players at 90+  → 5%  × 450 ≈ 22
-  //   ≥100 players at 80–89 → 22% × 450 ≈ 99
-  //   rest 60–79, no players below 60
+  // Compressed 7-tier distribution (30 teams × 15 = 450 players):
+  //   ~4  players 95–99  (franchise / league face)
+  //   ~27 players 90–94  (All-Star caliber)
+  //   ~68 players 85–89  (star / high-end starter)
+  //   ~99 players 80–84  (quality starter)
+  //   ~99 players 75–79  (role starter)
+  //   ~81 players 70–74  (rotation)
+  //   ~72 players 60–69  (bench / development)
   // tierCeiling enforced after enforcePositionalBounds so attribute variance
-  // cannot push 80-tier players into the 90+ superstar bracket.
+  // cannot push players above their tier bracket.
   let baseRating: number;
   let tierCeiling: number;
-  if (rand > 0.95) {
-    baseRating = 90 + Math.floor(Math.random() * 7);   // 5%:  90–96 (superstars)
+  if (rand > 0.99) {
+    baseRating = 95 + Math.floor(Math.random() * 5);   // 1%:  95–99 (franchise player)
     tierCeiling = 99;
-  } else if (rand > 0.73) {
-    baseRating = 80 + Math.floor(Math.random() * 10);  // 22%: 80–89 (All-Star / star tier)
+  } else if (rand > 0.93) {
+    baseRating = 90 + Math.floor(Math.random() * 5);   // 6%:  90–94 (All-Star caliber)
+    tierCeiling = 94;
+  } else if (rand > 0.78) {
+    baseRating = 85 + Math.floor(Math.random() * 5);   // 15%: 85–89 (star / high-end starter)
     tierCeiling = 89;
-  } else if (rand > 0.35) {
-    baseRating = 70 + Math.floor(Math.random() * 10);  // 38%: 70–79 (solid starters)
+  } else if (rand > 0.56) {
+    baseRating = 80 + Math.floor(Math.random() * 5);   // 22%: 80–84 (quality starter)
+    tierCeiling = 84;
+  } else if (rand > 0.34) {
+    baseRating = 75 + Math.floor(Math.random() * 5);   // 22%: 75–79 (role starter)
     tierCeiling = 79;
+  } else if (rand > 0.16) {
+    baseRating = 70 + Math.floor(Math.random() * 5);   // 18%: 70–74 (rotation player)
+    tierCeiling = 74;
   } else {
-    baseRating = 60 + Math.floor(Math.random() * 10);  // 35%: 60–69 (bench / role players)
+    baseRating = 60 + Math.floor(Math.random() * 10);  // 16%: 60–69 (bench / development)
     tierCeiling = 69;
   }
   const rating = Math.min(99, Math.max(minRating, baseRating));
   const potential = Math.min(99, rating + Math.floor(Math.random() * 12));
   const pos = POSITIONS[Math.floor(Math.random() * POSITIONS.length)];
 
-  // Pick archetype first so attributes can be shaped toward it
+  // Pick archetype first so attributes can be shaped toward it.
+  // archetypeBias multipliers from team identity skew selection toward preferred archetypes.
   const archetypePool = ARCHETYPE_POSITION_WEIGHTS[pos] ?? [['Role Player', 1]];
-  const archetypeTotalWeight = archetypePool.reduce((s, [, w]) => s + w, 0);
+  const bias = genOpts?.archetypeBias ?? {};
+  const biasedPool = archetypePool.map(([name, weight]) =>
+    [name, weight * (bias[name] ?? 1.0)] as [string, number]
+  );
+  const archetypeTotalWeight = biasedPool.reduce((s, [, w]) => s + w, 0);
   let archetypeRoll = Math.random() * archetypeTotalWeight;
-  let chosenArchetype = archetypePool[archetypePool.length - 1][0];
-  for (const [name, weight] of archetypePool) {
+  let chosenArchetype = biasedPool[biasedPool.length - 1][0];
+  for (const [name, weight] of biasedPool) {
     archetypeRoll -= weight;
     if (archetypeRoll <= 0) { chosenArchetype = name; break; }
   }
-  // Elite players (90+) always upgrade to Hybrid Star
-  if (rating >= 90 && Math.random() < 0.4) chosenArchetype = 'Hybrid Star';
+  // Only truly generational 96+ players become Hybrid Stars — rare and meaningful
+  if (rating >= 96 && Math.random() < 0.65) chosenArchetype = 'Hybrid Star';
 
   // WNBA age eligibility: domestic (U.S.) ≥ 22, international ≥ 20.
   // Enforced here so every code path that calls generatePlayer automatically respects WNBA rules.
@@ -2224,14 +2326,69 @@ export const generateDefaultRotation = (roster: Player[]): TeamRotation => {
 // These are minimum ratings per roster slot so teams have a realistic spread.
 const TIER_SLOT_FLOORS: Record<string, number[]> = {
   // elite: top contenders — slot 0 guaranteed near-star (88+); bench 60+ floor
-  elite:      [88, 85, 82, 80, 78, 76, 74, 72, 70, 68, 66, 64, 62, 60],
-  // solid: strong rosters — 1 star-level starter (82+), deep bench 60+
-  solid:      [82, 80, 78, 76, 74, 72, 70, 68, 66, 64, 62, 61, 60, 60],
-  // average: steady starters (76+), full bench 60+
-  average:    [76, 74, 72, 70, 68, 66, 64, 62, 61, 60, 60, 60, 60, 60],
-  // rebuilding: young project roster — starter 70+, full bench 60+
-  rebuilding: [72, 70, 68, 66, 64, 62, 61, 60, 60, 60, 60, 60, 60, 60],
+  elite:      [88, 84, 81, 79, 77, 75, 73, 71, 69, 67, 65, 63, 61, 59],
+  // solid: strong rosters — 1 star-level starter (82+), deep bench 58+
+  solid:      [82, 79, 77, 75, 73, 71, 69, 67, 65, 63, 61, 60, 58, 58],
+  // average: steady starters (76+), full bench 58+
+  average:    [76, 74, 72, 70, 68, 66, 64, 62, 60, 58, 58, 58, 58, 58],
+  // rebuilding: young project roster — starter 70+, full bench 56+
+  rebuilding: [72, 70, 68, 66, 64, 62, 60, 58, 56, 56, 56, 56, 56, 56],
 };
+
+// ── Team identity types — shape archetype selection and give teams clear identities ──
+export type TeamIdentityId = 'spacing' | 'defensive' | 'transition' | 'interior' | 'playmaking' | 'two_way' | 'balanced';
+
+export interface TeamIdentityDef {
+  id: TeamIdentityId;
+  name: string;
+  archetypeBias: Record<string, number>;
+  preferredScheme: CoachScheme;
+}
+
+export const TEAM_IDENTITY_TYPES: TeamIdentityDef[] = [
+  {
+    id: 'spacing',
+    name: 'Spacing & Shooting',
+    archetypeBias: { '3&D Wing': 1.9, 'Stretch Big': 1.9, 'Stretch Rim Protector': 1.6, 'Pure Scorer': 1.6, 'Shot-Creating Guard': 1.5 },
+    preferredScheme: 'Pace and Space',
+  },
+  {
+    id: 'defensive',
+    name: 'Defensive Identity',
+    archetypeBias: { 'Lockdown Defender': 1.9, 'Rim Protector': 1.9, 'Two-Way Forward': 1.5, 'Defensive Floor General': 1.9, 'Glass Cleaner': 1.6, 'Two-Way Wing': 1.4 },
+    preferredScheme: 'Grit and Grind',
+  },
+  {
+    id: 'transition',
+    name: 'Transition & Athletics',
+    archetypeBias: { 'Athletic Rim Runner': 1.9, 'Slashing Playmaker': 1.9, 'Scoring Playmaker': 1.5, 'Two-Way Wing': 1.5, 'Combo Guard': 1.3 },
+    preferredScheme: 'Showtime',
+  },
+  {
+    id: 'interior',
+    name: 'Interior Dominance',
+    archetypeBias: { 'Post Scorer': 1.9, 'Glass Cleaner': 1.8, 'Two-Way Interior Star': 1.8, 'Pick-and-Roll Big': 1.6, 'Rim Protector': 1.5 },
+    preferredScheme: 'Grit and Grind',
+  },
+  {
+    id: 'playmaking',
+    name: 'Playmaking & Creation',
+    archetypeBias: { 'Playmaking Guard': 1.9, 'Scoring Playmaker': 1.8, 'Slashing Playmaker': 1.5, 'Combo Guard': 1.4, 'Two-Way Forward': 1.3 },
+    preferredScheme: 'Triangle',
+  },
+  {
+    id: 'two_way',
+    name: 'Two-Way Defense',
+    archetypeBias: { 'Two-Way Wing': 1.9, 'Two-Way Forward': 1.8, 'Lockdown Defender': 1.5, '3&D Wing': 1.5, 'Defensive Floor General': 1.4 },
+    preferredScheme: 'Balanced',
+  },
+  {
+    id: 'balanced',
+    name: 'Balanced',
+    archetypeBias: {},
+    preferredScheme: 'Balanced',
+  },
+];
 
 // ── Executive (GM) name generation ───────────────────────────────────────────
 const GM_FIRST_NAMES_MALE = [
@@ -2325,8 +2482,13 @@ export const generateLeagueTeams = (genderRatio: number = 0, season: number = 20
     const draftCtx: DraftContext = { season, teamNames, usedPicks };
     const tier = (tierList[i] ?? 'average') as keyof typeof TIER_SLOT_FLOORS;
     const slotFloors = TIER_SLOT_FLOORS[tier];
+
+    // Assign a team identity that shapes archetype selection across the roster
+    const identity = TEAM_IDENTITY_TYPES[Math.floor(Math.random() * TEAM_IDENTITY_TYPES.length)];
+    const genOpts = { archetypeBias: identity.archetypeBias };
+
     let roster = Array.from({ length: 15 }).map((_, j) =>
-      generatePlayer(`p-${i}-${j}`, [19, 38], genderRatio, draftCtx, season, slotFloors[j] ?? 68)
+      generatePlayer(`p-${i}-${j}`, [19, 38], genderRatio, draftCtx, season, slotFloors[j] ?? 60, genOpts)
     );
 
     // ── Positional balance enforcement ────────────────────────────────────────
@@ -2384,6 +2546,8 @@ export const generateLeagueTeams = (genderRatio: number = 0, season: number = 20
     }
 
     const headCoach = generateCoach(`coach-${teamId}-hc`, 'B', genderRatio, season);
+    // Prefer the identity's scheme; fall back to coach's preferred scheme
+    const teamScheme = identity.preferredScheme ?? getCoachPreferredScheme(headCoach);
     return {
       id: teamId,
       name: data.name,
@@ -2397,7 +2561,8 @@ export const generateLeagueTeams = (genderRatio: number = 0, season: number = 20
         trainer: generateCoach(`coach-${teamId}-tr`, 'C', genderRatio, season)
       },
       staffBudget: 15000000,
-      activeScheme: getCoachPreferredScheme(headCoach),
+      activeScheme: teamScheme,
+      teamIdentity: identity.name,
       wins: 0, losses: 0, homeWins: 0, homeLosses: 0, roadWins: 0, roadLosses: 0, confWins: 0, confLosses: 0, lastTen: [],
       budget: 180000000,
       logo: '',  // no stock photo; TeamBadge renders letter badge as default
@@ -2434,6 +2599,51 @@ export const generateLeagueTeams = (genderRatio: number = 0, season: number = 20
       ...(() => { const gm = generateGMName(genderRatio); return { gmName: gm.name, gmAge: gm.age }; })(),
     };
   });
+};
+
+/**
+ * Analyzes a team's rotation and returns its notable strengths and weaknesses.
+ * Uses the top 8 players by rating to represent the rotation.
+ * Strengths = composite averages well above league average (~73).
+ * Weaknesses = composite averages well below league average.
+ */
+export const computeTeamProfile = (roster: Player[]): {
+  strengths: string[];
+  weaknesses: string[];
+} => {
+  const rotation = [...roster].sort((a, b) => b.rating - a.rating).slice(0, 8);
+  if (rotation.length === 0) return { strengths: [], weaknesses: [] };
+
+  const avg = (fn: (p: Player) => number) =>
+    rotation.reduce((s, p) => s + fn(p), 0) / rotation.length;
+
+  const categories: Array<{ label: string; val: number }> = [
+    { label: '3-Point Shooting',   val: avg(p => p.attributes.shooting3pt) },
+    { label: 'Mid-Range Scoring',  val: avg(p => p.attributes.shootingMid) },
+    { label: 'Perimeter Defense',  val: avg(p => p.attributes.perimeterDef) },
+    { label: 'Interior Defense',   val: avg(p => p.attributes.interiorDef) },
+    { label: 'Rebounding',         val: avg(p => (p.attributes.offReb + p.attributes.defReb) / 2) },
+    { label: 'Playmaking',         val: avg(p => (p.attributes.ballHandling + p.attributes.passing) / 2) },
+    { label: 'Post Scoring',       val: avg(p => p.attributes.postScoring) },
+    { label: 'Athleticism',        val: avg(p => p.attributes.athleticism) },
+    { label: 'Shot-Blocking',      val: avg(p => p.attributes.blocks) },
+    { label: 'Ball Pressure',      val: avg(p => p.attributes.steals) },
+  ];
+
+  // 78+ = clear strength, 66- = clear weakness vs league average ~73
+  const strengths = categories
+    .filter(c => c.val >= 78)
+    .sort((a, b) => b.val - a.val)
+    .slice(0, 4)
+    .map(c => c.label);
+
+  const weaknesses = categories
+    .filter(c => c.val <= 66)
+    .sort((a, b) => a.val - b.val)
+    .slice(0, 3)
+    .map(c => c.label);
+
+  return { strengths, weaknesses };
 };
 
 export const generateSeasonSchedule = (

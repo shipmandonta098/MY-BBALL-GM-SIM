@@ -565,6 +565,8 @@ export interface Team {
   paceRating?: number;
   /** Days remaining in the permanent HC search. undefined = not searching. 0 = user-team vacancy (user hires manually). */
   coachSearchDaysLeft?: number;
+  /** Intended team identity (set at league generation, e.g. 'Spacing & Shooting') */
+  teamIdentity?: string;
 }
 
 export interface TradePiece {
