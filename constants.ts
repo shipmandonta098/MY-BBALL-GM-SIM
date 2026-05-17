@@ -1919,7 +1919,10 @@ export const generatePlayer = (id: string, ageRange: [number, number] = [19, 38]
   // push a lower-tier player into the 90+ superstar bracket.
   const effectiveCeiling = Math.max(minRating, tierCeiling);
   const clampedRating = Math.max(minRating, Math.min(effectiveCeiling, raw.rating));
-  return clampedRating !== raw.rating ? { ...raw, rating: clampedRating } : raw;
+  // Potential must never be lower than current rating.
+  const clampedPotential = Math.max(clampedRating, raw.potential);
+  const needsUpdate = clampedRating !== raw.rating || clampedPotential !== raw.potential;
+  return needsUpdate ? { ...raw, rating: clampedRating, potential: clampedPotential } : raw;
 };
 
 export const generateFreeAgentPool = (count: number, season: number, genderRatio: number = 0, extraTeamNames: string[] = []): Player[] => {
