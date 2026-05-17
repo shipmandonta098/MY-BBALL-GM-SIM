@@ -3452,7 +3452,9 @@ type PossessionType =
   | 'CUT'          // backdoor/basket cut; layup vs. interior awareness
   | 'DRIVE_KICK'   // drive-and-kick to open shooter; passer vision, shooter 3PT
   | 'OREB_CONT'    // offensive rebound continuation; finisher + offReb tendency
-  | 'BAILOUT';     // late-clock scramble; any scorer with high isolation
+  | 'BAILOUT'      // late-clock scramble; any scorer with high isolation
+  | 'LOB'          // alley-oop/lob play — rim runner catches and finishes above the rim
+  | 'DUMP_OFF';    // drive penetration dump-off to rolling big near the basket
 
 interface TeamPossState {
   p: Player;
@@ -3490,12 +3492,12 @@ const mkTeamPossState = (p: Player, min: number, varRoll: number): TeamPossState
 
 // Scheme base possession-type weights. Each scheme biases toward its identity play.
 const SCHEME_POSS_WEIGHTS: Record<CoachScheme, Record<PossessionType, number>> = {
-  'Balanced':       { TRANSITION:14, ISO:8,  POST_UP:7,  PNR_BH:17, PNR_ROLL:10, SPOT_UP:20, OFF_SCREEN:6,  CUT:8,  DRIVE_KICK:8,  OREB_CONT:2, BAILOUT:0 },
-  'Pace and Space': { TRANSITION:22, ISO:5,  POST_UP:3,  PNR_BH:15, PNR_ROLL:6,  SPOT_UP:28, OFF_SCREEN:5,  CUT:6,  DRIVE_KICK:7,  OREB_CONT:2, BAILOUT:1 },
-  'Grit and Grind': { TRANSITION:8,  ISO:10, POST_UP:18, PNR_BH:14, PNR_ROLL:14, SPOT_UP:14, OFF_SCREEN:8,  CUT:7,  DRIVE_KICK:5,  OREB_CONT:2, BAILOUT:0 },
-  'Triangle':       { TRANSITION:10, ISO:5,  POST_UP:12, PNR_BH:10, PNR_ROLL:10, SPOT_UP:18, OFF_SCREEN:12, CUT:14, DRIVE_KICK:7,  OREB_CONT:2, BAILOUT:0 },
-  'Small Ball':     { TRANSITION:20, ISO:8,  POST_UP:4,  PNR_BH:17, PNR_ROLL:7,  SPOT_UP:22, OFF_SCREEN:7,  CUT:7,  DRIVE_KICK:6,  OREB_CONT:1, BAILOUT:1 },
-  'Showtime':       { TRANSITION:28, ISO:6,  POST_UP:6,  PNR_BH:12, PNR_ROLL:9,  SPOT_UP:16, OFF_SCREEN:6,  CUT:9,  DRIVE_KICK:6,  OREB_CONT:1, BAILOUT:1 },
+  'Balanced':       { TRANSITION:14, ISO:8,  POST_UP:7,  PNR_BH:17, PNR_ROLL:6,  SPOT_UP:16, OFF_SCREEN:6,  CUT:8,  DRIVE_KICK:8,  OREB_CONT:2, BAILOUT:0, LOB:4,  DUMP_OFF:4  },
+  'Pace and Space': { TRANSITION:22, ISO:5,  POST_UP:3,  PNR_BH:12, PNR_ROLL:3,  SPOT_UP:25, OFF_SCREEN:5,  CUT:6,  DRIVE_KICK:7,  OREB_CONT:2, BAILOUT:1, LOB:3,  DUMP_OFF:6  },
+  'Grit and Grind': { TRANSITION:8,  ISO:10, POST_UP:14, PNR_BH:11, PNR_ROLL:9,  SPOT_UP:14, OFF_SCREEN:8,  CUT:7,  DRIVE_KICK:5,  OREB_CONT:2, BAILOUT:0, LOB:5,  DUMP_OFF:7  },
+  'Triangle':       { TRANSITION:10, ISO:5,  POST_UP:12, PNR_BH:10, PNR_ROLL:10, SPOT_UP:13, OFF_SCREEN:12, CUT:9,  DRIVE_KICK:7,  OREB_CONT:2, BAILOUT:0, LOB:5,  DUMP_OFF:5  },
+  'Small Ball':     { TRANSITION:18, ISO:8,  POST_UP:4,  PNR_BH:12, PNR_ROLL:7,  SPOT_UP:19, OFF_SCREEN:7,  CUT:7,  DRIVE_KICK:6,  OREB_CONT:1, BAILOUT:1, LOB:4,  DUMP_OFF:6  },
+  'Showtime':       { TRANSITION:24, ISO:6,  POST_UP:6,  PNR_BH:7,  PNR_ROLL:9,  SPOT_UP:11, OFF_SCREEN:6,  CUT:6,  DRIVE_KICK:6,  OREB_CONT:1, BAILOUT:1, LOB:9,  DUMP_OFF:8  },
 };
 
 /** Weighted random pick — O(n). Returns arr[i] with prob proportional to wFn(arr[i]). */
@@ -3520,6 +3522,59 @@ function getInsideFgPctForPlayer(p: Player): number {
   return layupBase * Math.max(0, 1 - dunkW - postW) + dunkBase * 0.75 * dunkW + postBase * postW;
 }
 
+const RIM_RUNNING_ARCHETYPES = new Set([
+  'Athletic Rim Runner', 'Pick-and-Roll Big', 'Glass Cleaner',
+  'Rim Protector', 'Two-Way Interior Star',
+]);
+function isRimRunner(p: Player): boolean {
+  return RIM_RUNNING_ARCHETYPES.has(p.archetype ?? '');
+}
+
+type RimFinishType =
+  | 'LOB'            // alley-oop dunk above the rim
+  | 'TRANSITION_DUNK'// open-court dunk in transition
+  | 'OPEN_ROLL'      // catch on open roll to rim
+  | 'OPEN_CUT'       // backdoor cut to rim
+  | 'DUMP_OFF'       // dump-off layup from drive penetration
+  | 'PUTBACK'        // offensive rebound put-back
+  | 'STANDARD';      // contested layup / default inside
+
+/** Per-shot-type FG% for inside finishes, reflecting open vs. contested quality. */
+function getRimFinishFgPct(p: Player, finishType: RimFinishType): number {
+  const dunk     = p.attributes.dunks    ?? 50;
+  const layup    = p.attributes.layups   ?? 50;
+  const jumping  = p.attributes.jumping  ?? 50;
+  const strength = p.attributes.strength ?? 50;
+  switch (finishType) {
+    case 'LOB': {
+      const raw = 0.60 + (dunk / 100) * 0.22 + (jumping / 100) * 0.14;
+      return Math.max(0.76, Math.min(0.96, raw));
+    }
+    case 'TRANSITION_DUNK': {
+      const raw = 0.58 + (dunk / 100) * 0.22 + (jumping / 100) * 0.15;
+      return Math.max(0.74, Math.min(0.95, raw));
+    }
+    case 'OPEN_ROLL': {
+      const raw = 0.48 + (layup / 100) * 0.20 + (dunk / 100) * 0.22;
+      return Math.max(0.65, Math.min(0.90, raw));
+    }
+    case 'OPEN_CUT': {
+      const raw = 0.45 + (layup / 100) * 0.22 + (dunk / 100) * 0.17;
+      return Math.max(0.62, Math.min(0.84, raw));
+    }
+    case 'DUMP_OFF': {
+      const raw = 0.42 + (layup / 100) * 0.22 + (strength / 100) * 0.18;
+      return Math.max(0.60, Math.min(0.82, raw));
+    }
+    case 'PUTBACK': {
+      const raw = 0.38 + (layup / 100) * 0.20 + (dunk / 100) * 0.14 + (jumping / 100) * 0.08;
+      return Math.max(0.53, Math.min(0.80, raw));
+    }
+    default:
+      return getInsideFgPctForPlayer(p);
+  }
+}
+
 /** Defender's per-zone FG-suppression mod (negative = harder to score).
  *  Uses TEAM_BOX_SCORE contexts calibrated for game-average suppression. */
 function zoneDefMod(def: Player, zone: 'inside' | 'mid' | 'three'): number {
@@ -3531,10 +3586,12 @@ function zoneDefMod(def: Player, zone: 'inside' | 'mid' | 'three'): number {
 // Fraction of made baskets that earn an assist, keyed by possession type.
 // Derived from NBA 2024-25 play-type assist rates (Synergy / Second Spectrum).
 const ASSIST_PROB: Record<PossessionType, number> = {
+  LOB:        0.99,  // alley-oop is always assisted; the passer throws it up
+  DUMP_OFF:   0.96,  // dump-off to rolling big nearly always earns an assist
   CUT:        0.90,  // catch-and-cut is nearly always assisted
-  PNR_ROLL:   0.82,  // roll-man catch almost always gets a pass credit
   SPOT_UP:    0.88,  // catch-and-shoot = assisted by definition
   DRIVE_KICK: 0.85,  // driver kicks out, shooter hits → driver gets AST
+  PNR_ROLL:   0.82,  // roll-man catch almost always gets a pass credit
   OFF_SCREEN: 0.78,  // curl shooter gets the pass credit
   TRANSITION: 0.50,  // mix of outlet-pass scores and solo runs
   PNR_BH:     0.28,  // pull-up is often unassisted; some kick-backs are assisted
@@ -3563,7 +3620,8 @@ function resolveAssist(
   }
   // Pass plays: ball handler passed to a different shooter → BH gets the AST.
   const isNaturalPassPlay = (possType === 'PNR_ROLL' || possType === 'SPOT_UP'
-    || possType === 'CUT' || possType === 'DRIVE_KICK' || possType === 'OFF_SCREEN')
+    || possType === 'CUT' || possType === 'DRIVE_KICK' || possType === 'OFF_SCREEN'
+    || possType === 'LOB' || possType === 'DUMP_OFF')
     && bh.p.id !== shooter.p.id;
   const candidates = court.filter(s => s.p.id !== shooter.p.id);
   if (candidates.length === 0) { shooter._unassistedMakes++; return; }
@@ -3625,8 +3683,10 @@ function runOffenseEngine(
       const ot      = getOT(s.p);
       const play    = (ot.isoHeavy + ot.pullUpOffPnr + ot.driveToBasket + ot.kickOutPasser) / 4;
       const hotBoost = 1 + s.varRoll / 100 * 0.20;
+      // Rim runners are poor initiators — they function as receivers, not ball-handlers
+      const rimPenalty = isRimRunner(s.p) ? 0.25 : 1.0;
       return Math.max(0.01,
-        Math.pow(s.p.rating / 75, 1.5) * s.minFrac * (1 + (play - 50) / 100) * hotBoost);
+        Math.pow(s.p.rating / 75, 1.5) * s.minFrac * (1 + (play - 50) / 100) * hotBoost * rimPenalty);
     });
     bh._touches++;
 
@@ -3641,6 +3701,21 @@ function runOffenseEngine(
     wMap.PNR_BH     = Math.max(0, wMap.PNR_BH     * (1 + (ot.pullUpOffPnr    - 50) / 100 + (ot.midRangeJumper - 50) / 200));
     wMap.DRIVE_KICK = Math.max(0, wMap.DRIVE_KICK * (1 + (ot.kickOutPasser   - 50) / 100));
     wMap.OFF_SCREEN = Math.max(0, wMap.OFF_SCREEN * (1 + (ot.offScreen       - 50) / 50));
+    // LOB and DUMP_OFF require specific personnel on court to be viable
+    const courtRimRunners = court.filter(s => isRimRunner(s.p));
+    const hasPenetratingGuard = court.some(s =>
+      (s.p.position === 'PG' || s.p.position === 'SG') &&
+      (s.p.attributes.driveToBasket ?? 50) > 60);
+    if (courtRimRunners.length === 0) {
+      wMap.LOB      = 0;
+      wMap.DUMP_OFF = Math.max(0, (wMap.DUMP_OFF ?? 0) * 0.20);
+    } else {
+      const rimQuality = courtRimRunners.reduce(
+        (best, s) => Math.max(best, ((s.p.attributes.dunks ?? 50) + (s.p.attributes.jumping ?? 50)) / 2), 0);
+      wMap.LOB = Math.max(0, (wMap.LOB ?? 0) * (rimQuality / 75));
+      wMap.DUMP_OFF = Math.max(0, (wMap.DUMP_OFF ?? 0)
+        * (hasPenetratingGuard ? 1 + courtRimRunners.length * 0.40 : 0.40));
+    }
     const entries  = Object.entries(wMap) as [PossessionType, number][];
     const possType = pickWeighted(entries, ([, w]) => w)[0];
     bh._possTypes[possType] = (bh._possTypes[possType] ?? 0) + 1;
@@ -3711,7 +3786,8 @@ function runOffenseEngine(
     // Runs before the shooter receives the ball on all pass-heavy possessions.
     // Scale 2.2: pass-lane steals contribute ~2.5/game to reach 6–9 team STL/game target.
     const isPassPlay = possType === 'PNR_ROLL' || possType === 'SPOT_UP'
-      || possType === 'CUT' || possType === 'DRIVE_KICK' || possType === 'OFF_SCREEN';
+      || possType === 'CUT' || possType === 'DRIVE_KICK' || possType === 'OFF_SCREEN'
+      || possType === 'LOB' || possType === 'DUMP_OFF';
     if (isPassPlay && dCourt.length > 0) {
       const passLaneDef = pickWeighted(dCourt, s => {
         const dt = getDT(s.p);
@@ -3739,10 +3815,17 @@ function runOffenseEngine(
       let shooter = bh;
       if (shotN === 0 && isPassPlay && court.length > 1) {
         const others = court.filter(s => s.p.id !== bh.p.id);
-        shooter = pickWeighted(others, s => {
+        // LOB and DUMP_OFF strongly prefer rim-running targets; fall back if none present
+        const lobCandidates = (possType === 'LOB' || possType === 'DUMP_OFF')
+          ? others.filter(s => isRimRunner(s.p))
+          : null;
+        const candidates = (lobCandidates && lobCandidates.length > 0) ? lobCandidates : others;
+        shooter = pickWeighted(candidates, s => {
           const ot2  = getOT(s.p);
           const base = Math.pow(s.p.rating / 75, 1.5) * s.minFrac;
           const bonus =
+            possType === 'LOB'        ? ((s.p.attributes.dunks ?? 50) + (s.p.attributes.jumping ?? 50)) / 200 :
+            possType === 'DUMP_OFF'   ? ((s.p.attributes.layups ?? 50) + (s.p.attributes.dunks ?? 50)) / 200 :
             possType === 'PNR_ROLL'   ? ((s.p.attributes.layups ?? 50) + (s.p.attributes.dunks ?? 50)) / 200 :
             possType === 'SPOT_UP'    ? s.p.attributes.shooting3pt / 100 + (ot2.spotUp    - 50) / 100 :
             possType === 'CUT'        ? (ot2.cutter    - 30) / 70 :
@@ -3760,7 +3843,7 @@ function runOffenseEngine(
 
       // ── Shot zone ───────────────────────────────────────────────────────
       let zone: 'inside' | 'mid' | 'three';
-      if (['POST_UP', 'PNR_ROLL', 'CUT'].includes(possType) || shotN > 0) {
+      if (['POST_UP', 'PNR_ROLL', 'CUT', 'LOB', 'DUMP_OFF'].includes(possType) || shotN > 0) {
         zone = 'inside';
       } else if (['SPOT_UP', 'OFF_SCREEN', 'DRIVE_KICK'].includes(possType)) {
         // Catch-and-shoot plays: decide three vs. mid based on shooter's relative shooting attributes.
@@ -3793,6 +3876,10 @@ function runOffenseEngine(
       else if (zone === 'three') shooter._shotThree++;
       else shooter._shotMid++;
 
+      // For transition possessions going inside, stochastically classify as a dunk
+      const isTransitionDunk = possType === 'TRANSITION' && zone === 'inside'
+        && (shooter.p.attributes.dunks ?? 50) >= 65 && Math.random() < 0.40;
+
       // ── Block check: ALL on-court defenders checked in descending blocks order ─
       // Checking all defenders (instead of picking one) lets teams with multiple
       // shot-blockers reach the 4–6 team BPG target organically.
@@ -3800,7 +3887,8 @@ function runOffenseEngine(
       // average roster 4–6 team BPG. (was 1.8, producing 7+ BPG for top individual).
       // Mid-range post-up shots are also contestable by interior defenders.
       let blocked = false;
-      if ((zone === 'inside' || (zone === 'mid' && possType === 'POST_UP')) && dCourt.length > 0) {
+      if ((zone === 'inside' || (zone === 'mid' && possType === 'POST_UP'))
+          && possType !== 'LOB' && dCourt.length > 0) {
         const blockCandidates = [...dCourt].sort(
           (a, b) => (b.p.attributes.blocks ?? 0) - (a.p.attributes.blocks ?? 0));
         for (const blocker of blockCandidates) {
@@ -3843,18 +3931,40 @@ function runOffenseEngine(
       if (zone === 'three') shooter.tpa++;
 
       if (!blocked) {
+        // Shot quality tier — determines base FG% ceiling and defense scaling
+        const finishType: RimFinishType =
+          zone !== 'inside'        ? 'STANDARD' :
+          possType === 'LOB'       ? 'LOB' :
+          possType === 'DUMP_OFF'  ? 'DUMP_OFF' :
+          possType === 'PNR_ROLL'  ? 'OPEN_ROLL' :
+          possType === 'CUT'       ? 'OPEN_CUT' :
+          isTransitionDunk         ? 'TRANSITION_DUNK' :
+          shotN > 0                ? 'PUTBACK' : 'STANDARD';
+        // Open/lob finishes are nearly undefended — scale the contest penalty down
+        const defModScale =
+          possType === 'LOB'    ? 0.05 :
+          (possType === 'DUMP_OFF' || possType === 'PNR_ROLL' || possType === 'CUT') ? 0.50 : 1.0;
         const basePct =
-          zone === 'inside' ? getInsideFgPctForPlayer(shooter.p) :
+          zone === 'inside' ? getRimFinishFgPct(shooter.p, finishType) :
           zone === 'mid'    ? getMidRangePercentage(shooter.p.attributes.shootingMid, shooter.p.position,
                                shooter.p.attributes.offensiveIQ, shooter.p.attributes.ballHandling) :
                               getThreePointPercentage(shooter.p.attributes.shooting3pt);
-        const defMod     = defPlayer ? zoneDefMod(defPlayer.p, zone) : 0;
+        const defMod     = defPlayer ? zoneDefMod(defPlayer.p, zone) * defModScale : 0;
         const contestMod = -contestBoost;      // on-ball pressure suppression
         const noiseMod   = shooter.varRoll / 100 * 0.35;
         const fatigueMod = -(shooter.fatigue * 0.05);
         const schemeDelta = zone === 'three' ? pbMults.fgPct3Delta
           : zone === 'inside' ? pbMults.fgPctInsDelta : pbMults.fgPctMidDelta;
-        const finalPct = Math.max(0.05, Math.min(0.72,
+        const maxFgPct =
+          finishType === 'LOB'             ? 0.98 :
+          finishType === 'TRANSITION_DUNK' ? 0.95 :
+          finishType === 'OPEN_ROLL'       ? 0.92 :
+          finishType === 'OPEN_CUT'        ? 0.88 :
+          finishType === 'DUMP_OFF'        ? 0.88 :
+          finishType === 'PUTBACK'         ? 0.82 :
+          zone === 'inside'                ? 0.76 :
+          0.72;
+        const finalPct = Math.max(0.05, Math.min(maxFgPct,
           basePct + defMod + contestMod + noiseMod + fatigueMod + schemeDelta
           + (Math.random() * 0.06 - 0.03)));
 
