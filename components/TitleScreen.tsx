@@ -79,73 +79,134 @@ const TitleScreen: React.FC<TitleScreenProps> = ({
 
   return (
     <div className={`fixed inset-0 bg-slate-950 flex flex-col items-center justify-center z-[100] overflow-hidden transition-all duration-1000 ${isExiting ? 'opacity-0 scale-110 pointer-events-none' : 'opacity-100 scale-100'}`}>
-      {/* Cinematic Background */}
+      {/* Background: glows + basketball court texture */}
       <div className="absolute inset-0 overflow-hidden pointer-events-none">
-        <div className="absolute top-1/4 left-1/4 w-[600px] h-[600px] bg-amber-500/10 rounded-full blur-[140px] animate-pulse"></div>
-        <div className="absolute bottom-1/4 right-1/3 w-[800px] h-[800px] bg-blue-600/5 rounded-full blur-[180px]"></div>
-        
-        {/* Subtle Grid Pattern */}
-        <div className="absolute inset-0 opacity-[0.03]" style={{ 
-          backgroundImage: `linear-gradient(#f59e0b 1px, transparent 1px), linear-gradient(90deg, #f59e0b 1px, transparent 1px)`, 
-          backgroundSize: '60px 60px' 
-        }}></div>
+
+        {/* ── Layer 1: Hardwood plank texture ── */}
+        <div className="absolute inset-0" style={{
+          backgroundImage: `
+            repeating-linear-gradient(
+              180deg,
+              rgba(200,140,55,0.09) 0px,
+              rgba(175,115,40,0.05) 11px,
+              rgba(145,90,28,0.09)  22px,
+              rgba(70, 40, 8, 0.30) 23px,
+              rgba(200,140,55,0.09) 24px
+            ),
+            repeating-linear-gradient(
+              90deg,
+              transparent 0px,
+              rgba(210,150,60,0.018) 3px,
+              transparent 6px,
+              transparent 88px,
+              rgba(170,110,42,0.022) 91px,
+              transparent 94px
+            )
+          `,
+        }} />
+
+        {/* ── Layer 2: Basketball silhouette (centred, faint amber glow) ── */}
+        <svg
+          className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-[53%] opacity-[0.075] basketball-pulse"
+          style={{ width: '680px', height: '680px', filter: 'drop-shadow(0 0 48px rgba(245,158,11,0.28))' }}
+          viewBox="0 0 500 500"
+          fill="none"
+          stroke="#f59e0b"
+          strokeWidth="5.5"
+          strokeLinecap="round"
+        >
+          {/* Outer ball */}
+          <circle cx="250" cy="250" r="234" />
+          {/* Horizontal seam pair — classic S-wave across equator */}
+          <path d="M 16 250 C 90 172 162 172 250 250 C 338 328 410 328 484 250" />
+          <path d="M 16 250 C 90 328 162 328 250 250 C 338 172 410 172 484 250" />
+          {/* Vertical seam pair — S-wave pole to pole */}
+          <path d="M 250 16 C 172 90 172 162 250 250 C 328 338 328 410 250 484" />
+          <path d="M 250 16 C 328 90 328 162 250 250 C 172 338 172 410 250 484" />
+        </svg>
+
+        {/* ── Layer 3: Full-court top-down lines ── */}
+        <svg
+          className="absolute inset-0 w-full h-full opacity-[0.11]"
+          viewBox="0 0 940 500"
+          preserveAspectRatio="xMidYMid slice"
+          fill="none"
+          stroke="#f59e0b"
+          strokeWidth="1.4"
+          strokeLinecap="round"
+        >
+          {/* Boundary */}
+          <rect x="20" y="20" width="900" height="460" rx="3" />
+          {/* Midcourt */}
+          <line x1="470" y1="20" x2="470" y2="480" />
+          {/* Centre circle + small jump circle */}
+          <circle cx="470" cy="250" r="62" />
+          <circle cx="470" cy="250" r="10" />
+          {/* Left key */}
+          <rect x="20" y="152" width="158" height="196" />
+          <line x1="20" y1="202" x2="178" y2="202" />
+          <line x1="20" y1="298" x2="178" y2="298" />
+          {/* Left FT circle — solid top, dashed bottom */}
+          <path d="M 178 188 A 62 62 0 0 1 178 312" />
+          <path d="M 178 188 A 62 62 0 0 0 178 312" strokeDasharray="8 5" />
+          {/* Left restricted arc */}
+          <path d="M 58 228 A 42 42 0 0 1 58 272" />
+          {/* Left backboard + rim */}
+          <line x1="20" y1="228" x2="20" y2="272" strokeWidth="4" />
+          <circle cx="38" cy="250" r="14" />
+          {/* Left 3-pt arc */}
+          <path d="M 20 77 L 158 77 A 234 234 0 0 1 158 423 L 20 423" />
+          {/* Right key */}
+          <rect x="762" y="152" width="158" height="196" />
+          <line x1="762" y1="202" x2="920" y2="202" />
+          <line x1="762" y1="298" x2="920" y2="298" />
+          {/* Right FT circle */}
+          <path d="M 762 188 A 62 62 0 0 0 762 312" />
+          <path d="M 762 188 A 62 62 0 0 1 762 312" strokeDasharray="8 5" />
+          {/* Right restricted arc */}
+          <path d="M 882 228 A 42 42 0 0 0 882 272" />
+          {/* Right backboard + rim */}
+          <line x1="920" y1="228" x2="920" y2="272" strokeWidth="4" />
+          <circle cx="902" cy="250" r="14" />
+          {/* Right 3-pt arc */}
+          <path d="M 920 77 L 782 77 A 234 234 0 0 0 782 423 L 920 423" />
+        </svg>
+
+        {/* ── Layer 4: Warm amber centre glow ── */}
+        <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[560px] h-[360px] rounded-full bg-amber-500/10 blur-[110px]" />
+
+        {/* ── Layer 5: Vignette — pulls dark edges in so content stays readable ── */}
+        <div className="absolute inset-0" style={{
+          background: 'radial-gradient(ellipse 78% 72% at 50% 48%, transparent 0%, rgba(2,6,23,0.60) 65%, rgba(2,6,23,0.94) 100%)',
+        }} />
+
       </div>
 
-      <div className="relative z-10 text-center px-6 max-w-5xl">
-        <div className="mb-4 inline-flex items-center gap-2 px-4 py-1.5 bg-slate-900 border border-amber-500/30 text-amber-500 text-[10px] font-bold tracking-[0.4em] uppercase rounded-full shadow-lg shadow-amber-500/10 animate-fade-in">
-          <span className="relative flex h-2 w-2">
-            <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-amber-400 opacity-75"></span>
-            <span className="relative inline-flex rounded-full h-2 w-2 bg-amber-500"></span>
-          </span>
-          Next-Gen Basketball Management
-        </div>
-        
-        <h1 className="text-8xl md:text-[10rem] font-display font-bold uppercase tracking-tighter text-white leading-[0.85] mb-6 drop-shadow-2xl">
+      <div className="relative z-10 text-center px-6 max-w-4xl">
+        <h1 className="text-8xl md:text-[10rem] font-display font-bold uppercase tracking-tighter text-white leading-[0.85] mb-8 drop-shadow-2xl">
           HOOPS<br/>
-          <span className="text-transparent bg-clip-text bg-gradient-to-r from-amber-400 via-amber-600 to-amber-400 animate-gradient-x">DYNASTY</span>
+          <span className="text-transparent bg-clip-text bg-gradient-to-r from-amber-400 via-amber-500 to-amber-400 animate-gradient-x">DYNASTY</span>
         </h1>
-        
-        <p className="text-slate-400 text-lg md:text-2xl font-medium mb-16 max-w-2xl mx-auto leading-relaxed opacity-80">
-          Build a legendary franchise. Scout superstars with Gemini AI. 
-          The court is your canvas, the win is your masterpiece.
+
+        <p className="text-slate-400 text-lg md:text-xl font-medium mb-14 max-w-xl mx-auto leading-relaxed tracking-wide">
+          Build a legendary franchise. Scout superstars. Dominate the court.
         </p>
 
-        <div className="flex flex-col md:flex-row items-center justify-center gap-8">
-          <button 
+        <div className="flex flex-col md:flex-row items-center justify-center gap-6">
+          <button
             onClick={() => handleStart(onNewLeague)}
-            className="group relative w-full md:w-auto px-16 py-6 bg-amber-500 hover:bg-amber-400 text-slate-950 font-display font-bold text-3xl uppercase tracking-wider rounded-2xl transition-all hover:scale-105 active:scale-95 shadow-[0_0_50px_rgba(245,158,11,0.4)] overflow-hidden"
+            className="group relative w-full md:w-auto px-16 py-6 bg-amber-500 hover:bg-amber-400 text-slate-950 font-display font-bold text-3xl uppercase tracking-wider rounded-2xl transition-all hover:scale-105 active:scale-95 shadow-[0_0_60px_rgba(245,158,11,0.35)] overflow-hidden"
           >
             <span className="relative z-10">New Career</span>
             <div className="absolute inset-0 bg-gradient-to-tr from-white/20 to-transparent opacity-0 group-hover:opacity-100 transition-opacity"></div>
-            <div className="absolute inset-0 border-2 border-white/30 rounded-2xl scale-110 opacity-0 group-hover:opacity-100 group-hover:scale-100 transition-all duration-300"></div>
           </button>
 
-          <button 
+          <button
             onClick={() => setShowSaveList(true)}
-            className="group relative w-full md:w-auto px-16 py-6 bg-slate-900/80 backdrop-blur-md hover:bg-slate-800 text-slate-100 font-display font-bold text-3xl uppercase tracking-wider rounded-2xl transition-all hover:scale-105 active:scale-95 border-2 border-slate-800 hover:border-amber-500/50"
+            className="group relative w-full md:w-auto px-16 py-6 bg-transparent hover:bg-slate-900 text-slate-300 hover:text-white font-display font-bold text-3xl uppercase tracking-wider rounded-2xl transition-all hover:scale-105 active:scale-95 border-2 border-slate-700 hover:border-amber-500/60"
           >
             Continue
-            <p className="absolute -bottom-6 left-0 right-0 text-[10px] text-slate-500 font-sans tracking-widest font-bold opacity-0 group-hover:opacity-100 transition-opacity">LOAD OR MANAGE SAVES</p>
           </button>
-        </div>
-
-        <div className="mt-32 grid grid-cols-2 md:grid-cols-4 gap-12 border-t border-slate-900/50 pt-12">
-          <div className="text-center group">
-            <div className="text-amber-500 font-display text-3xl group-hover:scale-110 transition-transform">FLASH 3</div>
-            <div className="text-[10px] text-slate-600 uppercase font-bold tracking-[0.2em] mt-1">AI Logic Engine</div>
-          </div>
-          <div className="text-center group">
-            <div className="text-amber-500 font-display text-3xl group-hover:scale-110 transition-transform">REAL-SIM</div>
-            <div className="text-[10px] text-slate-600 uppercase font-bold tracking-[0.2em] mt-1">Court Simulation</div>
-          </div>
-          <div className="text-center group">
-            <div className="text-amber-500 font-display text-3xl group-hover:scale-110 transition-transform">DYNAMIC</div>
-            <div className="text-[10px] text-slate-600 uppercase font-bold tracking-[0.2em] mt-1">Market Logic</div>
-          </div>
-          <div className="text-center group">
-            <div className="text-amber-500 font-display text-3xl group-hover:scale-110 transition-transform">CLOUD</div>
-            <div className="text-[10px] text-slate-600 uppercase font-bold tracking-[0.2em] mt-1">Persistence</div>
-          </div>
         </div>
       </div>
 
@@ -262,11 +323,9 @@ const TitleScreen: React.FC<TitleScreenProps> = ({
         </div>
       )}
 
-      {/* Aesthetic Footer */}
-      <div className="absolute bottom-8 flex items-center gap-12 opacity-20 hover:opacity-100 transition-opacity duration-700">
-        <div className="text-[10px] text-slate-500 uppercase tracking-[0.6em] font-black">© 2025 HD PRODUCTIONS</div>
-        <div className="w-1.5 h-1.5 bg-amber-500 rounded-full"></div>
-        <div className="text-[10px] text-slate-500 uppercase tracking-[0.6em] font-black italic">PRO GM SERIES v1.2</div>
+      {/* Version footer */}
+      <div className="absolute bottom-6 text-[10px] text-slate-700 uppercase tracking-[0.5em] font-bold select-none">
+        v1.2
       </div>
 
       <style dangerouslySetInnerHTML={{ __html: `
@@ -278,12 +337,12 @@ const TitleScreen: React.FC<TitleScreenProps> = ({
           background-size: 200% 200%;
           animation: gradient-x 15s ease infinite;
         }
-        .animate-fade-in {
-          animation: fadeIn 1s ease-out;
+        @keyframes basketball-pulse {
+          0%, 100% { opacity: 0.075; filter: drop-shadow(0 0 48px rgba(245,158,11,0.28)); }
+          50%       { opacity: 0.095; filter: drop-shadow(0 0 72px rgba(245,158,11,0.42)); }
         }
-        @keyframes fadeIn {
-          from { opacity: 0; transform: translateY(-10px); }
-          to { opacity: 1; transform: translateY(0); }
+        .basketball-pulse {
+          animation: basketball-pulse 6s ease-in-out infinite;
         }
       `}} />
     </div>

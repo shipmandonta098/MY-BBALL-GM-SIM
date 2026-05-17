@@ -22,13 +22,16 @@ interface TeamBadgeProps {
   size?: 'xs' | 'sm' | 'md' | 'lg' | 'xl';
   showName?: boolean;
   className?: string;
+  useSecondary?: boolean;
 }
 
-const TeamBadge: React.FC<TeamBadgeProps> = ({ team, size = 'md', showName = false, className = '' }) => {
+const TeamBadge: React.FC<TeamBadgeProps> = ({ team, size = 'md', showName = false, className = '', useSecondary = false }) => {
   const [imgError, setImgError] = React.useState(false);
 
   // Reset error state if logo URL changes
-  const logoUrl = (team as any).logo as string | undefined;
+  const primaryLogoUrl = (team as any).logo as string | undefined;
+  const secondaryLogoUrl = (team as any).secondaryLogo as string | undefined;
+  const logoUrl = useSecondary && secondaryLogoUrl ? secondaryLogoUrl : primaryLogoUrl;
   const prevLogoRef = React.useRef(logoUrl);
   React.useEffect(() => {
     if (prevLogoRef.current !== logoUrl) {

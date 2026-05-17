@@ -1,7 +1,10 @@
 
 import React, { useState, useMemo } from 'react';
-import { LeagueState, LeagueSettings } from '../types';
+import { LeagueState, LeagueSettings, Player } from '../types';
 import { getHistoricalFinancials } from '../constants';
+import { fmtSalary } from '../utils/formatters';
+import { useTheme, type Theme } from '../context/ThemeContext';
+import NumericInput from './NumericInput';
 
 interface SettingsProps {
   league: LeagueState;
@@ -9,7 +12,7 @@ interface SettingsProps {
   onRegenerateSchedule?: () => Promise<boolean>;
 }
 
-type SettingsTab = 'league' | 'gameplay' | 'sliders' | 'simulation' | 'godmode';
+type SettingsTab = 'league' | 'gameplay' | 'sliders' | 'simulation' | 'godmode' | 'appearance' | 'data';
 
 interface ChangeEntry {
   field: string;
@@ -40,13 +43,13 @@ const DEFAULT_SETTINGS: Partial<LeagueSettings> = {
   draftType: 'NBA 1994', customLotterySelections: 4,
   customLotteryChances: [140,140,140,125,105,90,75,60,45,30,20,15,10,5,5],
   tradableDraftPickSeasons: 4, prospectAgeMin: 19, prospectAgeMax: 22,
-  scheduledExpansion: 'Off', expansionTeamCount: 2, expansionDraftRules: 'Standard', expansionEnabled: false,
-  fatigueImpact: 'Medium', b2bPenalty: 'Mild', loadManagement: true,
+  scheduledExpansion: 'Off', expansionTeamCount: 1, expansionDraftRules: 'Standard',
+  fatigueImpact: 'Medium', b2bPenalty: 'Mild', loadManagement: true, b2bFatigueEnabled: true,
   injuryDuration: 'Realistic', practiceInjuries: false, careerEndingInjuries: true,
   teamChemistry: true, chemistryImpact: 'Medium', personalityClashPenalties: true,
   playerMorale: true, moraleAffectsAttributes: true, tradeRequestThreshold: 'Medium',
   pbpDetailLevel: 'Full', aiDecisionSpeed: 'Normal',
-  blowoutFrequency: 'Realistic', comebackFrequency: 'Realistic', overtimeFrequency: 'Realistic',
+  blowoutFrequency: 'Realistic', comebackFrequency: 'Realistic', overtimeFrequency: 'Realistic', upsetFrequency: 'Realistic',
   globalPaceOverride: 0, shotClockLength: 24, scoringEra: 'Modern',
   threePtFrequency: 'Medium', simBlockFrequency: 'Medium', turnoverFrequency: 'Medium',
   sliderLayup: 50, sliderMidRange: 50, slider3pt: 50, sliderFreeThrow: 50,
@@ -75,7 +78,7 @@ const BUILT_IN_PRESETS: Preset[] = [
     name: 'Arcade Mode',
     settings: {
       ...DEFAULT_SETTINGS,
-      difficulty: 'Rookie', fatigueImpact: 'None', b2bPenalty: 'None',
+      difficulty: 'Rookie', fatigueImpact: 'None', b2bPenalty: 'None', b2bFatigueEnabled: false,
       injuryFrequency: 'Low', careerEndingInjuries: false, practiceInjuries: false,
       teamChemistry: false, playerMorale: false,
       blowoutFrequency: 'Low', comebackFrequency: 'High',
@@ -126,7 +129,6 @@ const SEARCH_INDEX: { tab: SettingsTab; label: string }[] = [
   { tab: 'league', label: 'Draft Type' }, { tab: 'league', label: 'Custom Lottery Selections' },
   { tab: 'league', label: 'Custom Lottery Chances' }, { tab: 'league', label: 'Tradable Draft Pick Seasons' },
   { tab: 'league', label: 'Prospect Age Min' }, { tab: 'league', label: 'Prospect Age Max' },
-  { tab: 'league', label: 'Enable Expansion' }, { tab: 'league', label: 'Expansion Team Count' },
   { tab: 'league', label: 'Expansion Draft Rules' },
   { tab: 'league', label: 'Division Games' }, { tab: 'league', label: 'Conference Games' },
   { tab: 'league', label: 'Trade Deadline Fraction' }, { tab: 'league', label: 'Split By Conference' },
@@ -176,10 +178,12 @@ const SEARCH_INDEX: { tab: SettingsTab; label: string }[] = [
 
 const TAB_LABELS: Record<SettingsTab, string> = {
   league: 'League', gameplay: 'Gameplay', sliders: 'Sliders',
-  simulation: 'Simulation', godmode: 'God Mode',
+  simulation: 'Simulation', godmode: 'God Mode', appearance: 'Appearance',
+  data: 'Save Data',
 };
 
 const Settings: React.FC<SettingsProps> = ({ league, updateLeague, onRegenerateSchedule }) => {
+  const { theme, setTheme } = useTheme();
   const [activeTab, setActiveTab] = useState<SettingsTab>('league');
   const [searchQuery, setSearchQuery] = useState('');
   const [changeLog, setChangeLog]     = useState<ChangeEntry[]>([]);
@@ -192,6 +196,10 @@ const Settings: React.FC<SettingsProps> = ({ league, updateLeague, onRegenerateS
   const [regenSuccess, setRegenSuccess]             = useState(false);
   const [regenError, setRegenError]                 = useState(false);
   const [regenLoading, setRegenLoading]             = useState(false);
+  // Data management
+  const [dataConfirm, setDataConfirm] = useState<{ label: string; detail: string; onConfirm: () => void } | null>(null);
+  const [dataSuccess, setDataSuccess] = useState<string | null>(null);
+  const [trimSeasons, setTrimSeasons] = useState<number>(5);
 
   const updateSettings = (updates: Partial<LeagueSettings>, label = '') => {
     const entries: ChangeEntry[] = Object.entries(updates).map(([k, v]) => ({
@@ -202,6 +210,78 @@ const Settings: React.FC<SettingsProps> = ({ league, updateLeague, onRegenerateS
     setChangeLog(prev => [...entries, ...prev].slice(0, 50));
     updateLeague({ settings: { ...league.settings, ...updates } });
   };
+
+  // ── Data management helpers ───────────────────────────────────────────────
+
+  const showSuccess = (msg: string) => {
+    setDataSuccess(msg);
+    setTimeout(() => setDataSuccess(null), 3500);
+  };
+
+  const confirmAction = (label: string, detail: string, onConfirm: () => void) => {
+    setDataConfirm({ label, detail, onConfirm });
+  };
+
+  const handleExportSave = () => {
+    const blob = new Blob([JSON.stringify(league, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `${league.leagueName.replace(/\s+/g, '_')}_S${league.season}_backup.json`;
+    a.click();
+    URL.revokeObjectURL(url);
+    showSuccess('Save exported successfully.');
+  };
+
+  const handleTrimOldData = () => {
+    const cutoff = league.season - trimSeasons;
+    const trimmedFeed = (league.newsFeed ?? []).filter(
+      n => !n.seasonYear || n.seasonYear > cutoff
+    );
+    // Strip play-by-play from all schedule games (biggest per-game data blob)
+    const trimmedSchedule = (league.schedule ?? []).map(g =>
+      g.result ? { ...g, result: { ...g.result, playByPlay: undefined } } : g
+    );
+    const trimmedPreseason = (league.preseasonHistory ?? []).map(g =>
+      g.result ? { ...g, result: { ...g.result, playByPlay: undefined } } : g
+    );
+    // Trim transactions: keep last 500 (plenty for recent activity)
+    const trimmedTx = (league.transactions ?? []).slice(0, 500);
+    updateLeague({
+      newsFeed: trimmedFeed,
+      schedule: trimmedSchedule,
+      preseasonHistory: trimmedPreseason as any,
+      transactions: trimmedTx,
+    });
+    showSuccess(`Purged data from seasons before ${cutoff + 1}. PBP logs cleared.`);
+  };
+
+  const handleClearFeed = () => {
+    updateLeague({ newsFeed: [] });
+    showSuccess('Dynasty Feed cleared.');
+  };
+
+  const handleClearTransactions = () => {
+    updateLeague({ transactions: [] });
+    showSuccess('Transaction log cleared.');
+  };
+
+  const handleClearPBP = () => {
+    const cleaned = (league.schedule ?? []).map(g =>
+      g.result ? { ...g, result: { ...g.result, playByPlay: undefined } } : g
+    );
+    const cleanedPre = (league.preseasonHistory ?? []).map(g =>
+      g.result ? { ...g, result: { ...g.result, playByPlay: undefined } } : g
+    );
+    updateLeague({ schedule: cleaned, preseasonHistory: cleanedPre as any });
+    showSuccess('Play-by-play logs cleared from all game records.');
+  };
+
+  // Estimate save size
+  const estimatedKB = Math.round(JSON.stringify(league).length / 1024);
+  const newsCount = (league.newsFeed ?? []).length;
+  const txCount = (league.transactions ?? []).length;
+  const pbpGames = (league.schedule ?? []).filter(g => g.result?.playByPlay && g.result.playByPlay.length > 0).length;
 
   const s = league.settings;
   const inSeason = !league.isOffseason;
@@ -246,10 +326,10 @@ const Settings: React.FC<SettingsProps> = ({ league, updateLeague, onRegenerateS
   const resetTab = () => {
     const tabDefaults: Partial<LeagueSettings> = {};
     const tabMap: Record<SettingsTab, (keyof typeof DEFAULT_SETTINGS)[]> = {
-      league:     ['playoffFormat','playoffSeeding','playInTournament','homeCourt','tradeDeadline','hardCapAtDeadline','maxContractYears','rookieScaleContracts','maxPlayerSalaryPct','birdRights','draftRounds','draftClassSize','internationalProspects','draftLottery','scheduledExpansion','expansionTeamCount','expansionDraftRules','expansionEnabled','divisionGames','conferenceGames','tradeDeadlineFraction','splitByConference','guaranteedPerDivision','reseedRounds','ownerPatienceLevel','luxuryTaxMultiplier','budgetThreshold','tradeSalaryMatchPct','seasonLength','minRosterSize','maxRosterSize','draftType','customLotterySelections','tradableDraftPickSeasons','prospectAgeMin','prospectAgeMax','minPayroll','luxuryTaxThreshold','salaryCapType','pick1SalaryPct','roundsAboveMin','canRefuseAfterRookie'],
-      gameplay:   ['fatigueImpact','b2bPenalty','loadManagement','injuryDuration','practiceInjuries','careerEndingInjuries','teamChemistry','chemistryImpact','personalityClashPenalties','playerMorale','moraleAffectsAttributes','tradeRequestThreshold'],
+      league:     ['playoffFormat','playoffSeeding','playInTournament','homeCourt','tradeDeadline','hardCapAtDeadline','maxContractYears','rookieScaleContracts','maxPlayerSalaryPct','birdRights','draftRounds','draftClassSize','internationalProspects','draftLottery','scheduledExpansion','expansionDraftRules','divisionGames','conferenceGames','tradeDeadlineFraction','splitByConference','guaranteedPerDivision','reseedRounds','ownerPatienceLevel','luxuryTaxMultiplier','budgetThreshold','tradeSalaryMatchPct','seasonLength','minRosterSize','maxRosterSize','draftType','customLotterySelections','tradableDraftPickSeasons','prospectAgeMin','prospectAgeMax','minPayroll','luxuryTaxThreshold','salaryCapType','pick1SalaryPct','roundsAboveMin','canRefuseAfterRookie'],
+      gameplay:   ['fatigueImpact','b2bPenalty','loadManagement','b2bFatigueEnabled','injuryDuration','practiceInjuries','careerEndingInjuries','teamChemistry','chemistryImpact','personalityClashPenalties','playerMorale','moraleAffectsAttributes','tradeRequestThreshold'],
       sliders:    ['sliderLayup','sliderMidRange','slider3pt','sliderFreeThrow','sliderFastBreak','sliderPostUp','sliderPickRoll','sliderSteal','sliderBlock','sliderFoul','sliderHelpDefense','sliderPerimeterDefense','sliderTimeout','sliderSubstitution','sliderTechFoul','sliderFlagrantFoul','sliderInjuryMultiplier'],
-      simulation: ['pbpDetailLevel','aiDecisionSpeed','blowoutFrequency','comebackFrequency','overtimeFrequency','globalPaceOverride','shotClockLength','scoringEra','threePtFrequency','simBlockFrequency','turnoverFrequency'],
+      simulation: ['pbpDetailLevel','aiDecisionSpeed','blowoutFrequency','comebackFrequency','overtimeFrequency','upsetFrequency','globalPaceOverride','shotClockLength','scoringEra','threePtFrequency','simBlockFrequency','turnoverFrequency','wnbaStatRealism','singleYearSeason'],
       godmode:    ['editAnyPlayer','editAnyTeam','forceGameOutcomes','manipulateStandings','freeAgentMarketControl','draftClassEditor'],
     };
     for (const k of tabMap[activeTab]) {
@@ -296,7 +376,7 @@ const Settings: React.FC<SettingsProps> = ({ league, updateLeague, onRegenerateS
     return SEARCH_INDEX.filter(item => item.label.toLowerCase().includes(q));
   }, [searchQuery]);
 
-  const formatMoney = (val: number) => `$${(val / 1_000_000).toFixed(0)}M`;
+  const formatMoney = fmtSalary;
 
   // ── Helper UI components ──────────────────────────────────────────────────
   const TabButton = ({ id, label }: { id: SettingsTab; label: string }) => (
@@ -372,7 +452,7 @@ const Settings: React.FC<SettingsProps> = ({ league, updateLeague, onRegenerateS
     </div>
   );
 
-  const NumberInputField = ({ label, value, min, max, step = 1, onChange, unit = '', placeholder = '' }: {
+  const NumberInputField = ({ label, value, min, max, onChange, unit = '', placeholder = '' }: {
     label: string; value: number; min: number; max: number; step?: number;
     onChange: (v: number) => void; unit?: string; placeholder?: string;
   }) => (
@@ -381,10 +461,12 @@ const Settings: React.FC<SettingsProps> = ({ league, updateLeague, onRegenerateS
         <label className="text-[10px] font-black uppercase text-slate-500 tracking-widest">{label}</label>
         {unit && <span className="text-xs text-slate-500 font-bold">{unit}</span>}
       </div>
-      <input
-        type="number" min={min} max={max} step={step} value={value || ''}
+      <NumericInput
+        value={value}
+        min={min}
+        max={max}
+        onChange={onChange}
         placeholder={placeholder}
-        onChange={e => { const n = parseFloat(e.target.value); if (!isNaN(n)) onChange(Math.min(max, Math.max(min, n))); }}
         className="w-full bg-slate-900 border border-slate-700 rounded-xl px-4 py-3 text-amber-400 font-display font-bold text-xl focus:outline-none focus:border-amber-500/50"
       />
     </div>
@@ -399,6 +481,120 @@ const Settings: React.FC<SettingsProps> = ({ league, updateLeague, onRegenerateS
       </button>
     </div>
   );
+
+  const handleExportLeagueStats = () => {
+    const gp = (p: Player) => Math.max(1, p.stats.gamesPlayed);
+    const pct = (m: number, a: number) => a > 0 ? +(m / a * 100).toFixed(1) : 0;
+
+    const standings = [...league.teams]
+      .sort((a, b) => b.wins - a.wins)
+      .map((t, i) => ({
+        rank: i + 1,
+        team: `${t.city} ${t.name}`,
+        abbreviation: t.abbreviation,
+        conference: t.conference,
+        wins: t.wins,
+        losses: t.losses,
+        winPct: +((t.wins / Math.max(1, t.wins + t.losses)) * 100).toFixed(1),
+        capSpaceM: +((t.salaryCap ?? 136_000_000) - t.roster.reduce((s, p) => s + p.salary, 0)).toFixed(0),
+      }));
+
+    const playerStats = league.teams.flatMap(t =>
+      t.roster.map(p => ({
+        name: p.name,
+        team: t.abbreviation,
+        position: p.position,
+        age: p.age,
+        gamesPlayed: p.stats.gamesPlayed,
+        ppg: +(p.stats.points / gp(p)).toFixed(1),
+        rpg: +(p.stats.rebounds / gp(p)).toFixed(1),
+        apg: +(p.stats.assists / gp(p)).toFixed(1),
+        spg: +(p.stats.steals / gp(p)).toFixed(1),
+        bpg: +(p.stats.blocks / gp(p)).toFixed(1),
+        fgPct: pct(p.stats.fgm, p.stats.fga),
+        threePct: pct(p.stats.threepm, p.stats.threepa),
+        ftPct: pct(p.stats.ftm, p.stats.fta),
+        mpg: +(p.stats.minutes / gp(p)).toFixed(1),
+        rating: p.rating,
+        salary: p.salary,
+        careerGames: p.careerStats.reduce((s, cs) => s + (cs.gamesPlayed ?? 0), 0),
+        careerPoints: p.careerStats.reduce((s, cs) => s + (cs.points ?? 0), 0),
+        seasonsPlayed: p.careerStats.length,
+      }))
+    );
+
+    const leagueLeaders = {
+      scoring: [...playerStats].sort((a, b) => b.ppg - a.ppg).slice(0, 10),
+      rebounds: [...playerStats].sort((a, b) => b.rpg - a.rpg).slice(0, 10),
+      assists: [...playerStats].sort((a, b) => b.apg - a.apg).slice(0, 10),
+      steals: [...playerStats].sort((a, b) => b.spg - a.spg).slice(0, 10),
+      blocks: [...playerStats].sort((a, b) => b.bpg - a.bpg).slice(0, 10),
+      fieldGoalPct: [...playerStats].filter(p => p.gamesPlayed >= 10).sort((a, b) => b.fgPct - a.fgPct).slice(0, 10),
+    };
+
+    const teamStats = league.teams.map(t => {
+      const gamesPlayed = t.wins + t.losses;
+      const totals = t.roster.reduce((acc, p) => ({
+        pts: acc.pts + p.stats.points,
+        reb: acc.reb + p.stats.rebounds,
+        ast: acc.ast + p.stats.assists,
+        stl: acc.stl + p.stats.steals,
+        blk: acc.blk + p.stats.blocks,
+        fgm: acc.fgm + p.stats.fgm,
+        fga: acc.fga + p.stats.fga,
+        tpm: acc.tpm + p.stats.threepm,
+        tpa: acc.tpa + p.stats.threepa,
+      }), { pts: 0, reb: 0, ast: 0, stl: 0, blk: 0, fgm: 0, fga: 0, tpm: 0, tpa: 0 });
+      const div = Math.max(1, gamesPlayed);
+      return {
+        team: `${t.city} ${t.name}`,
+        abbreviation: t.abbreviation,
+        gamesPlayed,
+        wins: t.wins,
+        losses: t.losses,
+        ppg: +(totals.pts / div).toFixed(1),
+        rpg: +(totals.reb / div).toFixed(1),
+        apg: +(totals.ast / div).toFixed(1),
+        spg: +(totals.stl / div).toFixed(1),
+        bpg: +(totals.blk / div).toFixed(1),
+        fgPct: pct(totals.fgm, totals.fga),
+        threePct: pct(totals.tpm, totals.tpa),
+        avgRosterOvr: t.roster.length > 0 ? Math.round(t.roster.reduce((s, p) => s + p.rating, 0) / t.roster.length) : 0,
+        payrollM: +(t.roster.reduce((s, p) => s + p.salary, 0) / 1_000_000).toFixed(2),
+      };
+    });
+
+    const awardsHistory = (league.awardsHistory ?? []).map(a => ({
+      year: a.year,
+      mvp: a.mvp?.name,
+      mvpTeam: a.mvp?.teamName,
+      dpoy: a.dpoy?.name,
+      roy: a.roy?.name,
+      sixthMan: a.sixthMan?.name,
+      mip: a.mip?.name,
+      coy: a.coy?.name,
+    }));
+
+    const exportData = {
+      exportedAt: new Date().toISOString(),
+      leagueName: league.leagueName,
+      season: league.season,
+      standings,
+      teamStats,
+      playerStats: playerStats.sort((a, b) => b.ppg - a.ppg),
+      leagueLeaders,
+      awardsHistory,
+    };
+
+    const blob = new Blob([JSON.stringify(exportData, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `${league.leagueName.replace(/\s+/g, '_')}_S${league.season}_stats.json`;
+    a.click();
+    URL.revokeObjectURL(url);
+    showSuccess(`League stats exported — Season ${league.season} (${playerStats.length} players, ${league.teams.length} teams).`);
+  };
 
   const handleExport = () => {
     const dataStr = JSON.stringify(league, null, 2);
@@ -436,7 +632,7 @@ const Settings: React.FC<SettingsProps> = ({ league, updateLeague, onRegenerateS
               League <span className="text-amber-500">Settings</span>
             </h2>
             <div className="flex flex-wrap gap-2">
-              {(['league','gameplay','sliders','simulation','godmode'] as SettingsTab[]).map(id => (
+              {(['league','gameplay','sliders','simulation','godmode','appearance','data'] as SettingsTab[]).map(id => (
                 <React.Fragment key={id}><TabButton id={id} label={TAB_LABELS[id]} /></React.Fragment>
               ))}
             </div>
@@ -641,6 +837,14 @@ const Settings: React.FC<SettingsProps> = ({ league, updateLeague, onRegenerateS
             )}
             {inSeason ? (
               <LockedField>
+                <SliderField label="Preseason Games Per Team" value={s.preseasonGames ?? 6} min={0} max={10} onChange={() => {}} />
+              </LockedField>
+            ) : (
+              <SliderField label="Preseason Games Per Team" value={s.preseasonGames ?? 6} min={0} max={10}
+                onChange={v => updateSettings({ preseasonGames: v }, 'Preseason Games')} />
+            )}
+            {inSeason ? (
+              <LockedField>
                 <ButtonField label="Quarter Length (Minutes)" options={[8, 10, 12, 15, 20]} value={s.quarterLength ?? 12} onChange={() => {}} />
               </LockedField>
             ) : (
@@ -692,11 +896,11 @@ const Settings: React.FC<SettingsProps> = ({ league, updateLeague, onRegenerateS
                   </div>
                   <div className="flex flex-wrap gap-3 text-[10px] font-bold text-slate-400">
                     <span className={noCap ? 'text-rose-400' : 'text-slate-200'}>
-                      Cap: {noCap ? 'No Salary Cap' : `$${(s.salaryCap / 1_000_000).toFixed(1)}M`}
+                      Cap: {noCap ? 'No Salary Cap' : fmtSalary(s.salaryCap)}
                     </span>
                     <span>·</span>
                     <span>
-                      Luxury Tax: {(!s.luxuryTaxLine || s.luxuryTaxLine === 0) ? 'None' : `$${(s.luxuryTaxLine / 1_000_000).toFixed(1)}M`}
+                      Luxury Tax: {(!s.luxuryTaxLine || s.luxuryTaxLine === 0) ? 'None' : fmtSalary(s.luxuryTaxLine)}
                     </span>
                     <span>·</span>
                     <span>Rookie Scale: {s.rookieScaleContracts !== false ? 'Yes' : 'No'}</span>
@@ -900,25 +1104,18 @@ const Settings: React.FC<SettingsProps> = ({ league, updateLeague, onRegenerateS
 
             {/* Expansion */}
             <SectionHeader title="Expansion"
-              sub="Enable to add new franchise(s) via expansion draft. Configure teams in the Expansion tab." />
-            <ToggleField label="Enable Expansion" value={s.expansionEnabled ?? false}
-              onChange={v => updateSettings({ expansionEnabled: v }, 'Enable Expansion')} />
-            <ButtonField label="Expansion Team Count" options={[1,2,4]}
-              value={s.expansionTeamCount ?? 2}
-              onChange={v => updateSettings({ expansionTeamCount: Number(v) as 1|2|4 }, 'Expansion Team Count')} />
+              sub="Expansion automatically unlocks after the Finals each season. Configure team count and draft rules in the Expansion tab." />
             <SelectField label="Expansion Draft Rules" value={s.expansionDraftRules ?? 'Standard'}
               options={['Standard (8 protected)','Protected (11 protected)','Open (0 protected)']}
               onChange={v => updateSettings({ expansionDraftRules: v.split(' ')[0] as any }, 'Expansion Draft Rules')} />
-            {(s.expansionEnabled) && (
-              <div className="md:col-span-2 flex items-center gap-3 bg-orange-500/10 border border-orange-500/30 rounded-2xl p-4">
-                <svg className="w-5 h-5 text-orange-400 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-                </svg>
-                <p className="text-xs text-orange-300 font-bold">
-                  Expansion is enabled — head to the <span className="text-orange-400 uppercase tracking-widest">Expansion</span> tab to set up your new team(s) and run the draft.
-                </p>
-              </div>
-            )}
+            <div className="md:col-span-2 flex items-center gap-3 bg-indigo-500/10 border border-indigo-500/30 rounded-2xl p-4">
+              <svg className="w-5 h-5 text-indigo-400 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+              </svg>
+              <p className="text-xs text-indigo-300 font-bold">
+                Expansion is <span className="text-indigo-200 uppercase tracking-widest">automatic</span> — the Expansion tab unlocks after the Finals each season. Use the rules selector above to control protection counts.
+              </p>
+            </div>
 
             {/* Export */}
             <div className="md:col-span-2 flex gap-3 pt-2">
@@ -983,6 +1180,8 @@ const Settings: React.FC<SettingsProps> = ({ league, updateLeague, onRegenerateS
             <SelectField label="Back-to-Back Penalty" value={s.b2bPenalty ?? 'Mild'}
               options={['None','Mild','Severe']}
               onChange={v => updateSettings({ b2bPenalty: v as any }, 'Back-to-Back Penalty')} />
+            <ToggleField label="B2B Fatigue Impact" value={s.b2bFatigueEnabled !== false}
+              onChange={v => updateSettings({ b2bFatigueEnabled: v }, 'B2B Fatigue Impact')} />
             <ToggleField label="Load Management" value={s.loadManagement ?? true}
               onChange={v => updateSettings({ loadManagement: v }, 'Load Management')} />
 
@@ -1120,6 +1319,9 @@ const Settings: React.FC<SettingsProps> = ({ league, updateLeague, onRegenerateS
             <SelectField label="Overtime Frequency" value={s.overtimeFrequency ?? 'Realistic'}
               options={['Low','Medium','High','Realistic']}
               onChange={v => updateSettings({ overtimeFrequency: v as any }, 'Overtime Frequency')} />
+            <SelectField label="Upset Frequency" value={s.upsetFrequency ?? 'Realistic'}
+              options={['Low','Medium','Realistic','High']}
+              onChange={v => updateSettings({ upsetFrequency: v as any }, 'Upset Frequency')} />
 
             {/* Pace Enforcement */}
             <SectionHeader title="Pace Enforcement" sub="Set global pace override to 0 to use individual team pace" />
@@ -1143,6 +1345,153 @@ const Settings: React.FC<SettingsProps> = ({ league, updateLeague, onRegenerateS
             <SelectField label="Turnover Frequency" value={s.turnoverFrequency ?? 'Medium'}
               options={['Low','Medium','High']}
               onChange={v => updateSettings({ turnoverFrequency: v as any }, 'Turnover Frequency')} />
+
+            <div className="col-span-full border-t border-slate-800 pt-4">
+              <h4 className="text-[10px] font-black uppercase text-slate-500 tracking-widest mb-3">
+                League Mode
+              </h4>
+              <div className="flex items-start gap-4 bg-slate-800/50 rounded-xl p-4">
+                <button
+                  onClick={() => updateSettings({ wnbaStatRealism: !(s.wnbaStatRealism ?? ((s.playerGenderRatio ?? 0) === 100)) }, 'WNBA Stat Realism')}
+                  className={`relative w-11 h-6 rounded-full transition-colors flex-shrink-0 mt-0.5 ${(s.wnbaStatRealism ?? ((s.playerGenderRatio ?? 0) === 100)) ? 'bg-amber-500' : 'bg-slate-700'}`}
+                >
+                  <span className={`absolute top-0.5 left-0.5 w-5 h-5 bg-white rounded-full transition-transform ${(s.wnbaStatRealism ?? ((s.playerGenderRatio ?? 0) === 100)) ? 'translate-x-5' : ''}`} />
+                </button>
+                <div>
+                  <p className="text-sm font-semibold text-white">WNBA Stat Realism</p>
+                  <p className="text-xs text-slate-400 mt-0.5">
+                    Scales simulation outputs to WNBA 2024-26 targets — team PPG 78-86, FG% 43.5-47.5%, 3P% 33-38%, FT% 76-82%, APG 18-23, RPG 32-38.
+                    Individual scoring capped at 28-35 pts for stars. Auto-enabled when league gender is set to 100% Women.
+                  </p>
+                </div>
+              </div>
+              <div className="flex items-start gap-4 bg-slate-800/50 rounded-xl p-4 mt-3">
+                <button
+                  onClick={() => updateSettings({ singleYearSeason: !(s.singleYearSeason ?? ((s.playerGenderRatio ?? 0) === 100 || (s.startingYear ?? 9999) <= 1949)) }, 'Single-Year Season Labels')}
+                  className={`relative w-11 h-6 rounded-full transition-colors flex-shrink-0 mt-0.5 ${(s.singleYearSeason ?? ((s.playerGenderRatio ?? 0) === 100 || (s.startingYear ?? 9999) <= 1949)) ? 'bg-amber-500' : 'bg-slate-700'}`}
+                >
+                  <span className={`absolute top-0.5 left-0.5 w-5 h-5 bg-white rounded-full transition-transform ${(s.singleYearSeason ?? ((s.playerGenderRatio ?? 0) === 100 || (s.startingYear ?? 9999) <= 1949)) ? 'translate-x-5' : ''}`} />
+                </button>
+                <div>
+                  <p className="text-sm font-semibold text-white">Single-Year Season Labels</p>
+                  <p className="text-xs text-slate-400 mt-0.5">
+                    Display seasons as "1997 Season" instead of "1997–98 Season". Auto-enabled for women's leagues and pre-1950 starts.
+                    Applies to schedule headers, standings, dynasty feed, and all season labels across the app.
+                  </p>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* ════════════════════ APPEARANCE TAB ════════════════════ */}
+        {activeTab === 'appearance' && (
+          <div className="space-y-6 animate-in slide-in-from-bottom-2">
+
+            <div className="bg-slate-900 border border-slate-800 rounded-[2rem] p-8 space-y-6">
+              <div>
+                <h3 className="text-2xl font-display font-bold uppercase text-white tracking-tight">
+                  App <span className="text-amber-500">Theme</span>
+                </h3>
+                <p className="text-xs text-slate-500 mt-1 uppercase tracking-widest">Choose a visual style — updates instantly</p>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                {(
+                  [
+                    {
+                      id: 'default' as Theme,
+                      name: 'Default',
+                      desc: 'Dark slate with orange accents — the classic look',
+                      preview: ['#0f172a','#1e293b','#f59e0b'],
+                      textPreview: 'text-amber-500',
+                    },
+                    {
+                      id: 'dark' as Theme,
+                      name: 'Pure Dark',
+                      desc: 'Near-black backgrounds, steel-grey tones',
+                      preview: ['#020202','#0a0a0a','#a1a1aa'],
+                      textPreview: 'text-zinc-400',
+                    },
+                    {
+                      id: 'light' as Theme,
+                      name: 'Light',
+                      desc: 'Clean white canvas with dark text',
+                      preview: ['#f1f5f9','#ffffff','#d97706'],
+                      textPreview: 'text-amber-600',
+                    },
+                    {
+                      id: 'neon' as Theme,
+                      name: 'Neon',
+                      desc: 'Deep space dark with glowing orange & purple',
+                      preview: ['#07071a','#0f0f28','#ff6a10'],
+                      textPreview: 'text-orange-500',
+                    },
+                  ] as { id: Theme; name: string; desc: string; preview: string[]; textPreview: string }[]
+                ).map(t => {
+                  const active = theme === t.id;
+                  return (
+                    <button
+                      key={t.id}
+                      onClick={() => setTheme(t.id)}
+                      className={`relative group text-left p-5 rounded-2xl border-2 transition-all duration-200 ${
+                        active
+                          ? 'border-amber-500 bg-amber-500/10'
+                          : 'border-slate-700 bg-slate-950/40 hover:border-slate-600 hover:bg-slate-800/60'
+                      }`}
+                    >
+                      {/* colour swatches */}
+                      <div className="flex gap-2 mb-4">
+                        {t.preview.map((c, i) => (
+                          <span
+                            key={i}
+                            className="w-8 h-8 rounded-xl border border-slate-700 shadow-inner"
+                            style={{ backgroundColor: c }}
+                          />
+                        ))}
+                      </div>
+
+                      <div className="flex items-center justify-between">
+                        <span className="text-sm font-black uppercase tracking-widest text-white">{t.name}</span>
+                        {active && (
+                          <span className="text-[9px] font-black uppercase tracking-widest text-amber-500 bg-amber-500/15 px-2 py-1 rounded-lg">
+                            Active
+                          </span>
+                        )}
+                      </div>
+                      <p className="text-[11px] text-slate-500 mt-1 leading-relaxed">{t.desc}</p>
+
+                      {active && (
+                        <div className="absolute top-3 right-3 w-4 h-4 rounded-full bg-amber-500 flex items-center justify-center shadow-lg shadow-amber-500/30">
+                          <svg className="w-2.5 h-2.5 text-slate-950" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="3">
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+                          </svg>
+                        </div>
+                      )}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
+            {/* UI Preferences */}
+            <div className="bg-slate-900 border border-slate-800 rounded-[2rem] p-8 space-y-6">
+              <div>
+                <h3 className="text-2xl font-display font-bold uppercase text-white tracking-tight">
+                  UI <span className="text-amber-500">Preferences</span>
+                </h3>
+                <p className="text-xs text-slate-500 mt-1 uppercase tracking-widest">Visual helpers and display options</p>
+              </div>
+              <div className="flex items-center justify-between p-5 bg-slate-950 border border-slate-800 rounded-2xl">
+                <div>
+                  <p className="text-sm font-black uppercase tracking-widest text-white">Highlight My Team &amp; Players</p>
+                  <p className="text-[11px] text-slate-500 mt-0.5 uppercase tracking-widest">Accent your team's color on all lists, tables, standings, stats, and draft boards</p>
+                </div>
+                <ToggleField label="" value={s.highlightMyTeam !== false}
+                  onChange={v => updateSettings({ highlightMyTeam: v }, 'Highlight My Team & Players')} />
+              </div>
+            </div>
+
           </div>
         )}
 
@@ -1215,8 +1564,215 @@ const Settings: React.FC<SettingsProps> = ({ league, updateLeague, onRegenerateS
           </div>
         )}
 
+        {/* ════════════════════ DATA MANAGEMENT TAB ════════════════════ */}
+        {activeTab === 'data' && (
+          <div className="space-y-6 animate-in slide-in-from-bottom-2">
+
+            {/* Save size summary */}
+            <div className="bg-slate-900 border border-slate-800 rounded-3xl p-6 flex flex-wrap gap-6 items-center justify-between">
+              <div>
+                <h3 className="text-xs font-black uppercase tracking-widest text-slate-500 mb-1">Save File Health</h3>
+                <p className="text-white text-sm font-medium">
+                  Season <span className="text-amber-400 font-bold">{league.season}</span> &nbsp;·&nbsp;
+                  Estimated size: <span className={`font-bold ${estimatedKB > 2000 ? 'text-rose-400' : estimatedKB > 800 ? 'text-amber-400' : 'text-emerald-400'}`}>{estimatedKB > 1024 ? `${(estimatedKB/1024).toFixed(1)} MB` : `${estimatedKB} KB`}</span>
+                </p>
+                <div className="flex gap-4 mt-2 text-[10px] text-slate-500 font-bold uppercase tracking-widest">
+                  <span>News: {newsCount} items</span>
+                  <span>·</span>
+                  <span>Transactions: {txCount}</span>
+                  <span>·</span>
+                  <span>PBP logs: {pbpGames} games</span>
+                </div>
+              </div>
+              {estimatedKB > 800 && (
+                <div className="flex items-center gap-2 px-4 py-2 bg-amber-500/10 border border-amber-500/30 rounded-2xl">
+                  <svg className="w-4 h-4 text-amber-400 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 9v2m0 4h.01M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z" /></svg>
+                  <span className="text-[10px] font-black uppercase tracking-widest text-amber-400">Large save detected — consider trimming</span>
+                </div>
+              )}
+            </div>
+
+            {/* Export */}
+            <div className="bg-slate-900 border border-slate-800 rounded-3xl p-6 space-y-4">
+              <div className="flex items-start justify-between gap-4">
+                <div>
+                  <h3 className="text-sm font-black uppercase tracking-widest text-white mb-1">Export Save Data</h3>
+                  <p className="text-[11px] text-slate-500">Download a full backup as a <code className="text-amber-400">.json</code> file. Use the Title Screen to re-import it later.</p>
+                </div>
+                <button
+                  onClick={handleExportSave}
+                  className="shrink-0 px-5 py-3 bg-amber-500 hover:bg-amber-400 text-slate-950 font-display font-bold uppercase text-[10px] tracking-widest rounded-xl transition-all active:scale-95 shadow-lg shadow-amber-500/20"
+                >
+                  ↓ Download Backup
+                </button>
+              </div>
+            </div>
+
+            {/* Export League Stats */}
+            <div className="bg-slate-900 border border-slate-800 rounded-3xl p-6 space-y-4">
+              <div className="flex items-start justify-between gap-4">
+                <div>
+                  <h3 className="text-sm font-black uppercase tracking-widest text-white mb-1">Export League Stats</h3>
+                  <p className="text-[11px] text-slate-500">
+                    Download a <code className="text-emerald-400">.json</code> file with standings, team stats, player stats, league leaders, and awards history for Season {league.season}.
+                  </p>
+                  <div className="flex flex-wrap gap-2 mt-2">
+                    {(['Standings', 'Player Stats', 'Team Stats', 'League Leaders', 'Awards History'] as const).map(tag => (
+                      <span key={tag} className="px-2 py-0.5 rounded-full bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 text-[9px] font-black uppercase tracking-widest">{tag}</span>
+                    ))}
+                  </div>
+                </div>
+                <button
+                  onClick={handleExportLeagueStats}
+                  className="shrink-0 px-5 py-3 bg-emerald-600 hover:bg-emerald-500 text-white font-display font-bold uppercase text-[10px] tracking-widest rounded-xl transition-all active:scale-95 shadow-lg shadow-emerald-500/20"
+                >
+                  ↓ Export Stats
+                </button>
+              </div>
+            </div>
+
+            {/* Delete old season data */}
+            <div className="bg-slate-900 border border-slate-800 rounded-3xl p-6 space-y-5">
+              <div>
+                <h3 className="text-sm font-black uppercase tracking-widest text-white mb-1">Delete Old Season Data</h3>
+                <p className="text-[11px] text-slate-500 max-w-lg">
+                  Removes Dynasty Feed entries and strips play-by-play logs from seasons older than your chosen threshold.
+                  <span className="text-emerald-400 font-bold"> Core achievements, standings, awards, and championship records are always preserved.</span>
+                </p>
+              </div>
+              <div className="flex flex-wrap items-center gap-3">
+                <span className="text-[10px] font-black uppercase tracking-widest text-slate-400">Keep last</span>
+                {([3, 5, 7, 10] as const).map(n => (
+                  <button key={n} onClick={() => setTrimSeasons(n)}
+                    className={`px-4 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest border transition-all ${trimSeasons === n ? 'bg-amber-500/20 border-amber-500/50 text-amber-400' : 'bg-slate-950 border-slate-700 text-slate-500 hover:text-white'}`}>
+                    {n} Seasons
+                  </button>
+                ))}
+                <span className="text-[10px] font-black uppercase tracking-widest text-slate-400">of news history</span>
+              </div>
+              <div className="bg-amber-500/8 border border-amber-500/20 rounded-2xl px-4 py-3 text-[10px] text-amber-400/80 font-bold">
+                ⚠️ This action cannot be undone. Export a backup first if you want to preserve the full history.
+              </div>
+              <button
+                onClick={() => confirmAction(
+                  `Delete data older than ${league.season - trimSeasons} seasons`,
+                  `News entries from before season ${league.season - trimSeasons + 1} will be removed. Play-by-play logs will be stripped from all games. Standings, awards, and championships are preserved.`,
+                  handleTrimOldData
+                )}
+                className="px-6 py-3 bg-rose-500/15 hover:bg-rose-500/25 border border-rose-500/40 text-rose-400 font-display font-bold uppercase text-[10px] tracking-widest rounded-xl transition-all active:scale-95"
+              >
+                🗑 Purge Old Data
+              </button>
+            </div>
+
+            {/* Clear Dynasty Feed */}
+            <div className="bg-slate-900 border border-slate-800 rounded-3xl p-6 space-y-4">
+              <div className="flex items-start justify-between gap-4">
+                <div>
+                  <h3 className="text-sm font-black uppercase tracking-widest text-white mb-1">Clear Dynasty Feed</h3>
+                  <p className="text-[11px] text-slate-500">Removes all <span className="text-white font-bold">{newsCount}</span> news items from the feed. Stats and records are not affected.</p>
+                </div>
+                <button
+                  onClick={() => confirmAction(
+                    'Clear Dynasty Feed',
+                    `All ${newsCount} news items will be permanently deleted. This cannot be undone.`,
+                    handleClearFeed
+                  )}
+                  className="shrink-0 px-5 py-3 bg-rose-500/15 hover:bg-rose-500/25 border border-rose-500/40 text-rose-400 font-display font-bold uppercase text-[10px] tracking-widest rounded-xl transition-all active:scale-95"
+                >
+                  Clear Feed
+                </button>
+              </div>
+            </div>
+
+            {/* Clear Transactions */}
+            <div className="bg-slate-900 border border-slate-800 rounded-3xl p-6 space-y-4">
+              <div className="flex items-start justify-between gap-4">
+                <div>
+                  <h3 className="text-sm font-black uppercase tracking-widest text-white mb-1">Clear Transaction Log</h3>
+                  <p className="text-[11px] text-slate-500">Removes all <span className="text-white font-bold">{txCount}</span> entries from the League Log. Signings, trades, and waivers will no longer appear in history.</p>
+                </div>
+                <button
+                  onClick={() => confirmAction(
+                    'Clear Transaction Log',
+                    `All ${txCount} transaction records will be permanently deleted. This cannot be undone.`,
+                    handleClearTransactions
+                  )}
+                  className="shrink-0 px-5 py-3 bg-rose-500/15 hover:bg-rose-500/25 border border-rose-500/40 text-rose-400 font-display font-bold uppercase text-[10px] tracking-widest rounded-xl transition-all active:scale-95"
+                >
+                  Clear Log
+                </button>
+              </div>
+            </div>
+
+            {/* Clear PBP only */}
+            <div className="bg-slate-900 border border-slate-800 rounded-3xl p-6 space-y-4">
+              <div className="flex items-start justify-between gap-4">
+                <div>
+                  <h3 className="text-sm font-black uppercase tracking-widest text-white mb-1">Clear Play-by-Play Logs</h3>
+                  <p className="text-[11px] text-slate-500">
+                    Strips verbose play-by-play data from <span className="text-white font-bold">{pbpGames}</span> games. Box scores and final scores are kept. This is usually the biggest driver of save bloat.
+                  </p>
+                </div>
+                <button
+                  onClick={() => confirmAction(
+                    'Clear Play-by-Play Logs',
+                    `Removes the detailed play-by-play log from ${pbpGames} game records. Box scores, stats, and standings are unaffected.`,
+                    handleClearPBP
+                  )}
+                  className="shrink-0 px-5 py-3 bg-rose-500/15 hover:bg-rose-500/25 border border-rose-500/40 text-rose-400 font-display font-bold uppercase text-[10px] tracking-widest rounded-xl transition-all active:scale-95"
+                >
+                  Clear PBP
+                </button>
+              </div>
+            </div>
+
+          </div>
+        )}
+
       </div>
       )}
+
+      {/* ── Confirmation modal ── */}
+      {dataConfirm && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-sm">
+          <div className="bg-slate-900 border border-slate-700 rounded-3xl p-8 max-w-md w-full shadow-2xl space-y-5 animate-in fade-in zoom-in-95 duration-150">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-2xl bg-rose-500/15 border border-rose-500/30 flex items-center justify-center shrink-0">
+                <svg className="w-5 h-5 text-rose-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 9v2m0 4h.01M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z" /></svg>
+              </div>
+              <h3 className="text-lg font-display font-bold uppercase text-white tracking-wide">{dataConfirm.label}</h3>
+            </div>
+            <p className="text-sm text-slate-400 leading-relaxed">{dataConfirm.detail}</p>
+            <p className="text-[10px] font-black uppercase tracking-widest text-rose-400/80 border-t border-slate-800 pt-4">
+              ⚠️ This action cannot be undone. Core achievements and standings will be preserved.
+            </p>
+            <div className="flex gap-3 pt-1">
+              <button
+                onClick={() => setDataConfirm(null)}
+                className="flex-1 px-5 py-3 bg-slate-800 hover:bg-slate-700 text-slate-300 font-display font-bold uppercase text-[10px] tracking-widest rounded-xl transition-all"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={() => { dataConfirm.onConfirm(); setDataConfirm(null); }}
+                className="flex-1 px-5 py-3 bg-rose-600 hover:bg-rose-500 text-white font-display font-bold uppercase text-[10px] tracking-widest rounded-xl transition-all active:scale-95"
+              >
+                Confirm & Delete
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Success toast ── */}
+      {dataSuccess && (
+        <div className="fixed bottom-6 right-6 z-50 flex items-center gap-3 bg-emerald-900/90 border border-emerald-500/40 text-emerald-300 px-5 py-3 rounded-2xl shadow-2xl backdrop-blur-sm animate-in slide-in-from-bottom-2 duration-300">
+          <svg className="w-4 h-4 text-emerald-400 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M5 13l4 4L19 7" /></svg>
+          <span className="text-[11px] font-black uppercase tracking-widest">{dataSuccess}</span>
+        </div>
+      )}
+
     </div>
   );
 };

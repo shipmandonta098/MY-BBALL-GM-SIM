@@ -20,7 +20,8 @@ const getStatsLabel = (p: Player) => {
   return `${(p.stats.points / gp).toFixed(1)} PPG, ${(p.stats.rebounds / gp).toFixed(1)} RPG, ${(p.stats.assists / gp).toFixed(1)} APG`;
 };
 
-export const generateAwards = async (teams: Team[], year: number): Promise<SeasonAwards> => {
+export const generateAwards = async (teams: Team[], year: number, playerGenderRatio = 0): Promise<SeasonAwards> => {
+  const isFemaleLeague = playerGenderRatio === 100;
   const allPlayers = teams.flatMap(t => t.roster.map(p => ({ p, t })));
   
   // 1. MVP
@@ -49,21 +50,29 @@ export const generateAwards = async (teams: Team[], year: number): Promise<Seaso
   };
   dpoy.blurb = await generateAwardBlurb('Defensive Player of the Year', dpoy);
 
-  // 3. ROY — use draftInfo.year to find true rookies (drafted this season)
-  const rookies = allPlayers.filter(entry => entry.p.draftInfo?.year === year);
-  const royPool = rookies.length > 0
-    ? rookies
-    : allPlayers.filter(entry => entry.p.age <= 23); // fallback for edge cases
-  const royCandidate = royPool.sort((a, b) => getPlayerStatsValue(b.p, b.t) - getPlayerStatsValue(a.p, a.t))[0]
-    ?? allPlayers[0]; // ultimate safety fallback
-  const roy: AwardWinner = {
-    playerId: royCandidate.p.id,
-    name: royCandidate.p.name,
-    teamId: royCandidate.t.id,
-    teamName: royCandidate.t.name,
-    statsLabel: getStatsLabel(royCandidate.p)
+  // 3. ROY — true first-year players only.
+  //    Primary gate: p.isRookie === true (stamped at draft time, cleared at season-end).
+  //    Backward-compat fallback for pre-flag saves: drafted this exact season.
+  //    NO gamesPlayed fallback — that catches every veteran.
+  const isRookieEligible = (p: Player): boolean => {
+    if (p.isRookie === true) return true;
+    // Fallback for saves created before the isRookie flag existed
+    if ((p.careerStats?.length ?? 0) > 0) return false;
+    return p.draftInfo?.year === year;
   };
-  roy.blurb = await generateAwardBlurb('Rookie of the Year', roy);
+  const rookies = allPlayers.filter(entry => isRookieEligible(entry.p));
+  const royPool = [...rookies].sort((a, b) => getPlayerStatsValue(b.p, b.t) - getPlayerStatsValue(a.p, a.t));
+  const royEntry = royPool[0] ?? null;
+  const roy: AwardWinner = royEntry
+    ? {
+        playerId: royEntry.p.id,
+        name: royEntry.p.name,
+        teamId: royEntry.t.id,
+        teamName: royEntry.t.name,
+        statsLabel: getStatsLabel(royEntry.p),
+      }
+    : { name: '—', teamId: '', teamName: 'No eligible rookies', statsLabel: '' };
+  if (royEntry) roy.blurb = await generateAwardBlurb('Rookie of the Year', roy);
 
   // 4. Sixth Man — bench players only; three independent checks to prevent any starter slipping through:
   //    (a) player.status must be Bench or Rotation — never Starter
@@ -86,7 +95,7 @@ export const generateAwards = async (teams: Team[], year: number): Promise<Seaso
     teamName: sixthManCandidate.t.name,
     statsLabel: getStatsLabel(sixthManCandidate.p)
   };
-  sixthMan.blurb = await generateAwardBlurb('Sixth Man of the Year', sixthMan);
+  sixthMan.blurb = await generateAwardBlurb(isFemaleLeague ? 'Sixth Woman of the Year' : 'Sixth Man of the Year', sixthMan);
 
   // 5. MIP
   const mipCandidate = [...allPlayers].sort((a,b) => b.p.rating - a.p.rating)[5];
@@ -129,12 +138,13 @@ export const generateAwards = async (teams: Team[], year: number): Promise<Seaso
     return bScore - aScore;
   })[0];
 
+  const eoyGMName = eoyCandidate.gmName ?? `GM of the ${eoyCandidate.name}`;
   const executiveOfTheYear: AwardWinner = {
     gmId: 'gm-' + eoyCandidate.id,
-    name: `General Manager of the ${eoyCandidate.name}`,
+    name: eoyGMName,
     teamId: eoyCandidate.id,
     teamName: eoyCandidate.name,
-    statsLabel: `Lead improvement to ${eoyCandidate.wins} wins`
+    statsLabel: `${eoyCandidate.wins}-${eoyCandidate.losses} — General Manager, ${eoyCandidate.city} ${eoyCandidate.name}`
   };
   executiveOfTheYear.blurb = await generateAwardBlurb('Executive of the Year', executiveOfTheYear);
 
@@ -142,6 +152,15 @@ export const generateAwards = async (teams: Team[], year: number): Promise<Seaso
   const top15 = [...allPlayers]
     .sort((a, b) => getPlayerStatsValue(b.p, b.t) - getPlayerStatsValue(a.p, a.t))
     .slice(0, 15)
+    .map(e => e.p.id);
+
+  const defSorted = [...allPlayers]
+    .sort((a, b) => b.p.attributes.defense - a.p.attributes.defense)
+    .slice(0, 10)
+    .map(e => e.p.id);
+
+  const rookieSorted = royPool  // already sorted, already filtered to true rookies
+    .slice(0, 10)
     .map(e => e.p.id);
 
   return {
@@ -156,7 +175,9 @@ export const generateAwards = async (teams: Team[], year: number): Promise<Seaso
     allNbaFirst: top15.slice(0, 5),
     allNbaSecond: top15.slice(5, 10),
     allNbaThird: top15.slice(10, 15),
-    allDefensive: [...allPlayers].sort((a, b) => b.p.attributes.defense - a.p.attributes.defense).slice(0, 5).map(e => e.p.id),
-    allRookie: rookies.sort((a, b) => getPlayerStatsValue(b.p, b.t) - getPlayerStatsValue(a.p, a.t)).slice(0, 5).map(e => e.p.id)
+    allDefensive: defSorted.slice(0, 5),
+    allDefensiveSecond: defSorted.slice(5, 10),
+    allRookie: rookieSorted.slice(0, 5),
+    allRookieSecond: rookieSorted.slice(5, 10),
   };
 };

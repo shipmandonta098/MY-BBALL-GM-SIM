@@ -6,6 +6,7 @@ import TeamBadge from './TeamBadge';
 interface GMProfileProps {
   league: LeagueState;
   updateLeague: (updated: Partial<LeagueState>) => void;
+  onResign?: () => void;
 }
 
 const STYLE_OPTIONS = ['Offense', 'Defense', 'Balanced'] as const;
@@ -27,11 +28,12 @@ const milestoneIcon = (type: string) => {
   }
 };
 
-const GMProfileView: React.FC<GMProfileProps> = ({ league, updateLeague }) => {
+const GMProfileView: React.FC<GMProfileProps> = ({ league, updateLeague, onResign }) => {
   const profile = league.gmProfile;
   const userTeam = league.teams.find(t => t.id === league.userTeamId)!;
   const [isEditingName, setIsEditingName] = useState(false);
   const [newName, setNewName] = useState(profile.name);
+  const [showResignModal, setShowResignModal] = useState(false);
 
   const handleSaveName = () => {
     updateLeague({ gmProfile: { ...profile, name: newName } });
@@ -138,6 +140,19 @@ const GMProfileView: React.FC<GMProfileProps> = ({ league, updateLeague }) => {
                 <span className="self-center text-xs text-slate-500 italic">{STYLE_META[profile.preferredStyle]?.desc}</span>
               )}
             </div>
+
+            {/* Resign button — only shown if handler is wired up */}
+            {onResign && (
+              <div className="mt-6 flex justify-center md:justify-start">
+                <button
+                  onClick={() => setShowResignModal(true)}
+                  className="flex items-center gap-2 px-4 py-2 rounded-xl border border-rose-500/30 bg-rose-500/10 text-rose-400 text-xs font-black uppercase tracking-widest hover:bg-rose-500/20 hover:border-rose-500/60 transition-all"
+                >
+                  <span>🚪</span>
+                  Resign as GM
+                </button>
+              </div>
+            )}
           </div>
         </div>
       </div>
@@ -162,6 +177,60 @@ const GMProfileView: React.FC<GMProfileProps> = ({ league, updateLeague }) => {
           ))}
         </div>
       </div>
+
+      {/* ── Approval Ratings ──────────────────────────────────────────────── */}
+      {(league.ownerApproval !== undefined || league.fanApproval !== undefined) && (() => {
+        const owner = league.ownerApproval ?? 55;
+        const fan   = league.fanApproval   ?? 60;
+        const ownerTier =
+          owner >= 80 ? { label: 'Thrilled',    color: 'text-emerald-400', bar: 'bg-emerald-500' } :
+          owner >= 60 ? { label: 'Satisfied',   color: 'text-sky-400',     bar: 'bg-sky-500'     } :
+          owner >= 40 ? { label: 'Concerned',   color: 'text-amber-400',   bar: 'bg-amber-500'   } :
+          owner >= 20 ? { label: 'Frustrated',  color: 'text-orange-400',  bar: 'bg-orange-500'  } :
+                        { label: 'Furious',     color: 'text-rose-400',    bar: 'bg-rose-500'    };
+        const fanTier =
+          fan >= 80 ? { label: 'Electric',   color: 'text-emerald-400', bar: 'bg-emerald-500' } :
+          fan >= 60 ? { label: 'Energized',  color: 'text-sky-400',     bar: 'bg-sky-500'     } :
+          fan >= 40 ? { label: 'Restless',   color: 'text-amber-400',   bar: 'bg-amber-500'   } :
+          fan >= 20 ? { label: 'Unhappy',    color: 'text-orange-400',  bar: 'bg-orange-500'  } :
+                      { label: 'Outraged',   color: 'text-rose-400',    bar: 'bg-rose-500'    };
+        const ApprBar = ({ value, bar }: { value: number; bar: string }) => (
+          <div className="h-2.5 bg-slate-800 rounded-full overflow-hidden">
+            <div className={`h-full rounded-full transition-all duration-700 ${bar}`} style={{ width: `${value}%` }} />
+          </div>
+        );
+        return (
+          <div>
+            <h2 className="text-[10px] font-black uppercase text-slate-500 tracking-widest mb-4 px-1">Approval Ratings</h2>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              {/* Owner */}
+              <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 space-y-3 hover:border-amber-500/30 transition-all">
+                <div className="flex items-center justify-between">
+                  <span className="text-[10px] font-black uppercase text-slate-500 tracking-widest">👔 Owner Approval</span>
+                  <span className={`text-xs font-black uppercase ${ownerTier.color}`}>{ownerTier.label}</span>
+                </div>
+                <ApprBar value={owner} bar={ownerTier.bar} />
+                <div className="flex justify-between">
+                  <span className={`text-3xl font-display font-bold ${ownerTier.color}`}>{owner}</span>
+                  <span className="text-slate-600 text-sm self-end">/100</span>
+                </div>
+              </div>
+              {/* Fan */}
+              <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 space-y-3 hover:border-amber-500/30 transition-all">
+                <div className="flex items-center justify-between">
+                  <span className="text-[10px] font-black uppercase text-slate-500 tracking-widest">📣 Fan Approval</span>
+                  <span className={`text-xs font-black uppercase ${fanTier.color}`}>{fanTier.label}</span>
+                </div>
+                <ApprBar value={fan} bar={fanTier.bar} />
+                <div className="flex justify-between">
+                  <span className={`text-3xl font-display font-bold ${fanTier.color}`}>{fan}</span>
+                  <span className="text-slate-600 text-sm self-end">/100</span>
+                </div>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
 
       {/* ── Championship Banner ────────────────────────────────────────────── */}
       {champCount > 0 && (
@@ -279,6 +348,36 @@ const GMProfileView: React.FC<GMProfileProps> = ({ league, updateLeague }) => {
       </div>
 
       {/* ── Season Structure Summary removed ── */}
+
+      {/* ── Resign Confirmation Modal ─────────────────────────────────────── */}
+      {showResignModal && (
+        <div className="fixed inset-0 z-[9000] bg-slate-950/90 backdrop-blur-sm flex items-center justify-center p-6 animate-in fade-in duration-200">
+          <div className="bg-slate-900 border border-rose-500/40 rounded-[2rem] p-10 shadow-2xl max-w-md w-full space-y-6 text-center">
+            <div className="text-6xl">🚪</div>
+            <div>
+              <h2 className="text-3xl font-display font-bold uppercase text-white tracking-tight">Resign as GM?</h2>
+              <p className="text-slate-400 mt-2 text-sm leading-relaxed">
+                You will step down from the <span className="text-white font-bold">{userTeam.city} {userTeam.name}</span>.
+                Your career record and reputation will be preserved if you choose a new team.
+              </p>
+            </div>
+            <div className="flex gap-3">
+              <button
+                onClick={() => setShowResignModal(false)}
+                className="flex-1 px-6 py-3 rounded-xl bg-slate-800 border border-slate-700 text-slate-300 font-bold text-sm hover:bg-slate-700 transition-all"
+              >
+                Stay
+              </button>
+              <button
+                onClick={() => { setShowResignModal(false); onResign?.(); }}
+                className="flex-1 px-6 py-3 rounded-xl bg-rose-500 text-white font-black text-sm uppercase tracking-widest hover:bg-rose-600 transition-all shadow-lg"
+              >
+                Resign
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
     </div>
   );

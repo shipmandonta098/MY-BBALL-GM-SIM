@@ -8,39 +8,34 @@ export type InjuryType = 'Ankle Sprain' | 'Hamstring Strain' | 'Knee Sprain' | '
 export type Gender = 'Male' | 'Female' | 'Non-binary';
 
 export type PersonalityTrait = 'Leader' | 'Diva/Star' | 'Loyal' | 'Professional' | 'Gym Rat' | 'Lazy' | 'Clutch' | 'Tough/Alpha' | 'Friendly/Team First' | 'Money Hungry' | 'Hot Head' | 'Workhorse' | 'Streaky';
+export type TrainingFocusArea = 'Shooting / 3PT' | 'Playmaking / Passing' | 'Defense / Rebounding' | 'Post Scoring / Interior' | 'Athleticism / Dunking' | 'Finishing / Layups' | 'Free Throws' | 'Mental / Leadership';
 
 export interface PlayerTendencies {
-  offensiveTendencies: {
-    pullUpThree: number;          // 0-100
-    postUp: number;
-    driveToBasket: number;
-    midRangeJumper: number;
-    kickOutPasser: number;
-    isoHeavy: number;
-    transitionHunter: number;
-    // ── New offensive tendencies ──────────────────────────────────
-    spotUp: number;               // relocate off-ball for C&S
-    cutter: number;               // backdoor / basket cuts off-ball
-    offScreen: number;            // uses off-ball screens for open looks
-    rollVsPop?: number;           // C/PF only: 70+ = rolls, <40 = pops
-    attackCloseOuts: number;      // attacks when defender closes out hard
-    drawFoul: number;             // seeks contact / gets to the line
-    dribbleHandOff: number;       // initiates offense via DHOs
-    pullUpOffPnr: number;         // pulls up for jumper off ball-screen
-  };
-  defensiveTendencies: {
-    gambles: number;
-    helpDefender: number;
-    physicality: number;
-    faceUpGuard: number;
-    // ── New defensive tendencies ──────────────────────────────────
-    onBallPest: number;           // full pressure on ball handler
-    denyThePass: number;          // aggressively denies man from receiving
-    shotContestDiscipline: number;// contests without biting pump fakes
-  };
-  situationalTendencies: {
-    clutchShotTaker: number;      // demands ball / takes big shot in clutch
-  };
+  // Shooting tendencies
+  threePoint: number;        // catch-and-shoot 3PT attempts
+  midRange: number;          // mid-range jumper frequency
+  layup: number;             // drives and finishes at the rim
+  dunk: number;              // dunks when able vs. lays it up
+  postUp: number;            // posts up and scores in the paint
+  pullUpJumper: number;      // pull-up mid-range off the dribble
+  pullUpThree: number;       // pull-up 3PT off the dribble
+  // Off-ball movement
+  spotUp: number;            // catch-and-shoot from set position
+  cutToBasket: number;       // backdoor / basket cuts
+  offScreenThree: number;    // uses screens to get open 3PT looks
+  offScreenMidRange: number; // uses screens to get open mid-range looks
+  alleyOop: number;          // finishes alley-oops
+  putback: number;           // crashes boards for putback attempts
+  // Creation & passing
+  drive: number;             // attacks the basket off the dribble
+  isolation: number;         // plays one-on-one isolation ball
+  pass: number;              // tendency to pass vs. shoot; kick-out frequency
+  foulDrawing: number;       // seeks contact; draws fouls / takes charges
+  // Defense
+  onBallSteal: number;       // gambles for on-ball steals
+  block: number;             // goes for shot blocks
+  shotContest: number;       // contests shots without biting pump fakes
+  playPassLane: number;      // stays in passing lanes; intercepts / denies
 }
 export type CoachBadge = 'Developmental Genius' | 'Pace Master' | 'Star Handler' | 'Defensive Guru' | 'Offensive Architect' | 'Clutch Specialist' | 'Recruiting Ace';
 
@@ -113,7 +108,9 @@ export interface SeasonAwards {
   allNbaSecond: string[];
   allNbaThird: string[];
   allDefensive: string[];
+  allDefensiveSecond: string[];
   allRookie: string[];
+  allRookieSecond: string[];
 }
 
 export interface PlayoffSeries {
@@ -164,7 +161,7 @@ export interface BulkSimSummary {
   news: string[];
 }
 
-export type NewsCategory = 'rumor' | 'transaction' | 'injury' | 'firing' | 'trade_request' | 'award' | 'milestone' | 'expansion' | 'playoffs';
+export type NewsCategory = 'rumor' | 'transaction' | 'injury' | 'firing' | 'trade_request' | 'award' | 'milestone' | 'expansion' | 'playoffs' | 'suspension';
 
 export interface NewsItem {
   id: string;
@@ -176,6 +173,8 @@ export interface NewsItem {
   teamId?: string;
   playerId?: string;
   isBreaking?: boolean;
+  /** Season year (e.g. 2026) this item was generated in — used for year filter */
+  seasonYear?: number;
 }
 
 export interface Coach {
@@ -283,6 +282,8 @@ export interface GamePlayerLine {
   plusMinus: number;
   ejected?: boolean;
   date?: number;
+  /** League season year — used to scope per-season matchup stats. */
+  season?: number;
   opponentTeamId?: string;
   opponentTeamName?: string;
   /** Set when player did not play. Value is the reason, e.g. 'Injured'. */
@@ -369,14 +370,98 @@ export interface Player {
   };
   interestScore?: number;
   onTradeBlock?: boolean;
+  requestedTrade?: boolean;
   isSuspended?: boolean;
   suspensionGames?: number;
+  suspensionReason?: string;
+  /** True once GM has filed one appeal for the current suspension — blocks further appeals */
+  suspensionAppealed?: boolean;
   injuryType?: InjuryType;
   injuryDaysLeft?: number;
+  /** OVR points subtracted while this player is injured (cleared on recovery). */
+  injuryOVRPenalty?: number;
+  /** Set when a moderate/severe injury permanently reduces potential on recovery. */
+  potentialLossNote?: string;
+  /** GM activated play-through — player plays at reduced OVR with worsening risk. */
+  isPlayingThrough?: boolean;
+  /** Set when this injury is career-threatening; player is sidelined for the season. */
+  isCareerEnding?: boolean;
   /** Years (season numbers) in which this player was selected as an All-Star */
   allStarSelections?: number[];
   /** Years in which this player won the All-Star Game MVP award */
   allStarMvpYears?: number[];
+  /** Years (season numbers) in which this player won a championship ring */
+  championYears?: number[];
+
+  /** Active GM-assigned training priority for this player */
+  trainingFocus?: {
+    areas: TrainingFocusArea[];
+    seasonSet: number;
+    daysRemaining: number;
+    playerResponse: 'enthusiastic' | 'receptive' | 'resistant';
+  };
+
+  // ── Contract extensions ──────────────────────────────────────────────────
+  /** True for the entire first season after being drafted/signed; cleared at season-end */
+  isRookie?: boolean;
+  /** How many completed seasons this player has played (0 = current season is their first) */
+  yearsPro?: number;
+  /** True when this is a WNBA rookie scale contract; waivable before regular season */
+  isRookieContract?: boolean;
+  /** Free-agency classification once contract expires */
+  faType?: 'UFA' | 'RFA';
+  /** True when the TEAM holds an option on this contract */
+  teamOption?: boolean;
+  /** Contract year (1-based) in which the team option is exercisable */
+  teamOptionYear?: number;
+  /** True when the PLAYER holds an option on this contract */
+  playerOption?: boolean;
+  /** Contract year (1-based) in which the player option is exercisable */
+  playerOptionYear?: number;
+  /** Pending offer sheet submitted to an RFA by an outside team */
+  rfaOfferSheet?: {
+    salary: number;
+    years: number;
+    offeringTeamId: string;
+    offeringTeamName: string;
+  } | null;
+  /** Season number this player officially retired (set at end-of-season processing) */
+  yearRetired?: number;
+  /** Cached HOF probability 0-100 (recomputed each season) */
+  hofProbability?: number;
+}
+
+export interface HofInductee {
+  /** Matches the retired player's original id */
+  id: string;
+  name: string;
+  position: Position;
+  gender: Gender;
+  height: string;
+  jerseyNumber: number;
+  yearInducted: number;
+  yearRetired: number;
+  /** All team abbreviations this player appeared on (career) */
+  teams: string[];
+  /** Primary franchise (most seasons or most championships with) */
+  primaryTeam: string;
+  primaryTeamId: string;
+  careerGP: number;
+  careerSeasons: number;
+  careerPPG: number;
+  careerRPG: number;
+  careerAPG: number;
+  careerSPG: number;
+  careerBPG: number;
+  careerFGPct: number;
+  careerHighs: { points: number; rebounds: number; assists: number; steals: number; blocks: number; threepm: number };
+  awardsCount: {
+    mvp: number; dpoy: number; roy: number; allNba: number; allNbaFirst: number;
+    championships: number; allStarSelections: number; finalsMyp: number;
+  };
+  hofScore: number;
+  /** Flavour blurb shown on the HOF card */
+  inductionNote: string;
 }
 
 export interface Prospect extends Omit<Player, 'stats' | 'status' | 'morale' | 'salary' | 'contractYears'> {
@@ -412,6 +497,10 @@ export interface TeamFinances {
   fanHype: number;
   ownerPatience: number;
   ownerGoal: OwnerGoal;
+  /** Randomly generated at career creation — unique every new save. */
+  ownerName?: string;
+  /** Personality archetype describing the owner's management style. */
+  ownerPersonality?: string;
   budgets: {
     scouting: number;
     health: number;
@@ -436,14 +525,21 @@ export interface Team {
   activeScheme: CoachScheme;
   wins: number;
   losses: number;
-  prevSeasonWins?: number; // Added for EOY logic
+  prevSeasonWins?: number;  // Added for EOY logic
+  prevSeasonLosses?: number; // Added for EOY logic (used by draft lottery sorting)
   homeWins: number;
   homeLosses: number;
   roadWins: number; roadLosses: number;
   confWins: number; confLosses: number;
+  vsAbove500W?: number; // wins vs teams at .500 or better (at time of game)
+  vsAbove500L?: number; // losses vs teams at .500 or better
+  valuation?: number;            // franchise market value in $ (computed each offseason)
+  prevSeasonValuation?: number;  // prior season's value for YoY comparison
+  valuationBreakdown?: { revenue: number; market: number; performance: number; starPower: number; brand: number };
   lastTen: ('W' | 'L')[];
   budget: number;
   logo: string;
+  secondaryLogo?: string;
   conference: Conference;
   division: Division;
   marketSize: MarketSize;
@@ -460,11 +556,17 @@ export interface Team {
   borderStyle: 'None' | 'Solid' | 'Gradient';
   status: 'Active' | 'Inactive' | 'Relocating' | 'Expansion';
   aiGM?: AIGMData;
+  /** Name of the team's current General Manager (AI or human-named). */
+  gmName?: string;
+  /** Age of the team's GM (35–65). */
+  gmAge?: number;
   /** Team pace rating 60-100. Controls possessions per game via tier table.
    *  Defaults to scheme-based value if not set. */
   paceRating?: number;
   /** Days remaining in the permanent HC search. undefined = not searching. 0 = user-team vacancy (user hires manually). */
   coachSearchDaysLeft?: number;
+  /** Intended team identity (set at league generation, e.g. 'Spacing & Shooting') */
+  teamIdentity?: string;
 }
 
 export interface TradePiece {
@@ -493,12 +595,15 @@ export interface ScheduleGame {
   homeB2BCount: number;
   awayB2BCount: number;
   gameNumber?: number;
+  attendance?: number;
+  /** True for preseason / exhibition games — no standings impact */
+  isPreseason?: boolean;
 }
 
 export interface PlayByPlayEvent {
   time: string;
   text: string;
-  type: 'score' | 'miss' | 'turnover' | 'foul' | 'info';
+  type: 'score' | 'miss' | 'turnover' | 'foul' | 'info' | 'sub';
   quarter: number;
 }
 
@@ -544,6 +649,7 @@ export interface GameResult {
   isChippy?: boolean;
   season: number;
   gameInjuries?: Array<{playerId: string; playerName: string; injuryType: InjuryType; daysOut: number; teamId: string}>;
+  gameSuspensions?: Array<{playerId: string; playerName: string; teamId: string; games: number; reason: string}>;
   /** Detailed per-quarter pace/possession stats */
   quarterDetails?: QuarterDetail[];
   /** True when the game had a clutch situation (last 5 min of 4Q/OT, score diff ≤5) */
@@ -578,7 +684,9 @@ export interface LeagueSettings {
   allowManualGenderEdits: boolean;
   b2bFrequency: 'None' | 'Low' | 'Realistic' | 'High' | 'Brutal';
   showAdvancedStats: boolean;
+  highlightMyTeam?: boolean;    // defaults true — accent-colors user's team/players in all lists
   hardCap?: number;
+  numTeams?: number;
 
   // ── League Tab additions ──────────────────────────────────────────────────
   playoffFormat?: 6 | 8 | 10 | 12 | 14 | 16;
@@ -591,6 +699,8 @@ export interface LeagueSettings {
   rookieScaleContracts?: boolean;
   maxPlayerSalaryPct?: 25 | 30 | 35;
   birdRights?: boolean;
+  minContractSalary?: number;
+  maxContractSalary?: number;
   draftRounds?: number;           // default 2 (any positive integer)
   draftClassSize?: 'Small' | 'Normal' | 'Large';
   internationalProspects?: boolean;
@@ -599,7 +709,6 @@ export interface LeagueSettings {
   expansionTeamCount?: 1 | 2 | 4;
   expansionDraftRules?: 'Standard' | 'Protected' | 'Open';
   expansionEnabled?: boolean;
-  numTeams?: number;
 
   // ── Roster & Draft Extended ───────────────────────────────────────────────
   minRosterSize?: number;          // default 10
@@ -615,6 +724,7 @@ export interface LeagueSettings {
   fatigueImpact?: 'None' | 'Low' | 'Medium' | 'High';
   b2bPenalty?: 'None' | 'Mild' | 'Severe';
   loadManagement?: boolean;
+  b2bFatigueEnabled?: boolean;  // detailed B2B stat penalties; on by default
   injuryDuration?: 'Short' | 'Realistic' | 'Long';
   practiceInjuries?: boolean;
   careerEndingInjuries?: boolean;
@@ -662,6 +772,11 @@ export interface LeagueSettings {
   sliderFlagrantFoul?: number;
   sliderInjuryMultiplier?: number;
 
+  // ── WNBA Stat Realism ─────────────────────────────────────────────────────
+  wnbaStatRealism?: boolean; // auto-applied when playerGenderRatio=100; scales PPG/FGA/REB/AST to WNBA targets
+  singleYearSeason?: boolean; // show "1997 Season" instead of "1997–98 Season"; auto for women's leagues & pre-1950
+  upsetFrequency?: 'Low' | 'Medium' | 'High' | 'Realistic'; // how often weaker teams beat stronger ones
+
   // ── Season Structure additions ────────────────────────────────────────────
   divisionGames?: number;          // default 16
   conferenceGames?: number;        // default 36
@@ -681,6 +796,9 @@ export interface LeagueSettings {
   roundsAboveMin?: number;         // rounds with above-min contracts, default 1
   rookieContractLengths?: number[]; // per-round lengths, default [3,2]
   canRefuseAfterRookie?: boolean;  // player can refuse extension after rookie deal, default false
+
+  // ── Preseason ────────────────────────────────────────────────────────────
+  preseasonGames?: number;           // 4-10, default 6
 
   // ── God Mode additions ────────────────────────────────────────────────────
   editAnyPlayer?: boolean;
@@ -741,6 +859,35 @@ export interface RivalryStats {
   };
 }
 
+export interface PreviousSeasonStanding {
+  teamId: string;
+  teamName: string;
+  teamCity: string;
+  teamAbbr: string;
+  conference: Conference;
+  wins: number;
+  losses: number;
+  confRank: number;
+  madePlayoffs: boolean;
+}
+
+export interface OffseasonAlert {
+  id: string;
+  /** own_fa = user's player is a FA; notable_fa = star from another team; summary = team summary card */
+  type: 'own_fa' | 'notable_fa' | 'summary';
+  playerId?: string;
+  playerName: string;
+  playerRating?: number;
+  playerPosition?: string;
+  playerAge?: number;
+  faType?: 'UFA' | 'RFA';
+  message: string;
+  /** Desired annual salary */
+  salary?: number;
+  contractYears?: number;
+  dismissed: boolean;
+}
+
 export interface LeagueState {
   id: string;
   lastUpdated: number;
@@ -760,6 +907,12 @@ export interface LeagueState {
   coachPool: Coach[];
   savedTrades: TradeProposal[];
   incomingTradeProposals?: TradeProposal[];
+  /** Regular-season games-played count at which the next proposal batch fires (10–15 game interval). */
+  nextProposalGameCount?: number;
+  /** League day when the GM last used the manual "Check for New Proposals" button (3-day cooldown). */
+  proposalManualCooldownDay?: number;
+  /** Count of new unseen trade proposals since the GM last viewed the Trade Proposals tab. */
+  newProposalCount?: number;
   newsFeed: NewsItem[];
   transactions: Transaction[];
   powerRankingHistory?: PowerRankingSnapshot[];
@@ -771,12 +924,21 @@ export interface LeagueState {
   currentDraftPickIndex?: number;
   championshipHistory?: ChampionshipRecord[];
   rivalryHistory?: RivalryStats[];
+  /** Final standings snapshot from the most recently completed season, saved at season end. */
+  previousSeasonStandings?: PreviousSeasonStanding[];
+  /** Season number that previousSeasonStandings was captured from. */
+  previousSeasonYear?: number;
+  /** Net profit (revenue − all expenses) recorded at end of the most recently completed season. */
+  previousSeasonProfit?: number;
+  watchList?: string[];
   expansionDraft?: {
     active: boolean;
     phase: 'setup' | 'protection' | 'draft' | 'completed';
     protectedPlayerIds: Record<string, string[]>;
     expansionTeamIds: string[];
     draftLog: string[];
+    /** Per-pick news items accumulated during the draft; flushed to newsFeed on finalize. */
+    pickNews?: NewsItem[];
     pendingTeams?: {
       id: string;
       name: string;
@@ -788,11 +950,29 @@ export interface LeagueState {
       logoUrl: string;
     }[];
   };
+  /** All-time retired players (removed from FA pool after retirement age). */
+  retiredPlayers?: Player[];
+  /** Hall of Fame inductees — appended each offseason. */
+  hallOfFame?: HofInductee[];
   /** Populated when the human roster OVR ranks top-3 at season start (advisory only). */
   humanOvrAlert?: string;
+  /** Preseason exhibition games — separate from regular-season schedule. No standings impact. */
+  preseasonSchedule?: ScheduleGame[];
+  /** Box-score results for preseason games. */
+  preseasonHistory?: GameResult[];
+  /** Preseason record for the user's team this exhibition slate. */
+  preseasonRecord?: { wins: number; losses: number };
   seasonPhase?: SeasonPhase;
   tradeDeadlinePassed?: boolean;
   allStarWeekend?: AllStarWeekendData;
+  /** Owner satisfaction (0–100). Changes based on wins, playoffs, cap management. */
+  ownerApproval?: number;
+  /** Fan satisfaction (0–100). Reacts to wins, star moves, playoff success. */
+  fanApproval?: number;
+  /** When true, the end-of-season Owner Review overlay is shown. */
+  showOwnerReview?: boolean;
+  /** Data payload for the end-of-season Owner Review screen. */
+  ownerReviewData?: OwnerReviewData;
   liveGame?: {
     gameId: string;
     homeScore: number;
@@ -805,9 +985,44 @@ export interface LeagueState {
     homeQScore: number[];
     awayQScore: number[];
   };
+  /** Offseason alert queue shown after draft lottery / draft completion. Undefined = not yet generated. */
+  offseasonAlerts?: OffseasonAlert[];
+  /** Number of training-focus interventions the GM has used this season (max 4). */
+  devInterventionsThisSeason?: number;
+  /** Per-player development changes captured at offseason — shown in Dev Report modal. */
+  devReport?: PlayerDevChange[];
+}
+
+export interface PlayerDevChange {
+  playerId: string;
+  name: string;
+  position: string;
+  age: number;
+  ovrBefore: number;
+  ovrAfter: number;
+  potBefore: number;
+  potAfter: number;
+  hadFocus: boolean;
 }
 
 export type TransactionType = 'trade' | 'signing' | 'release' | 'hiring' | 'firing' | 'injury' | 'waiver' | 'draft';
+
+export interface OwnerReviewData {
+  season: number;
+  wins: number;
+  losses: number;
+  madePlayoffs: boolean;
+  playoffResult: 'none' | 'first_round' | 'semifinals' | 'finals' | 'champion';
+  grade: 'A+' | 'A' | 'B+' | 'B' | 'C+' | 'C' | 'D' | 'F';
+  comments: string[];
+  expectation: string;
+  ownerApprovalChange: number;
+  fanApprovalChange: number;
+  ownerApprovalBefore: number;
+  ownerApprovalAfter: number;
+  fanApprovalBefore: number;
+  fanApprovalAfter: number;
+}
 
 export type SeasonPhase = 'Preseason' | 'Regular Season' | 'Trade Deadline' | 'All-Star Weekend' | 'Playoffs' | 'Offseason';
 

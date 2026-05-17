@@ -1,4 +1,5 @@
 import { Team, Position, Player, Conference, Division, MarketSize, PersonalityTrait, PlayerTendencies, ScheduleGame, Prospect, DraftPick, Coach, CoachScheme, CoachBadge, OwnerGoal, Gender, CoachRole, TeamRotation } from './types';
+import { computeMensMarketSalary } from './utils/contractRules';
 
 export const POSITIONS: Position[] = ['PG', 'SG', 'SF', 'PF', 'C'];
 export const SCHEMES: CoachScheme[] = ['Balanced', 'Pace and Space', 'Grit and Grind', 'Triangle', 'Small Ball', 'Showtime'];
@@ -78,145 +79,439 @@ export const getRandomTraits = (): PersonalityTrait[] => {
   return [...PERSONALITY_TRAITS].sort(() => 0.5 - Math.random()).slice(0, count);
 };
 
-export const generateTendencies = (pos: Position, traits: PersonalityTrait[]): PlayerTendencies => {
-  type Base = {
-    pullUpThree: number; postUp: number; driveToBasket: number; midRangeJumper: number;
-    kickOutPasser: number; isoHeavy: number; transitionHunter: number;
-    spotUp: number; cutter: number; offScreen: number;
-    attackCloseOuts: number; drawFoul: number; dribbleHandOff: number; pullUpOffPnr: number;
-    gambles: number; helpDefender: number; physicality: number; faceUpGuard: number;
-    onBallPest: number; denyThePass: number; shotContestDiscipline: number;
-    clutchShotTaker: number;
-    rollVsPop?: number; // PF/C only
-  };
+// ── Archetype-first: weighted archetype pool per position ────────────────────
+export const ARCHETYPE_POSITION_WEIGHTS: Record<string, [string, number][]> = {
+  PG: [
+    ['Playmaking Guard', 22], ['Pure Scorer', 14], ['Scoring Playmaker', 10],
+    ['Combo Guard', 10], ['3&D Wing', 8], ['Lockdown Defender', 6],
+    ['Defensive Floor General', 6], ['Shot-Creating Guard', 8], ['Slashing Playmaker', 8],
+    ['Role Player', 6], ['Bench Spark', 4],
+  ],
+  SG: [
+    ['Pure Scorer', 20], ['3&D Wing', 18], ['Two-Way Wing', 12], ['Combo Guard', 12],
+    ['Shot-Creating Guard', 12], ['Playmaking Guard', 8], ['Lockdown Defender', 8],
+    ['Role Player', 6], ['Bench Spark', 4],
+  ],
+  SF: [
+    ['3&D Wing', 22], ['Two-Way Forward', 18], ['Pure Scorer', 12], ['Lockdown Defender', 8],
+    ['Slashing Playmaker', 8], ['Stretch Big', 7], ['Two-Way Wing', 8],
+    ['Role Player', 10], ['Bench Spark', 7],
+  ],
+  PF: [
+    ['Two-Way Forward', 14], ['Stretch Big', 14], ['Rim Protector', 10],
+    ['Two-Way Interior Star', 10], ['Post Scorer', 10], ['3&D Wing', 8],
+    ['Glass Cleaner', 8], ['Pick-and-Roll Big', 8], ['Lockdown Defender', 6],
+    ['Athletic Rim Runner', 4], ['Role Player', 6], ['Bench Spark', 4],
+  ],
+  C: [
+    ['Rim Protector', 22], ['Two-Way Interior Star', 16], ['Post Scorer', 12],
+    ['Glass Cleaner', 12], ['Stretch Big', 8], ['Pick-and-Roll Big', 8],
+    ['Athletic Rim Runner', 6], ['Stretch Rim Protector', 4],
+    ['Lockdown Defender', 4], ['Role Player', 5], ['Bench Spark', 3],
+  ],
+};
+
+// ── Per-archetype attribute shaping: boost primary, suppress weakness ────────
+// Applied in generatePlayer after base attr generation, before position bounds.
+// Boost increases raw attr value; suppress decreases it.
+// The archetype-aware floor bypass in applyAttrBounds skips position floors for
+// suppressed attributes, allowing genuine archetypical weaknesses to persist.
+export const ARCHETYPE_ATTR_SHAPE: Record<string, {
+  boost: Partial<Record<string, number>>;
+  suppress: Partial<Record<string, number>>;
+}> = {
+  'Rim Protector':        { boost: { blocks: 22, interiorDef: 20, defReb: 14, defensiveIQ: 12, strength: 10, stamina: 8 },
+                            suppress: { postScoring: 35, shootingMid: 28, shooting3pt: 38, ballHandling: 32, passing: 18, offReb: 8, perimeterDef: 12, speed: 10 } },
+  'Two-Way Interior Star':{ boost: { postScoring: 16, interiorDef: 18, blocks: 14, defReb: 16, offReb: 12, strength: 14, offensiveIQ: 10 },
+                            suppress: { ballHandling: 24, shooting3pt: 28, perimeterDef: 14, speed: 12, passing: 8 } },
+  'Post Scorer':          { boost: { postScoring: 24, strength: 16, layups: 12, offensiveIQ: 10, foulDrawing: 10 },
+                            suppress: { shooting3pt: 35, ballHandling: 22, perimeterDef: 18, speed: 14, blocks: 14, jumping: 10 } },
+  'Glass Cleaner':        { boost: { offReb: 26, defReb: 22, strength: 12, stamina: 10, dunks: 10 },
+                            suppress: { postScoring: 18, shooting3pt: 38, ballHandling: 28, shootingMid: 26, perimeterDef: 14, passing: 10 } },
+  'Stretch Big':          { boost: { shooting3pt: 26, shootingMid: 18, offensiveIQ: 10, freeThrow: 12 },
+                            suppress: { blocks: 25, strength: 18, postScoring: 30, interiorDef: 22, offReb: 18, defReb: 12 } },
+  'Stretch Rim Protector':{ boost: { blocks: 20, interiorDef: 18, shooting3pt: 18, defReb: 12 },
+                            suppress: { postScoring: 22, ballHandling: 20, speed: 10, passing: 10, offReb: 10, strength: 8 } },
+  '3&D Wing':             { boost: { shooting3pt: 18, perimeterDef: 16, defensiveIQ: 10, steals: 12 },
+                            suppress: { postScoring: 22, blocks: 16, ballHandling: 14, strength: 14, passing: 10 } },
+  'Lockdown Defender':    { boost: { perimeterDef: 22, defensiveIQ: 16, steals: 14, interiorDef: 10, speed: 8 },
+                            suppress: { shooting3pt: 28, ballHandling: 14, shootingMid: 20, offensiveIQ: 14, passing: 10 } },
+  'Playmaking Guard':     { boost: { ballHandling: 22, passing: 20, offensiveIQ: 12 },
+                            suppress: { blocks: 20, interiorDef: 18, postScoring: 18, strength: 16, offReb: 10, shootingMid: 10 } },
+  'Scoring Playmaker':    { boost: { ballHandling: 16, passing: 14, shooting3pt: 14, shootingMid: 12, offensiveIQ: 14 },
+                            suppress: { blocks: 16, interiorDef: 16, postScoring: 16, strength: 14, perimeterDef: 10, defReb: 8 } },
+  'Pure Scorer':          { boost: { shooting3pt: 16, shootingMid: 14, offensiveIQ: 12, freeThrow: 8 },
+                            suppress: { blocks: 18, interiorDef: 16, passing: 20, strength: 14, defensiveIQ: 12, perimeterDef: 10 } },
+  'Two-Way Forward':      { boost: { perimeterDef: 14, athleticism: 12, interiorDef: 10, steals: 12, shooting3pt: 10 },
+                            suppress: { postScoring: 16, ballHandling: 12, blocks: 8, passing: 8 } },
+  'Two-Way Wing':         { boost: { perimeterDef: 16, shooting3pt: 14, steals: 12, athleticism: 10 },
+                            suppress: { postScoring: 18, blocks: 14, strength: 14, ballHandling: 8, passing: 8 } },
+  'Combo Guard':          { boost: { shooting3pt: 10, ballHandling: 12, passing: 10, shootingMid: 10 },
+                            suppress: { blocks: 18, interiorDef: 16, postScoring: 14, strength: 14, perimeterDef: 10 } },
+  // New sub-archetypes
+  'Shot-Creating Guard':  { boost: { ballHandling: 16, shootingMid: 18, shooting3pt: 12, offensiveIQ: 12, freeThrow: 10, speed: 6 },
+                            suppress: { passing: 20, perimeterDef: 18, defensiveIQ: 14, blocks: 22, interiorDef: 20, postScoring: 12 } },
+  'Slashing Playmaker':   { boost: { ballHandling: 18, passing: 14, speed: 12, jumping: 10, layups: 16, athleticism: 12, offensiveIQ: 10 },
+                            suppress: { shooting3pt: 30, shootingMid: 20, freeThrow: 16, blocks: 14, strength: 10 } },
+  'Defensive Floor General': { boost: { perimeterDef: 24, defensiveIQ: 20, steals: 16, passing: 12, speed: 10, ballHandling: 8 },
+                                suppress: { shooting3pt: 32, shootingMid: 24, offensiveIQ: 10, postScoring: 18, layups: 10 } },
+  'Pick-and-Roll Big':    { boost: { postScoring: 16, strength: 14, offReb: 12, defReb: 12, offensiveIQ: 14, passing: 10 },
+                            suppress: { shooting3pt: 32, shootingMid: 18, perimeterDef: 16, blocks: 12, speed: 12 } },
+  'Athletic Rim Runner':  { boost: { dunks: 26, jumping: 22, athleticism: 18, speed: 12, offReb: 16, blocks: 14 },
+                            suppress: { shooting3pt: 42, shootingMid: 32, freeThrow: 20, ballHandling: 24, passing: 16, postScoring: 18 } },
+  'Hybrid Star':          { boost: {}, suppress: {} },
+  'Role Player':          { boost: {}, suppress: {} },
+  'Bench Spark':          { boost: {}, suppress: {} },
+};
+
+// ── Per-archetype tendency overrides (delta from position base) ──────────────
+export const ARCHETYPE_TENDENCY_OVERRIDES: Record<string, Partial<PlayerTendencies>> = {
+  'Rim Protector':        { block: 25, shotContest: 22, putback: 14, postUp: -20, isolation: -24, pullUpJumper: -30, pullUpThree: -35, offScreenThree: -30 },
+  'Two-Way Interior Star':{ block: 18, shotContest: 16, postUp: 22, putback: 18, isolation: 8, pullUpThree: -22, offScreenThree: -20, pullUpJumper: -14 },
+  'Post Scorer':          { postUp: 32, foulDrawing: 20, putback: 16, isolation: 10, pullUpThree: -30, offScreenThree: -30, block: -12, drive: 8 },
+  'Glass Cleaner':        { putback: 32, block: 10, shotContest: 12, isolation: -30, pullUpJumper: -25, pullUpThree: -35, offScreenThree: -30, spotUp: -14 },
+  'Stretch Big':          { spotUp: 30, offScreenThree: 22, pullUpThree: 14, postUp: -25, isolation: -20, block: -14, putback: -12, drive: -10 },
+  'Stretch Rim Protector':{ block: 22, shotContest: 18, spotUp: 16, offScreenThree: 12, postUp: -16, isolation: -12, pullUpJumper: -16, drive: -8 },
+  '3&D Wing':             { spotUp: 24, onBallSteal: 16, shotContest: 14, playPassLane: 16, isolation: -20, postUp: -18, pullUpJumper: -12, drive: -8 },
+  'Lockdown Defender':    { onBallSteal: 24, shotContest: 24, playPassLane: 20, isolation: -20, pullUpJumper: -18, pullUpThree: -22, drive: -10, threePoint: -18 },
+  'Playmaking Guard':     { pass: 24, cutToBasket: 16, playPassLane: 16, isolation: -14, postUp: -20, block: -18, pullUpJumper: -10 },
+  'Scoring Playmaker':    { pass: 16, pullUpJumper: 14, isolation: 14, drive: 12, spotUp: 10, block: -18, postUp: -12 },
+  'Pure Scorer':          { isolation: 24, pullUpJumper: 18, drive: 14, spotUp: 14, pass: -18, block: -20, putback: -14, postUp: -10 },
+  'Two-Way Forward':      { onBallSteal: 14, shotContest: 12, spotUp: 12, drive: 10, playPassLane: 12, postUp: -14, block: -6 },
+  'Two-Way Wing':         { onBallSteal: 16, spotUp: 14, shotContest: 14, drive: 10, postUp: -16, block: -12, isolation: -8 },
+  'Combo Guard':          { drive: 8, pullUpJumper: 10, pass: 10, spotUp: 10, block: -12, postUp: -12, isolation: -8 },
+  // New sub-archetypes
+  'Shot-Creating Guard':  { pullUpJumper: 26, drive: 18, isolation: 22, midRange: 18, foulDrawing: 14, pass: -16, onBallSteal: -10, shotContest: -14, playPassLane: -12 },
+  'Slashing Playmaker':   { drive: 32, cutToBasket: 22, pass: 20, alleyOop: 16, layup: 14, threePoint: -30, pullUpThree: -28, spotUp: -20, offScreenThree: -22 },
+  'Defensive Floor General': { onBallSteal: 28, playPassLane: 24, shotContest: 20, pass: 16, threePoint: -30, pullUpThree: -32, isolation: -18, spotUp: -20 },
+  'Pick-and-Roll Big':    { alleyOop: 28, cutToBasket: 22, putback: 18, foulDrawing: 12, offScreenThree: -26, pullUpThree: -32, isolation: -16, spotUp: -10 },
+  'Athletic Rim Runner':  { alleyOop: 35, dunk: 32, cutToBasket: 28, putback: 24, threePoint: -38, pullUpThree: -38, spotUp: -28, offScreenThree: -30, pullUpJumper: -24 },
+  'Hybrid Star':          {},
+  'Role Player':          {},
+  'Bench Spark':          {},
+};
+
+export const getArchetypeFitScores = (
+  pos: string,
+  attrs: Record<string, number>,
+  rating: number,
+): Array<{ archetype: string; score: number; isPrimary: boolean }> => {
+  const sht3 = attrs.shooting3pt ?? 50;
+  const mid  = attrs.shootingMid ?? 50;
+  const sht  = attrs.shooting ?? 50;
+  const blk  = attrs.blocks ?? 50;
+  const iDef = attrs.interiorDef ?? 50;
+  const pDef = attrs.perimeterDef ?? 50;
+  const dIQ  = attrs.defensiveIQ ?? 50;
+  const bh   = attrs.ballHandling ?? 50;
+  const pass = attrs.passing ?? 50;
+  const post = attrs.postScoring ?? 50;
+  const ath  = attrs.athleticism ?? 50;
+  const str  = attrs.strength ?? 50;
+  const oReb = attrs.offReb ?? 50;
+  const dReb = attrs.defReb ?? 50;
+  const stl  = attrs.steals ?? 50;
+  const oIQ  = attrs.offensiveIQ ?? 50;
+  const spd  = attrs.speed ?? 50;
+
+  const isBig   = pos === 'C' || pos === 'PF';
+  const isGuard = pos === 'PG' || pos === 'SG';
+  const isWing  = pos === 'SF' || pos === 'SG';
+  const isPG    = pos === 'PG';
+  const isSG    = pos === 'SG';
+  const isC     = pos === 'C';
+  const isPF    = pos === 'PF';
+  const isSF    = pos === 'SF';
+
+  const surplus = (v: number, threshold: number) => Math.max(0, v - threshold);
+
+  const entries: [string, number][] = [];
+
+  // Two-Way Interior Star: BOTH post AND interior defense must be elite
+  entries.push(['Two-Way Interior Star',
+    isBig
+      ? surplus(post, 78) * 0.55 + surplus(iDef, 78) * 0.55 + surplus(blk, 70) * 0.3 + surplus(dReb, 72) * 0.2 - Math.max(0, 78 - post) * 0.5 - Math.max(0, 78 - iDef) * 0.5
+      : -100
+  ]);
+
+  // Rim Protector: elite blocks+interior, penalized for elite post scoring
+  entries.push(['Rim Protector',
+    isBig
+      ? surplus(blk, 72) * 0.65 + surplus(iDef, 72) * 0.55 + surplus(dIQ, 60) * 0.25 - surplus(post, 78) * 0.5 - surplus(sht3, 68) * 0.3
+      : -100
+  ]);
+
+  // Post Scorer: elite post, penalized for no interior defense
+  entries.push(['Post Scorer',
+    isBig
+      ? surplus(post, 72) * 0.7 + surplus(str, 68) * 0.4 + ((attrs.layups ?? 50) > 65 ? 5 : 0) - Math.max(0, 65 - post) * 0.5
+      : -100
+  ]);
+
+  // Glass Cleaner: elite BOTH reb, penalized for elite post
+  entries.push(['Glass Cleaner',
+    isBig
+      ? surplus(oReb, 74) * 0.65 + surplus(dReb, 74) * 0.55 + surplus(str, 70) * 0.2 - surplus(post, 78) * 0.4 - surplus(sht3, 68) * 0.3
+      : -100
+  ]);
+
+  // Stretch Rim Protector: elite blocks + meaningful 3PT (rare hybrid)
+  entries.push(['Stretch Rim Protector',
+    isBig
+      ? surplus(blk, 78) * 0.55 + surplus(iDef, 72) * 0.45 + surplus(sht3, 68) * 0.6 - 15
+      : -100
+  ]);
+
+  // Stretch Big: elite perimeter shooting for a big
+  entries.push(['Stretch Big',
+    (isBig || isSF)
+      ? surplus(sht3, 68) * 0.7 + surplus(mid, 65) * 0.4 - surplus(blk, 78) * 0.3 - surplus(post, 82) * 0.4
+      : -100
+  ]);
+
+  // 3&D Wing: 3PT + perimeter defense
+  entries.push(['3&D Wing',
+    (!isBig || isPF)
+      ? surplus(sht3, 68) * 0.55 + surplus(pDef, 68) * 0.5 + surplus(dIQ, 60) * 0.2 - (isBig ? 15 : 0)
+      : -100
+  ]);
+
+  // Lockdown Defender: elite perimeter defense, any position
+  entries.push(['Lockdown Defender',
+    surplus(pDef, 75) * 0.65 + surplus(dIQ, 68) * 0.5 + surplus(stl, 65) * 0.3 - surplus(sht3, 78) * 0.2
+  ]);
+
+  // Playmaking Guard: elite BH + passing
+  entries.push(['Playmaking Guard',
+    isGuard
+      ? surplus(bh, 72) * 0.6 + surplus(pass, 70) * 0.55 + surplus(oIQ, 65) * 0.2 - (isSG ? 5 : 0)
+      : -100
+  ]);
+
+  // Scoring Playmaker: elite in both scoring AND playmaking (PG)
+  entries.push(['Scoring Playmaker',
+    isPG
+      ? surplus(bh, 76) * 0.4 + surplus(pass, 74) * 0.4 + surplus(sht3, 74) * 0.5 + surplus(mid, 72) * 0.3 - 12
+      : -100
+  ]);
+
+  // Pure Scorer: high shooting, any guard/wing
+  entries.push(['Pure Scorer',
+    !isBig
+      ? surplus(sht3, 70) * 0.45 + surplus(mid, 68) * 0.4 + surplus(oIQ, 65) * 0.3 + surplus(sht, 68) * 0.3
+      : surplus(post, 78) * 0.3 - 10  // bigs can score but not "pure scorer"
+  ]);
+
+  // Two-Way Forward (SF/PF wings with both offense and defense)
+  entries.push(['Two-Way Forward',
+    (isSF || isPF)
+      ? surplus(pDef, 68) * 0.4 + surplus(ath, 70) * 0.4 + surplus(iDef, 62) * 0.25 + surplus(stl, 60) * 0.2 + surplus(sht3, 62) * 0.2
+      : -100
+  ]);
+
+  // Two-Way Wing (SG/SF with scoring + defense)
+  entries.push(['Two-Way Wing',
+    (isSG || isSF)
+      ? surplus(pDef, 70) * 0.45 + surplus(sht3, 68) * 0.4 + surplus(ath, 68) * 0.3 + surplus(stl, 62) * 0.2 - 5
+      : -100
+  ]);
+
+  // Combo Guard (balanced, neither pure scorer nor pure playmaker)
+  entries.push(['Combo Guard',
+    isGuard
+      ? surplus(bh, 68) * 0.3 + surplus(sht3, 68) * 0.3 + surplus(pass, 65) * 0.2 + surplus(mid, 65) * 0.2 - 8
+      : -100
+  ]);
+
+  // Shot-Creating Guard: off-dribble scorer, penalized for elite passing
+  entries.push(['Shot-Creating Guard',
+    isGuard
+      ? surplus(bh, 70) * 0.5 + surplus(mid, 70) * 0.55 + surplus(oIQ, 65) * 0.3 - surplus(pass, 76) * 0.3 - 8
+      : -100
+  ]);
+
+  // Slashing Playmaker: speed + handles + layups, penalized for elite 3PT
+  entries.push(['Slashing Playmaker',
+    (isGuard || isSF)
+      ? surplus(bh, 70) * 0.5 + surplus(spd, 72) * 0.4 + surplus(pass, 68) * 0.35 - surplus(sht3, 78) * 0.55 - 8
+      : -100
+  ]);
+
+  // Defensive Floor General: elite D + passing, heavily penalized for shooting
+  entries.push(['Defensive Floor General',
+    isPG
+      ? surplus(pDef, 72) * 0.6 + surplus(dIQ, 68) * 0.55 + surplus(stl, 65) * 0.3 + surplus(pass, 68) * 0.3 - surplus(sht3, 72) * 0.7 - 10
+      : -100
+  ]);
+
+  // Pick-and-Roll Big: post + rebounding + offense, penalized for 3PT
+  entries.push(['Pick-and-Roll Big',
+    isBig
+      ? surplus(post, 70) * 0.4 + surplus(oReb, 68) * 0.35 + surplus(dReb, 68) * 0.35 + surplus(str, 68) * 0.3 - surplus(sht3, 68) * 0.45 - 8
+      : -100
+  ]);
+
+  // Athletic Rim Runner: elite athleticism + dunks + speed, penalized for shooting
+  entries.push(['Athletic Rim Runner',
+    isBig
+      ? surplus(ath, 78) * 0.65 + surplus(spd, 70) * 0.4 + surplus(oReb, 65) * 0.3 - surplus(sht3, 65) * 0.2 - 12
+      : -100
+  ]);
+
+  // Hybrid Star: any elite player (rating-gated) — only true elites qualify
+  entries.push(['Hybrid Star', rating >= 92 ? (rating - 92) * 6 : -100]);
+
+  // Fallbacks
+  entries.push(['Role Player', 5]);
+  entries.push(['Bench Spark', 4]);
+
+  return entries
+    .sort((a, b) => b[1] - a[1])
+    .map(([archetype, score], i) => ({ archetype, score: Math.max(0, Math.round(score)), isPrimary: i === 0 }));
+};
+
+export const generateTendencies = (pos: Position, traits: PersonalityTrait[], archetype?: string): PlayerTendencies => {
+  type Base = PlayerTendencies;
   const baseMap: Record<Position, Base> = {
-    PG: { pullUpThree: 78, postUp: 20, driveToBasket: 74, midRangeJumper: 62, kickOutPasser: 68, isoHeavy: 65, transitionHunter: 74,
-          spotUp: 58, cutter: 57, offScreen: 58, attackCloseOuts: 80, drawFoul: 65, dribbleHandOff: 55, pullUpOffPnr: 80,
-          gambles: 50, helpDefender: 65, physicality: 40, faceUpGuard: 60,
-          onBallPest: 62, denyThePass: 60, shotContestDiscipline: 62, clutchShotTaker: 58 },
-    SG: { pullUpThree: 85, postUp: 35, driveToBasket: 68, midRangeJumper: 72, kickOutPasser: 42, isoHeavy: 82, transitionHunter: 60,
-          spotUp: 87, cutter: 52, offScreen: 74, attackCloseOuts: 82, drawFoul: 65, dribbleHandOff: 50, pullUpOffPnr: 78,
-          gambles: 55, helpDefender: 55, physicality: 50, faceUpGuard: 65,
-          onBallPest: 62, denyThePass: 65, shotContestDiscipline: 62, clutchShotTaker: 62 },
-    SF: { pullUpThree: 72, postUp: 50, driveToBasket: 63, midRangeJumper: 73, kickOutPasser: 48, isoHeavy: 75, transitionHunter: 53,
-          spotUp: 72, cutter: 62, offScreen: 60, attackCloseOuts: 80, drawFoul: 65, dribbleHandOff: 45, pullUpOffPnr: 65,
-          gambles: 50, helpDefender: 60, physicality: 60, faceUpGuard: 55,
-          onBallPest: 57, denyThePass: 60, shotContestDiscipline: 67, clutchShotTaker: 58 },
-    PF: { pullUpThree: 35, postUp: 70, driveToBasket: 45, midRangeJumper: 55, kickOutPasser: 40, isoHeavy: 45, transitionHunter: 35,
-          spotUp: 42, cutter: 65, offScreen: 32, attackCloseOuts: 52, drawFoul: 62, dribbleHandOff: 47, pullUpOffPnr: 32,
-          gambles: 45, helpDefender: 70, physicality: 75, faceUpGuard: 45,
-          onBallPest: 47, denyThePass: 50, shotContestDiscipline: 67, clutchShotTaker: 50,
-          rollVsPop: 50 },
-    C:  { pullUpThree: 15, postUp: 85, driveToBasket: 35, midRangeJumper: 40, kickOutPasser: 30, isoHeavy: 40, transitionHunter: 25,
-          spotUp: 27, cutter: 70, offScreen: 20, attackCloseOuts: 37, drawFoul: 62, dribbleHandOff: 55, pullUpOffPnr: 20,
-          gambles: 40, helpDefender: 80, physicality: 85, faceUpGuard: 30,
-          onBallPest: 37, denyThePass: 40, shotContestDiscipline: 72, clutchShotTaker: 50,
-          rollVsPop: 60 },
+    PG: { threePoint:75, midRange:62, foulDrawing:65, postUp:20,  layup:68, dunk:45,
+          spotUp:60, drive:74, offScreenThree:55, offScreenMidRange:50, cutToBasket:55,
+          pass:70, isolation:62, onBallSteal:52, block:28, alleyOop:45,
+          shotContest:60, putback:32, pullUpJumper:72, pullUpThree:78, playPassLane:62 },
+    SG: { threePoint:85, midRange:72, foulDrawing:63, postUp:35,  layup:62, dunk:58,
+          spotUp:85, drive:65, offScreenThree:72, offScreenMidRange:65, cutToBasket:50,
+          pass:42, isolation:80, onBallSteal:55, block:32, alleyOop:42,
+          shotContest:62, putback:38, pullUpJumper:72, pullUpThree:82, playPassLane:60 },
+    SF: { threePoint:70, midRange:70, foulDrawing:65, postUp:50,  layup:62, dunk:60,
+          spotUp:70, drive:62, offScreenThree:58, offScreenMidRange:60, cutToBasket:60,
+          pass:48, isolation:72, onBallSteal:50, block:45, alleyOop:52,
+          shotContest:65, putback:48, pullUpJumper:62, pullUpThree:68, playPassLane:58 },
+    PF: { threePoint:35, midRange:55, foulDrawing:62, postUp:70,  layup:55, dunk:68,
+          spotUp:42, drive:45, offScreenThree:30, offScreenMidRange:38, cutToBasket:65,
+          pass:38, isolation:45, onBallSteal:45, block:68, alleyOop:65,
+          shotContest:67, putback:72, pullUpJumper:30, pullUpThree:32, playPassLane:55 },
+    C:  { threePoint:15, midRange:40, foulDrawing:62, postUp:85,  layup:55, dunk:78,
+          spotUp:27, drive:35, offScreenThree:18, offScreenMidRange:25, cutToBasket:68,
+          pass:30, isolation:38, onBallSteal:38, block:82, alleyOop:75,
+          shotContest:72, putback:80, pullUpJumper:20, pullUpThree:15, playPassLane:50 },
   };
+
   const b = baseMap[pos];
   const rand = (base: number) => Math.min(100, Math.max(0, base + Math.floor(Math.random() * 21) - 10));
-
-  let off: PlayerTendencies['offensiveTendencies'] = {
-    pullUpThree:      rand(b.pullUpThree),
-    postUp:           rand(b.postUp),
-    driveToBasket:    rand(b.driveToBasket),
-    midRangeJumper:   rand(b.midRangeJumper),
-    kickOutPasser:    rand(b.kickOutPasser),
-    isoHeavy:         rand(b.isoHeavy),
-    transitionHunter: rand(b.transitionHunter),
-    spotUp:           rand(b.spotUp),
-    cutter:           rand(b.cutter),
-    offScreen:        rand(b.offScreen),
-    attackCloseOuts:  rand(b.attackCloseOuts),
-    drawFoul:         rand(b.drawFoul),
-    dribbleHandOff:   rand(b.dribbleHandOff),
-    pullUpOffPnr:     rand(b.pullUpOffPnr),
-    ...(b.rollVsPop !== undefined ? { rollVsPop: rand(b.rollVsPop) } : {}),
-  };
-  let def: PlayerTendencies['defensiveTendencies'] = {
-    gambles:               rand(b.gambles),
-    helpDefender:          rand(b.helpDefender),
-    physicality:           rand(b.physicality),
-    faceUpGuard:           rand(b.faceUpGuard),
-    onBallPest:            rand(b.onBallPest),
-    denyThePass:           rand(b.denyThePass),
-    shotContestDiscipline: rand(b.shotContestDiscipline),
-  };
-  let sit: PlayerTendencies['situationalTendencies'] = {
-    clutchShotTaker: rand(b.clutchShotTaker),
-  };
-
-  // ── Existing personality trait modifiers (unchanged) ─────────────────────
-  if (traits.includes('Lazy'))                 { off.isoHeavy        = Math.min(100, off.isoHeavy        + 15); def.gambles      = Math.max(0,   def.gambles      - 10); }
-  if (traits.includes('Workhorse'))            { off.driveToBasket   = Math.min(100, off.driveToBasket   + 10); def.helpDefender = Math.min(100, def.helpDefender  + 10); }
-  if (traits.includes('Leader'))               { off.kickOutPasser   = Math.min(100, off.kickOutPasser   + 15); off.isoHeavy     = Math.max(0,   off.isoHeavy     - 10); }
-  if (traits.includes('Friendly/Team First'))  { off.kickOutPasser   = Math.min(100, off.kickOutPasser   + 12); def.helpDefender = Math.min(100, def.helpDefender  + 12); }
-  if (traits.includes('Diva/Star'))            { off.isoHeavy        = Math.min(100, off.isoHeavy        + 20); off.kickOutPasser = Math.max(0,  off.kickOutPasser - 15); }
-  if (traits.includes('Tough/Alpha'))          { def.physicality     = Math.min(100, def.physicality     + 15); def.gambles      = Math.min(100, def.gambles      + 10); }
-  if (traits.includes('Hot Head'))             { def.gambles         = Math.min(100, def.gambles         + 15); off.isoHeavy     = Math.min(100, off.isoHeavy     + 10); }
-  if (traits.includes('Professional'))         { off.midRangeJumper  = Math.min(100, off.midRangeJumper  + 10); def.helpDefender = Math.min(100, def.helpDefender + 10); }
-  if (traits.includes('Gym Rat'))              { off.driveToBasket   = Math.min(100, off.driveToBasket   + 10); def.helpDefender = Math.min(100, def.helpDefender + 10); }
-  if (traits.includes('Streaky'))              { off.pullUpThree     = Math.min(100, off.pullUpThree     + 12); off.midRangeJumper = Math.min(100, off.midRangeJumper + 8); }
-
-  // ── New personality modifiers ─────────────────────────────────────────────
   const clamp = (v: number) => Math.min(100, Math.max(0, v));
 
+  const t: PlayerTendencies = {
+    threePoint:        rand(b.threePoint),
+    midRange:          rand(b.midRange),
+    foulDrawing:       rand(b.foulDrawing),
+    postUp:            rand(b.postUp),
+    layup:             rand(b.layup),
+    dunk:              rand(b.dunk),
+    spotUp:            rand(b.spotUp),
+    drive:             rand(b.drive),
+    offScreenThree:    rand(b.offScreenThree),
+    offScreenMidRange: rand(b.offScreenMidRange),
+    cutToBasket:       rand(b.cutToBasket),
+    pass:              rand(b.pass),
+    isolation:         rand(b.isolation),
+    onBallSteal:       rand(b.onBallSteal),
+    block:             rand(b.block),
+    alleyOop:          rand(b.alleyOop),
+    shotContest:       rand(b.shotContest),
+    putback:           rand(b.putback),
+    pullUpJumper:      rand(b.pullUpJumper),
+    pullUpThree:       rand(b.pullUpThree),
+    playPassLane:      rand(b.playPassLane),
+  };
+
+  // ── Personality trait modifiers ───────────────────────────────────────────
   if (traits.includes('Lazy')) {
-    off.spotUp         = clamp(off.spotUp         - 10);
-    off.cutter         = clamp(off.cutter         - 15);
-    off.offScreen      = clamp(off.offScreen       - 10);
-    def.onBallPest     = clamp(def.onBallPest      - 20);
-    def.denyThePass    = clamp(def.denyThePass     - 15);
-    off.drawFoul       = clamp(off.drawFoul        - 10);
+    t.isolation    = clamp(t.isolation    + 15);
+    t.onBallSteal  = clamp(t.onBallSteal  - 10);
+    t.spotUp       = clamp(t.spotUp       - 10);
+    t.cutToBasket  = clamp(t.cutToBasket  - 15);
+    t.offScreenThree    = clamp(t.offScreenThree    - 10);
+    t.offScreenMidRange = clamp(t.offScreenMidRange - 10);
+    t.playPassLane = clamp(t.playPassLane - 15);
+    t.foulDrawing  = clamp(t.foulDrawing  - 10);
   }
   if (traits.includes('Workhorse')) {
-    def.onBallPest     = clamp(def.onBallPest      + 15);
-    def.denyThePass    = clamp(def.denyThePass     + 12);
-    off.cutter         = clamp(off.cutter          + 10);
-    off.attackCloseOuts= clamp(off.attackCloseOuts + 10);
-    off.drawFoul       = clamp(off.drawFoul        +  8);
-  }
-  if (traits.includes('Diva/Star')) {
-    sit.clutchShotTaker= clamp(sit.clutchShotTaker + 20);
-    off.spotUp         = clamp(off.spotUp          - 15);
-    off.cutter         = clamp(off.cutter          - 15);
-    def.denyThePass    = clamp(def.denyThePass     - 10);
+    t.drive        = clamp(t.drive        + 10);
+    t.playPassLane = clamp(t.playPassLane + 10);
+    t.onBallSteal  = clamp(t.onBallSteal  + 15);
+    t.cutToBasket  = clamp(t.cutToBasket  + 10);
+    t.foulDrawing  = clamp(t.foulDrawing  +  8);
+    t.putback      = clamp(t.putback      +  8);
   }
   if (traits.includes('Leader')) {
-    off.kickOutPasser  = clamp(off.kickOutPasser   + 10); // already bumped, stack intentional
-    off.cutter         = clamp(off.cutter          +  8);
-    def.denyThePass    = clamp(def.denyThePass     +  8);
-    sit.clutchShotTaker= clamp(sit.clutchShotTaker + 10);
-    def.onBallPest     = clamp(def.onBallPest      +  5);
+    t.pass         = clamp(t.pass         + 20);
+    t.isolation    = clamp(t.isolation    - 10);
+    t.cutToBasket  = clamp(t.cutToBasket  +  8);
+    t.playPassLane = clamp(t.playPassLane + 12);
+    t.onBallSteal  = clamp(t.onBallSteal  +  5);
+  }
+  if (traits.includes('Friendly/Team First')) {
+    t.pass         = clamp(t.pass         + 12);
+    t.playPassLane = clamp(t.playPassLane + 12);
+    t.cutToBasket  = clamp(t.cutToBasket  +  6);
+  }
+  if (traits.includes('Diva/Star')) {
+    t.isolation    = clamp(t.isolation    + 30);
+    t.pass         = clamp(t.pass         - 15);
+    t.spotUp       = clamp(t.spotUp       - 15);
+    t.cutToBasket  = clamp(t.cutToBasket  - 15);
+    t.playPassLane = clamp(t.playPassLane - 10);
+  }
+  if (traits.includes('Tough/Alpha')) {
+    t.block        = clamp(t.block        + 15);
+    t.onBallSteal  = clamp(t.onBallSteal  + 10);
+    t.foulDrawing  = clamp(t.foulDrawing  +  8);
   }
   if (traits.includes('Hot Head')) {
-    def.shotContestDiscipline = clamp(def.shotContestDiscipline - 25);
-    def.onBallPest     = clamp(def.onBallPest      + 15);
-    sit.clutchShotTaker= clamp(sit.clutchShotTaker + 15);
+    t.onBallSteal  = clamp(t.onBallSteal  + 15);
+    t.isolation    = clamp(t.isolation    + 20);
+    t.shotContest  = clamp(t.shotContest  - 25);
   }
   if (traits.includes('Professional')) {
-    def.shotContestDiscipline = clamp(def.shotContestDiscipline + 20);
-    def.faceUpGuard    = clamp(def.faceUpGuard     + 10);
-    def.onBallPest     = clamp(def.onBallPest      +  8);
-    def.denyThePass    = clamp(def.denyThePass     + 10);
-    def.gambles        = clamp(def.gambles         - 15);
-    off.isoHeavy       = clamp(off.isoHeavy        - 10);
-    sit.clutchShotTaker= clamp(sit.clutchShotTaker +  5);
-  }
-  if (traits.includes('Streaky')) {
-    sit.clutchShotTaker= clamp(sit.clutchShotTaker + 15);
-    off.spotUp         = clamp(off.spotUp          + 10);
-    // pullUpThree already boosted above
+    t.midRange     = clamp(t.midRange     + 10);
+    t.playPassLane = clamp(t.playPassLane + 18);
+    t.shotContest  = clamp(t.shotContest  + 20);
+    t.onBallSteal  = clamp(t.onBallSteal  +  8);
+    t.isolation    = clamp(t.isolation    - 10);
   }
   if (traits.includes('Gym Rat')) {
-    def.onBallPest     = clamp(def.onBallPest      + 10);
-    def.denyThePass    = clamp(def.denyThePass     + 10);
-    def.shotContestDiscipline = clamp(def.shotContestDiscipline + 10);
-    off.attackCloseOuts= clamp(off.attackCloseOuts + 10);
-    off.cutter         = clamp(off.cutter          +  8);
+    t.drive        = clamp(t.drive        + 10);
+    t.playPassLane = clamp(t.playPassLane + 10);
+    t.onBallSteal  = clamp(t.onBallSteal  + 10);
+    t.shotContest  = clamp(t.shotContest  + 10);
+    t.cutToBasket  = clamp(t.cutToBasket  +  8);
+  }
+  if (traits.includes('Streaky')) {
+    t.pullUpThree  = clamp(t.pullUpThree  + 12);
+    t.midRange     = clamp(t.midRange     +  8);
+    t.isolation    = clamp(t.isolation    + 15);
+    t.spotUp       = clamp(t.spotUp       + 10);
+  }
+  if (traits.includes('Clutch')) {
+    t.isolation    = clamp(t.isolation    + 15);
+    t.pullUpJumper = clamp(t.pullUpJumper + 10);
+    t.pullUpThree  = clamp(t.pullUpThree  + 10);
+  }
+  if (traits.includes('Money Hungry')) {
+    t.foulDrawing  = clamp(t.foulDrawing  + 12);
+    t.isolation    = clamp(t.isolation    + 10);
   }
 
-  return { offensiveTendencies: off, defensiveTendencies: def, situationalTendencies: sit };
+  // ── Archetype tendency overrides ─────────────────────────────────────────
+  if (archetype && ARCHETYPE_TENDENCY_OVERRIDES[archetype]) {
+    const overrides = ARCHETYPE_TENDENCY_OVERRIDES[archetype];
+    for (const [key, delta] of Object.entries(overrides)) {
+      if (key in t) {
+        (t as any)[key] = clamp((t as any)[key] + (delta as number));
+      }
+    }
+  }
+
+  return t;
 };
 
 export const COACH_BADGES: CoachBadge[] = [
@@ -236,18 +531,52 @@ export const POS_ATTR_RANGES: Record<Position, Record<PosAttrRangeKey, [number, 
 // ── Granular per-attribute hard caps & floors ────────────────────────────────
 type AttrBounds = Partial<Record<keyof Player['attributes'], number>>;
 export const POSITION_HARD_CAPS: Record<Position, AttrBounds> = {
-  PG: { blocks: 55, interiorDef: 58, offReb: 52, defReb: 65, postScoring: 60, strength: 68 },
-  SG: { blocks: 62, interiorDef: 65, offReb: 58, defReb: 68, postScoring: 65, strength: 72 },
-  SF: { blocks: 75, interiorDef: 78, offReb: 74, defReb: 78, shooting3pt: 92, strength: 80 },
-  PF: { shooting3pt: 82, ballHandling: 74, speed: 80, perimeterDef: 78, passing: 75 },
-  C:  { shooting3pt: 72, ballHandling: 68, speed: 72, perimeterDef: 70, passing: 68 },
+  PG: { blocks: 55, interiorDef: 58, offReb: 52, defReb: 65, postScoring: 60, strength: 68, freeThrow: 99 },
+  SG: { blocks: 62, interiorDef: 65, offReb: 58, defReb: 68, postScoring: 65, strength: 72, freeThrow: 99 },
+  SF: { blocks: 75, interiorDef: 78, offReb: 74, defReb: 78, shooting3pt: 92, strength: 80, freeThrow: 96 },
+  PF: { shooting3pt: 82, ballHandling: 74, speed: 80, perimeterDef: 78, passing: 75, freeThrow: 88 },
+  C:  { shooting3pt: 72, ballHandling: 68, speed: 72, perimeterDef: 70, passing: 68, freeThrow: 79 },
 };
+// Floors ensure positional competency but are lower than before so archetype
+// suppressions (bypassed for suppressed attributes) can create real weaknesses.
 export const POSITION_HARD_FLOORS: Record<Position, AttrBounds> = {
-  PG: { ballHandling: 78, speed: 80, passing: 75, perimeterDef: 72, shooting3pt: 75 },
-  SG: { shooting3pt: 76, speed: 76, perimeterDef: 74, ballHandling: 70 },
-  SF: { speed: 60, perimeterDef: 72, athleticism: 76 },
-  PF: { strength: 78, interiorDef: 76, offReb: 72, defReb: 75 },
-  C:  { strength: 82, interiorDef: 80, offReb: 76, defReb: 78, blocks: 76, postScoring: 76 },
+  PG: { ballHandling: 72, speed: 74, passing: 68, perimeterDef: 65, shooting3pt: 68, freeThrow: 60 },
+  SG: { shooting3pt: 68, speed: 70, perimeterDef: 66, ballHandling: 64, freeThrow: 58 },
+  SF: { speed: 56, perimeterDef: 64, athleticism: 68, freeThrow: 48 },
+  PF: { strength: 72, interiorDef: 68, offReb: 64, defReb: 68, freeThrow: 38 },
+  C:  { strength: 76, interiorDef: 70, offReb: 66, defReb: 70, blocks: 68, postScoring: 65, freeThrow: 30 },
+};
+
+// ── Per-attribute generation bias by position ────────────────────────────────
+// Applied on top of the regional flavor when generating raw granular attributes.
+// Positive = higher baseline; negative = lower. Magnitude tuned to real NBA/WNBA
+// stat profiles: FT% especially position-sensitive (C ~68-72%, PG/SG ~80-83%).
+// These biases shift the random roll center; POSITION_HARD_CAPS/FLOORS still clamp
+// extreme outliers.
+export const POS_GRANULAR_BIAS: Record<Position, Partial<Record<string, number>>> = {
+  PG: {
+    freeThrow: +10, ballHandling: +14, speed: +8, passing: +10, perimeterDef: +6,
+    shooting3pt: +4, postScoring: -14, interiorDef: -12, blocks: -14, strength: -10,
+    offReb: -10, defReb: -6,
+  },
+  SG: {
+    freeThrow: +8,  ballHandling: +6, speed: +6, perimeterDef: +5, shooting3pt: +6,
+    postScoring: -8, interiorDef: -8, blocks: -10, strength: -5,
+  },
+  SF: {
+    freeThrow: 0, speed: +2, athleticism: +4, shooting3pt: +2,
+    postScoring: +2, strength: +2,
+  },
+  PF: {
+    freeThrow: -10, strength: +12, interiorDef: +8, postScoring: +10,
+    offReb: +10, defReb: +10, blocks: +6,
+    ballHandling: -10, speed: -6, perimeterDef: -8, shooting3pt: -8,
+  },
+  C: {
+    freeThrow: -20, strength: +16, interiorDef: +14, blocks: +14, postScoring: +14,
+    offReb: +14, defReb: +14,
+    ballHandling: -18, speed: -14, perimeterDef: -16, shooting3pt: -18, passing: -10,
+  },
 };
 
 // ── Position-weighted overall rating formula ─────────────────────────────
@@ -299,6 +628,99 @@ const parseHeightStr = (h: string): number => {
   return m ? parseInt(m[1]) * 12 + parseInt(m[2]) : 0;
 };
 
+// ── Secondary Position Assignment ────────────────────────────────────────────
+/**
+ * Derives realistic secondary positions based on height, attributes, and primary position.
+ * Returns 0–2 secondary positions the player can play without a full performance penalty.
+ */
+export const assignSecondaryPositions = (
+  primaryPos: Position,
+  attrs: Record<string, number>,
+  heightInches: number,
+): Position[] => {
+  const secondaries: Position[] = [];
+  const ballHandling = attrs.ballHandling ?? 50;
+  const passing      = attrs.passing      ?? 50;
+  const shooting3pt  = attrs.shooting3pt  ?? 50;
+  const speed        = attrs.speed        ?? 50;
+  const strength     = attrs.strength     ?? 50;
+  const shooting     = attrs.shooting     ?? 50;
+  const athleticism  = attrs.athleticism  ?? 50;
+  const interiorDef  = attrs.interiorDef  ?? 50;
+
+  switch (primaryPos) {
+    case 'PG':
+      // Combo guard / shoot-first PG → SG
+      if (shooting3pt >= 75 && speed >= 76) secondaries.push('SG');
+      // Tall PG (6-6+) with athleticism → can also play SF
+      if (heightInches >= 78 && athleticism >= 80 && shooting >= 74) secondaries.push('SF');
+      break;
+
+    case 'SG':
+      // Ball-handler combo → PG
+      if (ballHandling >= 74 && passing >= 68) secondaries.push('PG');
+      // Long athletic SG (6-5+) → SF
+      if (heightInches >= 77 && athleticism >= 80) secondaries.push('SF');
+      break;
+
+    case 'SF':
+      // Quick, shooting-capable wing → SG
+      if (speed >= 74 && shooting >= 76) secondaries.push('SG');
+      // Strong, tall SF (6-7+) → PF
+      if (strength >= 76 && heightInches >= 79) secondaries.push('PF');
+      break;
+
+    case 'PF':
+      // Mobile stretch four → SF
+      if (speed >= 70 && shooting >= 70) secondaries.push('SF');
+      // Interior-anchored PF with size → C
+      if (strength >= 80 && interiorDef >= 76) secondaries.push('C');
+      break;
+
+    case 'C':
+      // Mobile or stretch big → PF
+      if (speed >= 65 && shooting >= 60) secondaries.push('PF');
+      // Athletic, undersized C (under 7-0) with speed → SF small-ball
+      if (speed >= 72 && athleticism >= 80 && shooting >= 65 && heightInches <= 84) secondaries.push('SF');
+      break;
+  }
+
+  return secondaries;
+};
+
+/**
+ * Returns all positions a player is eligible to play (primary + secondary).
+ * Used by rotation assignment and substitution logic.
+ */
+export const getEligiblePositions = (player: { position: Position; secondaryPositions?: Position[] }): Position[] =>
+  [player.position, ...(player.secondaryPositions ?? [])];
+
+/**
+ * Positional distance penalty multiplier (0.88–1.0).
+ * A player at a position not in their eligible set takes a ~8% effective-rating hit.
+ * A player one tier away from their nearest eligible position takes ~4%.
+ */
+const POS_DISTANCE: Record<Position, Record<Position, number>> = {
+  PG: { PG: 0, SG: 1, SF: 2, PF: 3, C: 4 },
+  SG: { SG: 0, PG: 1, SF: 1, PF: 2, C: 3 },
+  SF: { SF: 0, SG: 1, PF: 1, PG: 2, C: 2 },
+  PF: { PF: 0, SF: 1, C:  1, SG: 2, PG: 3 },
+  C:  { C:  0, PF: 1, SF: 2, SG: 3, PG: 4 },
+};
+
+export const positionalPenaltyFactor = (
+  player: { position: Position; secondaryPositions?: Position[] },
+  slotPosition: Position,
+): number => {
+  const eligible = getEligiblePositions(player);
+  if (eligible.includes(slotPosition)) return 1.0;
+  // Find smallest distance from any eligible position to the slot
+  const minDist = Math.min(...eligible.map(ep => POS_DISTANCE[ep][slotPosition]));
+  if (minDist <= 1) return 0.96; // slight stretch, e.g. SG playing PF
+  if (minDist <= 2) return 0.92;
+  return 0.88;                   // far out of position, e.g. PG at C
+};
+
 /**
  * Hard caps applied to female players for physical attributes that are
  * physiologically distinct from the male game.
@@ -323,7 +745,7 @@ export const applyFemaleAttrCaps = (attrs: Player['attributes']): Player['attrib
 export const applyAttrBounds = (
   attrs: Player['attributes'],
   pos: Position,
-  opts?: { capBonus?: number; heightBonus?: number; stretchBig?: boolean; glassCleaner?: boolean }
+  opts?: { capBonus?: number; heightBonus?: number; stretchBig?: boolean; glassCleaner?: boolean; archetype?: string }
 ): Player['attributes'] => {
   const caps   = POSITION_HARD_CAPS[pos]  ?? {};
   const floors = POSITION_HARD_FLOORS[pos] ?? {};
@@ -333,6 +755,13 @@ export const applyAttrBounds = (
   const stretchBigOverride = opts?.stretchBig ?? false;
   // GLASS CLEANER badge → reb caps +8 for PG/SG
   const glassBonus = (opts?.glassCleaner && (pos === 'PG' || pos === 'SG')) ? 8 : 0;
+  // Archetype-aware floor bypass: skip position floors for attributes the archetype
+  // explicitly suppresses. This allows genuine archetypical weaknesses to persist
+  // (e.g. Rim Protector can have truly low postScoring, Lockdown Defender can have
+  // truly low shooting3pt) without position floors fighting the intended identity.
+  const archetypeSuppressed = opts?.archetype && ARCHETYPE_ATTR_SHAPE[opts.archetype]
+    ? new Set(Object.keys(ARCHETYPE_ATTR_SHAPE[opts.archetype].suppress))
+    : new Set<string>();
   const heightBonusKeys = new Set(['blocks', 'offReb', 'defReb', 'rebounding']);
   const rebBonusKeys    = new Set(['offReb', 'defReb', 'rebounding']);
   const a = { ...attrs } as any;
@@ -346,6 +775,8 @@ export const applyAttrBounds = (
     if (a[key] > adj) a[key] = adj;
   }
   for (const [key, floor] of Object.entries(floors)) {
+    // Skip floor enforcement for attributes the archetype is designed to suppress.
+    if (archetypeSuppressed.has(key)) continue;
     if (a[key] !== undefined && a[key] < (floor as number)) a[key] = floor as number;
   }
   return a as Player['attributes'];
@@ -367,7 +798,8 @@ export const enforcePositionalBounds = (player: Player): Player => {
     ((pos === 'PF' || pos === 'C') && player.archetype?.toLowerCase().includes('stretch'));
   // GLASS CLEANER badge → reb caps +8 for PG/SG
   const glassCleaner = playerBadges.includes('Glass Cleaner');
-  const newAttrs = applyAttrBounds(player.attributes, pos, { capBonus, heightBonus, stretchBig, glassCleaner });
+  // Pass archetype so floor bypass can skip suppressed attributes
+  const newAttrs = applyAttrBounds(player.attributes, pos, { capBonus, heightBonus, stretchBig, glassCleaner, archetype: player.archetype });
   const cappedAttrs = player.gender === 'Female' ? applyFemaleAttrCaps(newAttrs) : newAttrs;
   const newRating = calcPositionRating(pos, cappedAttrs);
   return { ...player, attributes: cappedAttrs, rating: newRating };
@@ -772,6 +1204,154 @@ export const EXPANSION_TEAM_POOL = [
   { city: "San Diego", name: "Sails", conf: "Western", div: "Pacific", market: "Medium", primary: "#002D62", secondary: "#FEC524" },
 ];
 
+export interface ExpansionCityOption {
+  city: string;
+  state: string;
+  country: 'USA' | 'Canada' | 'Mexico';
+  marketSize: 'Large' | 'Medium' | 'Small';
+  population: number;
+  expansionFee: number;
+  suggestedName: string;
+  suggestedNames: string[];
+  primaryColor: string;
+  secondaryColor: string;
+  conf: 'Eastern' | 'Western';
+  div: string;
+  highlight?: boolean;
+}
+
+export const EXPANSION_CITY_DB: ExpansionCityOption[] = [
+  // ── Large markets ──────────────────────────────────────────────────────────
+  {
+    city: 'Seattle', state: 'WA', country: 'USA', marketSize: 'Large',
+    population: 4.0, expansionFee: 130,
+    suggestedName: 'SuperSonics', suggestedNames: ['SuperSonics', 'Storm', 'Kraken', 'Emeralds', 'Cascades'],
+    primaryColor: '#00471B', secondaryColor: '#FEE123',
+    conf: 'Western', div: 'Northwest', highlight: true,
+  },
+  {
+    city: 'Mexico City', state: 'MX', country: 'Mexico', marketSize: 'Large',
+    population: 21.6, expansionFee: 150,
+    suggestedName: 'Aztecs', suggestedNames: ['Aztecs', 'Dragons', 'Condors', 'Jaguars', 'Toros'],
+    primaryColor: '#006341', secondaryColor: '#CE1126',
+    conf: 'Western', div: 'Southwest', highlight: true,
+  },
+  {
+    city: 'Montreal', state: 'QC', country: 'Canada', marketSize: 'Large',
+    population: 4.2, expansionFee: 120,
+    suggestedName: 'Express', suggestedNames: ['Express', 'Royals', 'Nordiques', 'Cavaliers', 'Storm'],
+    primaryColor: '#003DA5', secondaryColor: '#E31837',
+    conf: 'Eastern', div: 'Atlantic', highlight: true,
+  },
+  // ── Medium markets ─────────────────────────────────────────────────────────
+  {
+    city: 'Las Vegas', state: 'NV', country: 'USA', marketSize: 'Medium',
+    population: 2.3, expansionFee: 125,
+    suggestedName: 'Royals', suggestedNames: ['Royals', 'Aces', 'Neon', 'Scorpions', 'Desert Wolves'],
+    primaryColor: '#702963', secondaryColor: '#FFD700',
+    conf: 'Western', div: 'Pacific', highlight: true,
+  },
+  {
+    city: 'Vancouver', state: 'BC', country: 'Canada', marketSize: 'Medium',
+    population: 2.6, expansionFee: 110,
+    suggestedName: 'Grizzlies', suggestedNames: ['Grizzlies', 'Orcas', 'Voyageurs', 'Cascades', 'Ravens'],
+    primaryColor: '#041E42', secondaryColor: '#00843D',
+    conf: 'Western', div: 'Pacific',
+  },
+  {
+    city: 'Tampa', state: 'FL', country: 'USA', marketSize: 'Medium',
+    population: 3.2, expansionFee: 100,
+    suggestedName: 'Bay', suggestedNames: ['Bay', 'Lightning', 'Armada', 'Suncoast', 'Tides'],
+    primaryColor: '#002868', secondaryColor: '#BF0A30',
+    conf: 'Eastern', div: 'Southeast',
+  },
+  {
+    city: 'St. Louis', state: 'MO', country: 'USA', marketSize: 'Medium',
+    population: 2.8, expansionFee: 95,
+    suggestedName: 'Arch', suggestedNames: ['Arch', 'Blues', 'Pioneers', 'Cardinals', 'Gateway'],
+    primaryColor: '#002F6C', secondaryColor: '#BA0C2F',
+    conf: 'Eastern', div: 'Central',
+  },
+  {
+    city: 'San Diego', state: 'CA', country: 'USA', marketSize: 'Medium',
+    population: 3.3, expansionFee: 105,
+    suggestedName: 'Sails', suggestedNames: ['Sails', 'Waves', 'Surf', 'Tides', 'Bay'],
+    primaryColor: '#002D62', secondaryColor: '#FEC524',
+    conf: 'Western', div: 'Pacific',
+  },
+  {
+    city: 'Pittsburgh', state: 'PA', country: 'USA', marketSize: 'Medium',
+    population: 2.4, expansionFee: 90,
+    suggestedName: 'Steel', suggestedNames: ['Steel', 'Rivers', 'Forge', 'Iron', 'Bridges'],
+    primaryColor: '#FFB612', secondaryColor: '#101820',
+    conf: 'Eastern', div: 'Atlantic',
+  },
+  {
+    city: 'Baltimore', state: 'MD', country: 'USA', marketSize: 'Medium',
+    population: 2.9, expansionFee: 92,
+    suggestedName: 'Ravens', suggestedNames: ['Ravens', 'Crabs', 'Harbor', 'Chesapeake', 'Iron'],
+    primaryColor: '#241773', secondaryColor: '#9E7C0C',
+    conf: 'Eastern', div: 'Atlantic',
+  },
+  {
+    city: 'Kansas City', state: 'MO', country: 'USA', marketSize: 'Medium',
+    population: 2.2, expansionFee: 88,
+    suggestedName: 'Stampede', suggestedNames: ['Stampede', 'Chiefs', 'Storm', 'Thunder', 'Royals'],
+    primaryColor: '#E31837', secondaryColor: '#FFB81C',
+    conf: 'Eastern', div: 'Central',
+  },
+  {
+    city: 'Nashville', state: 'TN', country: 'USA', marketSize: 'Medium',
+    population: 2.0, expansionFee: 85,
+    suggestedName: 'Sounds', suggestedNames: ['Sounds', 'Predators', 'Rhythm', 'Stars', 'Boots'],
+    primaryColor: '#041E42', secondaryColor: '#FFB81C',
+    conf: 'Eastern', div: 'Southeast',
+  },
+  // ── Small markets ──────────────────────────────────────────────────────────
+  {
+    city: 'Cincinnati', state: 'OH', country: 'USA', marketSize: 'Small',
+    population: 1.7, expansionFee: 78,
+    suggestedName: 'Bengals', suggestedNames: ['Bengals', 'Reds', 'River City', 'Cyclones', 'Ohio'],
+    primaryColor: '#FB4F14', secondaryColor: '#000000',
+    conf: 'Eastern', div: 'Central',
+  },
+  {
+    city: 'Raleigh', state: 'NC', country: 'USA', marketSize: 'Small',
+    population: 1.4, expansionFee: 75,
+    suggestedName: 'Oaks', suggestedNames: ['Oaks', 'Hurricanes', 'Triangle', 'Pines', 'Storm'],
+    primaryColor: '#CC0000', secondaryColor: '#000000',
+    conf: 'Eastern', div: 'Southeast',
+  },
+  {
+    city: 'Columbus', state: 'OH', country: 'USA', marketSize: 'Small',
+    population: 2.1, expansionFee: 80,
+    suggestedName: 'Crew', suggestedNames: ['Crew', 'Bucks', 'Ohio Express', 'Blue Jackets', 'Forge'],
+    primaryColor: '#002F6C', secondaryColor: '#FFD700',
+    conf: 'Eastern', div: 'Central',
+  },
+  {
+    city: 'Louisville', state: 'KY', country: 'USA', marketSize: 'Small',
+    population: 1.4, expansionFee: 72,
+    suggestedName: 'Cardinals', suggestedNames: ['Cardinals', 'Bats', 'Sluggers', 'Thunder', 'River Kings'],
+    primaryColor: '#AD0000', secondaryColor: '#000000',
+    conf: 'Eastern', div: 'Southeast',
+  },
+  {
+    city: 'Jacksonville', state: 'FL', country: 'USA', marketSize: 'Small',
+    population: 1.6, expansionFee: 74,
+    suggestedName: 'Jaguars', suggestedNames: ['Jaguars', 'Armada', 'Tides', 'Surf', 'River Cats'],
+    primaryColor: '#006778', secondaryColor: '#9F792C',
+    conf: 'Eastern', div: 'Southeast',
+  },
+  {
+    city: 'Buffalo', state: 'NY', country: 'USA', marketSize: 'Small',
+    population: 1.2, expansionFee: 70,
+    suggestedName: 'Sabres', suggestedNames: ['Sabres', 'Blizzard', 'Bills', 'Thunder', 'Niagara'],
+    primaryColor: '#00338D', secondaryColor: '#FCB514',
+    conf: 'Eastern', div: 'Atlantic',
+  },
+];
+
 export const getRandomGender = (ratio: number): Gender => {
   return Math.random() * 100 < ratio ? 'Female' : 'Male';
 };
@@ -857,6 +1437,18 @@ const DAYS_IN_MONTH = [31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
 export const ageFromBirthdate = (birthdate: string, leagueYear: number): number => {
   const birthYear = parseInt(birthdate?.split('-')[0] ?? '0', 10);
   return birthYear > 0 ? Math.max(0, leagueYear - birthYear) : 0;
+};
+
+/**
+ * WNBA draft eligibility age floor.
+ * Domestic (U.S.) players must be ≥ 22; international players must be ≥ 20.
+ * Respects any user-configured minimum if it is higher.
+ *
+ * Pass `country` as resolved from `countryFromHometown()`.
+ */
+export const wnbaAgeFloor = (country: string, userMin: number = 0): number => {
+  const baseMin = country === 'United States' ? 22 : 20;
+  return Math.max(baseMin, userMin);
 };
 
 const randomBirthdate = (age: number, leagueYear: number): string => {
@@ -1122,68 +1714,15 @@ const assignArchetype = (pos: Position, attrs: Record<string, number>, rating: n
   return clamped[clamped.length - 1][0];
 };
 
-/** Deterministic archetype derivation — picks highest-weight archetype for the given position + attributes. */
-export const deriveArchetype = (pos: Position, attrs: Record<string, number>, rating: number): string => {
-  const sht  = attrs.shooting3pt ?? 50;
-  const def  = attrs.defense ?? 50;
-  const blk  = attrs.blocks ?? 50;
-  const bh   = attrs.ballHandling ?? 50;
-  const pass = attrs.passing ?? 50;
-  const post = attrs.postScoring ?? 50;
-  const ath  = attrs.athleticism ?? 50;
-  const pDef = attrs.perimeterDef ?? 50;
-  const shooting = attrs.shooting ?? 50;
-
-  const w: [string, number][] = [];
-
-  if (pos === 'PG') {
-    w.push(['Playmaking Guard', 30 + (bh + pass - 100) * 0.15]);
-    w.push(['Pure Scorer',      20 + shooting * 0.10]);
-    w.push(['Lockdown Defender', 8 + (pDef + def - 100) * 0.08]);
-    w.push(['Bench Spark',       8]);
-    w.push(['Role Player',       6]);
-    w.push(['Hybrid Star',       rating >= 82 ? 15 : 3]);
-    w.push(['Two-Way Forward',   5]);
-    w.push(['3&D Wing',          8 + sht * 0.06]);
-  } else if (pos === 'SG') {
-    w.push(['Pure Scorer',      25 + shooting * 0.12]);
-    w.push(['3&D Wing',         22 + sht * 0.08]);
-    w.push(['Playmaking Guard', 12 + (bh + pass - 100) * 0.08]);
-    w.push(['Lockdown Defender', 8 + (pDef + def - 100) * 0.08]);
-    w.push(['Bench Spark',       8]);
-    w.push(['Hybrid Star',       rating >= 82 ? 12 : 3]);
-    w.push(['Role Player',       6]);
-    w.push(['Two-Way Forward',   9 + (def + ath - 100) * 0.04]);
-  } else if (pos === 'SF') {
-    w.push(['3&D Wing',          25 + sht * 0.07]);
-    w.push(['Two-Way Forward',   20 + (def + ath - 100) * 0.08]);
-    w.push(['Pure Scorer',       14 + shooting * 0.06]);
-    w.push(['Lockdown Defender', 10 + (pDef + def - 100) * 0.08]);
-    w.push(['Hybrid Star',       rating >= 82 ? 12 : 3]);
-    w.push(['Bench Spark',        6]);
-    w.push(['Role Player',        8]);
-    w.push(['Stretch Big',        5 + sht * 0.03]);
-  } else if (pos === 'PF') {
-    w.push(['Stretch Big',       22 + sht * 0.09]);
-    w.push(['Two-Way Forward',   18 + (def + ath - 100) * 0.06]);
-    w.push(['Rim Protector',     15 + (blk + def - 100) * 0.10]);
-    w.push(['Lockdown Defender', 10 + (def - 50) * 0.08]);
-    w.push(['Pure Scorer',        8 + post * 0.05]);
-    w.push(['Hybrid Star',        rating >= 82 ? 10 : 2]);
-    w.push(['Role Player',        8]);
-    w.push(['Bench Spark',        5]);
-  } else {
-    w.push(['Rim Protector',     30 + (blk + def - 100) * 0.12]);
-    w.push(['Stretch Big',       18 + sht * 0.08]);
-    w.push(['Two-Way Forward',   12 + (def + ath - 100) * 0.05]);
-    w.push(['Lockdown Defender',  8 + (def - 50) * 0.06]);
-    w.push(['Pure Scorer',        6 + post * 0.06]);
-    w.push(['Role Player',        10]);
-    w.push(['Bench Spark',         6]);
-    w.push(['Hybrid Star',        rating >= 82 ? 8 : 2]);
-  }
-
-  return w.reduce((best, cur) => (cur[1] > best[1] ? cur : best), w[0])[0];
+/** Archetype derivation — uses getArchetypeFitScores to pick the best-fitting archetype.
+ *  Pass `isStarterRole = true` when the player is in the starting 5 so "Bench Spark" is never assigned. */
+export const deriveArchetype = (pos: Position, attrs: Record<string, number>, rating: number, isStarterRole = false): string => {
+  const scores = getArchetypeFitScores(pos, attrs, rating);
+  const eligible = isStarterRole
+    ? scores.filter(s => s.archetype !== 'Bench Spark')
+    : scores;
+  if (eligible.length === 0) return 'Role Player';
+  return eligible[0].archetype;
 };
 
 type AttrMap = Record<string, number>;
@@ -1235,7 +1774,49 @@ const applyPhysical = (attrs: AttrMap, pos: string, gender: 'Male'|'Female', hei
   return a;
 };
 
-export const generatePlayer = (id: string, ageRange: [number, number] = [19, 38], genderRatio: number = 0, draftCtx?: DraftContext, leagueYear?: number, minRating = 68): Player => {
+/** WNBA-realistic salary for a given player rating and league year. */
+const calcWNBASalary = (rating: number, year: number): number => {
+  let supermax: number, star: number, starter: number, role: number, bench: number, min: number;
+  if (year >= 2026) {
+    supermax = 1_400_000; star = 900_000; starter = 550_000; role = 300_000; bench = 150_000; min = 100_000;
+  } else if (year >= 2025) {
+    supermax = 700_000; star = 440_000; starter = 250_000; role = 130_000; bench = 65_000; min = 45_000;
+  } else if (year >= 2020) {
+    supermax = 250_000; star = 175_000; starter = 120_000; role = 72_000; bench = 38_000; min = 26_000;
+  } else if (year >= 2013) {
+    supermax = 110_000; star = 78_000; starter = 52_000; role = 32_000; bench = 18_000; min = 13_000;
+  } else if (year >= 2008) {
+    supermax = 82_000; star = 58_000; starter = 38_000; role = 22_000; bench = 12_000; min = 9_000;
+  } else if (year >= 2003) {
+    supermax = 60_000; star = 42_000; starter = 28_000; role = 16_000; bench = 8_500; min = 6_500;
+  } else if (year >= 2000) {
+    supermax = 45_000; star = 32_000; starter = 20_000; role = 12_000; bench = 6_500; min = 4_500;
+  } else {
+    supermax = 35_000; star = 24_000; starter = 15_000; role = 9_000; bench = 4_500; min = 3_000;
+  }
+  const base =
+    rating >= 95 ? supermax :
+    rating >= 88 ? star    + (rating - 88) * ((supermax - star)    / 7) :
+    rating >= 80 ? starter + (rating - 80) * ((star    - starter)  / 8) :
+    rating >= 70 ? role    + (rating - 70) * ((starter - role)     / 10) :
+    rating >= 60 ? bench   + (rating - 60) * ((role    - bench)    / 10) :
+    min;
+  const unit = supermax >= 500_000 ? 25_000 : supermax >= 100_000 ? 5_000 : 1_000;
+  return Math.round((base * (0.85 + Math.random() * 0.30)) / unit) * unit;
+};
+
+/** NBA salary with era-appropriate random variance — used only for setting a player's current contract. */
+const calcNBASalary = (rating: number, year: number): number => {
+  const market = computeMensMarketSalary(rating, year);
+  const unit =
+    market >= 10_000_000 ? 250_000 :
+    market >=  1_000_000 ?  50_000 :
+    market >=    100_000 ?   5_000 :
+    market >=     10_000 ?   1_000 : 100;
+  return Math.round((market * (0.80 + Math.random() * 0.40)) / unit) * unit;
+};
+
+export const generatePlayer = (id: string, ageRange: [number, number] = [19, 38], genderRatio: number = 0, draftCtx?: DraftContext, leagueYear?: number, minRating = 60, genOpts?: { archetypeBias?: Record<string, number> }): Player => {
   const gender = getRandomGender(genderRatio);
   
   // Pick a region based on weights
@@ -1252,59 +1833,138 @@ export const generatePlayer = (id: string, ageRange: [number, number] = [19, 38]
 
   const firstNames = gender === 'Male' ? region.firstNamesMale : NAMES_FEMALE.first;
   const lastNames = gender === 'Male' ? region.lastNamesMale : NAMES_FEMALE.last;
-  
+
   const rand = Math.random();
-  // Shifted distribution — avg ~78, producing realistic NBA-caliber league quality
-  let baseRating = rand > 0.97 ? 91 + Math.floor(Math.random() * 8)  // 3%: 91–98 (stars)
-                 : rand > 0.83 ? 83 + Math.floor(Math.random() * 9)  // 14%: 83–91 (good starters)
-                 : rand > 0.45 ? 76 + Math.floor(Math.random() * 8)  // 38%: 76–83 (starters/rotation)
-                               : 68 + Math.floor(Math.random() * 9); // 45%: 68–76 (role players)
+  // Compressed 7-tier distribution (30 teams × 15 = 450 players):
+  //   ~4  players 95–99  (franchise / league face)
+  //   ~27 players 90–94  (All-Star caliber)
+  //   ~68 players 85–89  (star / high-end starter)
+  //   ~99 players 80–84  (quality starter)
+  //   ~99 players 75–79  (role starter)
+  //   ~81 players 70–74  (rotation)
+  //   ~72 players 60–69  (bench / development)
+  // tierCeiling enforced after enforcePositionalBounds so attribute variance
+  // cannot push players above their tier bracket.
+  let baseRating: number;
+  let tierCeiling: number;
+  if (rand > 0.99) {
+    baseRating = 95 + Math.floor(Math.random() * 5);   // 1%:  95–99 (franchise player)
+    tierCeiling = 99;
+  } else if (rand > 0.93) {
+    baseRating = 90 + Math.floor(Math.random() * 5);   // 6%:  90–94 (All-Star caliber)
+    tierCeiling = 94;
+  } else if (rand > 0.78) {
+    baseRating = 85 + Math.floor(Math.random() * 5);   // 15%: 85–89 (star / high-end starter)
+    tierCeiling = 89;
+  } else if (rand > 0.56) {
+    baseRating = 80 + Math.floor(Math.random() * 5);   // 22%: 80–84 (quality starter)
+    tierCeiling = 84;
+  } else if (rand > 0.34) {
+    baseRating = 75 + Math.floor(Math.random() * 5);   // 22%: 75–79 (role starter)
+    tierCeiling = 79;
+  } else if (rand > 0.16) {
+    baseRating = 70 + Math.floor(Math.random() * 5);   // 18%: 70–74 (rotation player)
+    tierCeiling = 74;
+  } else {
+    baseRating = 60 + Math.floor(Math.random() * 10);  // 16%: 60–69 (bench / development)
+    tierCeiling = 69;
+  }
   const rating = Math.min(99, Math.max(minRating, baseRating));
   const potential = Math.min(99, rating + Math.floor(Math.random() * 12));
   const pos = POSITIONS[Math.floor(Math.random() * POSITIONS.length)];
-  const age = Math.floor(Math.random() * (ageRange[1] - ageRange[0]) + ageRange[0]);
+
+  // Pick archetype first so attributes can be shaped toward it.
+  // archetypeBias multipliers from team identity skew selection toward preferred archetypes.
+  const archetypePool = ARCHETYPE_POSITION_WEIGHTS[pos] ?? [['Role Player', 1]];
+  const bias = genOpts?.archetypeBias ?? {};
+  const biasedPool = archetypePool.map(([name, weight]) =>
+    [name, weight * (bias[name] ?? 1.0)] as [string, number]
+  );
+  const archetypeTotalWeight = biasedPool.reduce((s, [, w]) => s + w, 0);
+  let archetypeRoll = Math.random() * archetypeTotalWeight;
+  let chosenArchetype = biasedPool[biasedPool.length - 1][0];
+  for (const [name, weight] of biasedPool) {
+    archetypeRoll -= weight;
+    if (archetypeRoll <= 0) { chosenArchetype = name; break; }
+  }
+  // Only truly generational 96+ players become Hybrid Stars — rare and meaningful
+  if (rating >= 96 && Math.random() < 0.65) chosenArchetype = 'Hybrid Star';
+
+  // WNBA age eligibility: domestic (U.S.) ≥ 22, international ≥ 20.
+  // Enforced here so every code path that calls generatePlayer automatically respects WNBA rules.
+  const isWomensGen = genderRatio === 100;
+  const playerCountry = region.id === 'usa' ? 'United States' : region.name;
+  const effectiveAgeMin = isWomensGen
+    ? wnbaAgeFloor(playerCountry, ageRange[0])
+    : ageRange[0];
+  const effectiveAgeMax = Math.max(effectiveAgeMin, ageRange[1]);
+  const age = effectiveAgeMin + Math.floor(Math.random() * (effectiveAgeMax - effectiveAgeMin + 1));
   const _leagueYear = leagueYear ?? new Date().getFullYear();
   
   const f = region.flavor;
-  const getRandomAttr = (base: number, flavor: number = 0) => 
+  const getRandomAttr = (base: number, flavor: number = 0) =>
     Math.min(99, Math.max(25, Math.floor(base + flavor + (Math.random() * 20 - 10))));
   const playerHometown = region.hometowns[Math.floor(Math.random() * region.hometowns.length)];
   const physGender = gender === 'Female' ? 'Female' : 'Male';
   const phys = genPhysical(pos, physGender);
   const posRanges = POS_ATTR_RANGES[pos];
   const clampPos = (val: number, key: PosAttrRangeKey) => { const [lo, hi] = posRanges[key]; return Math.min(Math.min(99, hi), Math.max(lo, val)); };
+  // Position granular bias: shifts each raw attr center toward position-realistic values.
+  const gb = POS_GRANULAR_BIAS[pos] ?? {};
+  const ba = (base: number, flavor: number = 0, key?: string) =>
+    getRandomAttr(base, flavor + (key !== undefined && gb[key] !== undefined ? (gb[key] as number) : 0));
   const rawAttrs: AttrMap = {
     shooting:    clampPos(rating + f.shooting,     'shooting'),
     defense:     clampPos(rating,                  'defense'),
     rebounding:  clampPos(rating,                  'rebounding'),
     playmaking:  clampPos(rating + f.passing,      'playmaking'),
     athleticism: clampPos(rating + f.athleticism,  'athleticism'),
-    layups: getRandomAttr(rating),
-    dunks: getRandomAttr(rating, f.athleticism),
-    shootingMid: getRandomAttr(rating, f.shooting),
-    shooting3pt: getRandomAttr(rating, f.shooting),
-    freeThrow: getRandomAttr(rating, f.shooting),
-    speed: getRandomAttr(rating, f.athleticism),
-    strength: getRandomAttr(rating, f.athleticism),
-    jumping: getRandomAttr(rating, f.athleticism),
-    stamina: getRandomAttr(rating),
-    perimeterDef: getRandomAttr(rating),
-    interiorDef: getRandomAttr(rating),
-    steals: getRandomAttr(rating),
-    blocks: getRandomAttr(rating),
-    defensiveIQ: getRandomAttr(rating, f.iq),
-    ballHandling: getRandomAttr(rating, f.passing),
-    passing: getRandomAttr(rating, f.passing),
-    offensiveIQ: getRandomAttr(rating, f.iq),
-    postScoring: getRandomAttr(rating),
-    offReb: getRandomAttr(rating),
-    defReb: getRandomAttr(rating),
+    layups:       ba(rating, 0,            'layups'),
+    dunks:        ba(rating, f.athleticism, 'dunks'),
+    shootingMid:  ba(rating, f.shooting,   'shootingMid'),
+    shooting3pt:  ba(rating, f.shooting,   'shooting3pt'),
+    freeThrow:    ba(rating, f.shooting,   'freeThrow'),
+    speed:        ba(rating, f.athleticism,'speed'),
+    strength:     ba(rating, f.athleticism,'strength'),
+    jumping:      ba(rating, f.athleticism,'jumping'),
+    stamina:      ba(rating, 0,            'stamina'),
+    perimeterDef: ba(rating, 0,            'perimeterDef'),
+    interiorDef:  ba(rating, 0,            'interiorDef'),
+    steals:       ba(rating, 0,            'steals'),
+    blocks:       ba(rating, 0,            'blocks'),
+    defensiveIQ:  ba(rating, f.iq,         'defensiveIQ'),
+    ballHandling: ba(rating, f.passing,    'ballHandling'),
+    passing:      ba(rating, f.passing,    'passing'),
+    offensiveIQ:  ba(rating, f.iq,         'offensiveIQ'),
+    postScoring:  ba(rating, 0,            'postScoring'),
+    offReb:       ba(rating, 0,            'offReb'),
+    defReb:       ba(rating, 0,            'defReb'),
     // Durability is independent of skill — wide random spread (30–95)
     durability: Math.min(99, Math.max(20, Math.floor(55 + (Math.random() * 60 - 15)))),
   };
+
+  // Apply archetype attribute shaping
+  const shape = ARCHETYPE_ATTR_SHAPE[chosenArchetype];
+  if (shape) {
+    for (const [key, boost] of Object.entries(shape.boost)) {
+      if (key in rawAttrs) rawAttrs[key] = Math.min(99, (rawAttrs[key] ?? 50) + boost);
+    }
+    for (const [key, suppress] of Object.entries(shape.suppress)) {
+      if (key in rawAttrs) rawAttrs[key] = Math.max(25, (rawAttrs[key] ?? 50) - suppress);
+    }
+  }
+
   const pAttrs = applyPhysical(rawAttrs, pos, physGender, phys.heightIn, phys.weight);
   const playerTraits = getRandomTraits();
-  
+
+  // Validate archetype: if natural fit is significantly higher than chosen, upgrade
+  const fitScores = getArchetypeFitScores(pos, pAttrs as Record<string, number>, rating);
+  const topFit = fitScores[0];
+  const chosenFitScore = fitScores.find(s => s.archetype === chosenArchetype)?.score ?? 0;
+  const finalArchetype = (topFit.score > chosenFitScore + 15 && topFit.score > 20)
+    ? topFit.archetype
+    : chosenArchetype;
+
   const rawPlayer: Player = {
     id,
     name: `${firstNames[Math.floor(Math.random() * firstNames.length)]} ${lastNames[Math.floor(Math.random() * lastNames.length)]}`,
@@ -1314,15 +1974,17 @@ export const generatePlayer = (id: string, ageRange: [number, number] = [19, 38]
     rating,
     potential,
     attributes: pAttrs as Player['attributes'],
-    salary: Math.round((
-      rating >= 95 ? 38_000_000 + (rating - 95) * 1_400_000 :
-      rating >= 88 ? 26_000_000 + (rating - 88) * 1_714_286 :
-      rating >= 80 ? 16_000_000 + (rating - 80) * 1_250_000 :
-      rating >= 70 ? 7_000_000  + (rating - 70) * 900_000   :
-      rating >= 60 ? 3_000_000  + (rating - 60) * 400_000   : 1_500_000
-    ) * (0.85 + Math.random() * 0.30) / 250_000) * 250_000,
+    salary: gender === 'Female'
+      ? calcWNBASalary(rating, _leagueYear)
+      : calcNBASalary(rating, _leagueYear),
     contractYears: Math.floor(Math.random() * 5) + 1,
-    stats: { 
+    desiredContract: {
+      years: rating >= 80 ? 4 : rating >= 70 ? 3 : 2,
+      salary: gender === 'Female'
+        ? calcWNBASalary(rating, _leagueYear)
+        : computeMensMarketSalary(rating, _leagueYear),
+    },
+    stats: {
       points: 0, rebounds: 0, offReb: 0, defReb: 0, assists: 0, steals: 0, blocks: 0, gamesPlayed: 0, gamesStarted: 0,
       minutes: 0, fgm: 0, fga: 0, threepm: 0, threepa: 0, ftm: 0, fta: 0, tov: 0, pf: 0,
       techs: 0, flagrants: 0, ejections: 0, plusMinus: 0
@@ -1339,9 +2001,12 @@ export const generatePlayer = (id: string, ageRange: [number, number] = [19, 38]
     },
     morale: 75 + Math.floor(Math.random() * 20),
     jerseyNumber: Math.floor(Math.random() * 99),
-    height: phys.heightStr, weight: phys.weight, archetype: assignArchetype(pos, pAttrs as Record<string, number>, rating), status: 'Bench',
+    height: phys.heightStr, weight: phys.weight,
+    archetype: finalArchetype,
+    secondaryPositions: assignSecondaryPositions(pos, pAttrs as Record<string, number>, phys.heightIn),
+    status: 'Bench',
     personalityTraits: playerTraits,
-    tendencies: generateTendencies(pos, playerTraits),
+    tendencies: generateTendencies(pos, playerTraits, finalArchetype),
     hometown: playerHometown,
     country: countryFromHometown(playerHometown),
     birthdate: randomBirthdate(age, _leagueYear),
@@ -1350,7 +2015,16 @@ export const generatePlayer = (id: string, ageRange: [number, number] = [19, 38]
       ? generateDraftInfo(rating, age, draftCtx)
       : { team: "Undrafted", round: 0, pick: 0, year: 0 }
   };
-  return enforcePositionalBounds(rawPlayer);
+  const raw = enforcePositionalBounds(rawPlayer);
+  // Clamp the recalculated rating back to the intended tier. minRating slot
+  // constraints take priority (e.g. elite team slot 0 = 88 floor), but cannot
+  // push a lower-tier player into the 90+ superstar bracket.
+  const effectiveCeiling = Math.max(minRating, tierCeiling);
+  const clampedRating = Math.max(minRating, Math.min(effectiveCeiling, raw.rating));
+  // Potential must never be lower than current rating.
+  const clampedPotential = Math.max(clampedRating, raw.potential);
+  const needsUpdate = clampedRating !== raw.rating || clampedPotential !== raw.potential;
+  return needsUpdate ? { ...raw, rating: clampedRating, potential: clampedPotential } : raw;
 };
 
 export const generateFreeAgentPool = (count: number, season: number, genderRatio: number = 0, extraTeamNames: string[] = []): Player[] => {
@@ -1359,9 +2033,13 @@ export const generateFreeAgentPool = (count: number, season: number, genderRatio
   return Array.from({ length: count }).map((_, i) => {
     const draftCtx: DraftContext = { season, teamNames, usedPicks };
     const p = generatePlayer(`fa-${season}-${i}`, [21, 36], genderRatio, draftCtx, season);
-    // Skew OVR distribution: 90% → 70–82, 8% → 83–87, 2% → 88–92, none 93+
+    // Generated FA pool is capped at 75 OVR — realistic players above 75 are almost always
+    // on rosters. The only 76+ FAs are real players waived/released mid-season (not generated).
+    // Distribution: 20% → 60–67 (fringe/bench), 60% → 68–73 (rotation depth), 20% → 74–75 (ceiling).
     const tierRoll = Math.random();
-    const [tierMin, tierMax] = tierRoll < 0.90 ? [70, 82] : tierRoll < 0.98 ? [83, 87] : [88, 92];
+    const [tierMin, tierMax] =
+      tierRoll < 0.20 ? [60, 67] :
+      tierRoll < 0.80 ? [68, 73] : [74, 75];
     const skewedRating = Math.min(tierMax, Math.max(tierMin, p.rating));
     const skewedPlayer = skewedRating !== p.rating ? { ...p, rating: skewedRating } : p;
     return {
@@ -1371,13 +2049,9 @@ export const generateFreeAgentPool = (count: number, season: number, genderRatio
       contractYears: 0,
       desiredContract: {
         years: Math.floor(Math.random() * 3) + 1,
-        salary: Math.round((
-          skewedRating >= 95 ? 38_000_000 + (skewedRating - 95) * 1_400_000 :
-          skewedRating >= 88 ? 26_000_000 + (skewedRating - 88) * 1_714_286 :
-          skewedRating >= 80 ? 16_000_000 + (skewedRating - 80) * 1_250_000 :
-          skewedRating >= 70 ? 7_000_000  + (skewedRating - 70) * 900_000   :
-          skewedRating >= 60 ? 3_000_000  + (skewedRating - 60) * 400_000   : 1_500_000
-        ) * (0.90 + Math.random() * 0.20) / 250_000) * 250_000
+        salary: p.gender === 'Female'
+          ? calcWNBASalary(skewedRating, season)
+          : computeMensMarketSalary(skewedRating, season)
       },
       interestScore: 30 + Math.floor(Math.random() * 50)
     };
@@ -1406,57 +2080,136 @@ export const generateProspects = (year: number, count: number = 100, genderRatio
     const id = `prospect-${year}-${i}`;
     const pos = POSITIONS[Math.floor(Math.random() * POSITIONS.length)];
     
-    let rating = 60 + Math.floor(Math.random() * 15);
-    if (i < 5) rating = 78 + Math.floor(Math.random() * 5); 
-    else if (i < 15) rating = 72 + Math.floor(Math.random() * 6); 
-    
-    const potential = Math.min(99, rating + Math.floor(Math.random() * 20) + 5);
+    // ── Traits first — they drive bust risk and potential ceiling ──────────
+    const prospectTraits = getRandomTraits();
+    const badCount  = prospectTraits.filter(t => (t === 'Lazy' || t === 'Hot Head' || t === 'Money Hungry' || t === 'Diva/Star')).length;
+    const goodCount = prospectTraits.filter(t => (t === 'Gym Rat' || t === 'Workhorse' || t === 'Leader' || t === 'Professional' || t === 'Clutch')).length;
+
+    // ── OVR by pick slot — rookies are raw; superstars develop, not arrive ──
+    // #1 pick: 83–88 (rarely 90 with elite traits). True 90+ OVR must be earned.
+    let rating: number;
+    if (i === 0) {
+      rating = 83 + Math.floor(Math.random() * 6);          // #1 overall:  83–88
+    } else if (i < 5) {
+      rating = 79 + Math.floor(Math.random() * 6);          // Top 5:       79–84
+    } else if (i < 14) {
+      rating = 73 + Math.floor(Math.random() * 7);          // Lottery 6–13: 73–79
+    } else if (i < 30) {
+      rating = 67 + Math.floor(Math.random() * 7);          // Late first:  67–73
+    } else if (i < 60) {
+      rating = Math.random() < 0.08                         // 2nd round: sleeper or normal
+        ? 68 + Math.floor(Math.random() * 6)                //   sleeper:  68–73
+        : 57 + Math.floor(Math.random() * 10);              //   normal:   57–66
+    } else {
+      rating = 52 + Math.floor(Math.random() * 9);          // Undrafted:   52–60
+    }
+
+    // ── Trait bust-risk modifier ─────────────────────────────────────────
+    // Good traits (Gym Rat, Workhorse…) can push a prospect above their slot.
+    // Bad traits create bust risk — harsh for late picks, mild for top picks.
+    const bustMultiplier = i >= 14 ? 2.0 : i >= 5 ? 1.0 : 0.5;
+    const traitDelta     = Math.round((goodCount - badCount * 1.5) * bustMultiplier);
+    // #1 pick trait ceiling capped at +2 (84–90 max with elite traits — very rare 90)
+    const maxAdjust      = i === 0 ? 2 : i < 5 ? 3 : i < 14 ? 4 : 6;
+    rating = Math.min(99, Math.max(50, rating + Math.max(-maxAdjust, Math.min(maxAdjust, traitDelta))));
+
+    // ── Potential: development ceiling — high for top picks, earned for late picks ─
+    let potential: number;
+    if (i === 0) {
+      potential = 88 + Math.floor(Math.random() * 10);               // #1 pick:    88–97 (can become a star)
+    } else if (i < 5) {
+      potential = Math.min(99, 85 + Math.floor(Math.random() * 12)); // Top 5:      85–96
+    } else if (i < 14) {
+      potential = Math.min(99, rating + Math.floor(Math.random() * 16) + 7); // Lottery: high upside
+    } else if (i < 30) {
+      potential = Math.min(99, rating + Math.floor(Math.random() * 13) + 5); // Late 1st: moderate
+    } else {
+      potential = Math.min(99, rating + Math.floor(Math.random() * 10) + 3); // 2nd rd / undrafted
+    }
+    // Bad traits erode ceiling for mid/late picks — bust signal
+    if (badCount > 0 && i >= 5) {
+      potential = Math.max(rating + 4, potential - badCount * 3);
+    }
     
     // Apply regional flavor
     const f = region.flavor;
-    const getRandomAttr = (base: number, flavor: number = 0) => 
+    const getRandomAttr = (base: number, flavor: number = 0) =>
       Math.min(99, Math.max(25, Math.floor(base + flavor + (Math.random() * 25 - 12))));
     const prospectHometown = region.hometowns[Math.floor(Math.random() * region.hometowns.length)];
     const physGender = gender === 'Female' ? 'Female' : 'Male';
     const phys = genPhysical(pos, physGender);
     const posRanges = POS_ATTR_RANGES[pos];
     const clampPos = (val: number, key: PosAttrRangeKey) => { const [lo, hi] = posRanges[key]; return Math.min(Math.min(99, hi), Math.max(lo, val)); };
+    const gb = POS_GRANULAR_BIAS[pos] ?? {};
+    const ba = (base: number, flavor: number = 0, key?: string) =>
+      getRandomAttr(base, flavor + (key !== undefined && gb[key] !== undefined ? (gb[key] as number) : 0));
+
+    // Pick archetype first so attributes can be shaped toward it
+    const draftArchPool = ARCHETYPE_POSITION_WEIGHTS[pos] ?? [['Role Player', 1]];
+    const draftArchTotal = draftArchPool.reduce((s, [, w]) => s + w, 0);
+    let draftArchRoll = Math.random() * draftArchTotal;
+    let draftChosenArch = draftArchPool[draftArchPool.length - 1][0];
+    for (const [name, weight] of draftArchPool) {
+      draftArchRoll -= weight;
+      if (draftArchRoll <= 0) { draftChosenArch = name; break; }
+    }
+
     const rawAttrs: AttrMap = {
       shooting:    clampPos(rating + f.shooting,    'shooting'),
       defense:     clampPos(rating,                 'defense'),
       rebounding:  clampPos(rating,                 'rebounding'),
       playmaking:  clampPos(rating + f.passing,     'playmaking'),
       athleticism: clampPos(rating + f.athleticism, 'athleticism'),
-      layups: getRandomAttr(rating),
-      dunks: getRandomAttr(rating, f.athleticism),
-      shootingMid: getRandomAttr(rating, f.shooting),
-      shooting3pt: getRandomAttr(rating, f.shooting),
-      freeThrow: getRandomAttr(rating, f.shooting),
-      speed: getRandomAttr(rating, f.athleticism),
-      strength: getRandomAttr(rating, f.athleticism),
-      jumping: getRandomAttr(rating, f.athleticism),
-      stamina: getRandomAttr(rating),
-      perimeterDef: getRandomAttr(rating),
-      interiorDef: getRandomAttr(rating),
-      steals: getRandomAttr(rating),
-      blocks: getRandomAttr(rating),
-      defensiveIQ: getRandomAttr(rating, f.iq),
-      ballHandling: getRandomAttr(rating, f.passing),
-      passing: getRandomAttr(rating, f.passing),
-      offensiveIQ: getRandomAttr(rating, f.iq),
-      postScoring: getRandomAttr(rating),
-      offReb: getRandomAttr(rating),
-      defReb: getRandomAttr(rating),
+      layups:       ba(rating, 0,             'layups'),
+      dunks:        ba(rating, f.athleticism, 'dunks'),
+      shootingMid:  ba(rating, f.shooting,    'shootingMid'),
+      shooting3pt:  ba(rating, f.shooting,    'shooting3pt'),
+      freeThrow:    ba(rating, f.shooting,    'freeThrow'),
+      speed:        ba(rating, f.athleticism, 'speed'),
+      strength:     ba(rating, f.athleticism, 'strength'),
+      jumping:      ba(rating, f.athleticism, 'jumping'),
+      stamina:      ba(rating, 0,             'stamina'),
+      perimeterDef: ba(rating, 0,             'perimeterDef'),
+      interiorDef:  ba(rating, 0,             'interiorDef'),
+      steals:       ba(rating, 0,             'steals'),
+      blocks:       ba(rating, 0,             'blocks'),
+      defensiveIQ:  ba(rating, f.iq,          'defensiveIQ'),
+      ballHandling: ba(rating, f.passing,     'ballHandling'),
+      passing:      ba(rating, f.passing,     'passing'),
+      offensiveIQ:  ba(rating, f.iq,          'offensiveIQ'),
+      postScoring:  ba(rating, 0,             'postScoring'),
+      offReb:       ba(rating, 0,             'offReb'),
+      defReb:       ba(rating, 0,             'defReb'),
       durability: Math.min(99, Math.max(20, Math.floor(55 + (Math.random() * 60 - 15)))),
     };
+
+    // Apply archetype shaping to draft prospect
+    const draftShape = ARCHETYPE_ATTR_SHAPE[draftChosenArch];
+    if (draftShape) {
+      for (const [key, boost] of Object.entries(draftShape.boost)) {
+        if (key in rawAttrs) rawAttrs[key] = Math.min(99, (rawAttrs[key] ?? 50) + boost);
+      }
+      for (const [key, suppress] of Object.entries(draftShape.suppress)) {
+        if (key in rawAttrs) rawAttrs[key] = Math.max(25, (rawAttrs[key] ?? 50) - suppress);
+      }
+    }
+
     const pAttrs = applyPhysical(rawAttrs, pos, physGender, phys.heightIn, phys.weight);
     const bAttrsRaw = applyAttrBounds(pAttrs as Player['attributes'], pos, {
       heightBonus: phys.heightIn >= (HEIGHT_WEIGHT[pos]?.[physGender]?.avgH ?? 0) + 3 ? 5 : 0,
     });
     const bAttrs = gender === 'Female' ? applyFemaleAttrCaps(bAttrsRaw) : bAttrsRaw;
-    const prospectTraits = getRandomTraits();
+    const prospectArchetype = deriveArchetype(pos, bAttrs as Record<string, number>, rating, false);
 
-    const prospectAge = ageMin + Math.floor(Math.random() * (Math.max(ageMin, ageMax) - ageMin + 1));
+    // WNBA draft eligibility: domestic (U.S.) prospects must be ≥ 22; international ≥ 20.
+    // The caller's ageMin/ageMax is still honoured if it enforces a stricter floor.
+    const isWomensProspect = genderRatio === 100;
+    const prospectCountry = region.id === 'usa' ? 'United States' : region.name;
+    const effectiveProspectMin = isWomensProspect
+      ? wnbaAgeFloor(prospectCountry, ageMin)
+      : ageMin;
+    const effectiveProspectMax = Math.max(effectiveProspectMin, ageMax);
+    const prospectAge = effectiveProspectMin + Math.floor(Math.random() * (effectiveProspectMax - effectiveProspectMin + 1));
     const rawProspect = {
       id,
       name: `${firstNames[Math.floor(Math.random() * firstNames.length)]} ${lastNames[Math.floor(Math.random() * lastNames.length)]}`,
@@ -1471,9 +2224,11 @@ export const generateProspects = (year: number, count: number = 100, genderRatio
       mockRank: i + 1,
       attributes: bAttrs,
       jerseyNumber: Math.floor(Math.random() * 99),
-      height: phys.heightStr, weight: phys.weight, archetype: assignArchetype(pos, bAttrs as Record<string, number>, rating),
+      height: phys.heightStr, weight: phys.weight,
+      archetype: prospectArchetype,
+      secondaryPositions: assignSecondaryPositions(pos, bAttrs as Record<string, number>, phys.heightIn),
       personalityTraits: prospectTraits,
-      tendencies: generateTendencies(pos, prospectTraits),
+      tendencies: generateTendencies(pos, prospectTraits, prospectArchetype),
       hometown: prospectHometown,
       country: countryFromHometown(prospectHometown),
       birthdate: randomBirthdate(prospectAge, year),
@@ -1502,7 +2257,7 @@ export const generateDefaultRotation = (roster: Player[]): TeamRotation => {
   
   const assignedIds = new Set<string>();
   
-  // Try to fill positions naturally
+  // Try to fill positions naturally — first exact primary match, then secondary match
   const positions: Position[] = ['PG', 'SG', 'SF', 'PF', 'C'];
   positions.forEach(pos => {
     const bestAtPos = sorted.find(p => p.position === pos && !assignedIds.has(p.id));
@@ -1511,7 +2266,20 @@ export const generateDefaultRotation = (roster: Player[]): TeamRotation => {
       assignedIds.add(bestAtPos.id);
     }
   });
-  
+
+  // Second pass: fill gaps with secondary-position eligible players
+  positions.forEach(pos => {
+    if (!starters[pos]) {
+      const eligible = sorted.find(
+        p => !assignedIds.has(p.id) && (p.secondaryPositions ?? []).includes(pos)
+      );
+      if (eligible) {
+        starters[pos] = eligible.id;
+        assignedIds.add(eligible.id);
+      }
+    }
+  });
+
   // Fill remaining starter spots with best available
   positions.forEach(pos => {
     if (!starters[pos]) {
@@ -1557,14 +2325,99 @@ export const generateDefaultRotation = (roster: Player[]): TeamRotation => {
 // 14 values per tier, sorted best-to-worst (franchise player → 14th man).
 // These are minimum ratings per roster slot so teams have a realistic spread.
 const TIER_SLOT_FLOORS: Record<string, number[]> = {
-  // elite: full-roster avg ≈ 85–87  (2–4 per 30-team league)
-  elite:      [96, 93, 90, 88, 87, 86, 85, 84, 83, 83, 82, 81, 80, 79],
-  // solid: full-roster avg ≈ 82–84  (6–8 teams)
-  solid:      [92, 89, 87, 85, 84, 83, 82, 81, 80, 80, 79, 78, 77, 76],
-  // average: full-roster avg ≈ 78–80 (bulk of the league)
-  average:    [87, 84, 82, 80, 80, 79, 78, 77, 76, 76, 75, 74, 74, 74],
-  // rebuilding: full-roster avg ≈ 75–77 (floor teams; normalizeOVRs lifts to 76 min)
-  rebuilding: [84, 81, 79, 77, 77, 76, 75, 74, 74, 73, 73, 72, 71, 71],
+  // elite: top contenders — slot 0 guaranteed near-star (88+); bench 60+ floor
+  elite:      [88, 84, 81, 79, 77, 75, 73, 71, 69, 67, 65, 63, 61, 59],
+  // solid: strong rosters — 1 star-level starter (82+), deep bench 58+
+  solid:      [82, 79, 77, 75, 73, 71, 69, 67, 65, 63, 61, 60, 58, 58],
+  // average: steady starters (76+), full bench 58+
+  average:    [76, 74, 72, 70, 68, 66, 64, 62, 60, 58, 58, 58, 58, 58],
+  // rebuilding: young project roster — starter 70+, full bench 56+
+  rebuilding: [72, 70, 68, 66, 64, 62, 60, 58, 56, 56, 56, 56, 56, 56],
+};
+
+// ── Team identity types — shape archetype selection and give teams clear identities ──
+export type TeamIdentityId = 'spacing' | 'defensive' | 'transition' | 'interior' | 'playmaking' | 'two_way' | 'balanced';
+
+export interface TeamIdentityDef {
+  id: TeamIdentityId;
+  name: string;
+  archetypeBias: Record<string, number>;
+  preferredScheme: CoachScheme;
+}
+
+export const TEAM_IDENTITY_TYPES: TeamIdentityDef[] = [
+  {
+    id: 'spacing',
+    name: 'Spacing & Shooting',
+    archetypeBias: { '3&D Wing': 1.9, 'Stretch Big': 1.9, 'Stretch Rim Protector': 1.6, 'Pure Scorer': 1.6, 'Shot-Creating Guard': 1.5 },
+    preferredScheme: 'Pace and Space',
+  },
+  {
+    id: 'defensive',
+    name: 'Defensive Identity',
+    archetypeBias: { 'Lockdown Defender': 1.9, 'Rim Protector': 1.9, 'Two-Way Forward': 1.5, 'Defensive Floor General': 1.9, 'Glass Cleaner': 1.6, 'Two-Way Wing': 1.4 },
+    preferredScheme: 'Grit and Grind',
+  },
+  {
+    id: 'transition',
+    name: 'Transition & Athletics',
+    archetypeBias: { 'Athletic Rim Runner': 1.9, 'Slashing Playmaker': 1.9, 'Scoring Playmaker': 1.5, 'Two-Way Wing': 1.5, 'Combo Guard': 1.3 },
+    preferredScheme: 'Showtime',
+  },
+  {
+    id: 'interior',
+    name: 'Interior Dominance',
+    archetypeBias: { 'Post Scorer': 1.9, 'Glass Cleaner': 1.8, 'Two-Way Interior Star': 1.8, 'Pick-and-Roll Big': 1.6, 'Rim Protector': 1.5 },
+    preferredScheme: 'Grit and Grind',
+  },
+  {
+    id: 'playmaking',
+    name: 'Playmaking & Creation',
+    archetypeBias: { 'Playmaking Guard': 1.9, 'Scoring Playmaker': 1.8, 'Slashing Playmaker': 1.5, 'Combo Guard': 1.4, 'Two-Way Forward': 1.3 },
+    preferredScheme: 'Triangle',
+  },
+  {
+    id: 'two_way',
+    name: 'Two-Way Defense',
+    archetypeBias: { 'Two-Way Wing': 1.9, 'Two-Way Forward': 1.8, 'Lockdown Defender': 1.5, '3&D Wing': 1.5, 'Defensive Floor General': 1.4 },
+    preferredScheme: 'Balanced',
+  },
+  {
+    id: 'balanced',
+    name: 'Balanced',
+    archetypeBias: {},
+    preferredScheme: 'Balanced',
+  },
+];
+
+// ── Executive (GM) name generation ───────────────────────────────────────────
+const GM_FIRST_NAMES_MALE = [
+  'Marcus','Darnell','Terrence','Calvin','Jerome','Reginald','Alvin','Devin','Maurice','Kendall',
+  'Bradley','Curtis','Elijah','Gordon','Harris','Ivan','Jordan','Kevin','Lance','Miles',
+  'Nathan','Owen','Preston','Quinton','Russell','Spencer','Travis','Victor','Walter','Xavier',
+];
+const GM_FIRST_NAMES_FEMALE = [
+  'Alicia','Brenda','Carmen','Denise','Evelyn','Felicia','Gloria','Helen','Irene','Jasmine',
+  'Karen','Latasha','Monica','Natasha','Olivia','Patricia','Renee','Sandra','Tamika','Ursula',
+  'Vanessa','Whitney','Alexis','Brianna','Cassandra','Dominique','Elaine','Francine','Gwendolyn','Harriet',
+];
+const GM_LAST_NAMES = [
+  'Whitaker','Chambers','Holloway','Mercer','Stanton','Dupree','Fletcher','Gaines','Harmon','Ingram',
+  'Jefferson','Kingston','Lawson','Monroe','Nash','Okafor','Parrish','Quinn','Rhodes','Sutton',
+  'Tillman','Underwood','Vance','Washington','Yates','Zimmerman','Blackwell','Caldwell','Dixon','Ellison',
+];
+const GM_MIDDLE_INITIALS = 'ABCDEFGHJKLMNPRSTW';
+
+export const generateGMName = (genderRatio: number = 0): { name: string; age: number } => {
+  const isFemale = Math.random() * 100 < genderRatio;
+  const firstNames = isFemale ? GM_FIRST_NAMES_FEMALE : GM_FIRST_NAMES_MALE;
+  const first = firstNames[Math.floor(Math.random() * firstNames.length)];
+  const last  = GM_LAST_NAMES[Math.floor(Math.random() * GM_LAST_NAMES.length)];
+  const mid   = GM_MIDDLE_INITIALS[Math.floor(Math.random() * GM_MIDDLE_INITIALS.length)];
+  // ~50% chance of middle initial for variety
+  const name  = Math.random() < 0.5 ? `${first} ${mid}. ${last}` : `${first} ${last}`;
+  const age   = 35 + Math.floor(Math.random() * 31); // 35–65
+  return { name, age };
 };
 
 export const generateLeagueTeams = (genderRatio: number = 0, season: number = 2026, futureSeasonsToSeed: number = 4): Team[] => {
@@ -1595,33 +2448,121 @@ export const generateLeagueTeams = (genderRatio: number = 0, season: number = 20
       );
     }
     const picks: DraftPick[] = [
-      { round: 1, pick: 0, originalTeamId: teamId, currentTeamId: teamId },
-      { round: 2, pick: 0, originalTeamId: teamId, currentTeamId: teamId },
+      { round: 1, pick: 0, originalTeamId: teamId, currentTeamId: teamId, year: season },
+      { round: 2, pick: 0, originalTeamId: teamId, currentTeamId: teamId, year: season },
       ...futurePicks,
     ];
 
     const ownerGoals: OwnerGoal[] = ['Win Now', 'Rebuild', 'Profit'];
+    // Owner names: large diverse pool so every new career generates fresh identities.
+    const _ownerFirsts = [
+      'Alexander','Beatrice','Carlos','Diana','Edward','Felicia','Gordon','Helena',
+      'Ibrahim','Jacqueline','Klaus','Lorraine','Maxwell','Nadia','Oliver','Priya',
+      'Reginald','Simone','Theodore','Uma','Vincent','Whitney','Yusuf','Zoe',
+      'Andre','Bridget','Clayton','Desiree','Emil','Francesca','Grant','Harriet',
+      'Ingrid','Jerome','Kenji','Lakshmi','Morgan','Nicolette','Oswald','Penelope',
+      'Quincy','Roxanne','Stavros','Tabitha','Umberto','Valentina','Warren','Xiomara',
+    ];
+    const _ownerLasts = [
+      'Abernathy','Blackstone','Carrington','Delacroix','Everett','Fairbanks','Garrison','Holloway',
+      'Islington','Jameson','Kingston','Laurent','Merriweather','Northcott','Okonkwo','Pemberton',
+      'Quigley','Ravensworth','Stratton','Treadwell','Underwood','Vasiliev','Wentworth','Xavier',
+      'Alderton','Breckenridge','Callahan','Demetriou','Elsworth','Fontaine','Grantham','Huntington',
+      'Iyer','Johansson','Kulkarni','Lefebvre','Montoya','Nakamura','Osei','Papadopoulos',
+      'Rousseau','Shimizu','Thackeray','Uribe','Vossler','Whitfield','Yamamoto','Zuberi',
+    ];
+    const _ownerPersonalities = [
+      'Impatient Billionaire','Championship-or-Bust','Community Builder','Analytics Believer',
+      'Old-School Traditionalist','Media-Savvy Mogul','Silent Partner','Interfering Micromanager',
+      'Patient Developer','Win-Now Fanatic','Brand Builder','Revenue-Focused',
+    ];
+    const _rand = <T>(arr: T[]) => arr[Math.floor(Math.random() * arr.length)];
+    const ownerName = `${_rand(_ownerFirsts)} ${_rand(_ownerLasts)}`;
+    const ownerPersonality = _rand(_ownerPersonalities);
     const draftCtx: DraftContext = { season, teamNames, usedPicks };
     const tier = (tierList[i] ?? 'average') as keyof typeof TIER_SLOT_FLOORS;
     const slotFloors = TIER_SLOT_FLOORS[tier];
-    const roster = Array.from({ length: 14 }).map((_, j) =>
-      generatePlayer(`p-${i}-${j}`, [19, 38], genderRatio, draftCtx, season, slotFloors[j] ?? 68)
+
+    // Assign a team identity that shapes archetype selection across the roster
+    const identity = TEAM_IDENTITY_TYPES[Math.floor(Math.random() * TEAM_IDENTITY_TYPES.length)];
+    const genOpts = { archetypeBias: identity.archetypeBias };
+
+    let roster = Array.from({ length: 15 }).map((_, j) =>
+      generatePlayer(`p-${i}-${j}`, [19, 38], genderRatio, draftCtx, season, slotFloors[j] ?? 60, genOpts)
     );
 
+    // ── Positional balance enforcement ────────────────────────────────────────
+    // Target: 3 PG, 3 SG, 3 SF, 3 PF, 2-3 C per 15-man roster.
+    // Prevents absurd distributions (e.g. 5 C, 0 PG).  Reassigns position only —
+    // attributes are unchanged, so players feel slightly off-position which is
+    // realistic (converted bigs, point-forwards, etc.).
+    {
+      const posCount = (pos: Position) => roster.filter(p => p.position === pos).length;
+      // Too many centers (>3): convert excess C→PF, starting from lowest rating
+      let excess = posCount('C') - 3;
+      if (excess > 0) {
+        const sorted = [...roster].sort((a, b) => a.rating - b.rating);
+        roster = roster.map(p => {
+          if (excess > 0 && p.position === 'C' && sorted.findIndex(s => s.id === p.id) < sorted.filter(s => s.position === 'C').length) {
+            excess--;
+            return { ...p, position: 'PF' as Position };
+          }
+          return p;
+        });
+      }
+      // Too many PGs (>4): convert excess PG→SG
+      let exPG = posCount('PG') - 4;
+      if (exPG > 0) {
+        roster = roster.map(p => {
+          if (exPG > 0 && p.position === 'PG') { exPG--; return { ...p, position: 'SG' as Position }; }
+          return p;
+        });
+      }
+      // No center at all: convert worst PF to C
+      if (posCount('C') === 0) {
+        const worstPF = [...roster].filter(p => p.position === 'PF').sort((a, b) => a.rating - b.rating)[0];
+        if (worstPF) roster = roster.map(p => p.id === worstPF.id ? { ...p, position: 'C' as Position } : p);
+      }
+      // No PG at all: convert best SG to PG
+      if (posCount('PG') === 0) {
+        const bestSG = [...roster].filter(p => p.position === 'SG').sort((a, b) => b.rating - a.rating)[0];
+        if (bestSG) roster = roster.map(p => p.id === bestSG.id ? { ...p, position: 'PG' as Position } : p);
+      }
+    }
+
+    // ── Payroll normalization: cap total payroll at NBA first-apron equivalent.
+    // This prevents individual random variation from stacking into absurd totals
+    // (e.g. a full roster of high-floor players). Hard ceiling = $185M.
+    {
+      const PAYROLL_HARD_CAP = 185_000_000;
+      const rawPayroll = roster.reduce((s, p) => s + p.salary, 0);
+      if (rawPayroll > PAYROLL_HARD_CAP) {
+        const scale = PAYROLL_HARD_CAP / rawPayroll;
+        roster = roster.map(p => ({
+          ...p,
+          salary: Math.round(Math.max(1_100_000, p.salary * scale) / 250_000) * 250_000,
+        }));
+      }
+    }
+
+    const headCoach = generateCoach(`coach-${teamId}-hc`, 'B', genderRatio, season);
+    // Prefer the identity's scheme; fall back to coach's preferred scheme
+    const teamScheme = identity.preferredScheme ?? getCoachPreferredScheme(headCoach);
     return {
       id: teamId,
       name: data.name,
       city: data.city,
       roster,
       staff: {
-        headCoach: generateCoach(`coach-${teamId}-hc`, 'B', genderRatio, season),
+        headCoach,
         assistantOffense: generateCoach(`coach-${teamId}-off`, 'C', genderRatio, season),
         assistantDefense: generateCoach(`coach-${teamId}-def`, 'C', genderRatio, season),
         assistantDev: generateCoach(`coach-${teamId}-dev`, 'C', genderRatio, season),
         trainer: generateCoach(`coach-${teamId}-tr`, 'C', genderRatio, season)
       },
       staffBudget: 15000000,
-      activeScheme: 'Balanced',
+      activeScheme: teamScheme,
+      teamIdentity: identity.name,
       wins: 0, losses: 0, homeWins: 0, homeLosses: 0, roadWins: 0, roadLosses: 0, confWins: 0, confLosses: 0, lastTen: [],
       budget: 180000000,
       logo: '',  // no stock photo; TeamBadge renders letter badge as default
@@ -1639,6 +2580,8 @@ export const generateLeagueTeams = (genderRatio: number = 0, season: number = 20
         fanHype: 65,
         ownerPatience: 80,
         ownerGoal: ownerGoals[Math.floor(Math.random() * ownerGoals.length)],
+        ownerName,
+        ownerPersonality,
         budgets: {
           scouting: 20,
           health: 20,
@@ -1653,8 +2596,54 @@ export const generateLeagueTeams = (genderRatio: number = 0, season: number = 20
       stadiumCapacity: data.market === 'Large' ? 20000 : data.market === 'Medium' ? 18500 : 17000,
       borderStyle: 'Solid',
       status: 'Active',
+      ...(() => { const gm = generateGMName(genderRatio); return { gmName: gm.name, gmAge: gm.age }; })(),
     };
   });
+};
+
+/**
+ * Analyzes a team's rotation and returns its notable strengths and weaknesses.
+ * Uses the top 8 players by rating to represent the rotation.
+ * Strengths = composite averages well above league average (~73).
+ * Weaknesses = composite averages well below league average.
+ */
+export const computeTeamProfile = (roster: Player[]): {
+  strengths: string[];
+  weaknesses: string[];
+} => {
+  const rotation = [...roster].sort((a, b) => b.rating - a.rating).slice(0, 8);
+  if (rotation.length === 0) return { strengths: [], weaknesses: [] };
+
+  const avg = (fn: (p: Player) => number) =>
+    rotation.reduce((s, p) => s + fn(p), 0) / rotation.length;
+
+  const categories: Array<{ label: string; val: number }> = [
+    { label: '3-Point Shooting',   val: avg(p => p.attributes.shooting3pt) },
+    { label: 'Mid-Range Scoring',  val: avg(p => p.attributes.shootingMid) },
+    { label: 'Perimeter Defense',  val: avg(p => p.attributes.perimeterDef) },
+    { label: 'Interior Defense',   val: avg(p => p.attributes.interiorDef) },
+    { label: 'Rebounding',         val: avg(p => (p.attributes.offReb + p.attributes.defReb) / 2) },
+    { label: 'Playmaking',         val: avg(p => (p.attributes.ballHandling + p.attributes.passing) / 2) },
+    { label: 'Post Scoring',       val: avg(p => p.attributes.postScoring) },
+    { label: 'Athleticism',        val: avg(p => p.attributes.athleticism) },
+    { label: 'Shot-Blocking',      val: avg(p => p.attributes.blocks) },
+    { label: 'Ball Pressure',      val: avg(p => p.attributes.steals) },
+  ];
+
+  // 78+ = clear strength, 66- = clear weakness vs league average ~73
+  const strengths = categories
+    .filter(c => c.val >= 78)
+    .sort((a, b) => b.val - a.val)
+    .slice(0, 4)
+    .map(c => c.label);
+
+  const weaknesses = categories
+    .filter(c => c.val <= 66)
+    .sort((a, b) => a.val - b.val)
+    .slice(0, 3)
+    .map(c => c.label);
+
+  return { strengths, weaknesses };
 };
 
 export const generateSeasonSchedule = (
@@ -1759,6 +2748,28 @@ export const generateSeasonSchedule = (
     }
   });
 
+  // ── Build per-pair max games map (used in pool and greedy fill) ───────────
+  const maxPairGames: Record<string, number> = {};
+  for (let i = 0; i < teams.length; i++) {
+    for (let j = i + 1; j < teams.length; j++) {
+      const t1 = teams[i], t2 = teams[j];
+      const key = `${t1.id}|${t2.id}`;
+      if (numGames >= 80) {
+        if (t1.division === t2.division) {
+          maxPairGames[key] = divPP;
+        } else if (t1.conference === t2.conference) {
+          maxPairGames[key] = confPP + (confExtraPairs.has(key) ? 1 : 0);
+        } else {
+          maxPairGames[key] = oocPP + (oocExtraPairs.has(key) ? 1 : 0);
+        }
+      } else {
+        // Small league: allow multiple matchups per pair so each team reaches numGames
+        const opponentCount = Math.max(1, teams.length - 1);
+        maxPairGames[key] = Math.ceil(numGames / opponentCount);
+      }
+    }
+  }
+
   // ── Build the matchup pool ─────────────────────────────────────────────────
   for (let i = 0; i < teams.length; i++) {
     for (let j = i + 1; j < teams.length; j++) {
@@ -1776,7 +2787,10 @@ export const generateSeasonSchedule = (
           count = oocPP + (oocExtraPairs.has(key) ? 1 : 0);
         }
       } else {
-        count = 1;
+        // Small league: seed the pool with floor(numGames / opponents) games per pair;
+        // the greedy fill below tops up any remaining slots up to the maxPairGames cap.
+        const opponentCount = Math.max(1, teams.length - 1);
+        count = Math.max(1, Math.floor(numGames / opponentCount));
       }
       for (let c = 0; c < count; c++) {
         if (teamGamesCountTotal[t1.id] < numGames && teamGamesCountTotal[t2.id] < numGames) {
@@ -1787,14 +2801,38 @@ export const generateSeasonSchedule = (
   }
 
   // Fill any remaining gaps (rounding edge cases) greedily
+  // Respects per-pair maxima so conference opponents never exceed the planned cap.
+  // Priority: prefer OOC opponents → conf non-div → div → any (emergency only).
   const allTeamIds = teams.map(t => t.id);
+  const teamById: Record<string, Team> = {};
+  teams.forEach(t => { teamById[t.id] = t; });
+  const pairKey = (a: string, b: string) => a < b ? `${a}|${b}` : `${b}|${a}`;
+
   allTeamIds.forEach(id => {
     while (teamGamesCountTotal[id] < numGames) {
-      const bestOpponent = allTeamIds
-        .filter(oid => oid !== id && teamGamesCountTotal[oid] < numGames)
-        .sort((a, b) => (pairings[id][a] || 0) - (pairings[id][b] || 0))[0];
-      if (bestOpponent) addGameToPool(id, bestOpponent);
-      else break;
+      // Only consider opponents that still have capacity AND haven't hit their per-pair cap
+      const eligible = allTeamIds.filter(oid => {
+        if (oid === id || teamGamesCountTotal[oid] >= numGames) return false;
+        const max = maxPairGames[pairKey(id, oid)];
+        // If no max entry (shouldn't happen with standard setup), allow up to oocPP+1 as fallback
+        return max === undefined || (pairings[id][oid] || 0) < max;
+      });
+      if (eligible.length === 0) break;
+
+      // Sort: prefer OOC first, then conf-ND, then div; within each tier fewest pairings first
+      const myConf = teamById[id]?.conference;
+      const myDiv  = teamById[id]?.division;
+      eligible.sort((a, b) => {
+        const aConf = teamById[a]?.conference;
+        const bConf = teamById[b]?.conference;
+        const aDiv  = teamById[a]?.division;
+        const bDiv  = teamById[b]?.division;
+        const tierA = aConf !== myConf ? 0 : aDiv !== myDiv ? 1 : 2;
+        const tierB = bConf !== myConf ? 0 : bDiv !== myDiv ? 1 : 2;
+        if (tierA !== tierB) return tierA - tierB;
+        return (pairings[id][a] || 0) - (pairings[id][b] || 0);
+      });
+      addGameToPool(id, eligible[0]);
     }
   });
 
@@ -1821,12 +2859,28 @@ export const generateSeasonSchedule = (
       const t1B2B = t1Last === currentLeagueDay - 1;
       const t2B2B = t2Last === currentLeagueDay - 1;
 
-      if (t1B2B && (teamB2BCount[t1] >= 20 || teamGamesScheduled[t1] - teamLastB2BGameIndex[t1] < 3)) continue;
-      if (t2B2B && (teamB2BCount[t2] >= 20 || teamGamesScheduled[t2] - teamLastB2BGameIndex[t2] < 3)) continue;
+      // Don't allow B2B until a team has played ≥ 4 games (prevents game-2 B2Bs at season open).
+      if (t1B2B && (teamB2BCount[t1] >= 16 || teamGamesScheduled[t1] - teamLastB2BGameIndex[t1] < 5 || teamGamesScheduled[t1] < 4)) continue;
+      if (t2B2B && (teamB2BCount[t2] >= 16 || teamGamesScheduled[t2] - teamLastB2BGameIndex[t2] < 5 || teamGamesScheduled[t2] < 4)) continue;
+
+      // Progressive pacing guard: a team can't run more than ~20% ahead of its proportional
+      // B2B budget for the point in the season it's at. This distributes B2Bs evenly
+      // rather than clustering them in the first third of the schedule.
+      const b2bTarget = numGames >= 80 ? 15 : Math.round(numGames * 0.18);
+      if (t1B2B) {
+        const pacing = teamB2BCount[t1] / b2bTarget;
+        const progress = Math.max(0.01, teamGamesScheduled[t1] / numGames);
+        if (pacing > progress + 0.20) continue;
+      }
+      if (t2B2B) {
+        const pacing = teamB2BCount[t2] / b2bTarget;
+        const progress = Math.max(0.01, teamGamesScheduled[t2] / numGames);
+        if (pacing > progress + 0.20) continue;
+      }
 
       const roll = Math.random();
-      const restT1 = t1B2B ? 1 : (roll < 0.3 ? 1 : 2);
-      const restT2 = t2B2B ? 1 : (roll < 0.3 ? 1 : 2);
+      const restT1 = t1B2B ? 1 : (roll < 0.10 ? 1 : 2);
+      const restT2 = t2B2B ? 1 : (roll < 0.10 ? 1 : 2);
 
       if (currentLeagueDay - t1Last < restT1 && !t1B2B) continue;
       if (currentLeagueDay - t2Last < restT2 && !t2B2B) continue;
@@ -1893,6 +2947,17 @@ export interface HistoricalFinancials {
   luxuryTaxMultiplier: number;
   /** Descriptive note shown in UI */
   note: string;
+  // ── Optional WNBA / Women's league extensions ──
+  maxContractYears?: 2 | 3 | 4 | 5;
+  maxPlayerSalaryPct?: 25 | 30 | 35;
+  birdRights?: boolean;
+  draftRounds?: number;
+  draftClassSize?: 'Small' | 'Normal' | 'Large';
+  tradableDraftPickSeasons?: number;
+  /** WNBA active roster floor */
+  minRosterSize?: number;
+  /** WNBA active roster ceiling */
+  maxRosterSize?: number;
 }
 
 interface EraEntry {
@@ -2088,4 +3153,141 @@ const ERA_TABLE: EraEntry[] = [
 export const getHistoricalFinancials = (year: number): HistoricalFinancials => {
   const entry = ERA_TABLE.find(e => year >= e.from && year <= e.to);
   return entry ? entry.f : ERA_TABLE[ERA_TABLE.length - 1].f;
+};
+
+// ── WNBA / Women's League Historical Financials ──────────────────────────────
+// Years 1947–1996 intentionally omitted: dropdown is restricted to 1997+ for Women's leagues.
+
+const WNBA_ERA_TABLE: EraEntry[] = [
+  {
+    from: 1997, to: 1999,
+    f: {
+      era: 'WNBA Inaugural Era',
+      salaryCap: 400_000, luxuryTaxLine: 0, luxuryTaxThreshold: 0,
+      rookieScaleContracts: false, tradeSalaryMatchPct: 100, minPayroll: 0,
+      luxuryTaxMultiplier: 1.0,
+      maxContractYears: 2, maxPlayerSalaryPct: 25, birdRights: false,
+      draftRounds: 3, draftClassSize: 'Small', tradableDraftPickSeasons: 1,
+      minRosterSize: 10, maxRosterSize: 12,
+      note: 'WNBA founded 1997. NBA-subsidized, minimal salaries. Max $50K/yr. 3-round draft.',
+    },
+  },
+  {
+    from: 2000, to: 2002,
+    f: {
+      era: 'Early WNBA',
+      salaryCap: 550_000, luxuryTaxLine: 0, luxuryTaxThreshold: 0,
+      rookieScaleContracts: false, tradeSalaryMatchPct: 100, minPayroll: 0,
+      luxuryTaxMultiplier: 1.0,
+      maxContractYears: 2, maxPlayerSalaryPct: 25, birdRights: false,
+      draftRounds: 3, draftClassSize: 'Small', tradableDraftPickSeasons: 1,
+      minRosterSize: 10, maxRosterSize: 12,
+      note: 'Early WNBA era — minimal salaries. Team cap grows slowly to ~$550K.',
+    },
+  },
+  {
+    from: 2003, to: 2007,
+    f: {
+      era: 'WNBA 2003 CBA',
+      salaryCap: 740_000, luxuryTaxLine: 0, luxuryTaxThreshold: 0,
+      rookieScaleContracts: true, tradeSalaryMatchPct: 100, minPayroll: 0,
+      luxuryTaxMultiplier: 1.0,
+      maxContractYears: 3, maxPlayerSalaryPct: 25, birdRights: false,
+      draftRounds: 3, draftClassSize: 'Small', tradableDraftPickSeasons: 2,
+      minRosterSize: 10, maxRosterSize: 12,
+      note: '2003 CBA: rookie salary scale introduced. Cap ~$700K–$800K. Max contracts now 3 years.',
+    },
+  },
+  {
+    from: 2008, to: 2012,
+    f: {
+      era: 'Mid WNBA Era',
+      salaryCap: 878_000, luxuryTaxLine: 0, luxuryTaxThreshold: 0,
+      rookieScaleContracts: true, tradeSalaryMatchPct: 100, minPayroll: 0,
+      luxuryTaxMultiplier: 1.0,
+      maxContractYears: 3, maxPlayerSalaryPct: 25, birdRights: false,
+      draftRounds: 3, draftClassSize: 'Small', tradableDraftPickSeasons: 2,
+      minRosterSize: 10, maxRosterSize: 12,
+      note: 'Cap inches toward $900K. Growth largely flat. No luxury tax system.',
+    },
+  },
+  {
+    from: 2013, to: 2019,
+    f: {
+      era: 'Modern WNBA',
+      salaryCap: 1_000_000, luxuryTaxLine: 0, luxuryTaxThreshold: 0,
+      rookieScaleContracts: true, tradeSalaryMatchPct: 100, minPayroll: 0,
+      luxuryTaxMultiplier: 1.0,
+      maxContractYears: 4, maxPlayerSalaryPct: 30, birdRights: false,
+      draftRounds: 3, draftClassSize: 'Normal', tradableDraftPickSeasons: 2,
+      minRosterSize: 10, maxRosterSize: 12,
+      note: 'Cap crosses $1M. Player activism pushes for better conditions. Max contracts now 4 years.',
+    },
+  },
+  {
+    from: 2020, to: 2024,
+    f: {
+      era: '2020 Landmark CBA',
+      salaryCap: 1_800_000, luxuryTaxLine: 0, luxuryTaxThreshold: 0,
+      rookieScaleContracts: true, tradeSalaryMatchPct: 100, minPayroll: 500_000,
+      luxuryTaxMultiplier: 1.0,
+      maxContractYears: 4, maxPlayerSalaryPct: 30, birdRights: true,
+      draftRounds: 3, draftClassSize: 'Normal', tradableDraftPickSeasons: 3,
+      minRosterSize: 11, maxRosterSize: 12,
+      note: '2020 CBA: biggest pay jump in WNBA history at the time. Bird Rights introduced. Cap ~$1.8M.',
+    },
+  },
+  {
+    from: 2025, to: 2025,
+    f: {
+      era: '2025 Historic CBA',
+      salaryCap: 2_200_000, luxuryTaxLine: 0, luxuryTaxThreshold: 0,
+      rookieScaleContracts: true, tradeSalaryMatchPct: 100, minPayroll: 800_000,
+      luxuryTaxMultiplier: 1.0,
+      maxContractYears: 5, maxPlayerSalaryPct: 30, birdRights: true,
+      draftRounds: 3, draftClassSize: 'Normal', tradableDraftPickSeasons: 3,
+      minRosterSize: 11, maxRosterSize: 12,
+      note: 'January 2025 CBA: historic salary jump. Max 5-year deals. Team cap surges to ~$2.2M.',
+    },
+  },
+  {
+    from: 2026, to: 2099,
+    f: {
+      era: 'Future WNBA Projection',
+      salaryCap: 7_000_000, luxuryTaxLine: 8_500_000, luxuryTaxThreshold: 0,
+      rookieScaleContracts: true, tradeSalaryMatchPct: 110, minPayroll: 3_000_000,
+      luxuryTaxMultiplier: 1.5,
+      maxContractYears: 5, maxPlayerSalaryPct: 35, birdRights: true,
+      draftRounds: 3, draftClassSize: 'Normal', tradableDraftPickSeasons: 4,
+      minRosterSize: 11, maxRosterSize: 12,
+      note: 'Projected from 2026 CBA negotiations. Major growth expected as WNBA viewership surges.',
+    },
+  },
+];
+
+export const getWNBAHistoricalFinancials = (year: number): HistoricalFinancials => {
+  const entry = WNBA_ERA_TABLE.find(e => year >= e.from && year <= e.to);
+  return entry ? entry.f : WNBA_ERA_TABLE[WNBA_ERA_TABLE.length - 1].f;
+};
+
+/** Returns the historically-correct WNBA active roster limits for a given year. */
+export const getWNBARosterRules = (year: number): { minRosterSize: number; maxRosterSize: number } => {
+  const h = getWNBAHistoricalFinancials(year);
+  return {
+    minRosterSize: h.minRosterSize ?? (year >= 2020 ? 11 : 10),
+    maxRosterSize: h.maxRosterSize ?? 12,
+  };
+};
+
+/**
+ * Returns the maximum individual player salary for a given year and gender.
+ * Used by the LeagueConfiguration banner and settings validation.
+ */
+export const getEraMaxPlayerSalary = (year: number, isWomens: boolean, salaryCap: number): number => {
+  if (isWomens) {
+    const h = getWNBAHistoricalFinancials(year);
+    const pct = h.maxPlayerSalaryPct ?? 30;
+    return Math.round((salaryCap * pct) / 5_000) * 5_000;
+  }
+  return computeMensMarketSalary(99, year);
 };

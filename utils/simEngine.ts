@@ -1,7 +1,44 @@
 import { Team, GameResult, Player, GamePlayerLine, ClutchGameLine, CoachScheme, PlayByPlayEvent, InjuryType, LeagueState, QuarterDetail, LeagueSettings } from '../types';
 
+// ─── Tendency adapters ────────────────────────────────────────────────────────
+// Map the flat PlayerTendencies to legacy field names used throughout simEngine
+function getOT(p: Player) {
+  const t = p.tendencies;
+  const offScreen = t ? (t.offScreenThree + t.offScreenMidRange) / 2 : 50;
+  return {
+    pullUpThree:      t?.pullUpThree   ?? 50,
+    postUp:           t?.postUp        ?? 50,
+    driveToBasket:    t?.drive         ?? 50,
+    midRangeJumper:   t?.midRange      ?? 50,
+    kickOutPasser:    t?.pass          ?? 50,
+    isoHeavy:         t?.isolation     ?? 50,
+    transitionHunter: t?.drive         ?? 50,
+    spotUp:           t?.spotUp        ?? 50,
+    cutter:           t?.cutToBasket   ?? 50,
+    offScreen,
+    attackCloseOuts:  t?.drive         ?? 50,
+    drawFoul:         t?.foulDrawing   ?? 50,
+    dribbleHandOff:   t?.pass          ?? 50,
+    pullUpOffPnr:     t?.pullUpJumper  ?? 50,
+    clutchShotTaker:  t?.isolation     ?? 50,
+  };
+}
+
+function getDT(p: Player) {
+  const t = p.tendencies;
+  return {
+    gambles:               t?.onBallSteal  ?? 50,
+    helpDefender:          t?.playPassLane ?? 50,
+    physicality:           t?.block        ?? 50,
+    faceUpGuard:           t?.shotContest  ?? 50,
+    onBallPest:            t?.onBallSteal  ?? 50,
+    denyThePass:           t?.playPassLane ?? 50,
+    shotContestDiscipline: t?.shotContest  ?? 50,
+  };
+}
+
 // ─── Constants ───────────────────────────────────────────────────────────────
-const BASE_PPP       = 1.06;
+const BASE_PPP       = 1.10;
 const SCORE_VARIANCE = 0.12;  // ±12 pts of PPP randomness — wider band drives realistic upsets
 const HOME_COURT_ADV = 0.040; // +4.0% for home team (NBA home teams win ~60% empirically)
 const VISIT_TOV_PEN  = 0.008;  // road team slight TOV penalty
@@ -26,6 +63,36 @@ const SCHEME_DEFAULT_PACE: Record<CoachScheme, number> = {
   'Triangle':       74,  // 94–98 poss
   'Small Ball':     84,  // 103–107 poss
   'Showtime':       93,  // 114–120 poss
+};
+
+// ─── Playbook Shot-Distribution Multipliers ──────────────────────────────────
+/**
+ * Per-scheme multipliers baked into the per-player box-score path.
+ *
+ * threePaShareMult — scales the fraction of FGA that are three-pointers.
+ * insideShareMult  — scales the fraction of FGA that are at-rim attempts.
+ * fgPct3Delta      — additive shift to 3PT%; positive = system creates better 3PT looks.
+ * fgPctInsDelta    — additive shift to inside FG%; post-systems get cleaner entry reads.
+ * fgPctMidDelta    — additive shift to mid-range FG%; ball-movement systems create elbow looks.
+ *
+ * Design: a Pace-and-Space team fires ~28% more threes and ~32% fewer post/inside
+ * attempts vs. Balanced, while Grit-and-Grind does the opposite.  The FG% deltas
+ * are small but visible over an 82-game season (a 3PT specialist in P&S will shoot
+ * ~1.8 pp higher from three than the same player in Balanced).
+ */
+const PLAYBOOK_SHOT_MODS: Record<CoachScheme, {
+  threePaShareMult: number;
+  insideShareMult:  number;
+  fgPct3Delta:      number;
+  fgPctInsDelta:    number;
+  fgPctMidDelta:    number;
+}> = {
+  'Balanced':       { threePaShareMult: 1.00, insideShareMult: 1.00, fgPct3Delta:  0.000, fgPctInsDelta:  0.000, fgPctMidDelta:  0.000 },
+  'Pace and Space': { threePaShareMult: 1.28, insideShareMult: 0.68, fgPct3Delta: +0.018, fgPctInsDelta: -0.018, fgPctMidDelta: -0.010 },
+  'Grit and Grind': { threePaShareMult: 0.62, insideShareMult: 1.38, fgPct3Delta: -0.018, fgPctInsDelta: +0.020, fgPctMidDelta: +0.010 },
+  'Triangle':       { threePaShareMult: 0.88, insideShareMult: 1.02, fgPct3Delta: -0.005, fgPctInsDelta: +0.005, fgPctMidDelta: +0.015 },
+  'Small Ball':     { threePaShareMult: 1.18, insideShareMult: 0.85, fgPct3Delta: +0.010, fgPctInsDelta: +0.010, fgPctMidDelta: +0.005 },
+  'Showtime':       { threePaShareMult: 1.12, insideShareMult: 1.18, fgPct3Delta: +0.005, fgPctInsDelta: +0.022, fgPctMidDelta:  0.000 },
 };
 
 // ─── Attribute → Expected 3P% ─────────────────────────────────────────────────
@@ -73,23 +140,23 @@ export function getThreePointPercentage(attr: number): number {
 
   let base: number;
   if (a <= 59) {
-    // Non-shooters / big men: 25% at 0 → 32% at 59
-    base = 0.25 + (a / 59) * 0.07;
+    // Non-shooters / big men: 28% at 0 → 35% at 59
+    base = 0.28 + (a / 59) * 0.07;
   } else if (a <= 74) {
-    // Below-avg to league-avg: 32% at 60 → 34.5% at 74
-    base = 0.32 + ((a - 60) / 14) * 0.025;
+    // Below-avg to league-avg: 35% at 60 → 37.5% at 74
+    base = 0.35 + ((a - 60) / 14) * 0.025;
   } else if (a <= 89) {
-    // Solid starter to plus shooter: 34.5% at 75 → 40% at 89
-    base = 0.345 + ((a - 75) / 14) * 0.055;
+    // Solid starter to plus shooter: 37.5% at 75 → 43% at 89
+    base = 0.375 + ((a - 75) / 14) * 0.055;
   } else if (a <= 94) {
-    // Elite: 40% at 90 → 43% at 94
-    base = 0.40 + ((a - 90) / 4) * 0.030;
+    // Elite: 43% at 90 → 46% at 94
+    base = 0.43 + ((a - 90) / 4) * 0.030;
   } else {
-    // God-tier: 43% at 95 → 46% at 100 (max for any player on volume)
-    base = 0.43 + ((a - 95) / 5) * 0.03;
+    // God-tier: 46% at 95 → 49% at 100 (max for any player on volume)
+    base = 0.46 + ((a - 95) / 5) * 0.03;
   }
 
-  return Math.max(0.20, Math.min(0.48, base));
+  return Math.max(0.23, Math.min(0.51, base));
 }
 
 // ─── Rebound Chance Functions ────────────────────────────────────────────────
@@ -261,24 +328,24 @@ export function getTurnoverPercentage(
   // ── Primary driver: ball handling (inverse — better BH = lower TO%) ───────
   let base: number;
   if (bh <= 60) {
-    // Sloppy: 27 % at 0 → 21 % at 60
-    base = 0.27 - (bh / 60) * 0.06;
+    // Sloppy: 17 % at 0 → 13 % at 60
+    base = 0.17 - (bh / 60) * 0.04;
   } else if (bh <= 80) {
-    // Average: 21 % at 60 → 15 % at 80
-    base = 0.21 - ((bh - 60) / 20) * 0.06;
+    // Average: 13 % at 60 → 9.5 % at 80
+    base = 0.13 - ((bh - 60) / 20) * 0.035;
   } else if (bh <= 94) {
-    // Plus → elite: 15 % at 80 → 10 % at 94
-    base = 0.15 - ((bh - 80) / 14) * 0.05;
+    // Plus → elite: 9.5 % at 80 → 7 % at 94
+    base = 0.095 - ((bh - 80) / 14) * 0.025;
   } else {
-    // God-tier: 10 % at 95 → 8.5 % at 100
-    base = 0.10 - ((bh - 95) / 5) * 0.015;
+    // God-tier: 7 % at 95 → 6 % at 100
+    base = 0.07 - ((bh - 95) / 5) * 0.01;
   }
 
   // ── Passing: vision vs. ball-security balance ─────────────────────────────
   const passDelta = passing - bh;
   let passMod: number;
   if (passDelta > 10) {
-    passMod = Math.min(0.025, (passDelta - 10) / 100 * 0.04);
+    passMod = Math.min(0.015, (passDelta - 10) / 100 * 0.04);
   } else if (passDelta >= -10) {
     passMod = -0.005;
   } else {
@@ -292,13 +359,13 @@ export function getTurnoverPercentage(
   base += -(offIQ - 70) / 100 * 0.040;
 
   // ── Positional pressure ────────────────────────────────────────────────────
-  if (position === 'PG') base += 0.025;  // primary ball-handler; most pressure
-  else if (position === 'SG') base += 0.010;
-  else if (position === 'C' || position === 'PF') base -= 0.015;
+  if (position === 'PG') base += 0.015;  // primary ball-handler; most pressure
+  else if (position === 'SG') base += 0.005;
+  else if (position === 'C' || position === 'PF') base -= 0.010;
 
   // ── Fatigue: low-stamina players lose ball security late in games ─────────
   if (stamina !== undefined) {
-    base += Math.max(0, (60 - stamina) / 100 * 0.030);
+    base += Math.max(0, (60 - stamina) / 100 * 0.015);
   }
 
   // ── Personality trait modifiers ───────────────────────────────────────────
@@ -311,7 +378,7 @@ export function getTurnoverPercentage(
     if (personalityTraits.includes('Friendly/Team First')) base *= 0.90; // careful ball-mover
   }
 
-  return Math.max(0.08, Math.min(0.30, base));
+  return Math.max(0.06, Math.min(0.22, base));
 }
 
 /**
@@ -377,8 +444,8 @@ export function getAssistEfficiency(
  *    95   │  3.75 % │  4.25 % │ 3.45 %
  *   100   │  4.50 % │  5.00 % │ 4.20 %
  *
- * Tuning: STL_OPP_SCALE in simulatePlayerGameLine (default 65) controls the
- * number of steal opportunities per 48 min; raise/lower it to shift team totals.
+ * Tuning: STL_OPP_SCALE in runOffenseEngine controls the steal opportunity rate;
+ * raise/lower it to shift team totals.
  */
 export function getStealChance(attr: number, position?: string, defIQ?: number): number {
   const a = Math.max(0, Math.min(100, attr));
@@ -433,8 +500,8 @@ export function getStealChance(attr: number, position?: string, defIQ?: number):
  *    95   │  8.25 % │  9.75 % │  7.25 %
  *   100   │  9.00 % │ 10.00 % │  8.00 %
  *
- * Tuning: BLK_OPP_SCALE in simulatePlayerGameLine (default 50) controls the
- * number of block opportunities per 48 min; raise/lower to shift team totals.
+ * Tuning: BLK_OPP_SCALE in runOffenseEngine controls the block opportunity rate;
+ * raise/lower to shift team totals.
  */
 export function getBlockChance(attr: number, position?: string, defIQ?: number): number {
   const a = Math.max(0, Math.min(100, attr));
@@ -907,76 +974,39 @@ export function getRimProtectionMod(
 
 // ─── Free Throw Percentage ────────────────────────────────────────────────────
 /**
- * Maps a player's freeThrow attribute (0–100) to a base FT%, calibrated to
- * 2025-26 NBA data (league avg ≈ 78.3 %; team range 75–83.2 %).
+ * Maps a player's freeThrow attribute (0–100) to a base FT%.
  *
- * Piecewise curve (base before position/situational adjustments):
- *   0–59  → 60–72 %  (hack-a viable; bigs who can't shoot, scared rookies)
- *   60–69 → 72–76 %  (below-avg; shaky but playable — not worth intentional fouling)
- *   70–79 → 76–80 %  (league-avg range — most rotation players live here)
- *   80–89 → 80–86 %  (plus; clutch-reliable, teams can draw fouls without fear)
- *   90–94 → 86–90 %  (elite: Kawhi / SGA tier — high volume AND high %)
- *   95–100→ 90–94 %  (god-tier: Steph Curry .931 — nearly automatic)
+ * Piecewise calibration — realistic NBA tiers:
+ *   attr   0–50 → 45–66 %  (hack-a range; Shaq-tier to below-avg bigs)
+ *   attr  51–70 → 66–77 %  (below-avg → league average)
+ *   attr  71–85 → 77–85 %  (above-avg; reliable in clutch)
+ *   attr  86–100→ 85–91 %  (elite: SGA / prime KD territory)
  *
- * Diminishing returns design: each segment's slope narrows at the top so the
- * model never implies "100 attr = 100%" — even Steph misses ~7 % of FTs.
+ * Per-game noise (±3 %, ±5 % for Streaky) applied at call site.
+ * Season average for an attr-95 guard: ~89–91 %, rarely above 92 %.
  *
- * Positional adjustment:
- *   PG / SG / SF → +1.0 %  (guards drill the mechanics; better form from reps)
- *   C  / PF      → −1.5 %  (bigs with good attr still face slight mechanical cap)
- *
- * Hard clamp: [0.55, 0.96]
- *   Floor: even the worst FT shooter makes more than half.
- *   Ceiling: no one is historically above 96 % on real volume.
- *
- * Calibration target: unweighted league sim avg ≈ 78 %.
- *   Top individual players at 85–90 attr land in the 82–87 % band.
- *
- * Output table (base, guard position):
- *   attr  50 → 67.0 %
- *   attr  65 → 74.5 %
- *   attr  75 → 78.0 %
- *   attr  88 → 84.4 %
- *   attr  95 → 89.0 %
- *   attr 100 → 92.0 %
- *
- * Tunables:
- *   • Shift breakpoint values to raise/lower league-wide avg.
- *   • Widen positionalTweak gap for more position-driven spread.
- *   • Pair with getFreeThrowSituationalMod() for in-game pressure effects.
+ * Hard clamp: [0.45, 0.94]
  */
 export function getFreeThrowPercentage(attr: number, position?: string): number {
   const a = Math.max(0, Math.min(100, attr));
 
   let base: number;
-  if (a <= 59) {
-    // Hack-a tier: 60 % at 0 → 72 % at 59  (slow climb — these guys just can't shoot)
-    base = 0.60 + (a / 59) * 0.12;
-  } else if (a <= 69) {
-    // Below-avg: 72 % at 60 → 76 % at 69
-    base = 0.72 + ((a - 60) / 9) * 0.04;
-  } else if (a <= 79) {
-    // League-avg: 76 % at 70 → 80 % at 79
-    base = 0.76 + ((a - 70) / 9) * 0.04;
-  } else if (a <= 89) {
-    // Plus shooter: 80 % at 80 → 86 % at 89  (slope steepens — these reps add up)
-    base = 0.80 + ((a - 80) / 9) * 0.06;
-  } else if (a <= 94) {
-    // Elite: 86 % at 90 → 90 % at 94  (diminishing returns kick in hard)
-    base = 0.86 + ((a - 90) / 4) * 0.04;
+  if (a <= 50) {
+    base = 0.45 + (a / 50) * 0.21;           // 45 % → 66 % at 50
+  } else if (a <= 70) {
+    base = 0.66 + ((a - 50) / 20) * 0.11;    // 66 % → 77 % at 70
+  } else if (a <= 85) {
+    base = 0.77 + ((a - 70) / 15) * 0.08;    // 77 % → 85 % at 85
   } else {
-    // God-tier: 90 % at 95 → 94 % at 100  (Curry / prime Nash territory)
-    base = 0.90 + ((a - 95) / 5) * 0.04;
+    base = 0.85 + ((a - 85) / 15) * 0.06;    // 85 % → 91 % at 100
   }
 
-  // Positional: guards repeat the motion thousands more times; bigs have
-  // mechanical ceilings even when the attribute is strong.
   const positionalTweak =
-    position === 'PG' || position === 'SG' || position === 'SF' ? +0.010 :
-    position === 'C'  || position === 'PF'                      ? -0.015 :
+    position === 'PG' || position === 'SG' || position === 'SF' ? +0.008 :
+    position === 'C'  || position === 'PF'                      ? -0.012 :
     0;
 
-  return Math.max(0.55, Math.min(0.96, base + positionalTweak));
+  return Math.max(0.45, Math.min(0.94, base + positionalTweak));
 }
 
 // ─── Free Throw Situational Modifier ─────────────────────────────────────────
@@ -1312,7 +1342,7 @@ const simulateQuarterClock = (
 
   for (let i = 0; i < possessions; i++) {
     const handler = rotation[Math.floor(Math.random() * rotation.length)];
-    const ot = handler.tendencies?.offensiveTendencies;
+    const ot = getOT(handler);
 
     // Dominant tendency
     const doms: [string, number][] = [
@@ -1384,24 +1414,24 @@ export const normalizeLeagueOVRs = (state: LeagueState): LeagueState => {
     t.roster.slice().sort((a, b) => b.rating - a.rating).slice(0, 10)
       .reduce((s, p) => s + p.rating, 0) / Math.min(10, t.roster.length || 1);
 
-  // Hard clamp: no team below 76 (top-10 avg) or above 92
+  // Hard clamp: no team below 72 (top-10 avg) or above 86.
+  // Lowered from 76/92 to match the tighter OVR distribution where 90+ is rare.
   teams.forEach(t => {
     let ovr = teamOVR(t);
-    if (ovr < 76) {
-      // Boost weakest players +3 until we reach 76
+    if (ovr < 72) {
       const sorted = t.roster.slice().sort((a, b) => a.rating - b.rating);
       for (const p of sorted) {
-        if (teamOVR(t) >= 76) break;
+        if (teamOVR(t) >= 72) break;
         const real = t.roster.find(r => r.id === p.id)!;
-        real.rating = Math.min(92, real.rating + 3);
+        real.rating = Math.min(86, real.rating + 3);
         real.attributes.shooting = Math.min(99, real.attributes.shooting + 2);
       }
-    } else if (ovr > 92) {
+    } else if (ovr > 86) {
       const sorted = t.roster.slice().sort((a, b) => b.rating - a.rating);
       for (const p of sorted) {
-        if (teamOVR(t) <= 92) break;
+        if (teamOVR(t) <= 86) break;
         const real = t.roster.find(r => r.id === p.id)!;
-        real.rating = Math.max(76, real.rating - 3);
+        real.rating = Math.max(72, real.rating - 3);
       }
     }
   });
@@ -1518,7 +1548,7 @@ interface DefActionContext {
  *   × (1 − defIQ × IQ_FOUL_DAMPEN)              ← smart players avoid bad fouls
  */
 function calculateDefFoulChance(
-  dt: NonNullable<Player['tendencies']>['defensiveTendencies'] | undefined,
+  dt: ReturnType<typeof getDT> | undefined,
   attrs: Player['attributes'],
   actionType: 'steal' | 'block',
   ctx: DefActionContext,
@@ -1566,10 +1596,10 @@ function attemptDefensiveSteal(
   offHandler: Player,
   ctx: DefActionContext,
 ): DefStealResult {
-  const dt      = defender.tendencies?.defensiveTendencies;
-  const gambles = dt?.gambles      ?? 50;
-  const helpDef = dt?.helpDefender ?? 50;
-  const pest    = dt?.onBallPest   ?? 50;
+  const dt      = getDT(defender);
+  const gambles = dt.gambles;
+  const helpDef = dt.helpDefender;
+  const pest    = dt.onBallPest;
   const defLn   = defender.name.split(' ').at(-1) ?? defender.name;
 
   // Attribute-driven base steal chance — defIQ amplifies anticipation/positioning
@@ -1645,10 +1675,10 @@ function attemptDefensiveBlock(
   offAction: OffAction,
   ctx: DefActionContext,
 ): DefBlockResult {
-  const dt          = defender.tendencies?.defensiveTendencies;
-  const discipline  = dt?.shotContestDiscipline ?? 50;
-  const helpDef     = dt?.helpDefender          ?? 50;
-  const physicality = dt?.physicality           ?? 50;
+  const dt          = getDT(defender);
+  const discipline  = dt.shotContestDiscipline;
+  const helpDef     = dt.helpDefender;
+  const physicality = dt.physicality;
   const defLn       = defender.name.split(' ').at(-1) ?? defender.name;
 
   // Base block % from attribute curve — defIQ improves help-side timing and footwork
@@ -1708,11 +1738,11 @@ const simulatePossession = (
   /** External situational boost (+comeback, -complacency, +clutch) applied to final shot prob */
   situationalBoost = 0,
 ): PossessionResult => {
-  const ot = offHandler.tendencies?.offensiveTendencies;
+  const ot = getOT(offHandler);
   const ln = lastName(offHandler);
   const defIdx   = Math.floor(Math.random() * Math.min(8, defense.roster.length));
   const defender = defense.roster[defIdx];
-  const dt       = defender?.tendencies?.defensiveTendencies;
+  const dt       = defender ? getDT(defender) : undefined;
   const defLn    = defender ? lastName(defender) : 'Defender';
   const oP       = pronouns(offHandler);   // offender pronouns
   const dP       = pronouns(defender);     // defender pronouns
@@ -2035,7 +2065,7 @@ const simulatePossession = (
 
   // Step 4.5: Draw Foul -- contact-seeker gets to the line
   {
-    const drawFoulTend = ot?.drawFoul ?? 50;
+    const drawFoulTend = ot.drawFoul;
     if ((shotType === 'DRIVE_LAYUP' || shotType === 'POST_FADE') && drawFoulTend >= 55 && !isTransition) {
       // Offensive IQ amplifies foul-drawing: smart players know how to absorb contact,
       // time their body lean, and sell the call without flopping (sustainable technique).
@@ -2416,7 +2446,7 @@ const simulatePossession = (
     }
 
     // Shot Contest Discipline -- low = bites pump fakes; high = disciplined contests
-    const contestDisc = dt.shotContestDiscipline ?? 50;
+    const contestDisc = dt?.shotContestDiscipline ?? 50;
     if (contestDisc < 35 && (shotType === 'MID_RANGE' || shotType === 'PULL_UP_3') && offAction !== 'TRANSITION') {
       if (Math.random() < (40 - contestDisc) / 100 * 0.22) {
         return {
@@ -2539,11 +2569,11 @@ const calculateFoulChance = (
   actionType: DefensiveActionType,
   context: FoulContext,
 ): number => {
-  const dt  = defender.tendencies?.defensiveTendencies;
-  const gambles           = dt?.gambles              ?? 50;
-  const physicality       = dt?.physicality          ?? 50;
-  const contestDiscipline = dt?.shotContestDiscipline ?? 50;
-  const helpDefender      = dt?.helpDefender         ?? 50;
+  const dt  = getDT(defender);
+  const gambles           = dt.gambles;
+  const physicality       = dt.physicality;
+  const contestDiscipline = dt.shotContestDiscipline;
+  const helpDefender      = dt.helpDefender;
   const defensiveIQ       = defender.attributes.defensiveIQ ?? 65;
 
   // ── Base risk: every aggressive defensive action carries some foul risk ──────
@@ -2595,41 +2625,94 @@ interface TendencyModifiers {
   foulRisk:     number;
 }
 const computeTendencyModifiers = (p: Player): TendencyModifiers => {
-  const ot = p.tendencies?.offensiveTendencies;
-  const dt = p.tendencies?.defensiveTendencies;
+  const ot = getOT(p);
+  const dt = getDT(p);
   const diq = p.attributes.defensiveIQ ?? 65;
   return {
-    threepaBoost: (( ot?.pullUpThree    ?? 50) - 50) / 100 * 0.40,
-    insideBoost:  (( ot?.driveToBasket  ?? 50) - 50) / 100 * 0.30
-                + ((ot?.cutter         ?? 50) - 50) / 100 * 0.12,
-    usageBoost:   (( ot?.isoHeavy       ?? 50) - 50) / 100 * 0.45   // primary scorer lever
-                + ((ot?.attackCloseOuts ?? 50) - 50) / 100 * 0.10   // off-ball creation
-                + ((ot?.pullUpOffPnr    ?? 50) - 50) / 100 * 0.08   // PnR volume
-                - ((ot?.kickOutPasser   ?? 50) - 50) / 100 * 0.08   // pass-first penalty
-                + ((ot?.drawFoul        ?? 50) - 50) / 100 * 0.08,  // FTA-getter = more touches
-    astBoost:     (( ot?.kickOutPasser  ?? 50) - 50) / 100 * 0.35
-                + ((ot?.spotUp          ?? 50) - 50) / 100 * 0.08,
+    threepaBoost: (ot.pullUpThree    - 50) / 100 * 0.40,
+    insideBoost:  (ot.driveToBasket  - 50) / 100 * 0.30
+                + (ot.cutter         - 50) / 100 * 0.12,
+    usageBoost:   (ot.isoHeavy       - 50) / 100 * 0.45   // primary scorer lever
+                + (ot.attackCloseOuts - 50) / 100 * 0.10  // off-ball creation
+                + (ot.pullUpOffPnr    - 50) / 100 * 0.08  // PnR volume
+                - (ot.kickOutPasser   - 50) / 100 * 0.08  // pass-first penalty
+                + (ot.drawFoul        - 50) / 100 * 0.08, // FTA-getter = more touches
+    astBoost:     (ot.kickOutPasser  - 50) / 100 * 0.35
+                + (ot.spotUp         - 50) / 100 * 0.08,
 
     // stlBoost: gambles (reach frequency) + denyThePass (passing-lane reads)
     //           + helpDefender (rotation intercepts from weak side)
-    stlBoost:     (( dt?.gambles        ?? 50) - 50) / 100 * 0.30
-                + ((dt?.denyThePass     ?? 50) - 50) / 100 * 0.10
-                + ((dt?.helpDefender    ?? 50) - 50) / 100 * 0.08,
+    stlBoost:     (dt.gambles        - 50) / 100 * 0.30
+                + (dt.denyThePass    - 50) / 100 * 0.10
+                + (dt.helpDefender   - 50) / 100 * 0.08,
 
     // blkBoost: help rotations generate most blocks; physicality adds contested
     //           rejection power; disciplined contests rarely get pump-faked.
-    blkBoost:     (( dt?.helpDefender   ?? 50) - 50) / 100 * 0.25
-                + ((dt?.physicality     ?? 50) - 50) / 100 * 0.10
-                + ((dt?.shotContestDiscipline ?? 50) - 50) / 100 * 0.05,
+    blkBoost:     (dt.helpDefender         - 50) / 100 * 0.25
+                + (dt.physicality          - 50) / 100 * 0.10
+                + (dt.shotContestDiscipline - 50) / 100 * 0.05,
 
     // foulRisk: tendency-driven raw risk.  Now also reduced by Defensive IQ
     //   so smart defenders who are physical still commit fewer dumb fouls.
-    foulRisk:     (( dt?.physicality             ?? 50) - 50) / 100 * 0.25
-                + ((dt?.gambles                  ?? 50) - 50) / 100 * 0.15
-                + ((dt?.onBallPest               ?? 50) - 50) / 100 * 0.10
-                - ((dt?.shotContestDiscipline    ?? 50) - 50) / 100 * 0.12
+    foulRisk:     (dt.physicality             - 50) / 100 * 0.25
+                + (dt.gambles                 - 50) / 100 * 0.15
+                + (dt.onBallPest              - 50) / 100 * 0.10
+                - (dt.shotContestDiscipline   - 50) / 100 * 0.12
                 - ((diq - 50) / 100) * 0.18,
   };
+};
+
+// ─── Playbook–Tendency Mismatch Penalty ──────────────────────────────────────
+/**
+ * Returns an effective morale penalty (0 to −15) when a player's dominant
+ * offensive tendencies conflict with the team's active scheme.
+ *
+ * The penalty is applied to the player's morale for the duration of the game,
+ * which suppresses FG% (via moraleFgMod), raises TOV rate (via moraleTovMod),
+ * and dims defensive effort (via moraleEffMod) — all visible in the box score.
+ *
+ * Penalty scaling: each point a tendency exceeds the mismatch threshold
+ * contributes (excess / 5) × weight points of penalty, capped at −15.
+ *
+ * Key mismatches:
+ *   postUp > 55  in Pace and Space  → up to −12   (ball-stopper stalls motion)
+ *   pullUpThree > 60  in Grit&Grind → up to −10   (shooter can't find clean looks)
+ *   isoHeavy > 55  in Triangle      → up to −12   (iso ball kills ball movement)
+ *   postUp > 60  in Small Ball      → up to −10   (slow post clogs fast lanes)
+ *   transitionHunter > 65 in G&G    → up to −8    (not enough fast-break chances)
+ */
+const calcPlaybookMismatch = (player: Player, scheme: CoachScheme): number => {
+  const ot = getOT(player);
+
+  // Returns 0–10 penalty proportional to how far a tendency exceeds its threshold.
+  const excess = (val: number, threshold: number, weight: number): number =>
+    val <= threshold ? 0 : Math.min(10, ((val - threshold) / 5) * weight);
+
+  let penalty = 0;
+  switch (scheme) {
+    case 'Pace and Space':
+      penalty += excess(ot.postUp,   55, 1.2); // post-heavy player stalls spacing
+      penalty += excess(ot.isoHeavy, 60, 0.8); // iso ball-stopper disrupts motion
+      break;
+    case 'Grit and Grind':
+      penalty += excess(ot.pullUpThree,     60, 1.0); // shooter can't find 3PT looks
+      penalty += excess(ot.transitionHunter, 65, 0.8); // transition hunter vs. half-court grind
+      penalty += excess(ot.spotUp,          65, 0.6); // spot-up guy loses corner touches
+      break;
+    case 'Triangle':
+      penalty += excess(ot.isoHeavy, 55, 1.2); // iso breaks Triangle ball movement
+      break;
+    case 'Small Ball':
+      penalty += excess(ot.postUp, 60, 1.0); // post player clogs small-ball lanes
+      break;
+    case 'Showtime':
+      penalty += excess(ot.postUp, 60, 0.8); // post-up stalls the fast break
+      break;
+    default:
+      break; // Balanced: no tendency mismatches
+  }
+
+  return -Math.min(15, Math.round(penalty));
 };
 
 // ─── Cinematic PBP Narrator ─────────────────────────────────────────────────
@@ -2882,6 +2965,134 @@ const generateCinematicLines = (
   return { setup, attack, result };
 };
 
+// ─── Intentional Late-Game Fouling ───────────────────────────────────────────
+/** Generates PBP events for intentional-foul sequences when a trailing team
+ *  is down 1–8 in the final 60 seconds of Q4 or OT. */
+const generateIntentionalFoulEvents = (
+  trailingTeam: Team,
+  leadingTeam: Team,
+  deficit: number,
+  quarter: number,
+  isWNBA: boolean,
+): PlayByPlayEvent[] => {
+  const events: PlayByPlayEvent[] = [];
+
+  // Number of foul sequences scales with deficit and urgency
+  // Down ≤3: can squeeze in 3 fouls in 60 sec; down 7-8: one desperation foul
+  const nSeqs = deficit <= 3 ? 3 : deficit <= 6 ? 2 : 1;
+
+  // All clock times confined to the final 60 seconds (0:59 → 0:00)
+  const seqTimes =
+    nSeqs === 3 ? ['0:52', '0:35', '0:14'] :
+    nSeqs === 2 ? ['0:48', '0:22'] :
+                  ['0:40'];
+
+  // Find the worst FT shooter on leading team — weight C/PF as preferred hack-a targets
+  const leadRoster = leadingTeam.roster.filter(p => !p.injured);
+  if (!leadRoster.length) return events;
+  const foulTarget = leadRoster.reduce((worst, p) => {
+    const score  = (p.attributes?.freeThrow ?? 50) - (['C', 'PF'].includes(p.position ?? '') ? 5 : 0);
+    const wScore = (worst.attributes?.freeThrow ?? 50) - (['C', 'PF'].includes(worst.position ?? '') ? 5 : 0);
+    return score < wScore ? p : worst;
+  }, leadRoster[0]);
+
+  // A big on the trailing team commits the foul
+  const trailRoster = trailingTeam.roster.filter(p => !p.injured);
+  if (!trailRoster.length) return events;
+  const fouler = trailRoster.find(p => ['PF', 'C'].includes(p.position ?? '')) ?? trailRoster[0];
+
+  const targetName = lastName(foulTarget);
+  const foulerName = lastName(fouler);
+  const trailCoach = trailingTeam.staff.headCoach?.name?.split(' ').at(-1) ?? 'Coach';
+  const ftPct = getFreeThrowPercentage(foulTarget.attributes?.freeThrow ?? 50, foulTarget.position);
+  const pr = pronouns(foulTarget);
+  const isOT = quarter > 4;
+
+  for (let i = 0; i < seqTimes.length; i++) {
+    const time = seqTimes[i];
+    // Parse seconds from "0:SS" for flavor text
+    const secsLeft = parseInt(time.split(':')[1], 10);
+
+    // Coach signals the intentional foul — reference the live clock
+    const callLines = [
+      `${trailCoach} signals for the intentional foul — ${secsLeft} seconds left, no other choice!`,
+      `Hack-a strategy engaged with ${secsLeft} seconds on the clock. ${trailCoach} calling the play!`,
+      `${trailCoach} calls for the deliberate foul — ${trailingTeam.name} need every possession with ${secsLeft} to go.`,
+      `INTENTIONAL FOUL — ${trailCoach} screaming from the sideline with ${secsLeft} seconds remaining${isOT ? ' in OT' : ''}!`,
+    ];
+    events.push({ time, text: callLines[Math.floor(Math.random() * callLines.length)], type: 'info', quarter });
+
+    // Foul committed
+    const foulLines = [
+      `${foulerName} grabs ${targetName} deliberately — sending ${pr.him} to the line. Two shots.`,
+      `${targetName} is fouled hard on the perimeter — ${foulerName} with the intentional hack. Two free throws.`,
+      `${foulerName} wraps up ${targetName}. Deliberate foul called — ${targetName} at the stripe.`,
+      `Intentional foul by ${foulerName} on ${targetName}. ${pr.He} steps to the charity stripe.`,
+    ];
+    events.push({ time, text: foulLines[Math.floor(Math.random() * foulLines.length)], type: 'foul', quarter });
+
+    // Free throw 1
+    const ft1Make = Math.random() < ftPct;
+    const ft1Lines = ft1Make
+      ? [
+          `${targetName} knocks down FT #1 — ${leadingTeam.name} extending the lead with ${secsLeft} seconds left.`,
+          `${targetName} calm under pressure — buries the first free throw.`,
+          `Free throw GOOD. ${targetName} automatic from the charity stripe.`,
+          `${targetName} drills the first one. Hack-a strategy not working yet.`,
+        ]
+      : [
+          `${targetName} MISSES FT #1 with ${secsLeft} seconds left — hack-a strategy paying off!`,
+          `Off the back of the rim! ${targetName} clanks the first free throw. ${trailingTeam.name} alive!`,
+          `${targetName} can't convert — FT #1 rattles out! ${trailingTeam.name} needed that!`,
+          `No good! ${targetName} misses the first. The strategy is WORKING for ${trailingTeam.name}!`,
+        ];
+    events.push({ time, text: ft1Lines[Math.floor(Math.random() * ft1Lines.length)], type: ft1Make ? 'score' : 'miss', quarter });
+
+    // Free throw 2
+    const ft2Make = Math.random() < ftPct;
+    const ft2Lines = ft2Make
+      ? [
+          `${targetName} converts FT #2. ${leadingTeam.name} holding on with ${secsLeft} seconds to go.`,
+          `FT #2 is GOOD — ${pr.he} goes 2-for-2. ${trailingTeam.name} running out of time.`,
+          `${targetName} completes the two-shot trip. Hack-a backfired — tough night for ${trailingTeam.name}.`,
+          `Knocks down the second too. ${trailingTeam.name} needs a miracle with ${secsLeft} seconds left.`,
+        ]
+      : [
+          `${targetName} MISSES FT #2 with ${secsLeft} seconds left! ${trailingTeam.name} gets a live-ball rebound!`,
+          `FT #2 off the iron! Hack-a ${targetName} is WORKING tonight!`,
+          `Both free throws missed — ${trailingTeam.name} grabs the board and still has a chance!`,
+          `Can't hit from the line — ${trailingTeam.name} with the rebound and ${secsLeft} seconds to tie!`,
+        ];
+    events.push({ time, text: ft2Lines[Math.floor(Math.random() * ft2Lines.length)], type: ft2Make ? 'score' : 'miss', quarter });
+
+    // Live rebound if either FT missed
+    if (!ft1Make || !ft2Make) {
+      const rebLines = [
+        `${trailingTeam.name} secures the rebound — pushing the pace with ${secsLeft} seconds on the clock!`,
+        `Rebound ${trailingTeam.name}! Clock stopped — the comeback is alive!`,
+        `${trailingTeam.name} with the board — timeout called to set up the final play.`,
+        `${trailingTeam.name} grabs it! They need a score NOW to keep this game going.`,
+      ];
+      events.push({ time, text: rebLines[Math.floor(Math.random() * rebLines.length)], type: 'info', quarter });
+    }
+
+    // After the last sequence, add ball-inbound acknowledgment with dwindling clock
+    if (i === seqTimes.length - 1) {
+      const afterSecs = Math.max(2, secsLeft - 6);
+      const inboundTime = `0:${afterSecs.toString().padStart(2, '0')}`;
+      const inboundLines = [
+        `Ball inbounded — ${afterSecs} seconds left on the clock. ${leadingTeam.name} just needs to survive.`,
+        `Clock ticking down… ${afterSecs} seconds remaining. ${trailingTeam.name} needs a miracle finish.`,
+        `${afterSecs} seconds left${isOT ? ' in OT' : ''}. ${leadingTeam.name} holds a ${deficit}-point lead.`,
+        `Ball in play — ${afterSecs} seconds to go. Can ${trailingTeam.name} complete the comeback?`,
+      ];
+      events.push({ time: inboundTime, text: inboundLines[Math.floor(Math.random() * inboundLines.length)], type: 'info', quarter });
+    }
+  }
+
+  return events;
+};
+
 // ─── Quarter PBP Generator ────────────────────────────────────────────────────
 const generateQuarterPBP = (
   offTeam: Team,
@@ -2896,16 +3107,19 @@ const generateQuarterPBP = (
   isGarbageTime = false,
   /** How many consecutive possessions this team has scored (momentum counter) */
   momentumStreak = 0,
+  /** Minutes per quarter (default 12) — must match league settings */
+  quarterLength = 12,
 ): { events: PlayByPlayEvent[]; teamStreak: number } => {
   const events: PlayByPlayEvent[] = [];
   let teamStreak = momentumStreak; // consecutive scoring possessions
   let emergencyBoostPoss = 0;      // possessions remaining with emergency +10% boost
 
   // ── Running quarter clock ─────────────────────────────────────────────────
-  // Counts DOWN from 720 s (12:00) to 0 (0:00). Every possession consumes a
-  // slice of the 720-second quarter. Sub-events within a single possession each
+  // Counts DOWN from (quarterLength * 60) s to 0. Every possession consumes a
+  // slice of the quarter. Sub-events within a single possession each
   // tick the clock by 1–3 s so no two events share the same timestamp.
-  let clockSecs = 12 * 60;
+  const quarterSecs = quarterLength * 60;
+  let clockSecs = quarterSecs;
   const fmtClock = (s: number): string => {
     const clamped = Math.max(0, s);
     return `${Math.floor(clamped / 60)}:${String(clamped % 60).padStart(2, '0')}`;
@@ -2927,7 +3141,7 @@ const generateQuarterPBP = (
     // Each PBP possession represents ~3 real possessions; spread 720 s evenly
     // with ±4 s jitter so the clock feels organic. Sub-events tick down 1–3 s
     // from the possession's start time so every line has a unique timestamp.
-    const possClockUsed = Math.max(12, Math.round(720 / Math.max(1, sample)) + Math.floor(Math.random() * 9) - 4);
+    const possClockUsed = Math.max(12, Math.round(quarterSecs / Math.max(1, sample)) + Math.floor(Math.random() * 9) - 4);
     let subSec = clockSecs;                       // start of this possession's time window
     clockSecs  = Math.max(1, clockSecs - possClockUsed); // advance main clock FIRST
     const subFloor = clockSecs;                   // sub-events stay within this possession's window
@@ -3216,239 +3430,676 @@ const calculateTeamRatings = (team: Team) => {
   return { off, def };
 };
 
-// ─── Player Game Line (tendency-aware) ───────────────────────────────────────
-const simulatePlayerGameLine = (
-  player: Player,
-  teamPts: number,
-  teamFga: number,
-  teamReb: number,
-  teamAst: number,
-  minutes: number,
-  usageShare: number,
-  varRoll = 0,                 // game-level variance from tip-off roll (±15–25)
-  ftBonus = 0,                 // home court FT advantage (+0.03)
-  opponentPerimDefMod  = 0,   // team-level 3PT defensive suppression (get3PTContestMod)
-  opponentInteriorDefMod = 0,  // team-level at-rim defensive suppression (getRimProtectionMod)
-  opponentMidDefMod = 0,       // team-level mid-range suppression (getMidRangeContestMod)
-  opponentPostDefMod = 0,      // team-level post suppression (getPostDefenseMod)
-  morale = 75,                 // player morale (0-100); affects FG%, TOV, STL, BLK
-  teammateSpacing = 75,        // avg shooting3pt of teammates; high = more kick-out opportunities
-  teammateShootingEff = 0.48,  // implied team FG% for this game; hot teams get more AST
-): GamePlayerLine => {
-  // Morale modifiers: centered at 75 so an average player is neutral.
-  // Critical (<50): FG -3%, TOV +25%, effort -15% | High (>85): FG +2%, effort +10%
-  const moraleNorm = (morale - 75) / 75; // [-1, +0.33] range
-  const moraleFgMod  = moraleNorm *  0.025;  // ±2.5% FG at extremes
-  const moraleTovMod = moraleNorm * -0.15;   // low morale → more turnovers (inverted: -15% rate boost)
-  const moraleEffMod = moraleNorm *  0.10;   // ±10% effort (steals/blocks)
-  const fgPctBoost = varRoll / 100 * 0.4; // variance → small FG% delta
-  const tm     = computeTendencyModifiers(player);
-  const minFac = minutes / 48;
+// ─── Possession-Based Box Score Engine ───────────────────────────────────────
+//
+// Design contract:
+//   Attributes  → per-event success rate  (FG%, finish%, block%, steal%, FT%)
+//   Tendencies  → event frequency          (which possession type is selected)
+//   Stats emerge purely from resolved events — no post-hoc scaling or hard caps.
+//
+// runOffenseEngine() simulates every team possession individually.
+// Cross-team defensive stats (blk, stl, dreb) are recorded directly on the
+// defending team's states, so both engines share state before finalizing lines.
 
-  // Fatigue penalty: players logging 32+ minutes lose shot-making quality.
-  // Each minute over 32 costs ~0.35% FG% across all zones (rest + conditioning).
-  const fatigueMod = minutes > 32 ? -((minutes - 32) * 0.0035) : 0;
+type PossessionType =
+  | 'TRANSITION'   // fast break; athleticism + finishing vs. back-pedal defense
+  | 'ISO'          // one-on-one isolation; ballHandling + scoring vs. perimDef
+  | 'POST_UP'      // low-post entry; postScoring + strength vs. interiorDef
+  | 'PNR_BH'       // pick-and-roll ball handler; pull-up vs. perimeter D
+  | 'PNR_ROLL'     // pick-and-roll roll man; layup/dunk vs. interiorDef + blocks
+  | 'SPOT_UP'      // catch-and-shoot three; 3PT% vs. contest speed
+  | 'OFF_SCREEN'   // curl off screen; 3PT/mid vs. recovery and contest
+  | 'CUT'          // backdoor/basket cut; layup vs. interior awareness
+  | 'DRIVE_KICK'   // drive-and-kick to open shooter; passer vision, shooter 3PT
+  | 'OREB_CONT'    // offensive rebound continuation; finisher + offReb tendency
+  | 'BAILOUT'      // late-clock scramble; any scorer with high isolation
+  | 'LOB'          // alley-oop/lob play — rim runner catches and finishes above the rim
+  | 'DUMP_OFF';    // drive penetration dump-off to rolling big near the basket
 
-  const adjUsage = Math.max(0.02, usageShare * (1 + tm.usageBoost));
-  const fga      = Math.max(0, Math.round(teamFga * adjUsage * (minutes / 32)));
+interface TeamPossState {
+  p: Player;
+  min: number;
+  minFrac: number;
+  varRoll: number;   // tip-off variance roll: positive = hot, negative = cold
+  // mutable stats accumulated by the engine
+  pts: number; fga: number; fgm: number;
+  tpa: number; tpm: number; fta: number; ftm: number;
+  oreb: number; dreb: number;
+  ast: number; stl: number; blk: number; tov: number; pf: number;
+  fatigue: number;   // 0 = fresh, increases with touches; caps at 0.45
+  // per-player audit
+  _touches: number;
+  _possTypes: Partial<Record<PossessionType, number>>;
+  _shotInside: number; _shotMid: number; _shotThree: number;
+  _assistedMakes: number; _unassistedMakes: number;
+  _rebChances: number; _astCreated: number;
+  _tovBadPass: number; _tovLostBall: number; _tovOffFoul: number;
+  _defEvents: number;
+}
 
-  // TO% computed early: drives both the TOV stat and the AST efficiency penalty.
-  // Uses getTurnoverPercentage() — piecewise curve calibrated to NBA 2025-26.
-  // moraleTovMod is negative when morale < 75, boosting the raw toRate (more turnovers).
-  const toRate = Math.max(0, getTurnoverPercentage(
-    player.attributes.ballHandling,
-    player.attributes.passing,
-    player.attributes.offensiveIQ,
-    player.position,
-    player.attributes.stamina,
-    player.personalityTraits,
-  ) - moraleTovMod);
+const mkTeamPossState = (p: Player, min: number, varRoll: number): TeamPossState => ({
+  p, min, minFrac: min / 48, varRoll,
+  pts: 0, fga: 0, fgm: 0, tpa: 0, tpm: 0, fta: 0, ftm: 0,
+  oreb: 0, dreb: 0, ast: 0, stl: 0, blk: 0, tov: 0, pf: 0,
+  fatigue: 0,
+  _touches: 0, _possTypes: {},
+  _shotInside: 0, _shotMid: 0, _shotThree: 0,
+  _assistedMakes: 0, _unassistedMakes: 0,
+  _rebChances: 0, _astCreated: 0,
+  _tovBadPass: 0, _tovLostBall: 0, _tovOffFoul: 0,
+  _defEvents: 0,
+});
 
-  // 3PA share influenced by pullUpThree tendency
-  const threePaShare = Math.max(0, Math.min(0.90,
-    (player.attributes.shooting3pt / 100) * 0.5 + tm.threepaBoost));
-  const threepa = Math.round(fga * threePaShare);
-
-  // Inside / mid split
-  const insideShare = Math.max(0, Math.min(0.70,
-    ((player.attributes.layups + player.attributes.dunks) / 2 / 100) * 0.3 + tm.insideBoost));
-  const insFga  = Math.round(fga * insideShare);
-  const midFga  = Math.max(0, fga - threepa - insFga);
-
-  const fgPct3   = getThreePointPercentage(player.attributes.shooting3pt);
-  // Mid-range FG%: attribute-driven piecewise curve with offIQ + ballHandling synergy.
-  // Replaces the old linear formula (shootingMid/100 * 0.42 + 0.26) which over-rewarded
-  // high attributes linearly and ignored creation skill.
-  const fgPctMid = getMidRangePercentage(
-    player.attributes.shootingMid,
-    player.position,
-    player.attributes.offensiveIQ,
-    player.attributes.ballHandling,
-  );
-
-  // Inside FG%: three-way blend of layup, dunk, and post-scoring quality.
-  // Box-score context: "inside" represents all at-rim attempts (layups, contact
-  // finishes, short hooks, dump-offs) — not just clean uncontested dunks.
-  // Dunk% (80-98%) is therefore down-weighted so the blend lands at NBA at-rim
-  // average of 58-63%, not the 65-70% that a straight blend would produce.
-  const layupBase   = getLayupPercentage(player.attributes.layups, player.position);
-  const dunkBase    = getDunkPercentage(player.attributes.dunks, player.position, player.attributes.jumping);
-  const postBase    = getPostScoringPercentage(
-    player.attributes.postScoring, player.position,
-    player.attributes.strength, player.attributes.offensiveIQ,
-  );
-  // Reduced dunkWeight (0.20 max) and scaled dunkBase by 0.75 for box-score context:
-  // uncontested dunks are pre-selected plays; box-score "inside" includes many
-  // contested attempts where the defense has already rotated.
-  const dunkWeight  = Math.min(0.20, player.attributes.dunks       / 100 * 0.20);
-  const postWeight  = Math.min(0.25, player.attributes.postScoring / 100 * 0.25);
-  const layupWeight = Math.max(0,    1 - dunkWeight - postWeight);
-  const fgPctIns    = layupBase * layupWeight + (dunkBase * 0.75) * dunkWeight + postBase * postWeight;
-
-  // Stochastic rounding: Math.floor(n*rate + rand()) gives correct expected
-  // value (= n*rate) without the systematic upward bias of Math.round that
-  // was locking season 3PT% leaders at 50% for high-base shooters.
-  const threeRate = Math.max(0.05, fgPct3 + fgPctBoost + fatigueMod + opponentPerimDefMod + moraleFgMod + (Math.random() * 0.06 - 0.03));
-  const threepm   = Math.min(threepa, Math.floor(threepa * threeRate + Math.random()));
-  const midRate   = Math.max(0.05, fgPctMid + fgPctBoost + fatigueMod + opponentMidDefMod + moraleFgMod + (Math.random() * 0.06 - 0.03));
-  const midFgm    = Math.min(midFga,  Math.floor(midFga  * midRate   + Math.random()));
-  // Inside FGM: interior + post defense mods both apply (weighted by post share).
-  // opponentInteriorDefMod suppresses drives/dunks; opponentPostDefMod suppresses
-  // post-ups.  Blend them proportionally to postWeight so a non-post player
-  // (postWeight≈0) is barely affected by post defense, and a pure post scorer
-  // (postWeight≈0.25) feels the full post-defense penalty.
-  const blendedInsideMod = opponentInteriorDefMod * (1 - postWeight) + opponentPostDefMod * postWeight;
-  // Floor lowered to 0.30 (from 0.35): even poor finishers shouldn't make 35%+
-  // of their inside attempts after factoring in rim protection and fatigue.
-  const insRate   = Math.max(0.30, fgPctIns + fgPctBoost + fatigueMod + blendedInsideMod + moraleFgMod + (Math.random() * 0.06 - 0.03));
-  const insFgm    = Math.min(insFga,  Math.floor(insFga  * insRate   + Math.random()));
-  const fgm     = threepm + midFgm + insFgm;
-
-  // FTA: scaled by strength and minutes. Cap random component to prevent outlier
-  // games — NBA teams average 22 FTA, so per-player average should be ~2-3 FTA.
-  const fta = Math.round((player.attributes.strength / 100) * 3.5 * minFac + Math.random() * 1.5);
-
-  // FT%: piecewise curve + positional tweak + situational modifiers.
-  // ftBonus carries the home-court advantage from the call site; we also
-  // fold in stamina fatigue and personality pressure effects so FTM/FTA
-  // in the box score reflects real player variance across 82 games.
-  const ftBasePct = getFreeThrowPercentage(player.attributes.freeThrow, player.position);
-  const ftSitMod  = getFreeThrowSituationalMod({
-    minutesPlayed:     minutes,
-    isClutch:          false,     // box-score path aggregates full game; no single-moment clutch flag
-    isHome:            ftBonus > 0,
-    stamina:           player.attributes.stamina,
-    personalityTraits: player.personalityTraits,
-    clutchTendency:    player.tendencies?.situationalTendencies?.clutchShotTaker,
-  });
-  const ftNoise   = getFreeThrowNoiseWidth(player.personalityTraits);
-  const ftPct     = Math.max(0.50, Math.min(0.98,
-    ftBasePct + ftSitMod + (Math.random() * 2 * ftNoise - ftNoise)));
-  const ftm = Math.min(fta, Math.round(fta * ftPct));
-  const pts = midFgm * 2 + insFgm * 2 + threepm * 3 + ftm;
-
-  // Independent per-player rebound formula — no normalization to teamReb.
-  // posRebMult encodes positional rebounding rates (C highest, guards lowest).
-  // Power-curve (squared) concentrates boards in high-rebounding players.
-  // 28.0 calibration: C at reb=90, 36 min → ~(0.90²)×1.00×0.75×28 ≈ 17 raw boards.
-  // Random noise ±3 allows natural game-to-game variance.
-  const posRebMult =
-    player.position === 'C'  ? 1.00 :
-    player.position === 'PF' ? 0.72 :
-    player.position === 'SF' ? 0.50 : 0.32;
-  const totalReb = Math.max(0, Math.round(
-    Math.pow(player.attributes.rebounding / 100, 2) * posRebMult * minFac * 28.0
-    + (Math.random() * 6 - 3),
-  ));
-  // ORB/DRB split: use position-based base (bigs ~27% of their boards are ORBs,
-  // guards ~19%) + small attribute modifier. This replaces orbChance/drbChance
-  // ratio which produced unrealistic 45-55% ORB splits for bigs.
-  const posOrbBase =
-    player.position === 'C' || player.position === 'PF' ? 0.270 :
-    player.position === 'SF'                            ? 0.235 : 0.195;
-  const orbAttrMod = (player.attributes.offReb - player.attributes.defReb) / 300;
-  // No artificial ceiling — elite offensive rebounders (Dennis Rodman-tier) can reach 45–50% ORB ratio
-  const orbRatio   = Math.max(0.14, Math.min(0.50, posOrbBase + orbAttrMod));
-  const offReb    = Math.round(totalReb * orbRatio);
-  const defReb    = totalReb - offReb;
-
-  // ── Assist calculation ────────────────────────────────────────────────────
-  // Primary efficiency: passing + playmaking + ball handling + IQ + kick-out tendency.
-  // No artificial ceiling — elite playmakers are allowed to reach 12–18+ on
-  // exceptional nights; the math naturally constrains realistic totals since
-  // teamAst ≈ 22–28 and adjAstShare < 1.0 for all but the rarest performances.
-  const kickOutTendency = player.tendencies?.kickOutPasser ?? 50;
-  const astEff = getAssistEfficiency(
-    player.attributes.passing,
-    player.attributes.playmaking,
-    player.attributes.offensiveIQ,
-    toRate,
-    player.attributes.ballHandling ?? 70,
-    kickOutTendency,
-  );
-
-  // Contextual: elite spacers create kick-out lanes (spacing 80 → +6%; 50 → 0%)
-  const spacingBoost = (teammateSpacing - 65) / 100 * 0.14;
-  // Contextual: hot-shooting team = more makes off passes = more assists recorded
-  // FG% 0.52 → +4.8%; FG% 0.44 → −2.4%  (centered at NBA avg 0.48)
-  const shootingEffBoost = (teammateShootingEff - 0.48) * 0.60;
-
-  const contextMult = Math.max(0.80, 1.0 + spacingBoost + shootingEffBoost);
-
-  // handlerFrac: position-based ball-handling time share, decoupled from scoring usage.
-  // PGs naturally run more pick-and-roll/transition — their high BH + playmaking raises this.
-  // Pure scorers with low BH/playmaking won't inflate their own assist totals.
-  const posPlayBase =
-    player.position === 'PG' ? 0.34 : player.position === 'SG' ? 0.22 :
-    player.position === 'SF' ? 0.16 : player.position === 'PF' ? 0.12 : 0.09;
-  const handlerFrac = Math.max(0.05,
-    posPlayBase
-    + ((player.attributes.ballHandling ?? 60) - 65) / 160
-    + ((player.attributes.playmaking   ?? 60) - 65) / 220
-  );
-  const adjAstShare = Math.max(0.01, astEff * handlerFrac * minFac * 1.10 * (1 + tm.astBoost) * contextMult);
-  const ast = Math.max(0, Math.round(teamAst * adjAstShare));
-
-  // STL: getStealChance × 80 steal-opportunities per 48 min × minutes fraction.
-  // stlBoost from defensive tendencies (pass-denial, gambles, helpDefender).
-  // Stamina: fatigued defenders lose a step — up to 15 % reduction at stamina=40.
-  // No artificial per-player cap — elite thieves can reach 5–7 STL on exceptional nights.
-  const STL_OPP_SCALE = 80;
-  const stlBase    = getStealChance(player.attributes.steals, player.position, player.attributes.defensiveIQ)
-    * STL_OPP_SCALE * minFac * (1 + tm.stlBoost) * (1 + moraleEffMod);
-  const stlFatigue = Math.max(0, (65 - (player.attributes.stamina ?? 70)) / 100 * 0.15);
-  const stl        = Math.max(0, Math.floor(stlBase * (1 - stlFatigue) + Math.random() * 0.8));
-
-  // BLK: getBlockChance × 65 block-opportunities per 48 min × minutes fraction.
-  // blkBoost from helpDefender/physicality tendencies; stamina reduction for tired bigs.
-  // No artificial per-player cap — elite rim protectors can reach 7–10 BLK on dominant nights.
-  const BLK_OPP_SCALE = 65;
-  const blkBase    = getBlockChance(player.attributes.blocks, player.position, player.attributes.defensiveIQ)
-    * BLK_OPP_SCALE * minFac * (1 + tm.blkBoost) * (1 + moraleEffMod);
-  const blkFatigue = Math.max(0, (65 - (player.attributes.stamina ?? 70)) / 100 * 0.12);
-  const blk        = Math.max(0, Math.floor(blkBase * (1 - blkFatigue) + Math.random() * 0.8));
-  const pf  = Math.min(6, Math.round((Math.floor(Math.random() * 4 * minFac + 1)) * (1 + tm.foulRisk)));
-
-  // TOV: scaled by position-based touch multiplier so ball-handlers accrue
-  // turnovers from dribble actions beyond just shot attempts.
-  //   PG  × 1.6 — primary handler; ISO drives, P&R triggers, outlet passes
-  //   SG  × 1.4 — secondary handler; off-ball cuts + some creation
-  //   SF  × 1.25 — versatile; less primary handle time than guards
-  //   PF/C × 1.05 — mostly catch-and-finish; lower possession chain risk
-  const touchMul =
-    player.position === 'PG' ? 1.6 :
-    player.position === 'SG' ? 1.4 :
-    player.position === 'SF' ? 1.25 : 1.05;
-  const tovNoise = (Math.random() - 0.5) * 0.06;
-  const tov      = Math.max(0, Math.round((toRate + tovNoise) * fga * touchMul));
-
-  return {
-    playerId: player.id, name: player.name, min: minutes,
-    pts, reb: totalReb, offReb, defReb, ast, stl, blk, fgm, fga,
-    threepm, threepa, ftm, fta, tov,
-    plusMinus: 0, pf, techs: 0, flagrants: 0,
-  };
+// Scheme base possession-type weights. Each scheme biases toward its identity play.
+const SCHEME_POSS_WEIGHTS: Record<CoachScheme, Record<PossessionType, number>> = {
+  'Balanced':       { TRANSITION:14, ISO:8,  POST_UP:7,  PNR_BH:17, PNR_ROLL:6,  SPOT_UP:16, OFF_SCREEN:6,  CUT:8,  DRIVE_KICK:8,  OREB_CONT:2, BAILOUT:0, LOB:4,  DUMP_OFF:4  },
+  'Pace and Space': { TRANSITION:22, ISO:5,  POST_UP:3,  PNR_BH:12, PNR_ROLL:3,  SPOT_UP:25, OFF_SCREEN:5,  CUT:6,  DRIVE_KICK:7,  OREB_CONT:2, BAILOUT:1, LOB:3,  DUMP_OFF:6  },
+  'Grit and Grind': { TRANSITION:8,  ISO:10, POST_UP:14, PNR_BH:11, PNR_ROLL:9,  SPOT_UP:14, OFF_SCREEN:8,  CUT:7,  DRIVE_KICK:5,  OREB_CONT:2, BAILOUT:0, LOB:5,  DUMP_OFF:7  },
+  'Triangle':       { TRANSITION:10, ISO:5,  POST_UP:12, PNR_BH:10, PNR_ROLL:10, SPOT_UP:13, OFF_SCREEN:12, CUT:9,  DRIVE_KICK:7,  OREB_CONT:2, BAILOUT:0, LOB:5,  DUMP_OFF:5  },
+  'Small Ball':     { TRANSITION:18, ISO:8,  POST_UP:4,  PNR_BH:12, PNR_ROLL:7,  SPOT_UP:19, OFF_SCREEN:7,  CUT:7,  DRIVE_KICK:6,  OREB_CONT:1, BAILOUT:1, LOB:4,  DUMP_OFF:6  },
+  'Showtime':       { TRANSITION:24, ISO:6,  POST_UP:6,  PNR_BH:7,  PNR_ROLL:9,  SPOT_UP:11, OFF_SCREEN:6,  CUT:6,  DRIVE_KICK:6,  OREB_CONT:1, BAILOUT:1, LOB:9,  DUMP_OFF:8  },
 };
+
+/** Weighted random pick — O(n). Returns arr[i] with prob proportional to wFn(arr[i]). */
+function pickWeighted<T>(arr: T[], wFn: (x: T) => number): T {
+  if (arr.length === 1) return arr[0];
+  const ws = arr.map(wFn);
+  const total = ws.reduce((a, b) => a + b, 0);
+  if (total <= 0) return arr[Math.floor(Math.random() * arr.length)];
+  let r = Math.random() * total;
+  for (let i = 0; i < arr.length; i++) { r -= ws[i]; if (r <= 0) return arr[i]; }
+  return arr[arr.length - 1];
+}
+
+/** Blended inside FG% (layup/dunk/post) for a player — same formula as old box-score path. */
+function getInsideFgPctForPlayer(p: Player): number {
+  const layupBase = getLayupPercentage(p.attributes.layups, p.position);
+  const dunkBase  = getDunkPercentage(p.attributes.dunks,  p.position, p.attributes.jumping);
+  const postBase  = getPostScoringPercentage(
+    p.attributes.postScoring, p.position, p.attributes.strength, p.attributes.offensiveIQ);
+  const dunkW = Math.min(0.20, p.attributes.dunks / 100 * 0.20);
+  const postW = Math.min(0.25, p.attributes.postScoring / 100 * 0.25);
+  return layupBase * Math.max(0, 1 - dunkW - postW) + dunkBase * 0.75 * dunkW + postBase * postW;
+}
+
+const RIM_RUNNING_ARCHETYPES = new Set([
+  'Athletic Rim Runner', 'Pick-and-Roll Big', 'Glass Cleaner',
+  'Rim Protector', 'Two-Way Interior Star',
+]);
+function isRimRunner(p: Player): boolean {
+  return RIM_RUNNING_ARCHETYPES.has(p.archetype ?? '');
+}
+
+type RimFinishType =
+  | 'LOB'            // alley-oop dunk above the rim
+  | 'TRANSITION_DUNK'// open-court dunk in transition
+  | 'OPEN_ROLL'      // catch on open roll to rim
+  | 'OPEN_CUT'       // backdoor cut to rim
+  | 'DUMP_OFF'       // dump-off layup from drive penetration
+  | 'PUTBACK'        // offensive rebound put-back
+  | 'STANDARD';      // contested layup / default inside
+
+/** Per-shot-type FG% for inside finishes, reflecting open vs. contested quality. */
+function getRimFinishFgPct(p: Player, finishType: RimFinishType): number {
+  const dunk     = p.attributes.dunks    ?? 50;
+  const layup    = p.attributes.layups   ?? 50;
+  const jumping  = p.attributes.jumping  ?? 50;
+  const strength = p.attributes.strength ?? 50;
+  switch (finishType) {
+    case 'LOB': {
+      const raw = 0.60 + (dunk / 100) * 0.22 + (jumping / 100) * 0.14;
+      return Math.max(0.76, Math.min(0.96, raw));
+    }
+    case 'TRANSITION_DUNK': {
+      const raw = 0.58 + (dunk / 100) * 0.22 + (jumping / 100) * 0.15;
+      return Math.max(0.74, Math.min(0.95, raw));
+    }
+    case 'OPEN_ROLL': {
+      const raw = 0.48 + (layup / 100) * 0.20 + (dunk / 100) * 0.22;
+      return Math.max(0.65, Math.min(0.90, raw));
+    }
+    case 'OPEN_CUT': {
+      const raw = 0.45 + (layup / 100) * 0.22 + (dunk / 100) * 0.17;
+      return Math.max(0.62, Math.min(0.84, raw));
+    }
+    case 'DUMP_OFF': {
+      const raw = 0.42 + (layup / 100) * 0.22 + (strength / 100) * 0.18;
+      return Math.max(0.60, Math.min(0.82, raw));
+    }
+    case 'PUTBACK': {
+      const raw = 0.38 + (layup / 100) * 0.20 + (dunk / 100) * 0.14 + (jumping / 100) * 0.08;
+      return Math.max(0.53, Math.min(0.80, raw));
+    }
+    default:
+      return getInsideFgPctForPlayer(p);
+  }
+}
+
+/** Defender's per-zone FG-suppression mod (negative = harder to score).
+ *  Uses TEAM_BOX_SCORE contexts calibrated for game-average suppression. */
+function zoneDefMod(def: Player, zone: 'inside' | 'mid' | 'three'): number {
+  if (zone === 'three')  return get3PTContestMod(def.attributes.perimeterDef ?? 50, 'TEAM_BOX_SCORE', def.attributes.defensiveIQ ?? 50);
+  if (zone === 'inside') return getRimProtectionMod(def.attributes.interiorDef ?? 50, 'TEAM_BOX_SCORE');
+  return getMidRangeContestMod(def.attributes.perimeterDef ?? 50, 'TEAM_BOX_SCORE_MID', def.attributes.defensiveIQ ?? 50);
+}
+
+// Fraction of made baskets that earn an assist, keyed by possession type.
+// Derived from NBA 2024-25 play-type assist rates (Synergy / Second Spectrum).
+const ASSIST_PROB: Record<PossessionType, number> = {
+  LOB:        0.99,  // alley-oop is always assisted; the passer throws it up
+  DUMP_OFF:   0.96,  // dump-off to rolling big nearly always earns an assist
+  CUT:        0.90,  // catch-and-cut is nearly always assisted
+  SPOT_UP:    0.88,  // catch-and-shoot = assisted by definition
+  DRIVE_KICK: 0.85,  // driver kicks out, shooter hits → driver gets AST
+  PNR_ROLL:   0.82,  // roll-man catch almost always gets a pass credit
+  OFF_SCREEN: 0.78,  // curl shooter gets the pass credit
+  TRANSITION: 0.50,  // mix of outlet-pass scores and solo runs
+  PNR_BH:     0.28,  // pull-up is often unassisted; some kick-backs are assisted
+  POST_UP:    0.22,  // post entry pass doesn't count; most are unassisted
+  ISO:        0.12,  // pure isolation — rare assist
+  OREB_CONT:  0.04,  // put-back is almost always unassisted
+  BAILOUT:    0.08,  // late-clock scramble
+};
+
+/**
+ * Credits an assist to the most likely passer after a made basket.
+ * For pass plays the natural assister is the ball handler.
+ * For other play types, the best playmaker on court is picked.
+ * Updates _assistedMakes / _unassistedMakes audit fields on the shooter.
+ */
+function resolveAssist(
+  shooter: TeamPossState,
+  bh: TeamPossState,
+  court: TeamPossState[],
+  possType: PossessionType,
+): void {
+  const prob = ASSIST_PROB[possType] ?? 0.30;
+  if (Math.random() >= prob) {
+    shooter._unassistedMakes++;
+    return;
+  }
+  // Pass plays: ball handler passed to a different shooter → BH gets the AST.
+  const isNaturalPassPlay = (possType === 'PNR_ROLL' || possType === 'SPOT_UP'
+    || possType === 'CUT' || possType === 'DRIVE_KICK' || possType === 'OFF_SCREEN'
+    || possType === 'LOB' || possType === 'DUMP_OFF')
+    && bh.p.id !== shooter.p.id;
+  const candidates = court.filter(s => s.p.id !== shooter.p.id);
+  if (candidates.length === 0) { shooter._unassistedMakes++; return; }
+  const assister = isNaturalPassPlay
+    ? bh
+    : pickWeighted(candidates, s => {
+        const pass = s.p.attributes.passing    ?? 50;
+        const pm   = s.p.attributes.playmaking ?? 50;
+        const oiq  = s.p.attributes.offensiveIQ ?? 50;
+        return Math.max(0.01, (pass + pm + oiq) / 300 * s.minFrac);
+      });
+  assister.ast++;
+  assister._astCreated++;
+  shooter._assistedMakes++;
+}
+
+/**
+ * Core possession engine — simulates every offensive possession for offTeam.
+ *
+ * Design principles (must remain stable):
+ *   Attributes  → per-event success rate (FG%, block%, steal%, FT%)
+ *   Tendencies  → event frequency (possession type weights, who handles)
+ *   Stats emerge from resolved events — no post-hoc clamping or scaling.
+ *
+ * Defensive checks on every possession:
+ *   1. On-ball pressure: boosts TOV chance, adds FG% contest penalty.
+ *   2. Pass-lane steal: intercept chance before shooter receives ball.
+ *   3. Block check: all on-court defenders checked in order of blocks rating.
+ *   4. Shot contest: defMod scaled 2.5× for meaningful per-player impact.
+ *   5. Foul check: realistic rate (avg ~11%, elite ~13%), cap 0.15.
+ */
+function runOffenseEngine(
+  offTeam: TeamPossState[],
+  defTeam: TeamPossState[],
+  totalPoss: number,
+  scheme: CoachScheme,
+  pbMults: typeof PLAYBOOK_SHOT_MODS[CoachScheme],
+  isWNBA: boolean,
+): void {
+  const offActive = offTeam.filter(s => s.minFrac > 0);
+  const defActive = defTeam.filter(s => s.minFrac > 0);
+  if (offActive.length === 0) return;
+
+  const schemeW = SCHEME_POSS_WEIGHTS[scheme] ?? SCHEME_POSS_WEIGHTS['Balanced'];
+
+  for (let teamPoss = 0; teamPoss < totalPoss; teamPoss++) {
+    // ── On-court selection (~5 per side, weighted by minute fraction) ──────
+    const offFrac = offActive.reduce((s, p) => s + p.minFrac, 0);
+    const defFrac = defActive.reduce((s, p) => s + p.minFrac, 0);
+    const onOff = offActive.filter(s => Math.random() < s.minFrac * 5 / Math.max(1, offFrac));
+    const onDef = defActive.filter(s => Math.random() < s.minFrac * 5 / Math.max(1, defFrac));
+    const court  = onOff.length >= 3 ? onOff : offActive.slice(0, Math.min(5, offActive.length));
+    const dCourt = onDef.length >= 2 ? onDef : defActive.slice(0, Math.min(5, defActive.length));
+
+    // ── Ball-handler selection: 1.5-power keeps star involvement realistic ─
+    // Raised from 2.0 → 1.5 so a 90-rated player gets ~25% of BH duties,
+    // not 30%+, preventing unrealistic 28+ FGA concentrations.
+    const bh = pickWeighted(court, s => {
+      const ot      = getOT(s.p);
+      const play    = (ot.isoHeavy + ot.pullUpOffPnr + ot.driveToBasket + ot.kickOutPasser) / 4;
+      const hotBoost = 1 + s.varRoll / 100 * 0.20;
+      // Rim runners are poor initiators — they function as receivers, not ball-handlers
+      const rimPenalty = isRimRunner(s.p) ? 0.25 : 1.0;
+      return Math.max(0.01,
+        Math.pow(s.p.rating / 75, 1.5) * s.minFrac * (1 + (play - 50) / 100) * hotBoost * rimPenalty);
+    });
+    bh._touches++;
+
+    // ── Possession type: scheme base weighted by BH tendencies ─────────────
+    const ot = getOT(bh.p);
+    const wMap = { ...schemeW } as Record<PossessionType, number>;
+    wMap.ISO        = Math.max(0, wMap.ISO        * (1 + (ot.isoHeavy        - 50) / 100));
+    wMap.POST_UP    = Math.max(0, wMap.POST_UP    * (1 + (ot.postUp          - 50) / 100));
+    wMap.SPOT_UP    = Math.max(0, wMap.SPOT_UP    * (1 + (ot.spotUp          - 50) / 100));
+    wMap.CUT        = Math.max(0, wMap.CUT        * (1 + (ot.cutter          - 50) / 100));
+    wMap.TRANSITION = Math.max(0, wMap.TRANSITION * (1 + (ot.transitionHunter - 50) / 100));
+    wMap.PNR_BH     = Math.max(0, wMap.PNR_BH     * (1 + (ot.pullUpOffPnr    - 50) / 100 + (ot.midRangeJumper - 50) / 200));
+    wMap.DRIVE_KICK = Math.max(0, wMap.DRIVE_KICK * (1 + (ot.kickOutPasser   - 50) / 100));
+    wMap.OFF_SCREEN = Math.max(0, wMap.OFF_SCREEN * (1 + (ot.offScreen       - 50) / 50));
+    // LOB and DUMP_OFF require specific personnel on court to be viable
+    const courtRimRunners = court.filter(s => isRimRunner(s.p));
+    const hasPenetratingGuard = court.some(s =>
+      (s.p.position === 'PG' || s.p.position === 'SG') &&
+      (s.p.attributes.driveToBasket ?? 50) > 60);
+    if (courtRimRunners.length === 0) {
+      wMap.LOB      = 0;
+      wMap.DUMP_OFF = Math.max(0, (wMap.DUMP_OFF ?? 0) * 0.20);
+    } else {
+      const rimQuality = courtRimRunners.reduce(
+        (best, s) => Math.max(best, ((s.p.attributes.dunks ?? 50) + (s.p.attributes.jumping ?? 50)) / 2), 0);
+      wMap.LOB = Math.max(0, (wMap.LOB ?? 0) * (rimQuality / 75));
+      wMap.DUMP_OFF = Math.max(0, (wMap.DUMP_OFF ?? 0)
+        * (hasPenetratingGuard ? 1 + courtRimRunners.length * 0.40 : 0.40));
+    }
+    const entries  = Object.entries(wMap) as [PossessionType, number][];
+    const possType = pickWeighted(entries, ([, w]) => w)[0];
+    bh._possTypes[possType] = (bh._possTypes[possType] ?? 0) + 1;
+
+    // ── On-ball defensive pressure ─────────────────────────────────────────
+    // Selects the matchup defender and computes how much pressure they apply.
+    // Strong defenders: +3-7% TOV chance, +3-8% FG% suppression.
+    // Hot players attract more defensive attention (double-teams, ball denials).
+    let defPressureBoost = 0;
+    let contestBoost     = 0;
+    let primaryDef: TeamPossState | null = null;
+    if (dCourt.length > 0) {
+      const hotnessMod = Math.max(1.0, 1 + bh.varRoll / 100 * 0.30);  // hot star draws harder coverage
+      primaryDef = pickWeighted(dCourt, s => {
+        const dAttr = (s.p.attributes.perimeterDef ?? 50) * 0.45
+          + (s.p.attributes.defensiveIQ ?? 50) * 0.35
+          + (s.p.attributes.interiorDef ?? 50) * 0.20;
+        const posMatch = s.p.position === bh.p.position ? 1.4 : 1.0;
+        return Math.max(0.01, dAttr / 100 * posMatch * s.minFrac * hotnessMod);
+      });
+      const dt         = getDT(primaryDef.p);
+      const defQuality = (
+        (primaryDef.p.attributes.perimeterDef ?? 50) * 0.40 +
+        (primaryDef.p.attributes.defensiveIQ  ?? 50) * 0.40 +
+        (dt.onBallPest + dt.denyThePass) / 200 * 100 * 0.20
+      ) / 100;
+      // Threshold 0.55 = average defender; elite (0.80+) applies ~2% TOV + 8% FG suppression.
+      defPressureBoost = Math.max(0, (defQuality - 0.55) * 0.08);
+      contestBoost     = Math.max(0, (defQuality - 0.50) * 0.08);
+    }
+
+    // ── Turnover check ─────────────────────────────────────────────────────
+    const toRate = getTurnoverPercentage(
+      bh.p.attributes.ballHandling,
+      bh.p.attributes.passing,
+      bh.p.attributes.offensiveIQ,
+      bh.p.position,
+      bh.p.attributes.stamina,
+      bh.p.personalityTraits,
+    ) * (1 + bh.fatigue * 0.15) + defPressureBoost;
+
+    if (Math.random() < toRate) {
+      bh.tov++;
+      const r = Math.random();
+      if (r < 0.50)      bh._tovBadPass++;
+      else if (r < 0.78) bh._tovLostBall++;
+      else               bh._tovOffFoul++;
+      // Steal credit: defender with best deny-the-pass + gambles tendency.
+      // Scale 12: targets ~35–50% steal-credit rate per turnover (NBA ~50–60%).
+      if (dCourt.length > 0) {
+        const stealerCand = pickWeighted(dCourt, s => {
+          const dt = getDT(s.p);
+          return Math.max(0.01, (dt.gambles + dt.denyThePass) / 200 * s.minFrac);
+        });
+        if (Math.random() < getStealChance(
+          stealerCand.p.attributes.steals,
+          stealerCand.p.position,
+          stealerCand.p.attributes.defensiveIQ,
+        ) * 12) {
+          stealerCand.stl++;
+          stealerCand._defEvents++;
+        }
+      }
+      continue;
+    }
+
+    // ── Pass-lane steal check ─────────────────────────────────────────────
+    // Runs before the shooter receives the ball on all pass-heavy possessions.
+    // Scale 2.2: pass-lane steals contribute ~2.5/game to reach 6–9 team STL/game target.
+    const isPassPlay = possType === 'PNR_ROLL' || possType === 'SPOT_UP'
+      || possType === 'CUT' || possType === 'DRIVE_KICK' || possType === 'OFF_SCREEN'
+      || possType === 'LOB' || possType === 'DUMP_OFF';
+    if (isPassPlay && dCourt.length > 0) {
+      const passLaneDef = pickWeighted(dCourt, s => {
+        const dt = getDT(s.p);
+        return Math.max(0.01,
+          (dt.denyThePass + dt.gambles) / 200
+          * (s.p.attributes.steals ?? 50) / 100
+          * s.minFrac);
+      });
+      if (Math.random() < getStealChance(
+        passLaneDef.p.attributes.steals,
+        passLaneDef.p.position,
+        passLaneDef.p.attributes.defensiveIQ,
+      ) * 2.2) {
+        bh.tov++;
+        bh._tovBadPass++;
+        passLaneDef.stl++;
+        passLaneDef._defEvents++;
+        continue;
+      }
+    }
+
+    // ── Shot inner loop: up to 3 attempts via OREB continuation ───────────
+    for (let shotN = 0; shotN < 3; shotN++) {
+      // ── Shooter selection ───────────────────────────────────────────────
+      let shooter = bh;
+      if (shotN === 0 && isPassPlay && court.length > 1) {
+        const others = court.filter(s => s.p.id !== bh.p.id);
+        // LOB and DUMP_OFF strongly prefer rim-running targets; fall back if none present
+        const lobCandidates = (possType === 'LOB' || possType === 'DUMP_OFF')
+          ? others.filter(s => isRimRunner(s.p))
+          : null;
+        const candidates = (lobCandidates && lobCandidates.length > 0) ? lobCandidates : others;
+        shooter = pickWeighted(candidates, s => {
+          const ot2  = getOT(s.p);
+          const base = Math.pow(s.p.rating / 75, 1.5) * s.minFrac;
+          const bonus =
+            possType === 'LOB'        ? ((s.p.attributes.dunks ?? 50) + (s.p.attributes.jumping ?? 50)) / 200 :
+            possType === 'DUMP_OFF'   ? ((s.p.attributes.layups ?? 50) + (s.p.attributes.dunks ?? 50)) / 200 :
+            possType === 'PNR_ROLL'   ? ((s.p.attributes.layups ?? 50) + (s.p.attributes.dunks ?? 50)) / 200 :
+            possType === 'SPOT_UP'    ? s.p.attributes.shooting3pt / 100 + (ot2.spotUp    - 50) / 100 :
+            possType === 'CUT'        ? (ot2.cutter    - 30) / 70 :
+            possType === 'DRIVE_KICK' ? s.p.attributes.shooting3pt / 100 + (ot2.spotUp    - 50) / 100 :
+            possType === 'OFF_SCREEN' ? s.p.attributes.shooting3pt / 100 + (ot2.offScreen - 50) / 100 : 1;
+          return Math.max(0.01, base * (1 + bonus));
+        });
+      } else if (shotN > 0) {
+        shooter = pickWeighted(court, s => {
+          const posW = s.p.position === 'C' ? 0.45 : s.p.position === 'PF' ? 0.30 : 0.08;
+          return Math.max(0.01, posW * (s.p.attributes.offReb ?? 50) / 100 * s.minFrac);
+        });
+      }
+      shooter._touches++;
+
+      // ── Shot zone ───────────────────────────────────────────────────────
+      let zone: 'inside' | 'mid' | 'three';
+      if (['POST_UP', 'PNR_ROLL', 'CUT', 'LOB', 'DUMP_OFF'].includes(possType) || shotN > 0) {
+        zone = 'inside';
+      } else if (['SPOT_UP', 'OFF_SCREEN', 'DRIVE_KICK'].includes(possType)) {
+        // Catch-and-shoot plays: decide three vs. mid based on shooter's relative shooting attributes.
+        // Mid-range specialists (e.g. high shootingMid, low shooting3pt) spot up at the elbow;
+        // 3PT specialists fire from downtown. 0.55 multiplier biases toward three in modern ball.
+        const sht3 = shooter.p.attributes.shooting3pt ?? 50;
+        const mid  = shooter.p.attributes.shootingMid  ?? 50;
+        zone = Math.random() < sht3 / (sht3 + mid * 0.55) ? 'three' : 'mid';
+      } else if (possType === 'TRANSITION') {
+        zone = Math.random() < 0.52 ? 'inside' : Math.random() < 0.50 ? 'three' : 'mid';
+      } else {
+        // Normalize three weights so shootingMid properly competes with shooting3pt.
+        // Each attribute drives its zone's weight; inside uses position baseline + athleticism.
+        const ot2 = getOT(shooter.p);
+        const posInsideBase =
+          shooter.p.position === 'C'  ? 0.50 : shooter.p.position === 'PF' ? 0.35 :
+          shooter.p.position === 'SF' ? 0.22 : shooter.p.position === 'SG' ? 0.16 : 0.12;
+        const insideAttrMod = ((shooter.p.attributes.layups + shooter.p.attributes.dunks) / 2 / 100 - 0.70) * 0.30;
+        const insideW = Math.max(0.02,
+          (posInsideBase + insideAttrMod + (ot2.driveToBasket - 50) / 100 * 0.30) * pbMults.insideShareMult);
+        const threeW  = Math.max(0.01,
+          (shooter.p.attributes.shooting3pt / 100 * 0.52 + (ot2.pullUpThree - 50) / 100 * 0.35) * pbMults.threePaShareMult);
+        const midW    = Math.max(0.01,
+          shooter.p.attributes.shootingMid / 100 * 0.45 + (ot2.midRangeJumper - 50) / 100 * 0.35);
+        const totalW  = insideW + threeW + midW;
+        const r = Math.random() * totalW;
+        zone = r < insideW ? 'inside' : r < insideW + threeW ? 'three' : 'mid';
+      }
+      if (zone === 'inside') shooter._shotInside++;
+      else if (zone === 'three') shooter._shotThree++;
+      else shooter._shotMid++;
+
+      // For transition possessions going inside, stochastically classify as a dunk
+      const isTransitionDunk = possType === 'TRANSITION' && zone === 'inside'
+        && (shooter.p.attributes.dunks ?? 50) >= 65 && Math.random() < 0.40;
+
+      // ── Block check: ALL on-court defenders checked in descending blocks order ─
+      // Checking all defenders (instead of picking one) lets teams with multiple
+      // shot-blockers reach the 4–6 team BPG target organically.
+      // Scale 0.80: targets elite C (blocks=85) ~2.0 BPG, Wemby-tier (blocks=97) ~3.5 BPG,
+      // average roster 4–6 team BPG. (was 1.8, producing 7+ BPG for top individual).
+      // Mid-range post-up shots are also contestable by interior defenders.
+      let blocked = false;
+      if ((zone === 'inside' || (zone === 'mid' && possType === 'POST_UP'))
+          && possType !== 'LOB' && dCourt.length > 0) {
+        const blockCandidates = [...dCourt].sort(
+          (a, b) => (b.p.attributes.blocks ?? 0) - (a.p.attributes.blocks ?? 0));
+        for (const blocker of blockCandidates) {
+          const dt      = getDT(blocker.p);
+          const blkProb = getBlockChance(
+            blocker.p.attributes.blocks,
+            blocker.p.position,
+            blocker.p.attributes.defensiveIQ,
+          ) * 0.80 * (1 + (dt.helpDefender - 50) / 200);
+          if (Math.random() < blkProb) {
+            blocked = true;
+            blocker.blk++;
+            blocker._defEvents++;
+            break;
+          }
+        }
+      }
+
+      // ── Defender for FG% contest ─────────────────────────────────────────
+      // Zone-appropriate position bias: C/PF are the natural contest on inside shots;
+      // PG/SG/SF are the natural closeout on three-point and mid-range jumpers.
+      const defPlayer = dCourt.length > 0
+        ? pickWeighted(dCourt, s => {
+            const dAttr = zone === 'inside'
+              ? (s.p.attributes.interiorDef  ?? 50) * 0.6 + (s.p.attributes.defensiveIQ ?? 50) * 0.4
+              : (s.p.attributes.perimeterDef ?? 50) * 0.6 + (s.p.attributes.defensiveIQ ?? 50) * 0.4;
+            const posMatch = s.p.position === shooter.p.position ? 1.4 : 1.0;
+            const zonePos =
+              zone === 'inside' && (s.p.position === 'C'  || s.p.position === 'PF') ? 1.8 :
+              zone === 'inside' && (s.p.position === 'PG' || s.p.position === 'SG') ? 0.5 :
+              (zone === 'three' || zone === 'mid') && (s.p.position === 'PG' || s.p.position === 'SG' || s.p.position === 'SF') ? 1.6 :
+              (zone === 'three' || zone === 'mid') && (s.p.position === 'C'  || s.p.position === 'PF') ? 0.4 :
+              1.0;
+            return Math.max(0.01, dAttr / 100 * posMatch * zonePos * s.minFrac);
+          })
+        : null;
+
+      // ── Shot attempt ─────────────────────────────────────────────────────
+      shooter.fga++;
+      if (zone === 'three') shooter.tpa++;
+
+      if (!blocked) {
+        // Shot quality tier — determines base FG% ceiling and defense scaling
+        const finishType: RimFinishType =
+          zone !== 'inside'        ? 'STANDARD' :
+          possType === 'LOB'       ? 'LOB' :
+          possType === 'DUMP_OFF'  ? 'DUMP_OFF' :
+          possType === 'PNR_ROLL'  ? 'OPEN_ROLL' :
+          possType === 'CUT'       ? 'OPEN_CUT' :
+          isTransitionDunk         ? 'TRANSITION_DUNK' :
+          shotN > 0                ? 'PUTBACK' : 'STANDARD';
+        // Open/lob finishes are nearly undefended — scale the contest penalty down
+        const defModScale =
+          possType === 'LOB'    ? 0.05 :
+          (possType === 'DUMP_OFF' || possType === 'PNR_ROLL' || possType === 'CUT') ? 0.50 : 1.0;
+        const basePct =
+          zone === 'inside' ? getRimFinishFgPct(shooter.p, finishType) :
+          zone === 'mid'    ? getMidRangePercentage(shooter.p.attributes.shootingMid, shooter.p.position,
+                               shooter.p.attributes.offensiveIQ, shooter.p.attributes.ballHandling) :
+                              getThreePointPercentage(shooter.p.attributes.shooting3pt);
+        const defMod     = defPlayer ? zoneDefMod(defPlayer.p, zone) * defModScale : 0;
+        const contestMod = -contestBoost;      // on-ball pressure suppression
+        const noiseMod   = shooter.varRoll / 100 * 0.35;
+        const fatigueMod = -(shooter.fatigue * 0.05);
+        const schemeDelta = zone === 'three' ? pbMults.fgPct3Delta
+          : zone === 'inside' ? pbMults.fgPctInsDelta : pbMults.fgPctMidDelta;
+        const maxFgPct =
+          finishType === 'LOB'             ? 0.98 :
+          finishType === 'TRANSITION_DUNK' ? 0.95 :
+          finishType === 'OPEN_ROLL'       ? 0.92 :
+          finishType === 'OPEN_CUT'        ? 0.88 :
+          finishType === 'DUMP_OFF'        ? 0.88 :
+          finishType === 'PUTBACK'         ? 0.82 :
+          zone === 'inside'                ? 0.76 :
+          0.72;
+        const finalPct = Math.max(0.05, Math.min(maxFgPct,
+          basePct + defMod + contestMod + noiseMod + fatigueMod + schemeDelta
+          + (Math.random() * 0.06 - 0.03)));
+
+        // ── Foul check ────────────────────────────────────────────────────
+        // Coefficient 0.35, cap 0.22: avg player (drawFoulTend=50) → ~17.5% per shot,
+        // elite foul-drawer (tend=85) capped at 22%. Targets ~16 shot fouls/team/game
+        // on 88–92 FGA. Combined with ~3–4 background fouls → 18–22 team PF/game.
+        // WNBA: fouls still drawn but at 85% rate (slightly less physical contact).
+        const drawFoulTend = shooter.p.tendencies?.foulDrawing ?? 50;
+        const driveTend    = shooter.p.tendencies?.drive       ?? 50;
+        const postTend     = shooter.p.tendencies?.postUp      ?? 50;
+        const foulRate = (drawFoulTend / 100 * 0.35)
+          + (zone === 'inside' ? Math.max(0, driveTend - 50) / 100 * 0.04 : 0)
+          + (possType === 'POST_UP' ? Math.max(0, postTend - 50) / 100 * 0.03 : 0);
+        const schemeFtaMult = scheme === 'Grit and Grind' ? 1.18
+          : (scheme === 'Pace and Space' || scheme === 'Showtime') ? 1.08 : 1.0;
+        const wnbaFoulMod   = isWNBA ? 0.85 : 1.0;
+        const foulChance    = Math.min(0.22, foulRate * schemeFtaMult * wnbaFoulMod);
+
+        if (Math.random() < foulChance) {
+          const andOne = Math.random() < finalPct;
+          if (andOne) {
+            shooter.fgm++; shooter.pts += zone === 'three' ? 3 : 2;
+            if (zone === 'three') shooter.tpm++;
+            shooter.fta++;
+            const ftPct = getFreeThrowPercentage(shooter.p.attributes.freeThrow, shooter.p.position);
+            if (Math.random() < ftPct) { shooter.ftm++; shooter.pts++; }
+            resolveAssist(shooter, bh, court, possType);
+          } else {
+            const ftCount = zone === 'three' ? 3 : 2;
+            shooter.fta += ftCount;
+            const ftPct = getFreeThrowPercentage(shooter.p.attributes.freeThrow, shooter.p.position);
+            for (let i = 0; i < ftCount; i++) {
+              if (Math.random() < ftPct) { shooter.ftm++; shooter.pts++; }
+            }
+            // Non-shooting fouls: no basket, no assist
+          }
+          if (defPlayer) { defPlayer.pf++; defPlayer._defEvents++; }
+          shooter.fatigue = Math.min(0.45, shooter.fatigue + 0.006);
+          break;
+        }
+
+        // ── Shot resolution ───────────────────────────────────────────────
+        if (Math.random() < finalPct) {
+          shooter.fgm++; shooter.pts += zone === 'three' ? 3 : 2;
+          if (zone === 'three') shooter.tpm++;
+          resolveAssist(shooter, bh, court, possType);
+          shooter.fatigue = Math.min(0.45, shooter.fatigue + 0.005);
+          break;
+        }
+      }
+
+      // ── Miss / block → rebound battle ────────────────────────────────────
+      shooter.fatigue = Math.min(0.45, shooter.fatigue + 0.004);
+      // Offensive weights kept low so team ORB rate targets NBA average ~24-26%.
+      const offOrbScore = court.reduce((sum, s) => {
+        const posB = s.p.position === 'C' || s.p.position === 'PF' ? 0.09
+          : s.p.position === 'SF' ? 0.08 : 0.07;
+        return sum + posB * (s.p.attributes.offReb ?? 50) / 100;
+      }, 0);
+      const defRebScore = dCourt.reduce((sum, s) => {
+        const posB = s.p.position === 'C' || s.p.position === 'PF' ? 0.30
+          : s.p.position === 'SF' ? 0.24 : 0.18;
+        return sum + posB * (s.p.attributes.defReb ?? 50) / 100;
+      }, 0);
+      const orbProb = Math.max(0.08, Math.min(0.28,
+        offOrbScore / Math.max(0.01, offOrbScore + defRebScore)));
+
+      if (Math.random() < orbProb && shotN < 2) {
+        const rebounder = pickWeighted(court, s => {
+          // sqrt compresses attribute range so elite rebounders don't monopolise boards.
+          const posW = s.p.position === 'C' ? 0.20 : s.p.position === 'PF' ? 0.18
+            : s.p.position === 'SF' ? 0.15 : s.p.position === 'SG' ? 0.14 : 0.13;
+          return Math.max(0.01, posW * Math.sqrt((s.p.attributes.offReb ?? 50) / 100) * s.minFrac);
+        });
+        rebounder.oreb++;
+        rebounder._rebChances++;
+      } else {
+        if (dCourt.length > 0) {
+          const dReb = pickWeighted(dCourt, s => {
+            const posW = s.p.position === 'C' ? 0.20 : s.p.position === 'PF' ? 0.18
+              : s.p.position === 'SF' ? 0.15 : s.p.position === 'SG' ? 0.14 : 0.13;
+            return Math.max(0.01, posW * Math.sqrt((s.p.attributes.defReb ?? 50) / 100) * s.minFrac);
+          });
+          dReb.dreb++;
+          dReb._rebChances++;
+          dReb._defEvents++;
+        }
+        break;
+      }
+    }
+  }
+
+  // Background personal fouls: off-ball infractions and moving screens.
+  // Smart defenders (high defIQ) commit fewer away-from-ball fouls.
+  defActive.forEach(s => {
+    const dt = getDT(s.p);
+    const diq = s.p.attributes.defensiveIQ ?? 65;
+    const bgFoulRate = (dt.physicality + dt.onBallPest) / 200 * 0.12
+      - (diq - 50) / 100 * 0.03;
+    const bgFouls = Math.round(
+      Math.max(0, bgFoulRate) * (s.minFrac * 6) * (0.7 + Math.random() * 0.6));
+    s.pf = Math.min(6, s.pf + bgFouls);
+  });
+}
+
+// ─── Possession-based per-player stat audit (dev console) ────────────────────
+function emitPlayerAudit(
+  states: TeamPossState[],
+  teamName: string,
+): void {
+  console.groupCollapsed(`[PLAYER AUDIT] ${teamName}`);
+  for (const s of states) {
+    if (s.min === 0) continue;
+    const usage = s.fga > 0 ? (s.fga / Math.max(1, states.reduce((sum, x) => sum + x.fga, 0)) * 100).toFixed(1) : '0';
+    const fgPct = s.fga > 0 ? `${((s.fgm / s.fga) * 100).toFixed(0)}%` : '-';
+    const topPoss = Object.entries(s._possTypes)
+      .sort(([, a], [, b]) => b - a)
+      .slice(0, 3)
+      .map(([t, n]) => `${t}:${n}`)
+      .join(' ');
+    console.log(
+      `  ${s.p.name.padEnd(20)} | ${s.min}min | ${s.pts}pts ${s.fgm}/${s.fga}(${fgPct}) ` +
+      `3pm:${s.tpm}/${s.tpa} ft:${s.ftm}/${s.fta} | ` +
+      `ast:${s.ast} reb:${s.oreb}/${s.dreb} stl:${s.stl} blk:${s.blk} tov:${s.tov} | ` +
+      `usage:${usage}% touches:${s._touches} | ` +
+      `ins:${s._shotInside} mid:${s._shotMid} 3:${s._shotThree} | ` +
+      `asst:${s._assistedMakes}aM ${s._unassistedMakes}unaM | ` +
+      `rebChances:${s._rebChances} astCreated:${s._astCreated} | ` +
+      `tovCauses: BP:${s._tovBadPass} LB:${s._tovLostBall} OF:${s._tovOffFoul} | ` +
+      `defEvents:${s._defEvents} | poss:[${topPoss}]`
+    );
+  }
+  console.groupEnd();
+}
 
 // ─── Main simulateGame ────────────────────────────────────────────────────────
 export const simulateGame = (
@@ -3459,7 +4110,8 @@ export const simulateGame = (
   homeB2B = false,
   awayB2B = false,
   rivalryLevel = 'Ice Cold',
-  settings?: Pick<LeagueSettings, 'injuryFrequency' | 'homeCourt' | 'b2bFrequency' | 'quarterLength'>,
+  settings?: Pick<LeagueSettings, 'injuryFrequency' | 'homeCourt' | 'b2bFrequency' | 'quarterLength' | 'wnbaStatRealism' | 'upsetFrequency' | 'b2bFatigueEnabled' | 'fatigueImpact'>,
+  isPreseason = false,
 ): GameResult => {
   // ── Settings-driven constants ──────────────────────────────────────────────
   const quarterLength = settings?.quarterLength ?? 12; // minutes per quarter
@@ -3469,6 +4121,28 @@ export const simulateGame = (
   const injuryMultiplier = injuryMult[settings?.injuryFrequency ?? 'Medium'] ?? 1.0;
   const b2bMap: Record<string, number> = { None: 1.0, Low: 0.97, Realistic: 0.93, High: 0.90, Brutal: 0.87 };
   const b2bPenalty = b2bMap[settings?.b2bFrequency ?? 'Realistic'] ?? 0.93;
+  // b2bFatigueEnabled gates the detailed per-stat B2B penalties (REB, AST, TOV, minutes).
+  // fatigueImpact scales magnitude: Low=0.33, Medium=0.67, High=1.0.
+  const b2bFatigueEnabled = settings?.b2bFatigueEnabled !== false;
+  const fatigueScaleMap: Record<string, number> = { None: 0, Low: 0.33, Medium: 0.67, High: 1.0 };
+  const b2bFatigueScale = b2bFatigueEnabled
+    ? (fatigueScaleMap[settings?.fatigueImpact ?? 'Medium'] ?? 0.67)
+    : 0;
+  // How much the rating gap drives the outcome. Lower slope → more upsets.
+  // Low=0.40 (dominant favorites), Medium=0.30, Realistic=0.25, High=0.15 (frequent upsets)
+  const slopeMap: Record<string, number> = { Low: 0.40, Medium: 0.30, Realistic: 0.25, High: 0.15 };
+  const ratingSlope = slopeMap[settings?.upsetFrequency ?? 'Realistic'] ?? 0.25;
+
+  // ── WNBA Mode detection ────────────────────────────────────────────────────
+  // Explicit setting takes precedence; otherwise auto-detect from roster gender.
+  // When active, scales all outputs to WNBA 2024-26 targets:
+  //   PPG ~82, FG% 43.5-47.5%, 3P% 33-38%, FT% 76-82%, APG 18-23, RPG 32-38.
+  const combinedRoster = [...home.roster, ...away.roster];
+  const isWNBA: boolean = settings?.wnbaStatRealism ??
+    combinedRoster.filter(p => p.gender === 'Female').length > combinedRoster.length * 0.5;
+  // pppScale: WNBA avg 82 PPG / NBA avg 112 PPG ≈ 0.73. 0.77 is gentler to
+  // avoid over-correcting when pace is already slightly lower in WNBA games.
+  const pppScale = isWNBA ? 0.77 : 1.0;
 
   // ── 1. Player Variance Rolls (tip-off) ────────────────────────────────────
   const playerVariance = new Map<string, number>();
@@ -3524,17 +4198,16 @@ export const simulateGame = (
   };
 
   const calcBasePPP = (off: number, def: number, isB2B: boolean) => {
-    // Slope 0.25 (was 0.5): rating gap matters less → more realistic upset frequency.
-    // With slope 0.5 a 12-pt rating gap → 6 PPP pts → elite teams win 85-93%.
-    // With slope 0.25 a 12-pt rating gap → 3 PPP pts → elite teams win 70-78%.
-    let ppp = BASE_PPP + (off - def) / 100 * 0.25;
+    // ratingSlope is driven by upsetFrequency setting (0.15–0.40).
+    // Lower slope → rating gap matters less → more upsets.
+    let ppp = BASE_PPP + (off - def) / 100 * ratingSlope;
     if (isB2B) ppp *= b2bPenalty;
     return ppp + (Math.random() * SCORE_VARIANCE * 2 - SCORE_VARIANCE);
   };
-  const homePPP = calcBasePPP(homeBaseOff, homeDef, homeB2B)
-    + getStreakRegression(home) + teamMoraleMod(home);
-  const awayPPP = calcBasePPP(awayBaseOff, awayDef, awayB2B)
-    + getStreakRegression(away) + teamMoraleMod(away);
+  const homePPP = (calcBasePPP(homeBaseOff, homeDef, homeB2B)
+    + getStreakRegression(home) + teamMoraleMod(home)) * pppScale;
+  const awayPPP = (calcBasePPP(awayBaseOff, awayDef, awayB2B)
+    + getStreakRegression(away) + teamMoraleMod(away)) * pppScale;
 
   // ── 4. Pace / Possession Engine ───────────────────────────────────────────
   // Each team has their own pace rating (with coach badge effects).
@@ -3560,9 +4233,45 @@ export const simulateGame = (
   let runningHome = 0, runningAway = 0;
   let homeQStreak = 0, awayQStreak = 0;
 
+  // Pre-game favorite identification for upset PBP commentary.
+  // Uses net expected rating advantage (home court included) before any randomness.
+  const homeNetRating = homeBaseOff - homeDef + homeCourtAdv * 100;
+  const awayNetRating = awayBaseOff - awayDef;
+  const favoriteIsHome = homeNetRating >= awayNetRating;
+  const favoriteTeam   = favoriteIsHome ? home : away;
+  const underdogTeam   = favoriteIsHome ? away : home;
+  const preGameRatingGap = Math.abs(homeNetRating - awayNetRating);
+
   const pbp: PlayByPlayEvent[] = [
     { time: '12:00', text: 'Game Tip-off', type: 'info', quarter: 1 },
   ];
+
+  // ── B2B fatigue PBP flavor (injected pre-game and in Q2) ─────────────────
+  if (b2bFatigueScale > 0) {
+    const b2bEarlyLines = [
+      'Legs are heavy after last night\'s game — both teams looking to shake off the fatigue early.',
+      'Tired legs showing early — this back-to-back stretch is already showing on the floor.',
+      'You can see the fatigue setting in — that second night of a back-to-back is no joke.',
+      'The wear of last night\'s game is apparent — crisp execution will be at a premium tonight.',
+    ];
+    const b2bLateLines = [
+      'The back-to-back is catching up — decision-making getting sloppy in the second half.',
+      'Fatigue factor in full effect — defense is breaking down at both ends.',
+      'These tired legs can\'t keep up the intensity — substitutions going to be key down the stretch.',
+    ];
+    if (homeB2B) {
+      pbp.push({ time: '11:00', text: `${home.name} on a back-to-back — ${b2bEarlyLines[Math.floor(Math.random() * b2bEarlyLines.length)]}`, type: 'info', quarter: 1 });
+      if (b2bFatigueScale >= 0.5) {
+        pbp.push({ time: '6:30', text: `${home.name} showing fatigue — ${b2bLateLines[Math.floor(Math.random() * b2bLateLines.length)]}`, type: 'info', quarter: 3 });
+      }
+    }
+    if (awayB2B) {
+      pbp.push({ time: '10:30', text: `${away.name} on a back-to-back — ${b2bEarlyLines[Math.floor(Math.random() * b2bEarlyLines.length)]}`, type: 'info', quarter: 1 });
+      if (b2bFatigueScale >= 0.5) {
+        pbp.push({ time: '5:45', text: `${away.name} showing fatigue — ${b2bLateLines[Math.floor(Math.random() * b2bLateLines.length)]}`, type: 'info', quarter: 3 });
+      }
+    }
+  }
   const homeScheme = home.activeScheme ?? 'Balanced';
   const awayScheme = away.activeScheme ?? 'Balanced';
   const homeStreaks = new Map<string, number>();
@@ -3572,6 +4281,16 @@ export const simulateGame = (
     !!(t.staff.headCoach?.badges as unknown as string[] | undefined)?.includes?.('Clutch Specialist');
 
   let garbageTime = false;
+
+  // Coach-dependent garbage time threshold: dev-minded coaches pull starters earlier
+  // to protect them and develop the bench; win-now coaches ride starters longer.
+  const getGtThreshold = (t: Team) => {
+    const dev = t.staff.headCoach?.ratingDevelopment ?? 50;
+    return dev >= 72 ? 18 : dev >= 52 ? 22 : 28;
+  };
+  const homeGtThreshold = getGtThreshold(home);
+  const awayGtThreshold = getGtThreshold(away);
+  let garbageTimePBPFired = false;
 
   for (let q = 1; q <= 4; q++) {
     const scoreDiff    = runningHome - runningAway;
@@ -3585,7 +4304,10 @@ export const simulateGame = (
       awayQStreak = Math.round(awayQStreak * 0.3);
     }
 
-    garbageTime = q === 4 && absScoreDiff >= 30;
+    // Leading team's coach decides when to empty the bench.
+    // Dev coaches (threshold 18) pull starters at a closer margin; win-now (28) ride them longer.
+    const activeGtThreshold = scoreDiff > 0 ? homeGtThreshold : awayGtThreshold;
+    garbageTime = q === 4 && absScoreDiff >= activeGtThreshold;
 
     // Per-quarter possessions with ±3 random variance
     const homeQPoss = Math.max(18, baseQPoss[q] + (Math.floor(Math.random() * 7) - 3));
@@ -3626,8 +4348,8 @@ export const simulateGame = (
       awayOff += hasClutchCoach(away) ? 0.10 : 0.05;
       // Clutch Shot Taker tendency: roster-average score adjusts Q4 scoring output in close games
       const rosterSz = (t: Team) => Math.min(8, t.roster.length);
-      const homeClutch = home.roster.slice(0, 8).reduce((s, p) => s + (p.tendencies?.situationalTendencies?.clutchShotTaker ?? 50), 0) / rosterSz(home);
-      const awayClutch = away.roster.slice(0, 8).reduce((s, p) => s + (p.tendencies?.situationalTendencies?.clutchShotTaker ?? 50), 0) / rosterSz(away);
+      const homeClutch = home.roster.slice(0, 8).reduce((s, p) => s + (p.tendencies?.isolation ?? 50), 0) / rosterSz(home);
+      const awayClutch = away.roster.slice(0, 8).reduce((s, p) => s + (p.tendencies?.isolation ?? 50), 0) / rosterSz(away);
       homeOff += (homeClutch - 50) / 100 * 0.08;
       awayOff += (awayClutch - 50) / 100 * 0.08;
     }
@@ -3645,8 +4367,13 @@ export const simulateGame = (
     let aQScore = Math.round(awayQPoss * qPaceFactor * (awayPPP + awayOff) + (Math.random() * 12 - 6));
 
     // ── Scoring Bounds Validation ─────────────────────────────────────────
-    const { lo: qLo, hi: qHi } = getQuarterScoringBounds(homeQPoss, qGamePace);
-    const aBounds = getQuarterScoringBounds(awayQPoss, qGamePace);
+    // In WNBA mode, scale bounds by pppScale so the soft-clamp doesn't push
+    // WNBA scores back up toward NBA levels.
+    const hBoundsRaw = getQuarterScoringBounds(homeQPoss, qGamePace);
+    const aBoundsRaw = getQuarterScoringBounds(awayQPoss, qGamePace);
+    const qLo = Math.round(hBoundsRaw.lo * pppScale);
+    const qHi = Math.round(hBoundsRaw.hi * pppScale);
+    const aBounds = { lo: Math.round(aBoundsRaw.lo * pppScale), hi: Math.round(aBoundsRaw.hi * pppScale) };
 
     // Score cooldown/spark: clamp unrealistic outliers with soft correction
     if (hQScore > qHi + 5) {
@@ -3692,29 +4419,68 @@ export const simulateGame = (
       const cn = trailing.staff.headCoach?.name?.split(' ').at(-1) ?? 'The coach';
       pbp.push({ time: '6:00', text: `${cn} calls a timeout — trying to stop the bleeding`, type: 'info', quarter: q });
     }
-    if (garbageTime) {
-      pbp.push({ time: '6:00', text: `Garbage time — benches emptying in the ${home.name} vs ${away.name} matchup`, type: 'info', quarter: q });
+    if (garbageTime && !garbageTimePBPFired) {
+      garbageTimePBPFired = true;
+      const leading  = scoreDiff > 0 ? home : away;
+      const trailing = scoreDiff > 0 ? away : home;
+      const coachLast = leading.staff.headCoach?.name?.split(' ').at(-1) ?? 'The coach';
+      const benchMobLines = [
+        `${coachLast} empties the bench — starters take a rest with a ${absScoreDiff}-point lead!`,
+        `Bench mob time! ${leading.name} up ${absScoreDiff} — the backups are getting their run.`,
+        `${coachLast} goes deep into the rotation. No sense risking the starters with this margin.`,
+        `${leading.name} up ${absScoreDiff} — reserves hit the floor! Coach showing confidence in the depth.`,
+      ];
+      pbp.push({ time: '8:00', text: benchMobLines[Math.floor(Math.random() * benchMobLines.length)], type: 'info', quarter: q });
+      pbp.push({ time: '6:30', text: `${trailing.name} starters still grinding, but ${leading.name}'s bench mob is holding the fort.`, type: 'info', quarter: q });
     }
     if (q === 4 && Math.abs(runningHome - runningAway) <= 5) {
       pbp.push({ time: '4:00', text: `We have a BALL GAME! ${Math.abs(runningHome - runningAway) <= 2 ? "Anyone's game with 4 minutes left!" : 'One possession game down the stretch!'}`, type: 'info', quarter: q });
+    }
+
+    // Intentional fouling — trailing team hack-a strategy in final 60 seconds of Q4/OT
+    if (q >= 4 && !garbageTime) {
+      const finalDiff    = runningHome - runningAway;
+      const finalDeficit = Math.abs(finalDiff);
+      if (finalDeficit >= 1 && finalDeficit <= 8) {
+        const trailingTeam4 = finalDiff < 0 ? home : away;
+        const leadingTeam4  = finalDiff < 0 ? away : home;
+        pbp.push(...generateIntentionalFoulEvents(trailingTeam4, leadingTeam4, finalDeficit, q, isWNBA));
+      }
+    }
+
+    // Upset drama commentary — fires when the expected underdog is leading late
+    if (preGameRatingGap >= 8) {
+      const underdogLeadMargin = favoriteIsHome ? runningAway - runningHome : runningHome - runningAway;
+      if (q === 2 && underdogLeadMargin >= 5) {
+        pbp.push({ time: '0:01', text: `HUGE UPSET BREWING! ${underdogTeam.name} has the heavily-favored ${favoriteTeam.name} on the ropes at halftime!`, type: 'info', quarter: 2 });
+      }
+      if (q === 3 && underdogLeadMargin >= 5) {
+        const upsetMsgs = [
+          `Nobody saw THIS coming — ${underdogTeam.name} is defying the odds tonight!`,
+          `Role players stepping up HUGE for ${underdogTeam.name}!`,
+          `${underdogTeam.name} playing the game of their lives — one quarter away from a MASSIVE upset!`,
+        ];
+        pbp.push({ time: '0:01', text: upsetMsgs[Math.floor(Math.random() * upsetMsgs.length)], type: 'info', quarter: 3 });
+      }
     }
 
     // ── BUG 4 FIX: Starters always open Q1 and Q3 ────────────────────────
     // In the NBA, starters always open the 1st and 3rd quarters regardless of
     // foul trouble or fatigue (unless 5 fouls / injured, handled by rotation setup).
     // Sub logic does not fire for the first 2 minutes of Q3.
+    const qStartTime = `${quarterLength}:00`;
     if (q === 1) {
-      pbp.push({ time: '12:00', text: `${home.name} and ${away.name} are set — starting lineups on the floor for tip-off.`, type: 'info', quarter: 1 });
+      pbp.push({ time: qStartTime, text: `${home.name} and ${away.name} are set — starting lineups on the floor for tip-off.`, type: 'info', quarter: 1 });
     }
     if (q === 3) {
-      pbp.push({ time: '12:00', text: `${home.name} opens the second half with their starting lineup.`, type: 'info', quarter: 3 });
-      pbp.push({ time: '12:00', text: `${away.name} opens the second half with their starting lineup.`, type: 'info', quarter: 3 });
+      pbp.push({ time: qStartTime, text: `${home.name} opens the second half with their starting lineup.`, type: 'info', quarter: 3 });
+      pbp.push({ time: qStartTime, text: `${away.name} opens the second half with their starting lineup.`, type: 'info', quarter: 3 });
     }
 
     const homePBPBoost = homeOff * 0.5;
     const awayPBPBoost = awayOff * 0.5;
-    const hResult = generateQuarterPBP(home, away, q, homeQPoss, homeScheme, homeStreaks, homePBPBoost, garbageTime, homeQStreak);
-    const aResult = generateQuarterPBP(away, home, q, awayQPoss, awayScheme, awayStreaks, awayPBPBoost, garbageTime, awayQStreak);
+    const hResult = generateQuarterPBP(home, away, q, homeQPoss, homeScheme, homeStreaks, homePBPBoost, garbageTime, homeQStreak, quarterLength);
+    const aResult = generateQuarterPBP(away, home, q, awayQPoss, awayScheme, awayStreaks, awayPBPBoost, garbageTime, awayQStreak, quarterLength);
     homeQStreak = hResult.teamStreak;
     awayQStreak = aResult.teamStreak;
 
@@ -3736,130 +4502,297 @@ export const simulateGame = (
   let totalHome = Math.max(40, runningHome);
   let totalAway = Math.max(40, runningAway);
 
-  // ── 7. Player stat distribution ──────────────────────────────────────────
-  const statPace = totalPoss; // use actual total possessions for FGA/REB scaling
-  const distributeToPlayers = (team: Team, totalPts: number, isHome: boolean, isGT: boolean) => {
+  // ── 7. Player stat distribution via possession-based event engine ────────
+  //
+  // buildTeamStates: allocate per-player minutes, handle DNPs, roll variance,
+  // then create TeamPossState[] ready for runOffenseEngine.
+  const buildTeamStates = (team: Team, isHome: boolean, isGT: boolean, teamScoreDiff: number): TeamPossState[] => {
     const roster      = team.roster;
-    const totalRating = roster.reduce((acc, p) => acc + p.rating, 0);
-    const teamFga     = Math.round(statPace * 1.10);
-    // teamReb: ~42–52 boards/team at NBA pace. 0.50 coefficient (was 0.44) accounts
-    // for offensive boards — each missed shot is a rebound opportunity for either team.
-    // No artificial cap — fast-paced games with many missed shots can yield 60+ team boards.
-    const teamReb     = Math.round(statPace * 0.50);
-    // NBA reality: ~60% of FGM are assisted; FGM ≈ pts / 2.2.
-    // Old coefficient (0.6) applied to estimated FGM, but the share-sum across all
-    // players exceeds 1.0 by ~1.48×, causing reported team assists to balloon to 45+.
-    // New coefficient (0.46) brings the raw target to ~22-26 for typical 105-125 pt games,
-    // matching the 2024-25 NBA range of 22-26 team assists per game.
-    const teamAst     = Math.round((totalPts / 2.2) * 0.46);
-
-    // Opponent defensive averages — computed once per team, applied to every player's box score.
-    // Uses top-8 rotation players as the sample (starters + primary bench).
-    const oppRoster      = isHome ? away.roster : home.roster;
-    const oppTopN        = oppRoster.slice(0, 8);
-    const oppCount       = Math.max(1, oppTopN.length);
-
-    // 3PT suppression: avg perimDef 75 → ~−1.5 %  |  85 → ~−2.1 %  |  25 → ~+0.7 %
-    const oppAvgPerimDef   = oppTopN.reduce((s, op) => s + (op.attributes.perimeterDef ?? 50), 0) / oppCount;
-    const oppAvgDefIQ      = oppTopN.reduce((s, op) => s + (op.attributes.defensiveIQ  ?? 50), 0) / oppCount;
-    const oppPerimDefMod   = get3PTContestMod(oppAvgPerimDef, 'TEAM_BOX_SCORE', oppAvgDefIQ);
-
-    // At-rim suppression: avg interiorDef 80 → ~−3.6 %  |  85 → ~−4.2 %  |  20 → ~+1.4 %
-    const oppAvgInteriorDef    = oppTopN.reduce((s, op) => s + (op.attributes.interiorDef ?? 50), 0) / oppCount;
-    const oppInteriorDefMod    = getRimProtectionMod(oppAvgInteriorDef, 'TEAM_BOX_SCORE');
-
-    // Mid-range suppression: avg perimDef 75 → ~−2.0 %  |  85 → ~−2.8 %  |  25 → ~+0.9 %
-    const oppMidDefMod = getMidRangeContestMod(oppAvgPerimDef, 'TEAM_BOX_SCORE_MID', oppAvgDefIQ);
-
-    // Post suppression: composite interiorDef + strength; avg intDef 80/str 70 → ~−5 %
-    const oppAvgInteriorStr = oppTopN.reduce((s, op) => s + (op.attributes.strength ?? 50), 0) / oppCount;
-    const oppPostDefMod     = getPostDefenseMod(oppAvgInteriorDef, oppAvgInteriorStr, 'TEAM_BOX_SCORE_POST');
-
-    // Power-curve usage: (rating/avg)^4.0 — sharper star concentration so a
-    // 90-rated star absorbs ~30 FGA while a 75-rated role player gets ~11.
-    const avgRating     = totalRating / Math.max(1, roster.length);
-    const rawUsageArr   = roster.map(p => Math.pow(Math.max(1, p.rating) / avgRating, 4.0));
-    const totalRawUsage = rawUsageArr.reduce((s, u) => s + u, 0);
-    const usageShares   = rawUsageArr.map(u => u / Math.max(1, totalRawUsage));
-
-    // Team spacing: avg 3PT attribute — drives kick-out assist opportunities for playmakers
-    const teamAvg3pt = roster.reduce((s, p) => s + (p.attributes.shooting3pt ?? 70), 0) / Math.max(1, roster.length);
-    // Implied team FG% from this game's points/FGA — hot-shooting teams record more assists
-    const impliedFgPct = teamFga > 0 ? Math.min(0.65, Math.max(0.38, (totalPts / 2.2) / teamFga)) : 0.48;
-
-    // Rating rank (0 = best player on roster) for star-minutes differentiation
+    // Rating rank for star-minutes differentiation
     const sortedByRating = roster
       .map((p, idx) => ({ id: p.id, rating: p.rating, idx }))
       .sort((a, b) => b.rating - a.rating);
     const ratingRank = new Map(sortedByRating.map(({ id }, rank) => [id, rank]));
+    const isB2BTeam     = isHome ? homeB2B : awayB2B;
+    const isBlowoutWin  = teamScoreDiff >= 15;
+    const isCloseGame   = Math.abs(teamScoreDiff) <= 5;
 
-    const raw = roster.map((p, i) => {
-      // Hard gate: injured players get a zero-stat DNP line, bypassing all sim logic.
-      // This must run before the isGT block to prevent garbage-time code from
-      // overwriting mins for players who happen to be in the first 5 roster slots.
-      const isInjured = p.status === 'Injured' || (p.injuryDaysLeft != null && p.injuryDaysLeft > 0);
-      if (isInjured) {
-        return {
-          playerId: p.id, name: p.name,
-          min: 0, pts: 0, reb: 0, offReb: 0, defReb: 0,
-          ast: 0, stl: 0, blk: 0,
-          fgm: 0, fga: 0, threepm: 0, threepa: 0, ftm: 0, fta: 0,
-          tov: 0, pf: 0, techs: 0, flagrants: 0, plusMinus: 0,
-          ejected: false, dnp: 'Injured',
-        };
+    return roster.map((p, i) => {
+      // ── DNP gates ─────────────────────────────────────────────────────────
+      if (p.status === 'Injured' || (p.injuryDaysLeft != null && p.injuryDaysLeft > 0)) {
+        const s = mkTeamPossState(p, 0, 0);
+        (s as TeamPossState & { dnp: string }).dnp = 'Injured';
+        return s;
+      }
+      if (p.isSuspended && (p.suspensionGames ?? 0) > 0) {
+        const s = mkTeamPossState(p, 0, 0);
+        (s as TeamPossState & { dnp: string }).dnp = 'Suspended';
+        return s;
       }
 
+      // ── Minute allocation ─────────────────────────────────────────────────
       let mins = 0;
       if (team.rotation && team.rotation.minutes[p.id] !== undefined) {
-        mins = Math.round(team.rotation.minutes[p.id] * quarterLengthScale);
+        const baseMins = Math.round(team.rotation.minutes[p.id] * quarterLengthScale);
+        let scriptAdj = 0;
+        if (i < 5) {
+          if (isBlowoutWin)    scriptAdj = -(3 + Math.floor(Math.random() * 4));
+          else if (isCloseGame) scriptAdj = 2 + Math.floor(Math.random() * 3);
+        }
+        mins = Math.max(0, baseMins + scriptAdj + (Math.round(Math.random() * 6) - 3));
       } else {
         const rank = ratingRank.get(p.id) ?? i;
         if (i < 5) {
-          if (rank === 0)      mins = 37 + Math.floor(Math.random() * 4);
-          else if (rank === 1) mins = 34 + Math.floor(Math.random() * 4);
-          else if (rank === 2) mins = 30 + Math.floor(Math.random() * 4);
-          else                 mins = 26 + Math.floor(Math.random() * 5);
+          if (isCloseGame)     mins = 36 + Math.floor(Math.random() * 5);
+          else if (rank === 0) mins = 35 + Math.floor(Math.random() * 4);
+          else if (rank === 1) mins = 32 + Math.floor(Math.random() * 5);
+          else if (rank === 2) mins = 29 + Math.floor(Math.random() * 5);
+          else                 mins = 26 + Math.floor(Math.random() * 6);
+          mins += Math.round(Math.random() * 4) - 2;
         } else if (i < 9) mins = 14 + Math.floor(Math.random() * 10);
         else if (i < 12)  mins = Math.floor(Math.random() * 6);
-        mins = Math.round(mins * quarterLengthScale);
+        mins = Math.max(0, Math.round(mins * quarterLengthScale));
       }
       if (isGT) {
-        if (i < 5) mins = Math.max(Math.round(20 * quarterLengthScale), mins - Math.round(10 * quarterLengthScale));
-        else if (i < 9) mins = Math.min(Math.round(30 * quarterLengthScale), mins + Math.round(8 * quarterLengthScale));
+        const isLeading = isHome ? totalHome > totalAway : totalAway > totalHome;
+        if (i < 5) {
+          mins = Math.max(Math.round(20 * quarterLengthScale), mins - Math.round(10 * quarterLengthScale));
+        } else if (i < 9) {
+          mins = Math.min(Math.round(30 * quarterLengthScale), mins + Math.round(8 * quarterLengthScale));
+        } else if (isLeading) {
+          mins = Math.round(6 * quarterLengthScale) + Math.round(Math.random() * 4 * quarterLengthScale);
+        }
       }
-      const ftBonus    = isHome ? 0.03 : 0;
-      const varRoll    = playerVariance.get(p.id) ?? 0;
-      const usageShare = usageShares[i];
-      const line = simulatePlayerGameLine(p, totalPts, teamFga, teamReb, teamAst, mins, usageShare, varRoll, ftBonus, oppPerimDefMod, oppInteriorDefMod, oppMidDefMod, oppPostDefMod, p.morale ?? 75, teamAvg3pt, impliedFgPct);
-      return { ...line, techs: 0, flagrants: 0, ejected: false };
-    });
+      if (isB2BTeam && b2bFatigueScale > 0 && !(team.rotation?.minutes[p.id] !== undefined)) {
+        const rank = ratingRank.get(p.id) ?? i;
+        if (rank <= 1) mins = Math.max(Math.round(28 * quarterLengthScale), mins - Math.round((3 + b2bFatigueScale * 3) * quarterLengthScale));
+        else if (rank <= 4 && i < 5) mins = Math.max(Math.round(22 * quarterLengthScale), mins - Math.round((1 + b2bFatigueScale * 2) * quarterLengthScale));
+      }
+      if (isPreseason) {
+        const pAge = p.age ?? 25; const pYrsPro = p.yearsPro ?? 5;
+        if ((pAge <= 22 || pYrsPro <= 1) && mins > 0) mins = Math.min(Math.round(42 * quarterLengthScale), mins + Math.round((8 + Math.floor(Math.random() * 6)) * quarterLengthScale));
+        else if (pAge >= 30 && i < 5) mins = Math.max(0, mins - Math.round((7 + Math.floor(Math.random() * 5)) * quarterLengthScale));
+      }
 
-    // No post-normalization — each player's rebounds are independent of teamReb.
-    // Dominant bigs keep their raw boards; no uniform scaling suppresses elite performances.
-    return raw;
+      // ── Variance roll: hot/cold night encoded into varRoll ────────────────
+      // varRoll > 0 = hot night (higher FG%, more usage weight in possession engine)
+      // varRoll < 0 = cold night (lower FG%, less usage weight)
+      // varRoll magnitude 15+ = explosive (big night), -15 or lower = ice cold
+      let varRoll = playerVariance.get(p.id) ?? 0;
+      if (!isGT && p.rating >= 78) {
+        const starScore  = Math.max(0, Math.min(1, (p.rating - 78) / 19));
+        const isoTend    = p.tendencies?.isolation ?? 50;
+        const ctxBonus   = (isHome ? 0.02 : 0) + (['Hot', 'Red Hot'].includes(rivalryLevel) ? 0.04 : 0)
+          + (isoTend - 50) / 100 * 0.07;
+        const bigProb    = Math.max(0, Math.min(isWNBA ? 0.16 : 0.28, 0.07 + starScore * 0.21 + ctxBonus));
+        const histProb   = isWNBA ? 0 : Math.max(0, Math.min(0.0015, 0.00005 + starScore * 0.00145));
+        const r = Math.random();
+        if (r < histProb)              varRoll = 22 + Math.random() * 8;  // historic night
+        else if (r < histProb + bigProb) varRoll = 14 + Math.random() * 6; // big night
+      }
+      if (varRoll < 14) {  // cold night check (only if not already hot)
+        const traits = p.personalityTraits ?? [];
+        const isStreaky = traits.includes('Streaky');
+        const isPro     = traits.includes('Professional');
+        const isB2B     = isHome ? homeB2B : awayB2B;
+        const moralePenalty = Math.max(0, (50 - (p.morale ?? 75)) / 100 * 0.06);
+        const iceColdProb = (isStreaky ? 0.04 : isPro ? 0.01 : 0.02) + (isB2B ? 0.04 : 0) + moralePenalty;
+        const coldProb    = (isStreaky ? 0.12 : isPro ? 0.04 : 0.08) + (isB2B ? 0.02 : 0) + moralePenalty;
+        const r = Math.random();
+        if (r < iceColdProb)            varRoll = -15 - Math.random() * 7;
+        else if (r < iceColdProb + coldProb) varRoll = -7 - Math.random() * 7;
+      }
+
+      return mkTeamPossState(p, mins, varRoll);
+    });
   };
 
-  let homePlayerStats = distributeToPlayers(home, totalHome, true,  garbageTime);
-  let awayPlayerStats = distributeToPlayers(away, totalAway, false, garbageTime);
+  // Build possession states for both teams
+  const homeStates = buildTeamStates(home, true,  garbageTime, totalHome - totalAway);
+  const awayStates = buildTeamStates(away, false, garbageTime, totalAway - totalHome);
+
+  // Simulate possessions: each call runs one team's offense against the other's defense.
+  // Cross-team defensive stats (stl, blk, dreb) are written directly to the defending states.
+  const homePbMults = PLAYBOOK_SHOT_MODS[homeScheme] ?? PLAYBOOK_SHOT_MODS['Balanced'];
+  const awayPbMults = PLAYBOOK_SHOT_MODS[awayScheme] ?? PLAYBOOK_SHOT_MODS['Balanced'];
+  runOffenseEngine(homeStates, awayStates, totalPoss, homeScheme, homePbMults, isWNBA);
+  runOffenseEngine(awayStates, homeStates, totalPoss, awayScheme, awayPbMults, isWNBA);
+
+  // Emit per-player audit to dev console (one group per team, collapsed by default)
+  emitPlayerAudit(homeStates, home.name);
+  emitPlayerAudit(awayStates, away.name);
+
+  // Convert TeamPossState[] → GamePlayerLine[] for all downstream processing
+  const statesToLines = (states: TeamPossState[]): typeof homePlayerStats =>
+    states.map(s => ({
+      playerId: s.p.id, name: s.p.name, min: s.min,
+      pts: s.pts, reb: s.oreb + s.dreb, offReb: s.oreb, defReb: s.dreb,
+      ast: s.ast, stl: s.stl, blk: s.blk,
+      fgm: s.fgm, fga: s.fga, threepm: s.tpm, threepa: s.tpa,
+      ftm: s.ftm, fta: s.fta, tov: s.tov, pf: s.pf,
+      plusMinus: 0, techs: 0, flagrants: 0, ejected: false,
+      ...((s as TeamPossState & { dnp?: string }).dnp
+        ? { dnp: (s as TeamPossState & { dnp?: string }).dnp } : {}),
+    }));
+
+  let homePlayerStats = statesToLines(homeStates);
+  let awayPlayerStats = statesToLines(awayStates);
+
+  // ── B2B extra turnovers (+1 per team per game) ──────────────────────────
+  // Distributed to top-minute active players; runs BEFORE the TOV clamp so the
+  // elevated ceiling on B2B nights is reflected in the final clamp pass.
+  if (b2bFatigueScale > 0) {
+    const addB2BTovs = (lines: typeof homePlayerStats, extraTov: number) => {
+      let remaining = extraTov;
+      const ranked = lines
+        .map((p, idx) => ({ idx, min: p.min ?? 0 }))
+        .filter(x => x.min > 0 && !lines[x.idx].dnp)
+        .sort((a, b) => b.min - a.min);
+      for (const { idx } of ranked) {
+        if (remaining <= 0) break;
+        lines[idx] = { ...lines[idx], tov: (lines[idx].tov ?? 0) + 1 };
+        remaining--;
+      }
+      return lines;
+    };
+    if (homeB2B) {
+      const extra = Math.round(0.5 + b2bFatigueScale * 0.8);
+      homePlayerStats = addB2BTovs([...homePlayerStats], extra);
+    }
+    if (awayB2B) {
+      const extra = Math.round(0.5 + b2bFatigueScale * 0.8);
+      awayPlayerStats = addB2BTovs([...awayPlayerStats], extra);
+    }
+  }
 
   totalHome = homePlayerStats.reduce((s, p) => s + p.pts, 0);
   totalAway = awayPlayerStats.reduce((s, p) => s + p.pts, 0);
 
-  // ── 8. Chippy / tech rolls ────────────────────────────────────────────────
+  // ── Hot-Night PBP: God Mode flavor text for explosive scoring performances ───
+  // WNBA thresholds: 35+ legendary, 28+ explosive, 22+ impressive (vs NBA 50/40/30).
+  const injectHotNightPBP = (stats: typeof homePlayerStats, teamRef: Team) => {
+    const lastName = (name: string) => name.split(' ').at(-1) ?? name;
+    const rndTime  = () => `${Math.floor(Math.random() * 9) + 1}:${String(Math.floor(Math.random() * 60)).padStart(2, '0')}`;
+    const hotFloor   = isWNBA ? 22 : 30;
+    const bigTier    = isWNBA ? 28 : 40;
+    const epicTier   = isWNBA ? 35 : 50;
+    for (const line of stats) {
+      if (line.dnp || line.pts < hotFloor) continue;
+      const player = teamRef.roster.find(pl => pl.id === line.playerId);
+      if (!player) continue;
+      const n   = lastName(player.name);
+      const q34 = Math.floor(Math.random() * 2) + 3;
+      if (line.pts >= epicTier) {
+        pbp.push({ time: rndTime(), text: `LEGENDARY NIGHT — ${n} has ${line.pts} POINTS! The crowd will be talking about this one for years!`, type: 'score' as const, quarter: 4 });
+        pbp.push({ time: '2:00',    text: `${n} puts on an all-time CLINIC — ${line.fgm}/${line.fga} FG, ${line.ftm}/${line.fta} FT. Absolutely electric.`, type: 'score' as const, quarter: 4 });
+      } else if (line.pts >= bigTier) {
+        pbp.push({ time: rndTime(), text: `${n} EXPLODES for ${line.pts} — one of the best individual scoring nights of the season!`, type: 'score' as const, quarter: q34 });
+      } else {
+        pbp.push({ time: rndTime(), text: `${n} is TAKING OVER — ${line.pts} points and the defense has no answer!`, type: 'score' as const, quarter: q34 });
+      }
+      // God Mode scoring run sub-events
+      const threeBombThresh = isWNBA ? 5 : 7;
+      const threeHotThresh  = isWNBA ? 4 : 5;
+      if (line.threepm >= threeBombThresh) {
+        pbp.push({ time: rndTime(), text: `${n} AGAIN from three — ${line.threepm} bombs tonight! Someone call the fire department!`, type: 'score' as const, quarter: q34 });
+      } else if (line.threepm >= threeHotThresh) {
+        pbp.push({ time: rndTime(), text: `${n} drains another three — ${line.threepm} from downtown. UNCONSCIOUS right now!`, type: 'score' as const, quarter: 3 });
+      }
+      if (line.pts >= bigTier && line.fgm >= (isWNBA ? 10 : 14)) {
+        pbp.push({ time: '3:30', text: `${n} going on a SCORING RUN — ${line.fgm}-${line.fga} from the field tonight. Where do you even guard her?`, type: 'info' as const, quarter: 4 });
+      }
+    }
+  };
+  injectHotNightPBP(homePlayerStats, home);
+  injectHotNightPBP(awayPlayerStats, away);
+
+  // ── Cold-Night PBP: flavor text for ice-cold shooting performances ─────────
+  const injectColdNightPBP = (stats: typeof homePlayerStats, teamRef: Team) => {
+    const lastName = (name: string) => name.split(' ').at(-1) ?? name;
+    const rndTime  = () => `${Math.floor(Math.random() * 9) + 1}:${String(Math.floor(Math.random() * 60)).padStart(2, '0')}`;
+    for (const line of stats) {
+      if (line.dnp || line.min < 18) continue;
+      const player = teamRef.roster.find(pl => pl.id === line.playerId);
+      if (!player) continue;
+      const expected = (player.rating / 100) * 30;
+      const fgPct = line.fgm / Math.max(1, line.fga);
+      const isIceCold = line.fga >= 7 && fgPct < 0.25;
+      const isCold    = line.pts <= expected * 0.45 && player.rating >= 70;
+      if (!isIceCold && !isCold) continue;
+      const n         = lastName(player.name);
+      const q         = Math.floor(Math.random() * 2) + 2;
+      const fgPctStr  = `${line.fgm}/${line.fga}`;
+      if (isIceCold && line.fga >= 10) {
+        pbp.push({ time: rndTime(), text: `${n} is ICE COLD tonight — ${fgPctStr} from the field. The shots just aren't falling.`, type: 'info' as const, quarter: q });
+        pbp.push({ time: rndTime(), text: `${n} can't find his rhythm — defense is making life difficult every single possession.`, type: 'info' as const, quarter: q });
+      } else if (isIceCold) {
+        pbp.push({ time: rndTime(), text: `${n} can't buy a bucket tonight — ${fgPctStr} FG. The defense is locking him up completely.`, type: 'info' as const, quarter: q });
+      } else {
+        pbp.push({ time: rndTime(), text: `${n} is having a quiet night — ${line.pts} points on ${fgPctStr} shooting. Nowhere near his usual form.`, type: 'info' as const, quarter: q });
+      }
+    }
+  };
+  injectColdNightPBP(homePlayerStats, home);
+  injectColdNightPBP(awayPlayerStats, away);
+
+  // ── 8. Chippy / tech rolls + flagrant 2 + suspension triggers ──────────────
   let isChippy = false;
   const rivalryMod = ['Hot', 'Red Hot'].includes(rivalryLevel) ? 1.5 : 1.0;
+  const gameSuspensions: Array<{ playerId: string; playerName: string; teamId: string; games: number; reason: string }> = [];
+
   const rollForChippy = (stats: GamePlayerLine[], isHome: boolean) => {
+    const teamRef = isHome ? home : away;
     stats.forEach(p => {
-      const player = (isHome ? home : away).roster.find(pl => pl.id === p.playerId)!;
+      const player = teamRef.roster.find(pl => pl.id === p.playerId);
+      if (!player) return;
+      const traits = player.personalityTraits ?? [];
+
+      // ── Technical foul roll ───────────────────────────────────────────────
       let techChance = 0.02 * rivalryMod;
-      if (player?.personalityTraits.includes('Diva/Star'))    techChance *= 1.8;
-      if (player?.personalityTraits.includes('Tough/Alpha'))  techChance *= 1.4;
-      if (player?.personalityTraits.includes('Professional')) techChance *= 0.5;
-      if (player?.personalityTraits.includes('Leader'))       techChance *= 0.7;
+      if (traits.includes('Diva/Star'))    techChance *= 1.8;
+      if (traits.includes('Tough/Alpha'))  techChance *= 1.4;
+      if (traits.includes('Hot Head'))     techChance *= 1.6;
+      if (traits.includes('Professional')) techChance *= 0.5;
+      if (traits.includes('Leader'))       techChance *= 0.7;
       if (Math.random() < techChance) {
         p.techs += 1; isChippy = true;
         pbp.push({ time: `${Math.floor(Math.random() * 12)}:00`, quarter: Math.floor(Math.random() * 4) + 1, text: `${p.name} picks up a technical — bench reacts!`, type: 'foul' });
         if (isHome) totalAway += 1; else totalHome += 1;
+
+        // Second tech in same game → automatic ejection; only ~20% chance of 1-game suspension
+        if (p.techs >= 2 && !p.ejected) {
+          p.ejected = true;
+          pbp.push({ time: `${Math.floor(Math.random() * 12)}:00`, quarter: Math.floor(Math.random() * 4) + 1, text: `${p.name} EJECTED — second technical foul! He will be subject to league review.`, type: 'foul' });
+          // Rare suspension: 20% baseline, Hot Head 30%
+          const suspChance = traits.includes('Hot Head') ? 0.30 : 0.20;
+          if (Math.random() < suspChance) {
+            gameSuspensions.push({ playerId: player.id, playerName: player.name, teamId: teamRef.id, games: 1, reason: 'two technical fouls in one game' });
+          }
+        }
+      }
+
+      // ── Flagrant 2 roll (very rare — ~0.15–0.45% base, skip already-ejected) ──
+      // A Flagrant 2 always means ejection + fine. Suspension only on repeat offenses
+      // this season (player already has ≥1 flagrant) or a 25% chance on first offense.
+      if (!p.ejected) {
+        let flagrant2Chance = 0.0015 * rivalryMod; // halved from before
+        if (traits.includes('Hot Head'))     flagrant2Chance *= 3.0;
+        if (traits.includes('Tough/Alpha'))  flagrant2Chance *= 2.0;
+        if (traits.includes('Diva/Star'))    flagrant2Chance *= 1.5;
+        if (traits.includes('Professional')) flagrant2Chance *= 0.3;
+        if (Math.random() < flagrant2Chance) {
+          p.flagrants += 1; p.ejected = true; isChippy = true;
+          pbp.push({ time: `${Math.floor(Math.random() * 12)}:00`, quarter: Math.floor(Math.random() * 4) + 1, text: `FLAGRANT 2 on ${p.name} — automatic ejection! Fine issued; the league will determine if a suspension follows.`, type: 'foul' });
+          // Season-level flagrant count drives suspension decision
+          const seasonFlagrants = (player.stats?.flagrants ?? 0) + 1; // +1 for this game
+          const isRepeatOffender = seasonFlagrants >= 2;
+          // First F2 of the season: rare 8% suspension; repeat offenders: 75%, still 1-game max.
+          const suspChance = isRepeatOffender ? 0.75 : 0.08;
+          if (Math.random() < suspChance) {
+            const f2Games = 1; // single-game max; egregious repeat escalation is handled by tech accumulation
+            gameSuspensions.push({ playerId: player.id, playerName: player.name, teamId: teamRef.id, games: f2Games, reason: isRepeatOffender ? `repeat Flagrant 2 foul (${seasonFlagrants} this season)` : 'Flagrant 2 foul' });
+          }
+        }
       }
     });
   };
@@ -3881,7 +4814,8 @@ export const simulateGame = (
       if (injuryMultiplier === 0) return; // 'None' — injuries disabled
       let chance = 0.004 * injuryMultiplier;
       if (p.min > 35) chance *= 1.5;
-      if (isB2B)      chance *= 1.3;
+      // B2B fatigue raises injury risk: base 1.15× scaling up to 1.50× at High fatigue
+      if (isB2B)      chance *= (b2bFatigueScale > 0 ? 1.15 + b2bFatigueScale * 0.35 : 1.3);
       // Durability attribute: 99 → ~50% less likely, 50 → neutral, 1 → ~50% more likely
       const durability = player.attributes.durability ?? 50;
       chance *= 1 - ((durability - 50) / 100);
@@ -4030,6 +4964,52 @@ export const simulateGame = (
     }
   })();
 
+  // ── League Calibration Report (dev console — never affects sim math) ──────
+  // Logs per-team stat totals against 2025-26 NBA target ranges after every game.
+  // Use these numbers to tune possession engine constants when league averages drift.
+  // Targets: PPG 110–118 | FGA 88–92 | 3PA 35–43 | FTA 20–25 | TOV 13–16
+  //          OREB 9–12 | DREB 32–36 | AST 24–28 | STL 6–9 | BLK 4–6 | PF 18–23
+  (() => {
+    const teamStats = (stats: typeof homePlayerStats, pts: number) => {
+      const fga    = stats.reduce((s, p) => s + (p.fga    ?? 0), 0);
+      const fgm    = stats.reduce((s, p) => s + (p.fgm    ?? 0), 0);
+      const tpa    = stats.reduce((s, p) => s + (p.threepa ?? 0), 0);
+      const fta    = stats.reduce((s, p) => s + (p.fta    ?? 0), 0);
+      const tov    = stats.reduce((s, p) => s + (p.tov    ?? 0), 0);
+      const oreb   = stats.reduce((s, p) => s + (p.offReb ?? 0), 0);
+      const dreb   = stats.reduce((s, p) => s + (p.defReb ?? 0), 0);
+      const ast    = stats.reduce((s, p) => s + (p.ast    ?? 0), 0);
+      const stl    = stats.reduce((s, p) => s + (p.stl    ?? 0), 0);
+      const blk    = stats.reduce((s, p) => s + (p.blk    ?? 0), 0);
+      const pf     = stats.reduce((s, p) => s + (p.pf     ?? 0), 0);
+      const fgPct  = fga > 0 ? ((fgm / fga) * 100).toFixed(1) : '-';
+      // possession formula: FGA + 0.44*FTA + TOV - OREB
+      const poss   = fga + 0.44 * fta + tov - oreb;
+      const inRange = (v: number, lo: number, hi: number) => v >= lo && v <= hi ? '✓' : `✗(${lo}–${hi})`;
+      return { pts, fga, tpa, fta, tov, oreb, dreb, ast, stl, blk, pf, fgPct, poss, inRange };
+    };
+    const h = teamStats(homePlayerStats, totalHome);
+    const a = teamStats(awayPlayerStats, totalAway);
+    const log = (label: string, hv: number, av: number, lo: number, hi: number) =>
+      console.log(`  ${label.padEnd(8)} H:${String(hv).padStart(4)} ${h.inRange(hv,lo,hi)}  A:${String(av).padStart(4)} ${a.inRange(av,lo,hi)}`);
+    console.groupCollapsed(
+      `[CALIB] ${home.name} ${totalHome}–${totalAway} ${away.name} | pace ${gamePace} | poss H:${h.poss.toFixed(0)} A:${a.poss.toFixed(0)}`
+    );
+    log('PPG',  totalHome, totalAway, 110, 118);
+    log('FGA',  h.fga, a.fga, 88, 92);
+    log('3PA',  h.tpa, a.tpa, 35, 43);
+    log('FTA',  h.fta, a.fta, 20, 25);
+    log('TOV',  h.tov, a.tov, 13, 16);
+    log('OREB', h.oreb, a.oreb, 9, 12);
+    log('DREB', h.dreb, a.dreb, 32, 36);
+    log('AST',  h.ast, a.ast, 24, 28);
+    log('STL',  h.stl, a.stl, 6, 9);
+    log('BLK',  h.blk, a.blk, 4, 6);
+    log('PF',   h.pf, a.pf, 18, 23);
+    console.log(`  FG%     H:${h.fgPct}%    A:${a.fgPct}%`);
+    console.groupEnd();
+  })();
+
   // ── 12. Clutch Stats Injection ────────────────────────────────────────────
   // Clutch = last 5 min of Q4/OT when score diff ≤ 5 at game end.
   // Since we use box-score sim (not per-possession), clutch stats are synthetically derived.
@@ -4057,7 +5037,7 @@ export const simulateGame = (
       // Weight = minuteShare × clutchShotTaker tendency (default 50 → weight 1.0)
       const weights = active.map(s => {
         const p = team.roster.find(r => r.id === s.playerId);
-        const clutchTendency = p?.tendencies?.situationalTendencies?.clutchShotTaker ?? 50;
+        const clutchTendency = p?.tendencies?.isolation ?? 50;
         return (s.min / 48) * (clutchTendency / 50);
       });
       const totalWeight = weights.reduce((a, b) => a + b, 0);
@@ -4072,7 +5052,8 @@ export const simulateGame = (
         const ftPct      = s.fta  > 0 ? s.ftm  / s.fta  : 0.75;
         // Allocate pts: ~25% FT, ~20% 3pt, rest 2pt
         const cFta       = Math.max(0, Math.round(cPts * 0.25));
-        const cFtm       = Math.max(0, Math.round(cFta * ftPct));
+        let cFtm = 0;
+        for (let i = 0; i < cFta; i++) { if (Math.random() < ftPct) cFtm++; }
         const cThreepa   = Math.max(0, Math.round(cPts * 0.20 / 3));
         const cThreepm   = Math.max(0, Math.round(cThreepa * threePct));
         const rem        = Math.max(0, cPts - cFtm - cThreepm * 3);
@@ -4129,8 +5110,146 @@ export const simulateGame = (
     awayPlayerStats,
     topPerformers: allLines.slice(0, 3).map(l => ({ playerId: l.playerId, points: l.pts, rebounds: l.reb, assists: l.ast })),
     playByPlay: pbp,
-    date, season, isOvertime, isBuzzerBeater, isComeback, isChippy, gameInjuries,
+    date, season, isOvertime, isBuzzerBeater, isComeback, isChippy, gameInjuries, gameSuspensions,
   };
 };
 
+// ─── League Calibration Report ────────────────────────────────────────────────
+/**
+ * Aggregates box-score stats from a batch of GameResult objects and logs a
+ * calibration report to the console. Call this after simulating a week, month,
+ * or full season to verify the engine is hitting NBA-realistic targets.
+ *
+ * Targets (per team per game):
+ *   PPG 110–118 | FGA 88–92 | 3PA 35–43 | FTA 20–25 | FG% 46–50%
+ *   3P% 35–39%  | TOV 13–16 | AST 24–29 | STL 6–9   | BLK 4–6
+ * Individual season leaders:
+ *   PPG 28–35   | RPG 12–16 | APG 9–12  | SPG 1.7–2.4 | BPG 2.0–3.5
+ */
+export function computeLeagueCalibration(
+  results: import('../types').GameResult[],
+  label = 'BATCH',
+): void {
+  if (results.length === 0) return;
+
+  // Aggregate per-game team totals (each game contributes two team entries)
+  let totalPts = 0, totalFga = 0, totalFgm = 0, totalTpa = 0, totalTpm = 0;
+  let totalFta = 0, totalFtm = 0, totalTov = 0, totalAst = 0, totalStl = 0;
+  let totalBlk = 0, totalOreb = 0, totalDreb = 0, teamGames = 0;
+
+  // Per-player season accumulators keyed by playerId
+  const playerTotals = new Map<string, {
+    name: string; gp: number;
+    pts: number; reb: number; ast: number; stl: number; blk: number;
+  }>();
+
+  const addLine = (line: import('../types').GamePlayerLine) => {
+    if (!line.playerId || (line.min ?? 0) === 0) return;
+    const existing = playerTotals.get(line.playerId);
+    if (existing) {
+      existing.gp++;
+      existing.pts  += line.pts   ?? 0;
+      existing.reb  += line.reb   ?? 0;
+      existing.ast  += line.ast   ?? 0;
+      existing.stl  += line.stl   ?? 0;
+      existing.blk  += line.blk   ?? 0;
+    } else {
+      playerTotals.set(line.playerId, {
+        name: line.name ?? line.playerId,
+        gp: 1,
+        pts:  line.pts  ?? 0,
+        reb:  line.reb  ?? 0,
+        ast:  line.ast  ?? 0,
+        stl:  line.stl  ?? 0,
+        blk:  line.blk  ?? 0,
+      });
+    }
+  };
+
+  for (const r of results) {
+    const sumSide = (lines: import('../types').GamePlayerLine[]) => {
+      const fga  = lines.reduce((s, p) => s + (p.fga     ?? 0), 0);
+      const fgm  = lines.reduce((s, p) => s + (p.fgm     ?? 0), 0);
+      const tpa  = lines.reduce((s, p) => s + (p.threepa ?? 0), 0);
+      const tpm  = lines.reduce((s, p) => s + (p.threepm ?? 0), 0);
+      const fta  = lines.reduce((s, p) => s + (p.fta     ?? 0), 0);
+      const ftm  = lines.reduce((s, p) => s + (p.ftm     ?? 0), 0);
+      const tov  = lines.reduce((s, p) => s + (p.tov     ?? 0), 0);
+      const ast  = lines.reduce((s, p) => s + (p.ast     ?? 0), 0);
+      const stl  = lines.reduce((s, p) => s + (p.stl     ?? 0), 0);
+      const blk  = lines.reduce((s, p) => s + (p.blk     ?? 0), 0);
+      const oreb = lines.reduce((s, p) => s + (p.offReb  ?? 0), 0);
+      const dreb = lines.reduce((s, p) => s + (p.defReb  ?? 0), 0);
+      const pts  = lines.reduce((s, p) => s + (p.pts     ?? 0), 0);
+      return { fga, fgm, tpa, tpm, fta, ftm, tov, ast, stl, blk, oreb, dreb, pts };
+    };
+    for (const lines of [r.homePlayerStats, r.awayPlayerStats]) {
+      const t = sumSide(lines);
+      totalPts  += t.pts;  totalFga  += t.fga;  totalFgm  += t.fgm;
+      totalTpa  += t.tpa;  totalTpm  += t.tpm;  totalFta  += t.fta;
+      totalFtm  += t.ftm;  totalTov  += t.tov;  totalAst  += t.ast;
+      totalStl  += t.stl;  totalBlk  += t.blk;
+      totalOreb += t.oreb; totalDreb += t.dreb;
+      teamGames++;
+      lines.forEach(addLine);
+    }
+  }
+
+  const g = teamGames || 1;
+  const avgPpg  = totalPts  / g;
+  const avgFga  = totalFga  / g;
+  const avgTpa  = totalTpa  / g;
+  const avgFta  = totalFta  / g;
+  const avgTov  = totalTov  / g;
+  const avgAst  = totalAst  / g;
+  const avgStl  = totalStl  / g;
+  const avgBlk  = totalBlk  / g;
+  const fgPct   = totalFga  > 0 ? (totalFgm / totalFga * 100) : 0;
+  const threePct = totalTpa > 0 ? (totalTpm / totalTpa * 100) : 0;
+  const ftPct   = totalFta  > 0 ? (totalFtm / totalFta * 100) : 0;
+  const avgOreb = totalOreb / g;
+  const avgDreb = totalDreb / g;
+
+  // Individual season leaders (min 10 games played for a stable average)
+  const qualified = [...playerTotals.values()].filter(p => p.gp >= 10);
+  const leader = <K extends keyof typeof qualified[0]>(key: K) => {
+    if (qualified.length === 0) return { name: '—', avg: 0 };
+    const best = qualified.reduce((a, b) =>
+      ((b[key] as number) / b.gp) > ((a[key] as number) / a.gp) ? b : a);
+    return { name: best.name, avg: (best[key] as number) / best.gp };
+  };
+  const ppgLead = leader('pts');
+  const rpgLead = leader('reb');
+  const apgLead = leader('ast');
+  const spgLead = leader('stl');
+  const bpgLead = leader('blk');
+
+  const inRange = (v: number, lo: number, hi: number) =>
+    v >= lo && v <= hi ? '✓' : `✗ (target ${lo}–${hi})`;
+  const f1 = (n: number) => n.toFixed(1);
+  const f2 = (n: number) => n.toFixed(2);
+
+  console.groupCollapsed(
+    `[LEAGUE CALIB] ${label} — ${results.length} games / ${teamGames} team-games`);
+  console.log('  ── Team averages per game ──');
+  console.log(`  PPG   ${f1(avgPpg)}   ${inRange(avgPpg, 110, 118)}`);
+  console.log(`  FGA   ${f1(avgFga)}   ${inRange(avgFga, 88, 92)}`);
+  console.log(`  3PA   ${f1(avgTpa)}   ${inRange(avgTpa, 35, 43)}`);
+  console.log(`  FTA   ${f1(avgFta)}   ${inRange(avgFta, 20, 25)}`);
+  console.log(`  FG%   ${f1(fgPct)}%   ${inRange(fgPct, 46, 50)}`);
+  console.log(`  3P%   ${f1(threePct)}%  ${inRange(threePct, 35, 39)}`);
+  console.log(`  FT%   ${f1(ftPct)}%`);
+  console.log(`  TOV   ${f1(avgTov)}   ${inRange(avgTov, 13, 16)}`);
+  console.log(`  AST   ${f1(avgAst)}   ${inRange(avgAst, 24, 29)}`);
+  console.log(`  STL   ${f1(avgStl)}   ${inRange(avgStl, 6, 9)}`);
+  console.log(`  BLK   ${f1(avgBlk)}   ${inRange(avgBlk, 4, 6)}`);
+  console.log(`  OREB  ${f1(avgOreb)}  |  DREB  ${f1(avgDreb)}`);
+  console.log('  ── Individual leaders (min 10 GP) ──');
+  console.log(`  PPG  ${ppgLead.name.padEnd(22)} ${f1(ppgLead.avg)}  ${inRange(ppgLead.avg, 28, 36)}`);
+  console.log(`  RPG  ${rpgLead.name.padEnd(22)} ${f1(rpgLead.avg)}  ${inRange(rpgLead.avg, 12, 16)}`);
+  console.log(`  APG  ${apgLead.name.padEnd(22)} ${f1(apgLead.avg)}  ${inRange(apgLead.avg, 9, 12)}`);
+  console.log(`  SPG  ${spgLead.name.padEnd(22)} ${f2(spgLead.avg)}  ${inRange(spgLead.avg, 1.7, 2.4)}`);
+  console.log(`  BPG  ${bpgLead.name.padEnd(22)} ${f2(bpgLead.avg)}  ${inRange(bpgLead.avg, 2.0, 3.5)}`);
+  console.groupEnd();
+}
 

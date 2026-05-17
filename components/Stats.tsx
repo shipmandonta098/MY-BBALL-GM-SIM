@@ -2,6 +2,8 @@ import React, { useState, useMemo } from 'react';
 import { LeagueState, Player, Team, Position } from '../types';
 import TeamBadge from './TeamBadge';
 import { PlayerLink } from '../context/NavigationContext';
+import Attendance from './Attendance';
+import { rawUPER, normalizePER, leagueAvgRawUPER } from '../utils/playerUtils';
 
 interface StatsProps {
   league: LeagueState;
@@ -10,14 +12,21 @@ interface StatsProps {
   onViewPlayer?: (player: Player) => void;
 }
 
-type StatTab = 'leaderboards' | 'advanced' | 'compare' | 'teams' | 'players';
-type PlayerSubTab = 'traditional' | 'advanced' | 'per36' | 'shooting' | 'totals' | 'clutch';
+type StatTab = 'leaderboards' | 'advanced' | 'compare' | 'teams' | 'players' | 'attendance';
+type PlayerSubTab = 'traditional' | 'advanced' | 'per36' | 'shooting' | 'totals' | 'clutch' | 'highs';
 type PlayerStatsView = 'season' | 'career';
 type StatsSource = 'regular' | 'playoffs';
 
 const EMPTY_PS = { points: 0, rebounds: 0, offReb: 0, defReb: 0, assists: 0, steals: 0, blocks: 0, gamesPlayed: 0, gamesStarted: 0, minutes: 0, fgm: 0, fga: 0, threepm: 0, threepa: 0, ftm: 0, fta: 0, tov: 0, pf: 0, techs: 0, flagrants: 0, ejections: 0, plusMinus: 0 };
 
 const Stats: React.FC<StatsProps> = ({ league, onViewRoster, onManageTeam, onViewPlayer }) => {
+  const highlightMyTeam = league.settings.highlightMyTeam !== false;
+  const userTeamColor   = league.teams.find(t => t.id === league.userTeamId)?.primaryColor ?? '#f59e0b';
+  const myRowStyle = (teamId: string): React.CSSProperties | undefined =>
+    highlightMyTeam && teamId === league.userTeamId
+      ? { borderLeft: `3px solid ${userTeamColor}`, background: `${userTeamColor}18` }
+      : undefined;
+
   const [activeTab, setActiveTab] = useState<StatTab>('leaderboards');
   const [compareList, setCompareList] = useState<string[]>([]);
   const [minGames, setMinGames] = useState(1);
@@ -31,6 +40,7 @@ const Stats: React.FC<StatsProps> = ({ league, onViewRoster, onManageTeam, onVie
   const [playerStatsView, setPlayerStatsView] = useState<PlayerStatsView>('season');
   const [minClutchMin, setMinClutchMin] = useState(10);
   const [statsSource, setStatsSource] = useState<StatsSource>('regular');
+  const [highsView, setHighsView] = useState<'career' | 'season'>('career');
 
   const allPlayers = useMemo(() => {
     return league.teams.flatMap(t => t.roster.map(p => ({
@@ -131,8 +141,8 @@ const Stats: React.FC<StatsProps> = ({ league, onViewRoster, onManageTeam, onVie
         ast: ast / gp, stl: stl / gp, blk: blk / gp,
         tov: tov / gp, pf: pf / gp, pts: pts / gp, mov,
         // Advanced
-        eFGPct:      fga > 0 ? (fgm + 0.5 * threepm) / fga : 0,
-        tsPct:       (fga + 0.44 * fta) > 0 ? pts / (2 * (fga + 0.44 * fta)) : 0,
+        eFGPct:      fga > 0 ? Math.min(0.65, (fgm + 0.5 * threepm) / fga) : 0,
+        tsPct:       (fga + 0.44 * fta) > 0 ? Math.min(0.70, pts / (2 * (fga + 0.44 * fta))) : 0,
         pace:        (poss + oppPoss) / (2 * gp),
         ortg,
         drtg,
@@ -155,6 +165,12 @@ const Stats: React.FC<StatsProps> = ({ league, onViewRoster, onManageTeam, onVie
     });
   }, [league.teams, league.history, statsSource]);
 
+  // League-average rawUPER for PER normalization (all roster players, min 50 minutes)
+  const lgAvgRaw = useMemo(
+    () => leagueAvgRawUPER(league.teams.flatMap(t => t.roster.map(r => r.stats))),
+    [league.teams],
+  );
+
   // Advanced Stats Calculation
   const calculateAdvanced = (p: Player) => {
     const gp = Math.max(1, p.stats.gamesPlayed);
@@ -164,29 +180,85 @@ const Stats: React.FC<StatsProps> = ({ league, onViewRoster, onManageTeam, onVie
     const spg = p.stats.steals / gp;
     const bpg = p.stats.blocks / gp;
     const tpm = p.stats.threepm / gp;
+    const mpg = p.stats.minutes / gp;
+    const fgmpg = p.stats.fgm / gp;
+    const fgapg = p.stats.fga / gp;
+    const tpmpg = p.stats.threepm / gp;
+    const tpapg = p.stats.threepa / gp;
+    const ftmpg = p.stats.ftm / gp;
+    const ftapg = p.stats.fta / gp;
+    const drebpg = p.stats.defReb / gp;
+    const tovpg = p.stats.tov / gp;
+    const pfpg = p.stats.pf / gp;
     const fgPct = p.stats.fga > 0 ? p.stats.fgm / p.stats.fga : 0;
     const tpPct = p.stats.threepa > 0 ? p.stats.threepm / p.stats.threepa : 0;
+    const ftPct = p.stats.fta > 0 ? p.stats.ftm / p.stats.fta : 0;
 
-    // eFG%: (FGM + 0.5 * 3PM) / FGA
-    const eFG = p.stats.fga > 0 ? (p.stats.fgm + 0.5 * p.stats.threepm) / p.stats.fga : 0;
+    // eFG% and TS% — hard caps at realistic NBA maxima.
+    // eFG: best real seasons ~0.66 (Gobert rim-finishing, Curry 3-heavy); cap 0.65.
+    // TS:  Curry's best season was 0.672; elite sim player ≤ 0.70.
+    const eFG = p.stats.fga > 0 ? Math.min(0.65, (p.stats.fgm + 0.5 * p.stats.threepm) / p.stats.fga) : 0;
+    const TS = (p.stats.fga + 0.44 * p.stats.fta) > 0 ? Math.min(0.70, p.stats.points / (2 * (p.stats.fga + 0.44 * p.stats.fta))) : 0;
 
-    // TS%: PTS / (2 * (FGA + 0.44 * FTA))
-    const TS = (p.stats.fga + 0.44 * p.stats.fta) > 0 ? p.stats.points / (2 * (p.stats.fga + 0.44 * p.stats.fta)) : 0;
-
-    // Usage% (Estimated): (FGA + 0.44 * FTA + TOV) per minute relative to team
+    // Usage%
     const USG = p.stats.minutes > 0 ? (p.stats.fga + 0.44 * p.stats.fta + p.stats.tov) / p.stats.minutes : 0;
 
-    // Simplified PER: (PTS + REB + AST + STL + BLK - MissedFG - MissedFT - TOV) / MIN
-    const PER = p.stats.minutes > 0 ?
-      (p.stats.points + p.stats.rebounds + p.stats.assists + p.stats.steals + p.stats.blocks - (p.stats.fga - p.stats.fgm) - (p.stats.fta - p.stats.ftm) - p.stats.tov) / p.stats.minutes * 30
+    // PER — league-normalized so avg ≈ 15.0, stars 22–32, bench < 12
+    const PER = normalizePER(rawUPER(p.stats), lgAvgRaw);
+
+    // BPM — calibrated so avg player (14p/4r/3a, 55% TS) ≈ 0, All-Star (25/7/7, 58% TS) ≈ +6.
+    const OBPM = Math.min(10, Math.max(-8,
+      (ppg        - 10.0) * 0.28
+      + (apg      -  2.0) * 0.65
+      - tovpg              * 0.80
+      - (fgapg - fgmpg)   * 0.12
+      + (TS       - 0.52) * 20
+    ));
+    const DBPM = Math.min(6, Math.max(-4,
+      (spg    - 0.80) * 1.50
+      + (bpg  - 0.40) * 1.20
+      + (drebpg - 2.5) * 0.15
+      - 0.80
+    ));
+    const BPM = Math.min(12, Math.max(-8, OBPM + DBPM));
+
+    // VORP — (BPM + 2) × fraction of full 48-min season played (no arbitrary scale factor).
+    const VORP = Math.max(0, (BPM + 2.0) * (p.stats.minutes / (48 * 82)));
+
+    // WS/48 — avg player (BPM=0) → 0.100; star (BPM=+6) → 0.220; elite (BPM=+10) → 0.300.
+    const WS48 = Math.max(0, Math.min(0.350, (BPM + 2.0) * 0.020 + 0.060));
+    const WS_raw = p.stats.minutes > 0 ? WS48 * p.stats.minutes / 48 : 0;
+    const obpmPos = Math.max(0, OBPM + 2.0);
+    const dbpmPos = Math.max(0, DBPM + 2.0);
+    const bpmSum  = obpmPos + dbpmPos || 1;
+    const OWS = Math.min(12, WS_raw * (obpmPos / bpmSum));
+    const DWS = Math.min(10, WS_raw * (dbpmPos / bpmSum));
+    const WS  = OWS + DWS;
+
+    // ±/100 Possessions — gate at 10 MPG so garbage-time specialists
+    //   (2 min/game, +15 PM) can't inflate to +138. Hard cap ±22.
+    const pmPer100 = mpg >= 10
+      ? Math.max(-22, Math.min(22, (p.stats.plusMinus / gp) / mpg * 48))
       : 0;
 
-    return { eFG, TS, USG, PER, ppg, rpg, apg, spg, bpg, tpm, fgPct, tpPct };
+    // On-Off (estimated as player's per-100 on-court PM; true lineup data unavailable)
+    const onOff = pmPer100;
+
+    return {
+      eFG, TS, USG, PER, ppg, rpg, apg, spg, bpg, tpm, fgPct, tpPct, ftPct,
+      fgmpg, fgapg, tpmpg, tpapg, ftmpg, ftapg, mpg,
+      OBPM, DBPM, BPM, VORP, WS48, WS, OWS, DWS, pmPer100, onOff,
+    };
   };
 
   const filteredLeaders = useMemo(() => {
+    const seen = new Set<string>();
     return allPlayers
-      .filter(p => p.stats.gamesPlayed >= minGames && p.name.toLowerCase().includes(searchTerm.toLowerCase()))
+      .filter(p => {
+        if (seen.has(p.id)) return false;
+        seen.add(p.id);
+        return p.stats.gamesPlayed >= minGames && p.name.toLowerCase().includes(searchTerm.toLowerCase());
+      })
       .map(p => ({ ...p, adv: calculateAdvanced(p) }));
   }, [allPlayers, minGames, searchTerm]);
 
@@ -195,12 +267,21 @@ const Stats: React.FC<StatsProps> = ({ league, onViewRoster, onManageTeam, onVie
     else if (compareList.length < 4) setCompareList(prev => [...prev, id]);
   };
 
-  const LeaderTable = ({ statKey, label, fmt }: { statKey: string; label: string; fmt?: (v: number) => string }) => {
-    const sorted = [...filteredLeaders].sort((a, b) => {
-      const aVal = (a.adv as any)[statKey] ?? (a.stats as any)[statKey] / Math.max(1, a.stats.gamesPlayed) ?? 0;
-      const bVal = (b.adv as any)[statKey] ?? (b.stats as any)[statKey] / Math.max(1, b.stats.gamesPlayed) ?? 0;
-      return bVal - aVal;
-    }).slice(0, 25);
+  const LeaderTable = ({ statKey, label, fmt, minAttemptsFilter }: {
+    statKey: string;
+    label: string;
+    fmt?: (v: number) => string;
+    // Optional per-player predicate to enforce minimum attempt thresholds.
+    // Players who don't meet it are excluded from this leaderboard entirely.
+    minAttemptsFilter?: (p: typeof filteredLeaders[0]) => boolean;
+  }) => {
+    const sorted = [...filteredLeaders]
+      .filter(p => !minAttemptsFilter || minAttemptsFilter(p))
+      .sort((a, b) => {
+        const aVal = (a.adv as any)[statKey] ?? (a.stats as any)[statKey] / Math.max(1, a.stats.gamesPlayed) ?? 0;
+        const bVal = (b.adv as any)[statKey] ?? (b.stats as any)[statKey] / Math.max(1, b.stats.gamesPlayed) ?? 0;
+        return bVal - aVal;
+      }).slice(0, 25);
 
     return (
       <div className="bg-slate-900 border border-slate-800 rounded-3xl overflow-hidden shadow-2xl">
@@ -220,12 +301,17 @@ const Stats: React.FC<StatsProps> = ({ league, onViewRoster, onManageTeam, onVie
             </thead>
             <tbody className="divide-y divide-slate-800/40">
               {sorted.map((p, idx) => {
-                const val = (p.adv as any)[statKey] || (p.stats as any)[statKey] / Math.max(1, p.stats.gamesPlayed);
+                const val = (p.adv as any)[statKey] ?? (p.stats as any)[statKey] / Math.max(1, p.stats.gamesPlayed) ?? 0;
                 return (
-                  <tr key={p.id} className="hover:bg-slate-800/30 transition-all">
+                  <tr key={p.id} className="hover:bg-slate-800/30 transition-all" style={myRowStyle(p.teamId)}>
                     <td className="px-6 py-4 font-display font-bold text-slate-600">#{idx + 1}</td>
                     <td className="px-6 py-4 flex items-center gap-3">
-                       <PlayerLink playerId={p.id} name={p.name} className="font-bold text-slate-200 uppercase tracking-tight" />
+                       <span className="flex items-center gap-1">
+                         <PlayerLink playerId={p.id} name={p.name} className="font-bold text-slate-200 uppercase tracking-tight" />
+                         {(p.allStarSelections?.length ?? 0) > 0 && (
+                           <span title={`${p.allStarSelections!.length}× All-Star`} className="text-amber-400 text-xs leading-none select-none">★</span>
+                         )}
+                       </span>
                        <button onClick={() => toggleCompare(p.id)} className={`text-[10px] p-1 rounded ${compareList.includes(p.id) ? 'bg-amber-500 text-slate-950' : 'bg-slate-800 text-slate-500'} hover:scale-105 transition-all`}>Compare</button>
                     </td>
                     <td className="px-6 py-4">
@@ -416,13 +502,13 @@ const Stats: React.FC<StatsProps> = ({ league, onViewRoster, onManageTeam, onVie
           const twoPct = twoa > 0 ? twom / twoa : 0;
           const twomPg = twom / gpSafe;
           const twoaPg = twoa / gpSafe;
-          // EFG%
-          const efg = fga > 0 ? (fgm + 0.5 * tpm) / fga : 0;
-          // Advanced
+          // EFG% — cap mirrors calculateAdvanced (0.65 max)
+          const efg = fga > 0 ? Math.min(0.65, (fgm + 0.5 * tpm) / fga) : 0;
+          // Advanced — per cap 32 matches normalizePER ceiling; TS cap 0.70
           const per = min > 0
-            ? (pts + reb + ast + stl + blk - (fga - fgm) - (fta - ftm) - tov) / min * 30
+            ? Math.min(32, (pts + reb + ast + stl + blk - (fga - fgm) - (fta - ftm) - tov) / min * 30)
             : 0;
-          const ts  = (fga + 0.44 * fta) > 0 ? pts / (2 * (fga + 0.44 * fta)) : 0;
+          const ts  = (fga + 0.44 * fta) > 0 ? Math.min(0.70, pts / (2 * (fga + 0.44 * fta))) : 0;
           const usg = min > 0 ? (fga + 0.44 * fta + tov) / min : 0;
           const bpm = gpSafe > 0 ? pm / gpSafe : 0;
           const vorp = bpm * (gpSafe / 82) * 2.7;
@@ -616,12 +702,12 @@ const Stats: React.FC<StatsProps> = ({ league, onViewRoster, onManageTeam, onVie
           )}
           {/* Sub-tabs */}
           <div className="flex gap-2 flex-wrap">
-            {(['traditional', 'advanced', 'per36', 'shooting', 'totals', 'clutch'] as PlayerSubTab[]).filter(t => t !== 'advanced' || league.settings.showAdvancedStats !== false).map(t => (
+            {(['traditional', 'advanced', 'per36', 'shooting', 'totals', 'clutch', 'highs'] as PlayerSubTab[]).filter(t => t !== 'advanced' || league.settings.showAdvancedStats !== false).map(t => (
               <button
                 key={t}
                 onClick={() => {
                   setPlayerSubTab(t);
-                  setSortKey(t === 'advanced' ? 'per' : t === 'shooting' ? 'fgPct' : t === 'totals' ? 'totalPts' : t === 'clutch' ? 'clutchPpg' : 'ppg');
+                  setSortKey(t === 'advanced' ? 'per' : t === 'shooting' ? 'fgPct' : t === 'totals' ? 'totalPts' : t === 'clutch' ? 'clutchPpg' : t === 'highs' ? 'highPts' : 'ppg');
                   setSortDir('desc');
                   setPage(0);
                 }}
@@ -652,8 +738,148 @@ const Stats: React.FC<StatsProps> = ({ league, onViewRoster, onManageTeam, onVie
           </div>
         )}
 
+        {/* ── Game Highs sub-tab ──────────────────────────────────────────── */}
+        {playerSubTab === 'highs' && (() => {
+          const [highSort, setHighSort] = useState<string>('highPts');
+          const [highDir, setHighDir] = useState<'asc' | 'desc'>('desc');
+
+          // Season highs helper: compute from gameLog for each player
+          const getSeasonHighs = (p: typeof allPlayers[0]) => {
+            const games = (p.gameLog ?? []).filter((g: any) => !g.dnp);
+            if (!games.length) return null;
+            const maxOf = (fn: (g: any) => number) => games.reduce((m: number, g: any) => Math.max(m, fn(g)), 0);
+            return {
+              points:   maxOf(g => g.pts),
+              rebounds: maxOf(g => g.reb),
+              assists:  maxOf(g => g.ast),
+              steals:   maxOf(g => g.stl),
+              blocks:   maxOf(g => g.blk),
+              threepm:  maxOf(g => g.threepm),
+            };
+          };
+
+          const isSeason = highsView === 'season';
+
+          const highsCols = [
+            { key: 'highPts',  label: 'High PTS', field: 'points'   },
+            { key: 'highReb',  label: 'High REB', field: 'rebounds' },
+            { key: 'highAst',  label: 'High AST', field: 'assists'  },
+            { key: 'highStl',  label: 'High STL', field: 'steals'   },
+            { key: 'highBlk',  label: 'High BLK', field: 'blocks'   },
+            { key: 'high3pm',  label: 'High 3PM', field: 'threepm'  },
+          ];
+
+          const allPwT = allPlayers.filter(p => {
+            if (posFilter !== 'ALL' && p.position !== posFilter) return false;
+            if (teamFilter !== 'ALL' && p.teamName !== teamFilter) return false;
+            if (searchTerm && !p.name.toLowerCase().includes(searchTerm.toLowerCase())) return false;
+            if (isSeason) {
+              const sh = getSeasonHighs(p);
+              return sh && (sh.points > 0 || sh.rebounds > 0 || sh.assists > 0);
+            }
+            return p.careerHighs.points > 0 || p.careerHighs.rebounds > 0 || p.careerHighs.assists > 0;
+          });
+
+          const hiSorted = [...allPwT].sort((a, b) => {
+            const field = highsCols.find(c => c.key === highSort)?.field ?? 'points';
+            const aH = isSeason ? (getSeasonHighs(a) ?? {}) : (a.careerHighs as any);
+            const bH = isSeason ? (getSeasonHighs(b) ?? {}) : (b.careerHighs as any);
+            return highDir === 'desc'
+              ? ((bH as any)[field] ?? 0) - ((aH as any)[field] ?? 0)
+              : ((aH as any)[field] ?? 0) - ((bH as any)[field] ?? 0);
+          });
+
+          const ThH = ({ k, label }: { k: string; label: string }) => (
+            <th
+              className="px-3 py-3 text-slate-500 text-center cursor-pointer hover:text-amber-400 whitespace-nowrap transition-colors"
+              onClick={() => { if (highSort === k) setHighDir(d => d === 'desc' ? 'asc' : 'desc'); else { setHighSort(k); setHighDir('desc'); } }}
+            >
+              <span className={highSort === k ? 'text-amber-400' : ''}>{label}</span>
+              {highSort === k && <span className="ml-1 opacity-70">{highDir === 'desc' ? '↓' : '↑'}</span>}
+            </th>
+          );
+
+          const hl = (v: number) =>
+            v >= 40 ? 'text-amber-300 font-black' :
+            v >= 30 ? 'text-amber-400 font-bold' :
+            v >= 20 ? 'text-emerald-400' :
+            v >= 10 ? 'text-slate-200' : 'text-slate-500';
+
+          return (
+            <div className="space-y-4">
+              {/* Season / Career toggle */}
+              <div className="flex items-center justify-between">
+                <div className="bg-slate-900/50 border border-amber-500/15 rounded-2xl px-4 py-3 flex-1 mr-4">
+                  <p className="text-[10px] font-black uppercase tracking-widest text-amber-500/70">
+                    {isSeason ? 'Season Game Highs' : 'Career Game Highs'}
+                  </p>
+                  <p className="text-xs text-slate-500 mt-0.5">
+                    {isSeason
+                      ? 'Best single-game performance from this season\'s game log.'
+                      : 'Best single-game performance across entire career. Updated each game.'}
+                  </p>
+                </div>
+                <div className="flex gap-1 bg-slate-900 border border-slate-800 rounded-xl p-1 shrink-0">
+                  <button
+                    onClick={() => setHighsView('career')}
+                    className={`px-3 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all ${!isSeason ? 'bg-amber-500 text-slate-950' : 'text-slate-500 hover:text-white'}`}
+                  >Career</button>
+                  <button
+                    onClick={() => setHighsView('season')}
+                    className={`px-3 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all ${isSeason ? 'bg-orange-500 text-slate-950' : 'text-slate-500 hover:text-white'}`}
+                  >Season</button>
+                </div>
+              </div>
+
+              <div className="bg-slate-900 border border-slate-800 rounded-3xl overflow-hidden shadow-2xl">
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left border-collapse text-xs">
+                    <thead>
+                      <tr className="text-[10px] font-black uppercase tracking-widest border-b border-slate-800 bg-slate-950/50">
+                        <th className="px-3 py-3 text-slate-500 text-center sticky left-0 bg-slate-950/90 z-10">#</th>
+                        <th className="px-4 py-3 text-slate-500 sticky left-8 bg-slate-950/90 z-10">Player</th>
+                        <th className="px-2 py-3 text-slate-500 text-center">Team</th>
+                        <th className="px-2 py-3 text-slate-500 text-center">Pos</th>
+                        {highsCols.map(c => <ThH key={c.key} k={c.key} label={c.label} />)}
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-800/40">
+                      {hiSorted.map((p, idx) => {
+                        const h = isSeason ? (getSeasonHighs(p) ?? p.careerHighs) : p.careerHighs;
+                        return (
+                          <tr key={p.id} className="hover:bg-slate-800/30 transition-colors cursor-pointer" style={myRowStyle(p.teamId ?? '')} onClick={() => onViewPlayer?.(p)}>
+                            <td className="px-3 py-2.5 text-slate-600 text-center text-[10px] font-bold sticky left-0 bg-slate-900/95">{idx + 1}</td>
+                            <td className="px-4 py-2.5 sticky left-8 bg-slate-900/95">
+                              <span className="font-bold text-white whitespace-nowrap hover:text-amber-400 transition-colors">{p.name}</span>
+                            </td>
+                            <td className="px-2 py-2.5 text-center text-slate-400 whitespace-nowrap">{p.teamName}</td>
+                            <td className="px-2 py-2.5 text-center text-slate-500">{p.position}</td>
+                            <td className={`px-3 py-2.5 text-center tabular-nums ${hl(h.points)}`}>{h.points || '—'}</td>
+                            <td className={`px-3 py-2.5 text-center tabular-nums ${hl(h.rebounds)}`}>{h.rebounds || '—'}</td>
+                            <td className={`px-3 py-2.5 text-center tabular-nums ${hl(h.assists)}`}>{h.assists || '—'}</td>
+                            <td className={`px-3 py-2.5 text-center tabular-nums ${hl(h.steals)}`}>{h.steals || '—'}</td>
+                            <td className={`px-3 py-2.5 text-center tabular-nums ${hl(h.blocks)}`}>{h.blocks || '—'}</td>
+                            <td className={`px-3 py-2.5 text-center tabular-nums ${hl(h.threepm)}`}>{h.threepm || '—'}</td>
+                          </tr>
+                        );
+                      })}
+                      {allPwT.length === 0 && (
+                        <tr>
+                          <td colSpan={10} className="px-4 py-8 text-center text-slate-600 text-sm">
+                            {isSeason ? 'No season game log data yet — play some games first.' : 'No career highs recorded yet.'}
+                          </td>
+                        </tr>
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </div>
+          );
+        })()}
+
         {/* Table */}
-        <div className="bg-slate-900 border border-slate-800 rounded-3xl overflow-hidden shadow-2xl">
+        {playerSubTab !== 'highs' && <div className="bg-slate-900 border border-slate-800 rounded-3xl overflow-hidden shadow-2xl">
           <div className="overflow-x-auto">
             <table className="w-full text-left border-collapse text-xs">
               <thead>
@@ -892,7 +1118,7 @@ const Stats: React.FC<StatsProps> = ({ league, onViewRoster, onManageTeam, onVie
               </div>
             </div>
           )}
-        </div>
+        </div>}
       </div>
     );
   };
@@ -1170,7 +1396,7 @@ const Stats: React.FC<StatsProps> = ({ league, onViewRoster, onManageTeam, onVie
                 </thead>
                 <tbody className="divide-y divide-slate-800/40">
                   {sortedTeams.map((t, idx) => (
-                    <tr key={t.id} className="hover:bg-slate-800/30 transition-all cursor-pointer group" onClick={() => onManageTeam?.(t.id)}>
+                    <tr key={t.id} className="hover:bg-slate-800/30 transition-all cursor-pointer group" style={myRowStyle(t.id)} onClick={() => onManageTeam?.(t.id)}>
                       <LeadTd t={t} idx={idx} />
                       <td className="px-2 py-4 text-center font-mono text-xs">{n1(t.avgAge)}</td>
                       <td className="px-2 py-4 text-center font-mono text-xs">{n1(t.fgm)}</td>
@@ -1231,7 +1457,7 @@ const Stats: React.FC<StatsProps> = ({ league, onViewRoster, onManageTeam, onVie
             )}
 
             {/* ── ADVANCED ────────────────────────────────────────────── */}
-            {teamSubTab === 'advanced' && (
+            {teamSubTab === 'advanced' && (<>
               <table className="w-full text-left border-collapse">
                 <thead>
                   <tr className="text-[10px] text-slate-500 font-black uppercase tracking-widest border-b border-slate-800 bg-slate-950/50">
@@ -1253,7 +1479,7 @@ const Stats: React.FC<StatsProps> = ({ league, onViewRoster, onManageTeam, onVie
                 </thead>
                 <tbody className="divide-y divide-slate-800/40">
                   {sortedTeams.map((t, idx) => (
-                    <tr key={t.id} className="hover:bg-slate-800/30 transition-all cursor-pointer group" onClick={() => onManageTeam?.(t.id)}>
+                    <tr key={t.id} className="hover:bg-slate-800/30 transition-all cursor-pointer group" style={myRowStyle(t.id)} onClick={() => onManageTeam?.(t.id)}>
                       <LeadTd t={t} idx={idx} />
                       <td className={`px-2 py-4 text-center font-mono text-xs font-bold ${t.pts > avg.pts ? 'text-emerald-400' : 'text-rose-400'}`}>{n1(t.pts)}</td>
                       <td className="px-2 py-4 text-center font-mono text-xs">{n1(t.pace)}</td>
@@ -1291,7 +1517,52 @@ const Stats: React.FC<StatsProps> = ({ league, onViewRoster, onManageTeam, onVie
                   </tr>
                 </tfoot>
               </table>
-            )}
+              {/* ── Shot Distribution Visual ──────────────────────────── */}
+              <div className="border-t border-slate-800 px-5 py-5">
+                <h4 className="text-[10px] font-black uppercase tracking-[0.3em] text-slate-500 mb-4">
+                  Estimated Shot Distribution by Zone
+                </h4>
+                <div className="space-y-2.5">
+                  {sortedTeams.map(t => {
+                    const threePaRate = t.fga > 0 ? t.threepa / t.fga : 0;
+                    const raRate   = (1 - threePaRate) * 0.55;
+                    const midRate  = (1 - threePaRate) * 0.45;
+                    const c3Rate   = threePaRate * 0.22;
+                    const ab3Rate  = threePaRate * 0.78;
+                    return (
+                      <div key={t.id} className="flex items-center gap-3">
+                        <div className="w-28 shrink-0 text-[10px] font-black text-slate-400 truncate">{t.name}</div>
+                        <div className="flex-1 flex h-3.5 rounded-full overflow-hidden gap-px">
+                          <div style={{ width: `${(raRate * 100).toFixed(1)}%` }}  className="bg-emerald-600 opacity-80" title={`Restricted Area: ${(raRate * 100).toFixed(0)}%`} />
+                          <div style={{ width: `${(midRate * 100).toFixed(1)}%` }} className="bg-amber-600 opacity-80"   title={`Mid-Range: ${(midRate * 100).toFixed(0)}%`} />
+                          <div style={{ width: `${(c3Rate * 100).toFixed(1)}%` }}  className="bg-sky-500 opacity-80"     title={`Corner 3: ${(c3Rate * 100).toFixed(0)}%`} />
+                          <div style={{ width: `${(ab3Rate * 100).toFixed(1)}%` }} className="bg-violet-600 opacity-80"  title={`Above-Break 3: ${(ab3Rate * 100).toFixed(0)}%`} />
+                        </div>
+                        <div className="w-20 shrink-0 text-right text-[10px] font-bold tabular-nums text-slate-500">
+                          {(threePaRate * 100).toFixed(1)}% 3s
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+                <div className="flex flex-wrap items-center gap-4 mt-4">
+                  {[
+                    { label: 'Restricted Area', cls: 'bg-emerald-600' },
+                    { label: 'Mid-Range',        cls: 'bg-amber-600' },
+                    { label: 'Corner 3',         cls: 'bg-sky-500' },
+                    { label: 'Above-Break 3',    cls: 'bg-violet-600' },
+                  ].map(z => (
+                    <div key={z.label} className="flex items-center gap-1.5">
+                      <div className={`w-3 h-2 rounded-sm opacity-80 ${z.cls}`} />
+                      <span className="text-[9px] font-black uppercase tracking-widest text-slate-600">{z.label}</span>
+                    </div>
+                  ))}
+                </div>
+                <p className="text-[9px] text-slate-700 mt-2 italic">
+                  2P split estimated at 55% RA / 45% Mid-Range; Corner 3 estimated at ~22% of all 3PA.
+                </p>
+              </div>
+            </>)}
 
             {/* ── OPPONENT ────────────────────────────────────────────── */}
             {teamSubTab === 'opponent' && (
@@ -1321,7 +1592,7 @@ const Stats: React.FC<StatsProps> = ({ league, onViewRoster, onManageTeam, onVie
                 </thead>
                 <tbody className="divide-y divide-slate-800/40">
                   {sortedTeams.map((t, idx) => (
-                    <tr key={t.id} className="hover:bg-slate-800/30 transition-all cursor-pointer group" onClick={() => onManageTeam?.(t.id)}>
+                    <tr key={t.id} className="hover:bg-slate-800/30 transition-all cursor-pointer group" style={myRowStyle(t.id)} onClick={() => onManageTeam?.(t.id)}>
                       <LeadTd t={t} idx={idx} />
                       <td className={`px-2 py-4 text-center font-mono text-xs font-bold ${t.oppPts < avg.oppPts ? 'text-emerald-400' : 'text-rose-400'}`}>{n1(t.oppPts)}</td>
                       <td className="px-2 py-4 text-center font-mono text-xs">{n1(t.oppFgm)}</td>
@@ -1391,7 +1662,7 @@ const Stats: React.FC<StatsProps> = ({ league, onViewRoster, onManageTeam, onVie
                 </thead>
                 <tbody className="divide-y divide-slate-800/40">
                   {sortedClutchTeams.map((t, idx) => (
-                    <tr key={t.teamId} className="hover:bg-slate-800/30 transition-all cursor-pointer group" onClick={() => onManageTeam?.(t.teamId)}>
+                    <tr key={t.teamId} className="hover:bg-slate-800/30 transition-all cursor-pointer group" style={myRowStyle(t.teamId)} onClick={() => onManageTeam?.(t.teamId)}>
                       <td className="px-4 py-4 font-mono text-xs text-slate-500">{idx + 1}</td>
                       <td className="px-4 py-4 sticky left-0 bg-slate-900 group-hover:bg-slate-800/60 transition-colors">
                         <div className="flex items-center gap-3">
@@ -1457,7 +1728,7 @@ const Stats: React.FC<StatsProps> = ({ league, onViewRoster, onManageTeam, onVie
                   </thead>
                   <tbody className="divide-y divide-slate-800/40">
                     {sortedQuarterTeams.map((t, idx) => (
-                      <tr key={t.teamId} className="hover:bg-slate-800/30 transition-all cursor-pointer group" onClick={() => onManageTeam?.(t.teamId)}>
+                      <tr key={t.teamId} className="hover:bg-slate-800/30 transition-all cursor-pointer group" style={myRowStyle(t.teamId)} onClick={() => onManageTeam?.(t.teamId)}>
                         <td className="px-4 py-4 font-mono text-xs text-slate-500">{idx + 1}</td>
                         <td className="px-4 py-4 sticky left-0 bg-slate-900 group-hover:bg-slate-800/60 transition-colors">
                           <div className="flex items-center gap-3">
@@ -1528,13 +1799,13 @@ const Stats: React.FC<StatsProps> = ({ league, onViewRoster, onManageTeam, onVie
           <div>
             <h2 className="text-4xl font-display font-bold uppercase tracking-tight text-white mb-2">League Intelligence</h2>
             <div className="flex gap-2 flex-wrap">
-              {(['leaderboards', 'advanced', 'compare', 'teams', 'players'] as StatTab[]).map(t => (
-                <button 
+              {(['leaderboards', 'advanced', 'compare', 'teams', 'players', 'attendance'] as StatTab[]).map(t => (
+                <button
                   key={t}
                   onClick={() => { setActiveTab(t); setPage(0); }}
                   className={`text-[10px] font-black uppercase tracking-widest px-4 py-2 rounded-full transition-all ${activeTab === t ? 'bg-amber-500 text-slate-950' : 'bg-slate-800 text-slate-500 hover:text-white'}`}
                 >
-                  {t === 'teams' ? 'Team Stats' : t === 'players' ? 'Player Stats' : t}
+                  {t === 'teams' ? 'Team Stats' : t === 'players' ? 'Player Stats' : t === 'attendance' ? '🏟 Attendance' : t}
                 </button>
               ))}
             </div>
@@ -1612,22 +1883,55 @@ const Stats: React.FC<StatsProps> = ({ league, onViewRoster, onManageTeam, onVie
 
       {activeTab === 'leaderboards' && (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-8">
-          <LeaderTable statKey="ppg" label="Scoring" />
-          <LeaderTable statKey="rpg" label="Rebounding" />
-          <LeaderTable statKey="apg" label="Assists" />
-          <LeaderTable statKey="spg" label="Steals" />
-          <LeaderTable statKey="bpg" label="Blocks" />
-          <LeaderTable statKey="fgPct" label="FG%" fmt={v => (v * 100).toFixed(1) + '%'} />
+          <LeaderTable statKey="ppg"   label="Scoring" />
+          <LeaderTable statKey="rpg"   label="Rebounding" />
+          <LeaderTable statKey="apg"   label="Assists" />
+          <LeaderTable statKey="spg"   label="Steals" />
+          <LeaderTable statKey="bpg"   label="Blocks" />
+          <LeaderTable statKey="fgPct" label="FG%" fmt={v => (v * 100).toFixed(1) + '%'}
+            minAttemptsFilter={p => p.stats.fga >= p.stats.gamesPlayed * 3} />
           <LeaderTable statKey="tpm"   label="3-Pointers Made" />
-          <LeaderTable statKey="tpPct" label="3-Point %" fmt={v => (v * 100).toFixed(1) + '%'} />
+          <LeaderTable statKey="tpPct" label="3-Point %" fmt={v => (v * 100).toFixed(1) + '%'}
+            minAttemptsFilter={p => p.stats.threepa >= p.stats.gamesPlayed * 1.5} />
+          <LeaderTable statKey="fgmpg" label="FG Made" fmt={v => v.toFixed(1)} />
+          <LeaderTable statKey="fgapg" label="FG Attempts" fmt={v => v.toFixed(1)} />
+          <LeaderTable statKey="tpapg" label="3PA" fmt={v => v.toFixed(1)} />
+          <LeaderTable statKey="ftmpg" label="FT Made" fmt={v => v.toFixed(1)} />
+          <LeaderTable statKey="ftapg" label="FT Attempts" fmt={v => v.toFixed(1)} />
+          <LeaderTable statKey="ftPct" label="FT%" fmt={v => (v * 100).toFixed(1) + '%'}
+            minAttemptsFilter={p => p.stats.fta / Math.max(1, p.stats.gamesPlayed) >= 2.0} />
+          <LeaderTable statKey="mpg"   label="Minutes" fmt={v => v.toFixed(1)} />
+          <LeaderTable statKey="tov"   label="Turnovers" fmt={v => v.toFixed(1)} />
         </div>
       )}
 
       {activeTab === 'advanced' && (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
-           <LeaderTable statKey="PER" label="Efficiency (PER)" />
-           <LeaderTable statKey="TS" label="True Shooting" />
-           <LeaderTable statKey="eFG" label="eFG%" />
+          <LeaderTable statKey="PER"     label="Efficiency (PER)"
+            minAttemptsFilter={p => p.stats.fga >= p.stats.gamesPlayed * 2} />
+          <LeaderTable statKey="TS"      label="True Shooting %" fmt={v => (v * 100).toFixed(1) + '%'}
+            minAttemptsFilter={p => p.stats.fga >= p.stats.gamesPlayed * 3} />
+          <LeaderTable statKey="eFG"     label="eFG%" fmt={v => (v * 100).toFixed(1) + '%'}
+            minAttemptsFilter={p => p.stats.fga >= p.stats.gamesPlayed * 3} />
+          <LeaderTable statKey="WS"      label="Win Shares" fmt={v => v.toFixed(1)}
+            minAttemptsFilter={p => p.stats.minutes / Math.max(1, p.stats.gamesPlayed) >= 12} />
+          <LeaderTable statKey="OWS"     label="Offensive Win Shares" fmt={v => v.toFixed(1)}
+            minAttemptsFilter={p => p.stats.minutes / Math.max(1, p.stats.gamesPlayed) >= 12} />
+          <LeaderTable statKey="DWS"     label="Defensive Win Shares" fmt={v => v.toFixed(1)}
+            minAttemptsFilter={p => p.stats.minutes / Math.max(1, p.stats.gamesPlayed) >= 12} />
+          <LeaderTable statKey="WS48"    label="WS/48" fmt={v => v.toFixed(3)}
+            minAttemptsFilter={p => p.stats.minutes / Math.max(1, p.stats.gamesPlayed) >= 15} />
+          <LeaderTable statKey="BPM"     label="Box Plus/Minus" fmt={v => (v >= 0 ? '+' : '') + v.toFixed(1)}
+            minAttemptsFilter={p => p.stats.minutes / Math.max(1, p.stats.gamesPlayed) >= 15} />
+          <LeaderTable statKey="OBPM"    label="Offensive BPM" fmt={v => (v >= 0 ? '+' : '') + v.toFixed(1)}
+            minAttemptsFilter={p => p.stats.minutes / Math.max(1, p.stats.gamesPlayed) >= 15} />
+          <LeaderTable statKey="DBPM"    label="Defensive BPM" fmt={v => (v >= 0 ? '+' : '') + v.toFixed(1)}
+            minAttemptsFilter={p => p.stats.minutes / Math.max(1, p.stats.gamesPlayed) >= 15} />
+          <LeaderTable statKey="VORP"    label="VORP" fmt={v => v.toFixed(1)}
+            minAttemptsFilter={p => p.stats.minutes / Math.max(1, p.stats.gamesPlayed) >= 12} />
+          <LeaderTable statKey="pmPer100" label="±/100 Possessions" fmt={v => (v >= 0 ? '+' : '') + v.toFixed(1)}
+            minAttemptsFilter={p => p.stats.minutes / Math.max(1, p.stats.gamesPlayed) >= 15} />
+          <LeaderTable statKey="onOff"   label="On-Off (Est.)" fmt={v => (v >= 0 ? '+' : '') + v.toFixed(1)} />
         </div>
       )}
 
@@ -1636,6 +1940,10 @@ const Stats: React.FC<StatsProps> = ({ league, onViewRoster, onManageTeam, onVie
       {activeTab === 'teams' && <TeamStatsTable />}
 
       {activeTab === 'players' && <PlayerStatsTable />}
+
+      {activeTab === 'attendance' && (
+        <Attendance league={league} onManageTeam={onManageTeam} />
+      )}
     </div>
   );
 };

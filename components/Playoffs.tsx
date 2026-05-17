@@ -2,6 +2,7 @@ import React, { useState, useMemo } from 'react';
 import { LeagueState, Team, PlayoffBracket, PlayoffSeries, GameResult, Player, AwardWinner, RivalryStats, ChampionshipRecord } from '../types';
 import TeamBadge from './TeamBadge';
 import { simulateGame } from '../utils/simEngine';
+import LiveGameModal from './LiveGameModal';
 
 interface PlayoffsProps {
   league: LeagueState;
@@ -14,6 +15,7 @@ interface PlayoffsProps {
 
 const Playoffs: React.FC<PlayoffsProps> = ({ league, updateLeague, onStartOffseason, onScout, onViewBoxScore, onAddNews }) => {
   const [isSimulating, setIsSimulating] = useState(false);
+  const [watchingLiveSeriesId, setWatchingLiveSeriesId] = useState<string | null>(null);
   const bracket = league.playoffBracket;
 
   if (!bracket) {
@@ -25,7 +27,7 @@ const Playoffs: React.FC<PlayoffsProps> = ({ league, updateLeague, onStartOffsea
     );
   }
 
-  const simulatePlayoffGameInternal = async (state: LeagueState, seriesId: string): Promise<LeagueState> => {
+  const simulatePlayoffGameInternal = async (state: LeagueState, seriesId: string, preComputedResult?: GameResult): Promise<LeagueState> => {
     const currentBracket = state.playoffBracket;
     if (!currentBracket) return state;
 
@@ -39,7 +41,7 @@ const Playoffs: React.FC<PlayoffsProps> = ({ league, updateLeague, onStartOffsea
     const isT1Home = [0, 1, 4, 6].includes(totalGames);
 
     const rivalryStats = state.rivalryHistory?.find(r => (r.team1Id === t1.id && r.team2Id === t2.id) || (r.team1Id === t2.id && r.team2Id === t1.id));
-    
+
     const getRivalryLevel = (stats: RivalryStats | undefined): string => {
       if (!stats || stats.totalGames <= 2) return 'Ice Cold';
       const score = stats.totalGames + (stats.playoffSeriesCount * 5) + (stats.buzzerBeaters * 3) + (stats.comebacks * 2) + (stats.otGames * 2) + stats.badBloodScore;
@@ -52,23 +54,34 @@ const Playoffs: React.FC<PlayoffsProps> = ({ league, updateLeague, onStartOffsea
 
     const rivalryLevel = getRivalryLevel(rivalryStats);
 
-    const result = simulateGame(isT1Home ? t1 : t2, isT1Home ? t2 : t1, state.currentDay, state.season, false, false, rivalryLevel);
+    const result = preComputedResult ?? simulateGame(isT1Home ? t1 : t2, isT1Home ? t2 : t1, state.currentDay, state.season, false, false, rivalryLevel);
     // Ensure unique ID for playoff games
     result.id = `playoff-${state.season}-${series.id}-G${totalGames + 1}`;
     
-    // Update Rivalry Stats
-    const history = [...(state.rivalryHistory || [])];
+    // Update Rivalry Stats — immutable copy, no shared-ref mutation
     const rt1 = result.homeTeamId;
     const rt2 = result.awayTeamId;
-    let rivalry = history.find(r => (r.team1Id === rt1 && r.team2Id === rt2) || (r.team1Id === rt2 && r.team2Id === rt1));
-    if (!rivalry) {
-      rivalry = { team1Id: rt1, team2Id: rt2, team1Wins: 0, team2Wins: 0, totalGames: 0, lastFiveGames: [], playoffSeriesCount: 0, buzzerBeaters: 0, comebacks: 0, otGames: 0, badBloodScore: 0 };
-      history.push(rivalry);
-    }
+    const existingRivalryIdx = (state.rivalryHistory || []).findIndex(
+      r => (r.team1Id === rt1 && r.team2Id === rt2) || (r.team1Id === rt2 && r.team2Id === rt1)
+    );
+    const history = [...(state.rivalryHistory || [])];
+    let rivalry: RivalryStats = existingRivalryIdx >= 0
+      ? { ...history[existingRivalryIdx] }
+      : { team1Id: rt1, team2Id: rt2, team1Wins: 0, team2Wins: 0, totalGames: 0, lastFiveGames: [], playoffSeriesCount: 0, buzzerBeaters: 0, comebacks: 0, otGames: 0, badBloodScore: 0 };
+
     const isRivalryT1Home = rivalry.team1Id === result.homeTeamId;
     const rivalryT1Won = (isRivalryT1Home && result.homeScore > result.awayScore) || (!isRivalryT1Home && result.awayScore > result.homeScore);
     rivalry.totalGames += 1;
     if (rivalryT1Won) rivalry.team1Wins += 1; else rivalry.team2Wins += 1;
+
+    // Playoff games count toward This Season H2H — fix for inflated All-Time vs missing season counts
+    if (!rivalry.seasonH2H || rivalry.seasonH2H.season !== state.season) {
+      rivalry.seasonH2H = { season: state.season, team1Wins: 0, team2Wins: 0 };
+    } else {
+      rivalry.seasonH2H = { ...rivalry.seasonH2H };
+    }
+    if (rivalryT1Won) rivalry.seasonH2H.team1Wins += 1; else rivalry.seasonH2H.team2Wins += 1;
+
     rivalry.lastFiveGames = [rivalryT1Won ? 'team1' : 'team2', ...rivalry.lastFiveGames].slice(0, 5) as ('team1' | 'team2')[];
     rivalry.lastGameResult = { winnerId: rivalryT1Won ? rivalry.team1Id : rivalry.team2Id, score: `${result.homeScore}-${result.awayScore}`, day: result.date, season: result.season };
     if (result.isOvertime) rivalry.otGames += 1;
@@ -77,8 +90,11 @@ const Playoffs: React.FC<PlayoffsProps> = ({ league, updateLeague, onStartOffsea
 
     const allStats = [...result.homePlayerStats, ...result.awayPlayerStats];
     allStats.forEach(p => {
-      if (p.techs > 0) rivalry!.badBloodScore += p.techs;
+      if (p.techs > 0) rivalry.badBloodScore += p.techs;
     });
+
+    if (existingRivalryIdx >= 0) history[existingRivalryIdx] = rivalry;
+    else history.push(rivalry);
 
     // Update Playoff Stats (separate from regular season stats)
     const EMPTY_PO = { gamesPlayed: 0, gamesStarted: 0, points: 0, rebounds: 0, offReb: 0, defReb: 0, assists: 0, steals: 0, blocks: 0, minutes: 0, fgm: 0, fga: 0, threepm: 0, threepa: 0, ftm: 0, fta: 0, tov: 0, pf: 0, techs: 0, flagrants: 0, ejections: 0, plusMinus: 0 };
@@ -110,6 +126,7 @@ const Playoffs: React.FC<PlayoffsProps> = ({ league, updateLeague, onStartOffsea
               fta:      ps.fta      + line.fta,
               tov:      ps.tov      + line.tov,
               pf:       ps.pf       + line.pf,
+              plusMinus: ps.plusMinus + (line.plusMinus ?? 0),
             }
           };
         })
@@ -135,42 +152,121 @@ const Playoffs: React.FC<PlayoffsProps> = ({ league, updateLeague, onStartOffsea
 
     let newsFeed = [...state.newsFeed];
 
-    // Helper: build an engaging series-complete headline
-    const buildSeriesContent = (winner: Team, loser: Team, winsW: number, winsL: number): string => {
-      const pick = (arr: string[]): string => arr[Math.floor(Math.random() * arr.length)];
+    // Helper: build round-specific, varied playoff series news
+    const buildSeriesNews = (winner: Team, loser: Team, winsW: number, winsL: number): { headline: string; content: string } => {
+      const pick = <T,>(arr: T[]): T => arr[Math.floor(Math.random() * arr.length)];
       const margin = Math.abs(result.homeScore - result.awayScore);
-      const topLine = result.topPerformers?.[0];
-      const topName = topLine ? (() => {
-        const allRoster = [...winner.roster, ...loser.roster];
-        return allRoster.find(p => p.id === topLine.playerId)?.name ?? null;
-      })() : null;
       const seriesRecord = `${winsW}-${winsL}`;
-      const finalScore = `${Math.max(result.homeScore, result.awayScore)}-${Math.min(result.homeScore, result.awayScore)}`;
-      const roundName = newSeries.round === 4 ? 'Championship' : newSeries.round === 3 ? 'Conference Finals' : newSeries.round === 2 ? 'Semifinals' : 'First Round';
-
+      const totalGamesInSeries = winsW + winsL;
       const isSweep = winsL === 0;
+      const wentToSeven = winsL === 3 && totalGamesInSeries === 7;
       const isClose = winsL >= 3;
       const isBlowout = margin >= 20;
+      const W = `${winner.city} ${winner.name}`;
+      const L = `${loser.city} ${loser.name}`;
 
-      if (isSweep) return pick([
-        `${winner.name} sweep the ${roundName} series in dominant fashion, dispatching ${loser.name} without dropping a single game. The message to the rest of the bracket is clear.`,
-        `Four and done. ${winner.name} eliminate ${loser.name} in a sweep to advance. ${topName ? `${topName} led the charge throughout.` : 'They never trailed in the series.'}`,
-        `${winner.name} roll through the ${roundName} — a clean sweep over ${loser.name}. They look like the team to beat.`,
-      ]);
-      if (isClose && isBlowout) return pick([
-        `After a grueling ${seriesRecord} series, ${winner.name} put it away emphatically — a ${finalScore} blowout in the deciding game ends ${loser.name}'s run.`,
-        `${winner.name} survive a back-and-forth ${roundName} series and close it out in convincing fashion, ${finalScore}. ${loser.name} fought hard but ran out of answers.`,
-      ]);
-      if (isClose) return pick([
-        `${winner.name} edge ${loser.name} in a hard-fought ${seriesRecord} series. The deciding game came down to the wire — final: ${finalScore}. ${topName ? `${topName} was brilliant.` : ''}`,
-        `A battle for the ages. ${winner.name} advance after a ${seriesRecord} war with ${loser.name}, winning the clincher ${finalScore}. Neither team gave an inch.`,
-        `${loser.name} pushed them to the brink, but ${winner.name} close out the ${roundName} ${seriesRecord}. A series that lived up to every expectation.`,
-      ]);
-      return pick([
-        `${winner.name} advance past ${loser.name} with a ${seriesRecord} series win, closing out ${finalScore}. ${topName ? `${topName} was the difference-maker.` : 'On to the next round.'}`,
-        `${winner.name} punch their ticket to the next round, beating ${loser.name} ${seriesRecord} in the ${roundName}. Final: ${finalScore}.`,
-        `The ${roundName} belongs to ${winner.name}. They eliminate ${loser.name} ${seriesRecord} and look primed for a deep run.`,
-      ]);
+      // Compute series PPG for the winner's top scorer by scanning series game history
+      const prevSeriesGames = state.history.filter(g => (series.games as string[]).includes(g.id));
+      const allSeriesGames: GameResult[] = [...prevSeriesGames, result];
+      const ppgMap: Record<string, { name: string; pts: number; gp: number }> = {};
+      for (const game of allSeriesGames) {
+        const isHome = game.homeTeamId === winner.id;
+        const lines = isHome ? game.homePlayerStats : game.awayPlayerStats;
+        for (const line of lines) {
+          const player = winner.roster.find(p => p.id === line.playerId);
+          if (!player) continue;
+          if (!ppgMap[line.playerId]) ppgMap[line.playerId] = { name: player.name, pts: 0, gp: 0 };
+          ppgMap[line.playerId].pts += line.pts;
+          ppgMap[line.playerId].gp += 1;
+        }
+      }
+      const topScorer = Object.values(ppgMap)
+        .filter(p => p.gp >= Math.max(1, Math.floor(totalGamesInSeries / 2)))
+        .sort((a, b) => (b.pts / b.gp) - (a.pts / a.gp))[0] ?? null;
+      const topPPG = topScorer ? +(topScorer.pts / topScorer.gp).toFixed(1) : 0;
+      const standout = topScorer && topPPG >= 20
+        ? pick([
+            ` ${topScorer.name} was the difference-maker with ${topPPG} PPG in the series.`,
+            ` ${topScorer.name} averaged ${topPPG} points per game throughout the series.`,
+            ` ${topScorer.name} led the charge, averaging ${topPPG} PPG.`,
+            ` ${topScorer.name} stepped up when it counted, posting ${topPPG} PPG for the series.`,
+          ])
+        : '';
+
+      // Round-specific labels and advancement phrasing
+      const roundLabel: Record<number, string> = {
+        1: 'First Round', 2: 'Conference Semifinals', 3: 'Conference Finals', 4: 'Finals',
+      };
+      const round = newSeries.round;
+      const roundName = roundLabel[round] ?? 'First Round';
+      const advanceTo: Record<number, string[]> = {
+        1: ['advance to the Conference Semifinals', 'punch their ticket to the Conference Semifinals', 'move on to the Conference Semifinals'],
+        2: ['advance to the Conference Finals', 'earn a berth in the Conference Finals', 'punch their ticket to the Conference Finals'],
+        3: ['advance to the Finals', 'punch their ticket to the Finals', 'earn a trip to the Finals', 'book their place in the Finals'],
+        4: [],
+      };
+      const advancePhrase = round < 4 ? pick(advanceTo[round] ?? advanceTo[1]) : '';
+
+      // Finals — most dramatic templates
+      if (round === 4) {
+        const yr = state.season;
+        const headline = isSweep ? `🏆 ${yr} CHAMPIONS` : wentToSeven ? `🏆 SEVEN-GAME CLASSIC — ${yr} CHAMPIONS` : `🏆 ${yr} CHAMPIONSHIP`;
+        if (isSweep) return { headline, content: pick([
+          `${W} sweep the ${L} 4-0 to win the ${yr} Championship!${standout}`,
+          `CHAMPIONS! ${W} complete a dominant sweep of the ${L} and hoist the trophy in ${yr}.${standout}`,
+          `Four and done — ${W} are the ${yr} Champions, dismissing the ${L} in a clean sweep.${standout}`,
+        ]) };
+        if (wentToSeven) return { headline, content: pick([
+          `In a seven-game classic, ${W} defeat the ${L} ${seriesRecord} to win the ${yr} Championship!${standout}`,
+          `Seven games. One champion. ${W} outlast the ${L} in an epic Finals, closing it out ${seriesRecord} to claim ${yr} glory.${standout}`,
+          `The ${yr} title goes to ${W}! They edge the ${L} in seven unforgettable games.${standout}`,
+        ]) };
+        if (isClose) return { headline, content: pick([
+          `${W} defeat the ${L} ${seriesRecord} to win the ${yr} Championship! A hard-fought series goes down to the wire.${standout}`,
+          `After a thrilling Finals, ${W} capture the ${yr} title with a ${seriesRecord} series win over the ${L}.${standout}`,
+          `${W} are ${yr} Champions! They close out the ${L} ${seriesRecord} in an instant classic.${standout}`,
+        ]) };
+        return { headline, content: pick([
+          `${W} defeat the ${L} ${seriesRecord} to win the ${yr} Championship!${standout}`,
+          `CHAMPIONS! ${W} claim the ${yr} title, taking down the ${L} ${seriesRecord} in the Finals.${standout}`,
+          `${W} are ${yr} Champions, finishing off the ${L} ${seriesRecord} in an impressive Finals run.${standout}`,
+        ]) };
+      }
+
+      // Round-specific headlines
+      const headlines: Record<number, string[]> = {
+        1: ['FIRST ROUND — SERIES COMPLETE', 'FIRST ROUND OVER'],
+        2: ['CONFERENCE SEMIFINALS — SERIES COMPLETE', 'SEMIFINALS DECIDED'],
+        3: ['CONFERENCE FINALS — SERIES COMPLETE', 'CONFERENCE FINALS OVER'],
+      };
+      const headline = pick(headlines[round] ?? headlines[1]);
+
+      if (isSweep) return { headline, content: pick([
+        `${W} sweep ${L} 4-0 and ${advancePhrase}.${standout}`,
+        `A dominant showing — ${W} eliminate ${L} in a sweep and ${advancePhrase}. The message to the league is clear.${standout}`,
+        `Four and done. ${W} storm past ${L} without dropping a game and ${advancePhrase}.${standout}`,
+      ]) };
+      if (wentToSeven) return { headline, content: pick([
+        `${W} defeat ${L} ${seriesRecord} in a seven-game thriller and ${advancePhrase}.${standout}`,
+        `Seven games, everything on the line — ${W} eliminate ${L} ${seriesRecord} in the ${roundName} and ${advancePhrase}.${standout}`,
+        `A classic ${roundName} series ends — ${W} edge ${L} in seven and ${advancePhrase}.${standout}`,
+      ]) };
+      if (isClose && isBlowout) return { headline, content: pick([
+        `After a grueling ${seriesRecord} series, ${W} close it out with a statement performance and ${advancePhrase}. ${L} had no answers in the end.${standout}`,
+        `${W} survive a back-and-forth ${roundName} battle with ${L} and ${advancePhrase}, putting it away emphatically in the clincher.${standout}`,
+      ]) };
+      if (isClose) return { headline, content: pick([
+        `${W} eliminate ${L} ${seriesRecord} in the ${roundName} and ${advancePhrase}.${standout}`,
+        `A hard-fought ${seriesRecord} series goes to ${W}, who ${advancePhrase}. ${L} took them to the limit.${standout}`,
+        `${W} edge ${L} ${seriesRecord} in a tight ${roundName} battle and ${advancePhrase}.${standout}`,
+        `${L} pushed them to ${winsL} games, but ${W} close out the ${roundName} ${seriesRecord} and ${advancePhrase}.${standout}`,
+      ]) };
+      return { headline, content: pick([
+        `${W} defeat ${L} ${seriesRecord} in the ${roundName} and ${advancePhrase}.${standout}`,
+        `${W} eliminate ${L} ${seriesRecord} and ${advancePhrase}.${standout}`,
+        `The ${roundName} belongs to ${W} — they take down ${L} ${seriesRecord} and ${advancePhrase}.${standout}`,
+        `${W} take care of business in the ${roundName}, beating ${L} ${seriesRecord} to ${advancePhrase}.${standout}`,
+      ]) };
     };
 
     if (newSeries.team1Wins === 4) {
@@ -178,11 +274,12 @@ const Playoffs: React.FC<PlayoffsProps> = ({ league, updateLeague, onStartOffsea
       rivalry.playoffSeriesCount += 1;
       const winner = updatedTeams.find(t => t.id === newSeries.winnerId)!;
       const loser  = updatedTeams.find(t => t.id === series.team2Id)!;
+      const { headline, content } = buildSeriesNews(winner, loser, newSeries.team1Wins, newSeries.team2Wins);
       newsFeed.unshift({
         id: `playoff-win-${Date.now()}`,
         category: 'playoffs',
-        headline: 'SERIES COMPLETE',
-        content: buildSeriesContent(winner, loser, newSeries.team1Wins, newSeries.team2Wins),
+        headline,
+        content,
         timestamp: state.currentDay,
         realTimestamp: Date.now(),
         teamId: winner.id,
@@ -194,11 +291,12 @@ const Playoffs: React.FC<PlayoffsProps> = ({ league, updateLeague, onStartOffsea
       rivalry.playoffSeriesCount += 1;
       const winner = updatedTeams.find(t => t.id === newSeries.winnerId)!;
       const loser  = updatedTeams.find(t => t.id === series.team1Id)!;
+      const { headline, content } = buildSeriesNews(winner, loser, newSeries.team2Wins, newSeries.team1Wins);
       newsFeed.unshift({
         id: `playoff-win-${Date.now()}`,
         category: 'playoffs',
-        headline: 'SERIES COMPLETE',
-        content: buildSeriesContent(winner, loser, newSeries.team2Wins, newSeries.team1Wins),
+        headline,
+        content,
         timestamp: state.currentDay,
         realTimestamp: Date.now(),
         teamId: winner.id,
@@ -294,13 +392,26 @@ const Playoffs: React.FC<PlayoffsProps> = ({ league, updateLeague, onStartOffsea
           seriesScore: `${champWins}-${ruWins}`,
           finalsMvp: mvpEntry[mvpId]?.name ?? '—',
        };
+       // Stamp a championship ring on every player currently on the winning roster
+       const ringYear = state.season;
+       const teamsWithRings = updatedTeams.map(t => {
+          if (t.id !== championId) return t;
+          return {
+            ...t,
+            roster: t.roster.map(p => ({
+              ...p,
+              championYears: [...(p.championYears ?? []), ringYear],
+            })),
+          };
+       });
+
        return {
           ...state,
           playoffBracket: nextBracket,
           championshipHistory: [champRecord, ...(state.championshipHistory || [])],
           history: [result, ...state.history],
           rivalryHistory: history,
-          teams: updatedTeams,
+          teams: teamsWithRings,
           newsFeed,
        };
     }
@@ -551,13 +662,22 @@ const Playoffs: React.FC<PlayoffsProps> = ({ league, updateLeague, onStartOffsea
         )}
 
         {!series.winnerId && (
-          <button
-            onClick={() => simulatePlayoffGame(series.id)}
-            disabled={isSimulating}
-            className="w-full py-1.5 bg-slate-800 hover:bg-amber-500 hover:text-slate-950 text-[9px] font-black uppercase rounded-lg transition-all"
-          >
-            Sim Game
-          </button>
+          <div className="flex gap-2">
+            <button
+              onClick={() => simulatePlayoffGame(series.id)}
+              disabled={isSimulating}
+              className="flex-1 py-1.5 bg-slate-800 hover:bg-amber-500 hover:text-slate-950 text-[9px] font-black uppercase rounded-lg transition-all"
+            >
+              Sim Game
+            </button>
+            <button
+              onClick={() => setWatchingLiveSeriesId(series.id)}
+              disabled={isSimulating}
+              className="flex-1 py-1.5 bg-slate-800 hover:bg-green-500 hover:text-slate-950 text-[9px] font-black uppercase rounded-lg transition-all flex items-center justify-center gap-1"
+            >
+              <span>▶</span> Watch Live
+            </button>
+          </div>
         )}
       </div>
     );
@@ -712,6 +832,54 @@ const Playoffs: React.FC<PlayoffsProps> = ({ league, updateLeague, onStartOffsea
           border-style: solid;
         }
       `}} />
+
+      {/* ── Watch Live modal for playoff games ── */}
+      {watchingLiveSeriesId && (() => {
+        const liveSeries = bracket.series.find(s => s.id === watchingLiveSeriesId);
+        if (!liveSeries) return null;
+        const totalGames = liveSeries.team1Wins + liveSeries.team2Wins;
+        const isT1Home   = [0, 1, 4, 6].includes(totalGames);
+        const liveHome   = league.teams.find(t => t.id === (isT1Home ? liveSeries.team1Id : liveSeries.team2Id))!;
+        const liveAway   = league.teams.find(t => t.id === (isT1Home ? liveSeries.team2Id : liveSeries.team1Id))!;
+        const rivalryStats = league.rivalryHistory?.find(r =>
+          (r.team1Id === liveHome.id && r.team2Id === liveAway.id) ||
+          (r.team1Id === liveAway.id && r.team2Id === liveHome.id));
+        const getRivalryLevel = (stats: RivalryStats | undefined) => {
+          if (!stats || stats.totalGames <= 2) return 'Ice Cold';
+          const score = stats.totalGames + stats.playoffSeriesCount * 5 + stats.buzzerBeaters * 3 + stats.comebacks * 2 + stats.otGames * 2 + stats.badBloodScore;
+          if (stats.totalGames >= 20 && score >= 30) return 'Red Hot';
+          if (stats.totalGames >= 16) return 'Hot';
+          if (stats.totalGames >= 8) return 'Warm';
+          if (stats.totalGames >= 3) return 'Cold';
+          return 'Ice Cold';
+        };
+        return (
+          <LiveGameModal
+            game={{
+              id: `playoff-${league.season}-${watchingLiveSeriesId}-G${totalGames + 1}`,
+              day: league.currentDay,
+              homeTeamId: liveHome.id,
+              awayTeamId: liveAway.id,
+              played: false,
+              homeB2B: false,
+              awayB2B: false,
+              homeB2BCount: 0,
+              awayB2BCount: 0,
+            }}
+            homeTeam={liveHome}
+            awayTeam={liveAway}
+            season={league.season}
+            league={league}
+            rivalryLevel={getRivalryLevel(rivalryStats)}
+            onComplete={async (result) => {
+              const updated = await simulatePlayoffGameInternal(league, watchingLiveSeriesId, result);
+              updateLeague(updated);
+              setWatchingLiveSeriesId(null);
+            }}
+            onClose={() => setWatchingLiveSeriesId(null)}
+          />
+        );
+      })()}
     </div>
   );
 };

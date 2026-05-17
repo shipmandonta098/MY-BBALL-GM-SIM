@@ -2,6 +2,7 @@ import React, { useState, useMemo } from 'react';
 import { LeagueState, Transaction, TransactionType, Team } from '../types';
 import TeamBadge from './TeamBadge';
 import { useNavigation } from '../context/NavigationContext';
+import { fmtSalary } from '../utils/formatters';
 
 interface TransactionsProps {
   league: LeagueState;
@@ -60,7 +61,7 @@ const Transactions: React.FC<TransactionsProps> = ({ league }) => {
     }
   };
 
-  const formatMoney = (val: number) => `$${(val / 1000000).toFixed(1)}M`;
+  const formatMoney = fmtSalary;
 
   return (
     <div className="space-y-8 animate-in fade-in duration-500 pb-40">

@@ -79,6 +79,13 @@ const TeamSelection: React.FC<TeamSelectionProps> = ({ teams, onSelectTeam, onEd
     ? { ...editingTeam, ...editDraft }
     : null;
 
+  const handleSurpriseMe = () => {
+    const active = teams.filter(t => t.status === 'Active' || !t.status);
+    const pool = active.length > 0 ? active : teams;
+    const pick = pool[Math.floor(Math.random() * pool.length)];
+    if (pick) onSelectTeam(pick.id);
+  };
+
   return (
     <div className="fixed inset-0 bg-slate-950 overflow-y-auto p-8 z-[110] animate-in fade-in duration-700">
       <div className="max-w-[1600px] mx-auto">
@@ -94,10 +101,16 @@ const TeamSelection: React.FC<TeamSelectionProps> = ({ teams, onSelectTeam, onEd
           <h2 className="text-6xl font-display font-bold uppercase tracking-tighter text-white mb-2">
             Select Your <span className="text-amber-500">Franchise</span>
           </h2>
-          <p className="text-slate-400 text-lg max-w-2xl mx-auto">
+          <p className="text-slate-400 text-lg max-w-2xl mx-auto mb-5">
             Choose a team to lead to the championship.{' '}
             {onEditTeam && <span className="text-amber-500/80">Click the pencil icon to customize any team before you start.</span>}
           </p>
+          <button
+            onClick={handleSurpriseMe}
+            className="inline-flex items-center gap-2 px-6 py-2.5 rounded-xl font-black uppercase tracking-widest text-sm bg-amber-500 hover:bg-amber-400 text-slate-950 shadow-lg shadow-amber-500/20 hover:shadow-amber-400/30 transition-all active:scale-95"
+          >
+            🎲 Surprise Me
+          </button>
         </header>
 
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5 gap-6 pb-20">

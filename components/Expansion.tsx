@@ -1,6 +1,6 @@
 import React, { useState, useMemo, useEffect, useCallback } from 'react';
 import { LeagueState, Team, Player, NewsItem } from '../types';
-import { generateCoach, generateDefaultRotation } from '../constants';
+import { generateCoach, generateDefaultRotation, EXPANSION_CITY_DB, TEAM_DATA, ExpansionCityOption } from '../constants';
 
 interface ExpansionProps {
   league: LeagueState;
@@ -40,8 +40,7 @@ const fmt = (n: number) =>
 // ─── Component ────────────────────────────────────────────────────────────────
 const Expansion: React.FC<ExpansionProps> = ({ league, updateLeague, onScout }) => {
   const s = league.settings;
-  const enabled    = s.expansionEnabled ?? false;
-  const teamCount  = s.expansionTeamCount ?? 2;
+  const teamCount  = s.expansionTeamCount ?? 1;
   const rules      = s.expansionDraftRules ?? 'Standard';
   const maxProtected = rules === 'Protected' ? 11 : rules === 'Open' ? 0 : 8;
   const draftState = league.expansionDraft;
@@ -55,6 +54,8 @@ const Expansion: React.FC<ExpansionProps> = ({ league, updateLeague, onScout }) 
   const [draftIdx, setDraftIdx]         = useState(0);
   const [isAutoRunning, setIsAutoRunning] = useState(false);
   const [activeExpTeam, setActiveExpTeam] = useState(0); // which expansion team tab to preview
+  const [showCityPicker, setShowCityPicker] = useState(true);
+  const [citySearch, setCitySearch] = useState('');
 
   // sync protection list from persisted state
   useEffect(() => {
@@ -71,6 +72,51 @@ const Expansion: React.FC<ExpansionProps> = ({ league, updateLeague, onScout }) 
     }
   }, [teamCount, draftState?.active]);
 
+  // reset city picker when navigating between form pages
+  useEffect(() => {
+    setShowCityPicker(forms[formPage]?.city.trim() === '');
+    setCitySearch('');
+  }, [formPage]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // ── available expansion markets ────────────────────────────────────────────
+  const availableCities = useMemo(() => {
+    const activeLeagueCities = new Set(
+      league.teams
+        .filter(t => t.status === 'Active' || t.status === 'Relocating' || t.status === 'Expansion')
+        .map(t => t.city.toLowerCase())
+    );
+
+    // Cities from EXPANSION_CITY_DB not already occupied
+    const staticCities = EXPANSION_CITY_DB.filter(
+      c => !activeLeagueCities.has(c.city.toLowerCase())
+    );
+
+    // Former league cities (in TEAM_DATA but no longer in league.teams)
+    const leagueCities = new Set(league.teams.map(t => t.city.toLowerCase()));
+    const formerCities: (ExpansionCityOption & { isFormerLeague: true; formerName: string })[] =
+      TEAM_DATA
+        .filter(td => !leagueCities.has(td.city.toLowerCase()))
+        .filter(td => !EXPANSION_CITY_DB.some(c => c.city.toLowerCase() === td.city.toLowerCase()))
+        .map(td => ({
+          city: td.city,
+          state: '',
+          country: 'USA' as const,
+          marketSize: td.market as 'Large' | 'Medium' | 'Small',
+          population: td.market === 'Large' ? 5.0 : td.market === 'Medium' ? 2.8 : 1.6,
+          expansionFee: td.market === 'Large' ? 130 : td.market === 'Medium' ? 95 : 78,
+          suggestedName: td.name,
+          suggestedNames: [td.name],
+          primaryColor: td.primary,
+          secondaryColor: td.secondary,
+          conf: td.conf as 'Eastern' | 'Western',
+          div: td.div,
+          isFormerLeague: true as const,
+          formerName: td.name,
+        }));
+
+    return { staticCities, formerCities };
+  }, [league.teams]);
+
   // ── unprotected pool memo ──────────────────────────────────────────────────
   const unprotectedPool = useMemo(() => {
     if (!draftState) return [];
@@ -85,7 +131,7 @@ const Expansion: React.FC<ExpansionProps> = ({ league, updateLeague, onScout }) 
       .sort((a, b) => b.rating - a.rating);
   }, [league.teams, draftState]);
 
-  // ── action: start expansion ────────────────────────────────────────────────
+  // ── action: start expansion draft ─────────────────────────────────────────
   const handleStartExpansion = useCallback(() => {
     updateLeague({
       expansionDraft: {
@@ -235,16 +281,40 @@ const Expansion: React.FC<ExpansionProps> = ({ league, updateLeague, onScout }) 
       return t;
     });
 
-    const pick = Math.floor(draftIdx / expIds.length) + 1;
-    const round = pick <= expIds.length ? `R1 P${draftIdx + 1}` : `R${Math.ceil(pick / expIds.length)} P${draftIdx + 1}`;
-    const log = `${round}: ${expTeam.name} — ${picked.name} (${picked.position}, ${picked.rating} OVR) from ${fromTeamName}`;
+    const overallPick = draftIdx + 1;
+    const roundNum = Math.floor(draftIdx / expIds.length) + 1;
+    const roundLabel = `R${roundNum} P${overallPick}`;
+    const log = `${roundLabel}: ${expTeam.name} — ${picked.name} (${picked.position}, ${picked.rating} OVR) from ${fromTeamName}`;
+
+    const flavor = picked.rating >= 85
+      ? 'A proven veteran who brings immediate impact.'
+      : picked.rating >= 78
+      ? 'A reliable contributor targeted for their experience.'
+      : 'A developmental piece added to build depth.';
+
+    const pickNewsItem: NewsItem = {
+      id: `exp-pick-${draftIdx}-${Date.now()}`,
+      category: 'transaction' as const,
+      headline: roundNum === 1 ? `EXPANSION DRAFT: R1 PICK ${overallPick}` : `EXPANSION DRAFT: R${roundNum}`,
+      content: `Expansion Draft: ${expTeam.city} ${expTeam.name} select ${picked.name} (${picked.position}, ${picked.age ?? ''}${picked.age ? ', ' : ''}${picked.rating} OVR) from ${fromTeamName}. ${flavor}`,
+      timestamp: league.currentDay,
+      realTimestamp: Date.now() + draftIdx * 10,
+      teamId: expId,
+      playerId: picked.id,
+      isBreaking: false,
+      seasonYear: league.season,
+    };
 
     updateLeague({
       teams: updatedTeams,
-      expansionDraft: { ...draftState, draftLog: [log, ...draftState.draftLog] },
+      expansionDraft: {
+        ...draftState,
+        draftLog: [log, ...draftState.draftLog],
+        pickNews: [pickNewsItem, ...(draftState.pickNews ?? [])],
+      },
     });
     setDraftIdx(prev => prev + 1);
-  }, [draftState, draftIdx, league.teams, unprotectedPool, updateLeague]);
+  }, [draftState, draftIdx, league.teams, league.currentDay, league.season, unprotectedPool, updateLeague]);
 
   // ── auto-draft loop ────────────────────────────────────────────────────────
   useEffect(() => {
@@ -267,35 +337,46 @@ const Expansion: React.FC<ExpansionProps> = ({ league, updateLeague, onScout }) 
       return { ...t, rotation: generateDefaultRotation(t.roster) };
     });
 
-    const newsItems: NewsItem[] = draftState.expansionTeamIds.map((tid, i) => {
+    const teamCompleteItems: NewsItem[] = draftState.expansionTeamIds.map((tid, i) => {
       const team = updatedTeams.find(t => t.id === tid);
       const gmName = draftState.pendingTeams?.find(pt => pt.id === tid)?.gmName ?? 'the new GM';
+      const rosterSize = team?.roster.length ?? 0;
+      const topPlayer = team?.roster.slice().sort((a, b) => b.rating - a.rating)[0];
+      const topStr = topPlayer ? ` Led by ${topPlayer.name} (${topPlayer.position}, ${topPlayer.rating} OVR),` : '';
       return {
         id: `exp-news-${tid}-${Date.now()}`,
-        category: 'transaction' as const,
-        headline: `${team?.name ?? 'Expansion Team'} joins the league!`,
-        content: `The ${team?.city ?? ''} ${team?.name ?? 'Expansion franchise'} has completed its expansion draft under GM ${gmName}. The team selected ${team?.roster.length ?? 0} players and will join league play next season.`,
+        category: 'expansion' as const,
+        headline: `🏀 ${team?.name ?? 'Expansion Team'} JOINS THE LEAGUE`,
+        content: `The ${team?.city ?? ''} ${team?.name ?? 'Expansion franchise'} has completed its Expansion Draft under GM ${gmName}, selecting ${rosterSize} players.${topStr} the franchise is ready to begin play next season.`,
         timestamp: league.currentDay,
         realTimestamp: Date.now() + i * 50,
         teamId: tid,
         isBreaking: true,
+        seasonYear: league.season,
       };
     });
 
-    // Add draft-result news
-    const draftRecap: NewsItem = {
+    // Wrap up headline item
+    const teamNames = draftState.expansionTeamIds
+      .map(tid => updatedTeams.find(t => t.id === tid)?.name ?? 'Expansion Team')
+      .join(' & ');
+    const wrapUpItem: NewsItem = {
       id: `exp-recap-${Date.now()}`,
-      category: 'transaction' as const,
+      category: 'expansion' as const,
       headline: 'Expansion Draft Complete — League Grows!',
-      content: draftState.draftLog.slice(0, 6).join(' | '),
+      content: `The ${teamNames} ${draftState.expansionTeamIds.length > 1 ? 'have' : 'has'} completed the Expansion Draft. Both franchises will join league play next season.`,
       timestamp: league.currentDay,
       realTimestamp: Date.now() + 200,
       isBreaking: false,
+      seasonYear: league.season,
     };
+
+    // Per-pick news items accumulated during the draft (most recent first already)
+    const perPickNews: NewsItem[] = draftState.pickNews ?? [];
 
     updateLeague({
       teams: updatedTeams,
-      newsFeed: [...newsItems, draftRecap, ...league.newsFeed],
+      newsFeed: [...teamCompleteItems, wrapUpItem, ...perPickNews, ...league.newsFeed],
       expansionDraft: { ...draftState, active: false },
     });
   }, [draftState, league.teams, league.newsFeed, league.currentDay, updateLeague]);
@@ -323,40 +404,45 @@ const Expansion: React.FC<ExpansionProps> = ({ league, updateLeague, onScout }) 
   );
 
   // ══════════════════════════════════════════════════════════════════════════
-  // SCREEN 1: Not enabled
+  // SCREEN 0: Season not yet complete — locked until offseason
   // ══════════════════════════════════════════════════════════════════════════
-  if (!enabled) {
+  const isWomensLeague = (league.settings.playerGenderRatio ?? 0) === 100;
+  const finalsLabel = isWomensLeague ? 'WNBA Finals' : 'NBA Finals';
+
+  if (!league.isOffseason && !draftState?.active) {
     return (
       <div className="space-y-8 animate-in fade-in duration-500 pb-40">
         <PageHeader
           title="Expansion Draft"
           sub="Add a new franchise to your league"
-          badge="Feature Disabled"
+          badge="Locked"
         />
         <div className="bg-slate-900 border border-slate-800 rounded-3xl p-12 text-center space-y-6">
           <div className="w-20 h-20 bg-slate-800 rounded-full flex items-center justify-center mx-auto">
-            <svg className="w-10 h-10 text-slate-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.5" d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-2 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4" />
+            <svg className="w-10 h-10 text-slate-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.5" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
             </svg>
           </div>
           <div>
             <p className="text-2xl font-display font-bold uppercase text-slate-400 tracking-wide mb-2">
-              Expansion Not Active
+              Expansion Draft Locked
             </p>
-            <p className="text-slate-600 text-sm max-w-md mx-auto">
-              Enable expansion in League Settings to add {teamCount} new franchise{teamCount > 1 ? 's' : ''} to your league via expansion draft.
+            <p className="text-slate-500 text-sm max-w-md mx-auto">
+              The Expansion Draft becomes available after the{' '}
+              <span className="text-slate-300 font-semibold">{finalsLabel}</span>{' '}
+              conclude. Complete the current season — playoffs and championship — then return here during the offseason.
             </p>
           </div>
           <div className="flex items-center justify-center gap-3 pt-2">
             <div className="h-px flex-1 max-w-24 bg-slate-800" />
-            <span className="text-[10px] font-black uppercase tracking-widest text-slate-600">How to enable</span>
+            <span className="text-[10px] font-black uppercase tracking-widest text-slate-600">When it unlocks</span>
             <div className="h-px flex-1 max-w-24 bg-slate-800" />
           </div>
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 max-w-xl mx-auto text-left">
             {[
-              { n: '1', t: 'Open Settings', d: 'Go to League Settings → League tab' },
-              { n: '2', t: 'Toggle On', d: 'Find "Enable Expansion" and turn it on' },
-              { n: '3', t: 'Return Here', d: 'Come back to launch your expansion draft' },
+              { n: '1', t: 'Finish the Season', d: 'Complete all regular season games' },
+              { n: '2', t: 'Win the Championship', d: `Play through the playoffs and ${finalsLabel}` },
+              { n: '3', t: 'Enter Offseason', d: 'Expansion unlocks automatically once the season ends' },
             ].map(step => (
               <div key={step.n} className="bg-slate-950 border border-slate-800 rounded-2xl p-4 flex gap-3">
                 <span className="text-2xl font-display font-black text-slate-700">{step.n}</span>
@@ -373,7 +459,7 @@ const Expansion: React.FC<ExpansionProps> = ({ league, updateLeague, onScout }) 
   }
 
   // ══════════════════════════════════════════════════════════════════════════
-  // SCREEN 2: Enabled but not started
+  // SCREEN 1: Unlocked — configure and launch
   // ══════════════════════════════════════════════════════════════════════════
   if (!draftState?.active) {
     return (
@@ -430,6 +516,29 @@ const Expansion: React.FC<ExpansionProps> = ({ league, updateLeague, onScout }) 
           ))}
         </div>
 
+        {/* Team count selector */}
+        <div className="bg-slate-900 border border-slate-800 rounded-3xl p-6 flex flex-col sm:flex-row sm:items-center gap-4">
+          <div className="flex-1">
+            <p className="text-xs font-black uppercase tracking-[0.3em] text-slate-400">Expansion Teams</p>
+            <p className="text-[11px] text-slate-600 mt-0.5">How many new franchises will join next season?</p>
+          </div>
+          <div className="flex gap-2">
+            {([1, 2, 4] as const).map(n => (
+              <button
+                key={n}
+                onClick={() => updateLeague({ settings: { ...s, expansionTeamCount: n } })}
+                className={`w-14 h-10 rounded-xl font-display font-black text-sm transition-all ${
+                  teamCount === n
+                    ? 'bg-orange-500 text-slate-950 shadow-lg shadow-orange-500/30'
+                    : 'bg-slate-800 text-slate-400 hover:bg-slate-700 hover:text-slate-200'
+                }`}
+              >
+                {n}
+              </button>
+            ))}
+          </div>
+        </div>
+
         {/* Steps overview */}
         <div className="bg-slate-900 border border-slate-800 rounded-3xl p-8">
           <h3 className="text-xs font-black uppercase tracking-[0.4em] text-orange-500 mb-6">Expansion Process</h3>
@@ -467,7 +576,8 @@ const Expansion: React.FC<ExpansionProps> = ({ league, updateLeague, onScout }) 
   }
 
   // ══════════════════════════════════════════════════════════════════════════
-  // SCREEN 3: Setup phase — configure new team(s)
+  // ══════════════════════════════════════════════════════════════════════════
+  // SCREEN 2: Setup phase — configure new team(s)
   // ══════════════════════════════════════════════════════════════════════════
   if (draftState.phase === 'setup') {
     const form = forms[formPage] ?? { ...BLANK_FORM };
@@ -476,17 +586,244 @@ const Expansion: React.FC<ExpansionProps> = ({ league, updateLeague, onScout }) 
 
     const allValid = forms.every(f => f.name.trim().length > 0 && f.city.trim().length > 0);
 
+    const marketSizeLabel = (s: 'Large' | 'Medium' | 'Small') =>
+      s === 'Large' ? { label: 'Large Market', cls: 'bg-amber-500/20 text-amber-400 border-amber-500/30' }
+      : s === 'Medium' ? { label: 'Medium Market', cls: 'bg-sky-500/20 text-sky-400 border-sky-500/30' }
+      : { label: 'Small Market', cls: 'bg-slate-600/40 text-slate-400 border-slate-600/40' };
+
+    const fmtPop = (p: number) => p >= 10 ? `${p.toFixed(0)}M` : `${p.toFixed(1)}M`;
+    const fmtFee = (f: number) => `$${f}M`;
+
+    const applyCity = (c: ExpansionCityOption) => {
+      const abbr = c.city.replace(/\s+/g, '').substring(0, 3).toUpperCase();
+      setForms(prev => prev.map((f, i) => i === formPage ? {
+        ...f,
+        city: c.city,
+        name: c.suggestedName,
+        abbreviation: abbr,
+        primaryColor: c.primaryColor,
+        secondaryColor: c.secondaryColor,
+      } : f));
+      setShowCityPicker(false);
+    };
+
+    const q = citySearch.toLowerCase();
+    const filteredStatic = availableCities.staticCities.filter(
+      c => c.city.toLowerCase().includes(q) || c.state.toLowerCase().includes(q)
+        || c.suggestedName.toLowerCase().includes(q) || c.country.toLowerCase().includes(q)
+    );
+    const filteredFormer = availableCities.formerCities.filter(
+      c => c.city.toLowerCase().includes(q) || c.formerName.toLowerCase().includes(q)
+    );
+
+    // ── City Picker sub-screen ─────────────────────────────────────────────
+    if (showCityPicker) {
+      return (
+        <div className="space-y-8 animate-in fade-in duration-500 pb-40">
+          <PageHeader
+            title="Select Market"
+            sub={`Step 1 of 4 — Choose a city for${teamCount > 1 ? ` Team ${formPage + 1}` : ' your new franchise'}`}
+            badge="Expansion Phase · Step 1"
+          />
+
+          {/* Multi-team tabs */}
+          {teamCount > 1 && (
+            <div className="flex gap-2 flex-wrap">
+              {forms.map((f, i) => (
+                <button
+                  key={i}
+                  onClick={() => setFormPage(i)}
+                  className={`px-5 py-2.5 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all ${
+                    formPage === i ? 'bg-orange-500 text-slate-950' : 'bg-slate-800 text-slate-400 hover:text-white'
+                  }`}
+                >
+                  {f.name.trim() || `Team ${i + 1}`}
+                  {f.name.trim() && f.city.trim() ? <span className="ml-1.5 text-emerald-400">✓</span> : null}
+                </button>
+              ))}
+            </div>
+          )}
+
+          {/* Search bar */}
+          <div className="relative">
+            <svg className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M21 21l-4.35-4.35M17 11A6 6 0 1 1 5 11a6 6 0 0 1 12 0z" />
+            </svg>
+            <input
+              type="text"
+              value={citySearch}
+              onChange={e => setCitySearch(e.target.value)}
+              placeholder="Search cities, states, or team names…"
+              className="w-full bg-slate-900 border border-slate-700 rounded-2xl pl-11 pr-4 py-3.5 text-white font-semibold text-sm focus:outline-none focus:border-orange-500/60 placeholder:text-slate-600 transition-colors"
+            />
+            {citySearch && (
+              <button onClick={() => setCitySearch('')} className="absolute right-4 top-1/2 -translate-y-1/2 text-slate-500 hover:text-white transition-colors">
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+            )}
+          </div>
+
+          {/* Former league markets (dynamic — cities removed from the league) */}
+          {filteredFormer.length > 0 && (
+            <div className="space-y-3">
+              <p className="text-[10px] font-black uppercase tracking-[0.4em] text-orange-400">
+                Former League Markets — Available Again
+              </p>
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+                {filteredFormer.map(c => {
+                  const ms = marketSizeLabel(c.marketSize);
+                  return (
+                    <button
+                      key={c.city}
+                      onClick={() => applyCity(c)}
+                      className="group text-left bg-slate-900 border border-orange-500/20 hover:border-orange-500/50 rounded-2xl p-4 transition-all hover:bg-slate-800 relative overflow-hidden"
+                    >
+                      <div className="absolute top-0 left-0 w-1 h-full rounded-l-2xl" style={{ backgroundColor: c.primaryColor }} />
+                      <div className="pl-3 space-y-2">
+                        <div className="flex items-start justify-between gap-2">
+                          <div>
+                            <p className="font-display font-black text-white text-base leading-tight">
+                              {c.city}
+                            </p>
+                            <p className="text-[10px] text-slate-500 font-semibold mt-0.5">
+                              Former {c.city} {c.formerName} market
+                            </p>
+                          </div>
+                          <span className="shrink-0 text-[9px] font-black uppercase tracking-wider px-2 py-0.5 rounded-full border bg-orange-500/10 text-orange-400 border-orange-500/20">
+                            Returned
+                          </span>
+                        </div>
+                        <div className="flex items-center gap-3 text-[10px] text-slate-500">
+                          <span>{fmtPop(c.population)} pop.</span>
+                          <span>·</span>
+                          <span>{fmtFee(c.expansionFee)} fee</span>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <span className={`text-[9px] font-black uppercase tracking-wide px-2 py-0.5 rounded-full border ${ms.cls}`}>
+                            {ms.label}
+                          </span>
+                          <span className="text-[10px] text-slate-600">→ {c.suggestedName}</span>
+                        </div>
+                        <div className="flex gap-1.5 mt-1">
+                          {c.suggestedNames.map(n => (
+                            <span key={n} className="text-[9px] px-1.5 py-0.5 bg-slate-800 rounded text-slate-500">{n}</span>
+                          ))}
+                        </div>
+                      </div>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
+          {/* Available expansion markets */}
+          {filteredStatic.length > 0 && (
+            <div className="space-y-3">
+              <p className="text-[10px] font-black uppercase tracking-[0.4em] text-slate-500">
+                Available Expansion Markets — {filteredStatic.length} {filteredStatic.length === 1 ? 'city' : 'cities'}
+              </p>
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+                {filteredStatic.map(c => {
+                  const ms = marketSizeLabel(c.marketSize);
+                  return (
+                    <button
+                      key={c.city}
+                      onClick={() => applyCity(c)}
+                      className="group text-left bg-slate-900 border border-slate-800 hover:border-slate-600 rounded-2xl p-4 transition-all hover:bg-slate-800 relative overflow-hidden"
+                    >
+                      {c.highlight && (
+                        <div className="absolute top-3 right-3">
+                          <span className="text-[9px] font-black uppercase tracking-wider px-2 py-0.5 rounded-full bg-amber-500/15 text-amber-400 border border-amber-500/25">
+                            Strong Market
+                          </span>
+                        </div>
+                      )}
+                      <div className="absolute top-0 left-0 w-1 h-full rounded-l-2xl" style={{ backgroundColor: c.primaryColor }} />
+                      <div className="pl-3 space-y-2">
+                        <div>
+                          <p className="font-display font-black text-white text-base leading-tight pr-20">
+                            {c.city}
+                            {c.state && <span className="text-slate-500 font-bold text-sm ml-1.5">{c.state}</span>}
+                          </p>
+                          {c.country !== 'USA' && (
+                            <p className="text-[10px] text-slate-600 font-semibold">{c.country}</p>
+                          )}
+                        </div>
+                        <div className="flex items-center gap-3 text-[10px] text-slate-500">
+                          <span>{fmtPop(c.population)} pop.</span>
+                          <span>·</span>
+                          <span className="font-bold text-slate-400">{fmtFee(c.expansionFee)} fee</span>
+                        </div>
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <span className={`text-[9px] font-black uppercase tracking-wide px-2 py-0.5 rounded-full border ${ms.cls}`}>
+                            {ms.label}
+                          </span>
+                          <span className="text-[10px] text-slate-500">{c.conf} · {c.div}</span>
+                        </div>
+                        <div className="flex items-center gap-1">
+                          <span className="text-[10px] text-slate-500">Suggested:</span>
+                          <div className="flex gap-1 flex-wrap">
+                            {c.suggestedNames.slice(0, 3).map((n, ni) => (
+                              <span key={n} className={`text-[9px] px-1.5 py-0.5 rounded transition-colors ${
+                                ni === 0 ? 'bg-orange-500/15 text-orange-400 font-bold' : 'bg-slate-800 text-slate-500'
+                              }`}>{n}</span>
+                            ))}
+                          </div>
+                        </div>
+                        <div className="flex gap-1.5 mt-0.5">
+                          <div className="w-4 h-4 rounded-full border border-slate-700" style={{ backgroundColor: c.primaryColor }} />
+                          <div className="w-4 h-4 rounded-full border border-slate-700" style={{ backgroundColor: c.secondaryColor }} />
+                          <span className="text-[10px] text-slate-600 ml-1">Preset colors</span>
+                        </div>
+                      </div>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
+          {filteredStatic.length === 0 && filteredFormer.length === 0 && (
+            <div className="bg-slate-900 border border-slate-800 rounded-3xl p-10 text-center">
+              <p className="text-slate-400 font-bold">No cities match "{citySearch}"</p>
+              <p className="text-slate-600 text-sm mt-1">Try a different search or use Custom Entry below.</p>
+            </div>
+          )}
+
+          {/* Navigation */}
+          <div className="flex items-center justify-between">
+            <button
+              onClick={() => updateLeague({ expansionDraft: undefined })}
+              className="px-6 py-3 bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-white font-bold rounded-xl transition-all text-sm"
+            >
+              ← Cancel
+            </button>
+            <button
+              onClick={() => setShowCityPicker(false)}
+              className="px-6 py-3 bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white font-bold rounded-xl transition-all text-sm"
+            >
+              Custom Entry →
+            </button>
+          </div>
+        </div>
+      );
+    }
+
+    // ── Team Details sub-screen (pre-filled, fully editable) ─────────────────
     return (
       <div className="space-y-8 animate-in fade-in duration-500 pb-40">
         <PageHeader
-          title="Team Setup"
+          title="Team Details"
           sub={`Step 1 of 4 — Configure new franchise${teamCount > 1 ? 's' : ''}`}
           badge="Expansion Phase · Step 1"
         />
 
         {/* Multi-team tabs */}
         {teamCount > 1 && (
-          <div className="flex gap-2">
+          <div className="flex gap-2 flex-wrap">
             {forms.map((f, i) => (
               <button
                 key={i}
@@ -496,9 +833,7 @@ const Expansion: React.FC<ExpansionProps> = ({ league, updateLeague, onScout }) 
                 }`}
               >
                 {f.name.trim() || `Team ${i + 1}`}
-                {f.name.trim() && f.city.trim() ? (
-                  <span className="ml-1.5 text-emerald-400">✓</span>
-                ) : null}
+                {f.name.trim() && f.city.trim() ? <span className="ml-1.5 text-emerald-400">✓</span> : null}
               </button>
             ))}
           </div>
@@ -507,9 +842,30 @@ const Expansion: React.FC<ExpansionProps> = ({ league, updateLeague, onScout }) 
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
           {/* Form */}
           <div className="bg-slate-900 border border-slate-800 rounded-3xl p-8 space-y-5">
-            <h3 className="text-xl font-display font-bold uppercase text-white">
-              {teamCount > 1 ? `Team ${formPage + 1} Details` : 'New Franchise Details'}
-            </h3>
+            <div className="flex items-center justify-between">
+              <h3 className="text-xl font-display font-bold uppercase text-white">
+                {teamCount > 1 ? `Team ${formPage + 1} Details` : 'New Franchise Details'}
+              </h3>
+              <button
+                onClick={() => setShowCityPicker(true)}
+                className="flex items-center gap-1.5 text-[10px] font-black uppercase tracking-widest text-orange-400 hover:text-orange-300 transition-colors"
+              >
+                <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M15 19l-7-7 7-7" />
+                </svg>
+                Change City
+              </button>
+            </div>
+
+            {form.city && (
+              <div className="flex items-center gap-3 bg-orange-500/8 border border-orange-500/20 rounded-2xl px-4 py-3">
+                <div className="w-3 h-3 rounded-full border-2 border-orange-500/50 shrink-0" style={{ backgroundColor: form.primaryColor }} />
+                <div>
+                  <p className="text-orange-300 font-black text-sm">{form.city}</p>
+                  <p className="text-[10px] text-slate-500">Selected market · customize below</p>
+                </div>
+              </div>
+            )}
 
             {[
               { key: 'name' as const,         label: 'Team Name',       placeholder: 'e.g. Raptors' },
@@ -555,9 +911,9 @@ const Expansion: React.FC<ExpansionProps> = ({ league, updateLeague, onScout }) 
 
           {/* Preview badge */}
           <div className="bg-slate-900 border border-slate-800 rounded-3xl p-8 flex flex-col items-center justify-center gap-6">
-            <p className="text-[10px] font-black uppercase tracking-[0.4em] text-slate-600">Preview</p>
+            <p className="text-[10px] font-black uppercase tracking-[0.4em] text-slate-600">Live Preview</p>
             <div
-              className="w-32 h-32 rounded-full flex items-center justify-center text-5xl font-display font-black border-4 shadow-2xl"
+              className="w-32 h-32 rounded-full flex items-center justify-center text-5xl font-display font-black border-4 shadow-2xl transition-all duration-300"
               style={{
                 backgroundColor: form.primaryColor || '#1e293b',
                 borderColor:     form.secondaryColor || '#f97316',
@@ -575,8 +931,23 @@ const Expansion: React.FC<ExpansionProps> = ({ league, updateLeague, onScout }) 
               <p className="text-lg font-display font-bold text-slate-400 uppercase tracking-widest">{form.name || '—'}</p>
               {form.gmName && <p className="text-xs text-slate-600 mt-1">GM: {form.gmName}</p>}
             </div>
-            <div className="text-xs text-slate-600 text-center max-w-48">
-              Expansion team will be assigned to the Western Conference, Pacific Division by default.
+            <div className="w-full border-t border-slate-800 pt-4 grid grid-cols-2 gap-3 text-center">
+              <div>
+                <p className="text-[10px] font-black uppercase text-slate-600 tracking-widest">Conference</p>
+                <p className="text-xs font-bold text-slate-400 mt-0.5">
+                  {availableCities.staticCities.find(c => c.city === form.city)?.conf
+                    ?? availableCities.formerCities.find(c => c.city === form.city)?.conf
+                    ?? 'Western'}
+                </p>
+              </div>
+              <div>
+                <p className="text-[10px] font-black uppercase text-slate-600 tracking-widest">Division</p>
+                <p className="text-xs font-bold text-slate-400 mt-0.5">
+                  {availableCities.staticCities.find(c => c.city === form.city)?.div
+                    ?? availableCities.formerCities.find(c => c.city === form.city)?.div
+                    ?? 'Pacific'}
+                </p>
+              </div>
             </div>
           </div>
         </div>

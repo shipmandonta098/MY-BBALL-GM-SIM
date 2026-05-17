@@ -1,10 +1,14 @@
-import React, { useState, useMemo, useEffect } from 'react';
-import { LeagueState, Team, Prospect, DraftPick, Player } from '../types';
+import React, { useState, useMemo, useEffect, useRef } from 'react';
+import { LeagueState, Team, Prospect, DraftPick, Player, NewsItem } from '../types';
 import { getFlag } from '../constants';
-import { aiGMDraftPick } from '../utils/aiGMEngine';
+import { getContractRules, computeRookieSalary } from '../utils/contractRules';
+import WatchToggle from './WatchToggle';
+import { aiGMDraftPick, computeTeamNeeds, prospectNeedFit, TeamNeedItem } from '../utils/aiGMEngine';
 import DraftLottery from './DraftLottery';
 import ProspectProfile from './ProspectProfile';
 import DraftPickTrade from './DraftPickTrade';
+import LiveDraftTrade from './LiveDraftTrade';
+import TeamBadge from './TeamBadge';
 
 interface DraftProps {
   league: LeagueState;
@@ -18,14 +22,40 @@ const Draft: React.FC<DraftProps> = ({ league, updateLeague, onScout, scoutingRe
   const [scoutPoints, setScoutPoints] = useState(100);
   const [isDrafting, setIsDrafting] = useState(false);
   const [isSimming, setIsSimming] = useState(false);
+  const [isSimToEnd, setIsSimToEnd] = useState(false);
+  const [showSimToEndConfirm, setShowSimToEndConfirm] = useState(false);
   const [draftLog, setDraftLog] = useState<string[]>([]);
+
+  // Watch list
+  const watchList = league.watchList ?? [];
+  const toggleWatch = (id: string) => {
+    updateLeague({ watchList: watchList.includes(id) ? watchList.filter(x => x !== id) : [...watchList, id] });
+  };
 
   // Prospect profile modal
   const [selectedProspect, setSelectedProspect] = useState<Prospect | null>(null);
 
-  // Pick trade modal
+  // Pick-for-pick trade modal (existing)
   const [showTradeModal, setShowTradeModal] = useState(false);
   const [pickToTrade, setPickToTrade] = useState<DraftPick | undefined>(undefined);
+
+  // Live Draft Trade modal — "TRADE FOR" a specific AI pick
+  const [showLiveTrade, setShowLiveTrade] = useState(false);
+  const [liveTradeTarget, setLiveTradeTarget] = useState<DraftPick | null>(null);
+
+  // AI-initiated draft trade offer
+  interface AIDraftOffer {
+    offeringTeam: Team;
+    theirPicks: DraftPick[];
+    wantedPick: DraftPick;
+  }
+  const [aiDraftOffer, setAiDraftOffer] = useState<AIDraftOffer | null>(null);
+
+  // Draft order panel
+  const [showDraftOrder, setShowDraftOrder] = useState(true);
+  const [draftOrderRound, setDraftOrderRound] = useState(1);
+  const draftOrderContainerRef = useRef<HTMLDivElement>(null);
+  const currentPickRowRef = useRef<HTMLDivElement>(null);
 
   const currentPickIndex = league.currentDraftPickIndex || 0;
   const userTeam = league.teams.find(t => t.id === league.userTeamId)!;
@@ -45,14 +75,89 @@ const Draft: React.FC<DraftProps> = ({ league, updateLeague, onScout, scoutingRe
     setIsSimming(true);
   };
 
+  const draftRules = getContractRules(league);
+
+  const ordinal = (n: number) => {
+    const s = ['th', 'st', 'nd', 'rd'], v = n % 100;
+    return n + (s[(v - 20) % 10] ?? s[v] ?? s[0]);
+  };
+
+  const buildDraftPickNews = (
+    prospect: Prospect, team: Team,
+    pickNum: number, round: number, pickInRound: number,
+    isUserPick: boolean,
+  ): NewsItem => {
+    const isWomens = draftRules.isWomens;
+    const draftName = (league.settings as any).leagueName
+      ? `${(league.settings as any).leagueName} Draft`
+      : isWomens ? 'WNBA Draft' : 'NBA Draft';
+    const yr = league.season;
+    const school = prospect.school && prospect.school !== 'Unknown' && prospect.school !== 'N/A'
+      ? ` out of ${prospect.school}`
+      : (prospect.country && prospect.country !== 'United States' ? ` from ${prospect.country}` : '');
+    const pos = prospect.position;
+    const age = prospect.age ? `, ${prospect.age}` : '';
+
+    let headline: string;
+    let content: string;
+    let isBreaking = false;
+
+    if (pickNum === 1) {
+      isBreaking = true;
+      headline = '🏀 #1 OVERALL PICK';
+      content = `${team.city} ${team.name} select ${prospect.name} (${pos}${age})${school} with the No. 1 overall pick in the ${yr} ${draftName}. A generational talent expected to anchor the franchise for years to come.`;
+    } else if (pickNum <= 3) {
+      headline = `🏀 TOP-${pickNum} PICK`;
+      const flavors = ['A consensus top prospect', 'One of the draft\'s premier talents', 'A highly decorated prospect'];
+      content = `The ${team.name} add ${prospect.name} (${pos})${school} with the No. ${pickNum} pick in the ${yr} ${draftName}. ${flavors[pickNum - 2]} who brings elite upside to ${team.city}.`;
+    } else if (pickNum <= 5) {
+      headline = `🏀 TOP-5 PICK`;
+      content = `${team.city} ${team.name} select ${prospect.name} (${pos})${school} with the No. ${pickNum} overall pick in the ${yr} ${draftName}.`;
+    } else if (pickNum <= 10) {
+      headline = `DRAFT: PICK #${pickNum}`;
+      content = `With the ${ordinal(pickNum)} pick, the ${team.name} select ${prospect.name} (${pos})${school}. ${prospect.rating >= 80 ? 'A high-upside talent bolsters the rotation.' : 'The team adds a promising young player.'}`;
+    } else if (round === 1) {
+      headline = isUserPick ? 'YOUR DRAFT PICK' : `DRAFT: R1 PICK ${pickInRound}`;
+      content = `With the ${ordinal(pickNum)} overall selection in Round 1, the ${team.name} take ${prospect.name} (${pos})${school}.`;
+    } else {
+      headline = isUserPick ? 'YOUR DRAFT PICK' : `DRAFT: R${round} PICK ${pickInRound}`;
+      content = `With the ${ordinal(pickInRound)} pick in Round ${round}, the ${team.name} select ${prospect.name} (${pos}${age})${school}. The team reaches for depth in the later rounds.`;
+    }
+
+    return {
+      id: `draft-pick-${pickNum}-${Date.now()}`,
+      category: 'transaction' as const,
+      headline,
+      content,
+      timestamp: league.currentDay,
+      realTimestamp: Date.now(),
+      teamId: team.id,
+      playerId: prospect.id,
+      isBreaking,
+      seasonYear: league.season,
+    };
+  };
+
   const makePick = (teamId: string, prospect: Prospect) => {
     const team = league.teams.find(t => t.id === teamId)!;
+    const pickRound = (league.draftPicks?.[league.currentDraftPickIndex || 0]?.round) ?? 1;
+    const rookieSalary = computeRookieSalary(prospect.rating, pickRound, draftRules);
+    // WNBA rookie scale: 1-4 year contracts with a team option on the final year
+    const contractYears = Math.min(draftRules.maxContractYears, league.settings.maxContractYears ?? (draftRules.isWomens ? 4 : 4));
     const newPlayer: Player = {
       ...prospect,
-      salary: Math.floor((prospect.rating / 100) * 8_000_000),
-      contractYears: Math.min(4, league.settings.maxContractYears ?? 4),
+      salary: rookieSalary,
+      contractYears,
       status: 'Rotation',
       morale: 85,
+      isRookie: true,
+      yearsPro: 0,
+      // WNBA rookies get a team option on the last year of their scale contract
+      ...(draftRules.isWomens && {
+        isRookieContract: true,
+        teamOption: contractYears > 1,
+        teamOptionYear: contractYears,
+      }),
       stats: {
         points: 0, rebounds: 0, offReb: 0, defReb: 0, assists: 0, steals: 0, blocks: 0,
         gamesPlayed: 0, gamesStarted: 0, minutes: 0, fgm: 0, fga: 0,
@@ -74,7 +179,15 @@ const Draft: React.FC<DraftProps> = ({ league, updateLeague, onScout, scoutingRe
       `${label}: The ${team.name} select ${prospect.name} (${prospect.position}) — ${prospect.school}`,
       ...prev,
     ]);
-    updateLeague({ teams: updatedTeams, currentDraftPickIndex: currentPickIndex + 1 });
+
+    // Generate dynasty feed entry for notable picks
+    const isUserPick = teamId === league.userTeamId;
+    const isNotable = pickNum <= 10 || isUserPick || prospect.rating >= 85;
+    const feedUpdate = isNotable
+      ? [buildDraftPickNews(prospect, team, pickNum, round, pickInRound, isUserPick), ...league.newsFeed]
+      : league.newsFeed;
+
+    updateLeague({ teams: updatedTeams, currentDraftPickIndex: currentPickIndex + 1, newsFeed: feedUpdate });
   };
 
   const executeAIPick = () => {
@@ -83,6 +196,7 @@ const Draft: React.FC<DraftProps> = ({ league, updateLeague, onScout, scoutingRe
       if (isDrafting) {
         setIsDrafting(false);
         setIsSimming(false);
+        setIsSimToEnd(false);
         const newsItem = {
           id: `draft-complete-${Date.now()}`,
           category: 'playoffs' as const,
@@ -92,13 +206,19 @@ const Draft: React.FC<DraftProps> = ({ league, updateLeague, onScout, scoutingRe
           realTimestamp: Date.now(),
           isBreaking: true,
         };
-        updateLeague({ draftPhase: 'completed', newsFeed: [newsItem, ...league.newsFeed] });
+        // Remove current-year picks from team.picks — they've been exercised in the draft
+        const draftedSeason = league.season - 1;
+        const cleanedTeams = league.teams.map(t => ({
+          ...t,
+          picks: t.picks.filter(p => p.year !== undefined && p.year > draftedSeason),
+        }));
+        updateLeague({ draftPhase: 'completed', teams: cleanedTeams, newsFeed: [newsItem, ...league.newsFeed] });
       }
       return;
     }
 
     const currentPick = picks[currentPickIndex];
-    if (currentPick.currentTeamId === league.userTeamId) return; // Pause for user
+    if (currentPick.currentTeamId === league.userTeamId && !isSimToEnd) return; // Pause for user
 
     const available = league.prospects.filter(
       p => !league.teams.some(t => t.roster.some(r => r.id === p.id))
@@ -112,31 +232,113 @@ const Draft: React.FC<DraftProps> = ({ league, updateLeague, onScout, scoutingRe
   };
 
   useEffect(() => {
-    if (!isDrafting) return;
+    // Pause draft loop whenever a trade modal is open
+    if (!isDrafting || showLiveTrade || showTradeModal) return;
 
     const picks = league.draftPicks || [];
     const cp = picks[currentPickIndex];
 
-    // Stop simming when it's the user's turn
-    if (cp?.currentTeamId === league.userTeamId) {
+    // Stop simming when it's the user's turn (unless simming to end)
+    if (cp?.currentTeamId === league.userTeamId && !isSimToEnd) {
       if (isSimming) setIsSimming(false);
       return;
     }
 
-    const delay = isSimming ? 80 : 900;
+    const delay = isSimToEnd ? 60 : isSimming ? 80 : 900;
     const timer = setTimeout(executeAIPick, delay);
     return () => clearTimeout(timer);
-  }, [isDrafting, currentPickIndex, isSimming]);
+  }, [isDrafting, currentPickIndex, isSimming, isSimToEnd, showLiveTrade, showTradeModal]);
+
+  // AI-initiative trade offers: fires after each pick advancement during draft
+  useEffect(() => {
+    if (!isDrafting || isSimToEnd || aiDraftOffer || showLiveTrade || currentPickIndex === 0) return;
+
+    // ~9% chance per pick, but only when not blitzing through
+    if (isSimming || Math.random() > 0.09) return;
+
+    const userUpcoming = (league.draftPicks ?? [])
+      .filter(p => p.currentTeamId === league.userTeamId && p.pick > currentPickIndex)
+      .sort((a, b) => a.pick - b.pick);
+
+    if (userUpcoming.length === 0) return;
+    const wantedPick = userUpcoming[0];
+
+    // Find an AI team with the right motivation to trade
+    const candidates = league.teams
+      .filter(t => t.id !== league.userTeamId)
+      .map(t => {
+        const personality = t.aiGM?.personality ?? 'Balanced';
+        const winPct = t.wins / Math.max(1, t.wins + t.losses);
+        const isContender = winPct >= 0.55 || personality === 'Win Now' || personality === 'Superstar Chaser';
+        const isRebuilder = personality === 'Rebuilder' || winPct < 0.38;
+        // Contenders want to move UP to user's pick; need a later pick they can offer
+        const theirLaterPicks = (league.draftPicks ?? [])
+          .filter(p => p.currentTeamId === t.id && p.pick > wantedPick.pick)
+          .sort((a, b) => a.pick - b.pick);
+        return { team: t, isContender, isRebuilder, theirLaterPicks };
+      })
+      .filter(c => c.isContender && c.theirLaterPicks.length > 0);
+
+    if (candidates.length === 0) return;
+
+    const chosen = candidates[Math.floor(Math.random() * candidates.length)];
+    // Offer their next 1-2 picks to entice
+    const theirPicks = chosen.theirLaterPicks.slice(0, chosen.theirLaterPicks.length >= 2 ? 2 : 1);
+
+    setAiDraftOffer({ offeringTeam: chosen.team, theirPicks, wantedPick });
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentPickIndex, isDrafting]);
 
   const availableProspects = useMemo(() => {
     const draftedIds = new Set(league.teams.flatMap(t => t.roster.map(p => p.id)));
     return league.prospects.filter(p => !draftedIds.has(p.id));
   }, [league.prospects, league.teams]);
 
+  const draftClassTalent = useMemo((): 'Strong' | 'Average' | 'Weak' => {
+    const sorted = [...league.prospects].sort((a, b) => b.rating - a.rating);
+    const top10 = sorted.slice(0, 10);
+    const avgRating = top10.length > 0 ? top10.reduce((s, p) => s + p.rating, 0) / top10.length : 0;
+    const eliteCount = sorted.filter(p => p.rating >= 90).length;
+    if (avgRating >= 82 && eliteCount >= 3) return 'Strong';
+    if (avgRating >= 75 || eliteCount >= 1) return 'Average';
+    return 'Weak';
+  }, [league.prospects]);
+
+  // Needs for the user's team (recalculated when roster/scheme/record changes)
+  const userTeamNeeds = useMemo(
+    () => computeTeamNeeds(userTeam),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [userTeam.roster, userTeam.activeScheme, userTeam.wins, userTeam.losses]
+  );
+
   const currentPick = league.draftPicks?.[currentPickIndex];
   const isUserTurn = isDrafting && currentPick?.currentTeamId === league.userTeamId;
   const totalPicks = league.draftPicks?.length ?? 0;
   const draftProgress = totalPicks > 0 ? Math.round((currentPickIndex / totalPicks) * 100) : 0;
+
+  // Needs for whichever team is currently on the clock
+  const draftingTeamNeeds = useMemo(() => {
+    if (!isDrafting || !currentPick) return userTeamNeeds;
+    const clockTeam = league.teams.find(t => t.id === currentPick.currentTeamId);
+    return clockTeam ? computeTeamNeeds(clockTeam) : userTeamNeeds;
+  }, [isDrafting, currentPick, league.teams, userTeamNeeds]);
+
+  // Advance the round tab automatically when the live draft crosses into a new round
+  useEffect(() => {
+    if (currentPick?.round && currentPick.round !== draftOrderRound) {
+      setDraftOrderRound(currentPick.round);
+    }
+  }, [currentPick?.round]);
+
+  // Scroll the current pick row into view inside the draft order panel
+  useEffect(() => {
+    if (!isDrafting) return;
+    const row = currentPickRowRef.current;
+    const container = draftOrderContainerRef.current;
+    if (row && container) {
+      container.scrollTop = row.offsetTop - container.clientHeight / 3;
+    }
+  }, [currentPickIndex, isDrafting]);
 
   // ─── LOTTERY PHASE ────────────────────────────────────────────────────────
   if (league.draftPhase === 'lottery') {
@@ -145,6 +347,45 @@ const Draft: React.FC<DraftProps> = ({ league, updateLeague, onScout, scoutingRe
 
   // ─── DRAFT COMPLETE PHASE ─────────────────────────────────────────────────
   if (league.draftPhase === 'completed') {
+    // WNBA: rookies the user drafted this offseason — waivable before the regular season
+    const userRookies = draftRules.isWomens
+      ? userTeam.roster.filter(p => p.isRookieContract)
+      : [];
+
+    const waiveRookie = (player: Player) => {
+      const releasedPlayer: Player = {
+        ...player,
+        isFreeAgent: true,
+        isRookieContract: false,
+        teamOption: false,
+        faType: 'UFA' as const,
+        lastTeamId: userTeam.id,
+        inSeasonFA: false,
+        salary: 0,
+        contractYears: 0,
+        interestScore: Math.max(40, (player.interestScore ?? 50) - 10),
+      };
+      const updatedTeams = league.teams.map(t =>
+        t.id === userTeam.id
+          ? { ...t, roster: t.roster.filter(p => p.id !== player.id) }
+          : t
+      );
+      const existingFAIds = new Set(league.freeAgents.map(p => p.id));
+      const updatedFAs = existingFAIds.has(releasedPlayer.id)
+        ? league.freeAgents
+        : [...league.freeAgents, releasedPlayer];
+      const newsItem = {
+        id: `rookie-waive-${Date.now()}-${player.id}`,
+        category: 'transaction' as const,
+        headline: `✂ WAIVED: ${player.name} (Rookie)`,
+        content: `The ${userTeam.name} have waived rookie ${player.name} (${player.position}, ${player.rating} OVR) before the regular season. She is now an unrestricted free agent.`,
+        timestamp: league.currentDay,
+        realTimestamp: Date.now(),
+        isBreaking: false,
+      };
+      updateLeague({ teams: updatedTeams, freeAgents: updatedFAs, newsFeed: [newsItem, ...league.newsFeed] });
+    };
+
     return (
       <div className="space-y-8 animate-in fade-in duration-500 pb-40">
         <div className="bg-gradient-to-br from-emerald-900/40 to-slate-900 border border-emerald-500/20 rounded-[3rem] p-16 text-center shadow-2xl">
@@ -164,6 +405,48 @@ const Draft: React.FC<DraftProps> = ({ league, updateLeague, onScout, scoutingRe
             </button>
           )}
         </div>
+
+        {/* ── WNBA rookie waiver panel ──────────────────────────────────────── */}
+        {draftRules.isWomens && userRookies.length > 0 && (
+          <div className="bg-slate-900 border border-violet-500/20 rounded-3xl overflow-hidden shadow-2xl">
+            <div className="p-6 border-b border-slate-800 flex items-start justify-between flex-wrap gap-3">
+              <div>
+                <p className="text-[10px] font-black uppercase tracking-[0.4em] text-violet-400 mb-1">WNBA — Pre-Season Roster Decisions</p>
+                <h3 className="text-lg font-display font-bold uppercase text-white">Your Drafted Rookies</h3>
+                <p className="text-xs text-slate-400 mt-1">
+                  WNBA teams may waive drafted rookies before the regular season. Waived rookies become unrestricted free agents and are no longer on rookie scale.
+                </p>
+              </div>
+              <span className="text-[10px] font-black uppercase tracking-widest px-3 py-1.5 rounded-full bg-violet-500/10 border border-violet-500/25 text-violet-400">
+                {userRookies.length} Rookie{userRookies.length !== 1 ? 's' : ''}
+              </span>
+            </div>
+            <div className="divide-y divide-slate-800/50">
+              {userRookies.map(p => (
+                <div key={p.id} className="flex items-center justify-between gap-4 px-6 py-4 hover:bg-slate-800/20 transition-all">
+                  <div className="flex-1 min-w-0">
+                    <p className="font-bold text-slate-200 uppercase tracking-tight">{p.name}</p>
+                    <p className="text-[10px] text-slate-500 font-bold uppercase mt-0.5">
+                      {p.position} · {p.rating} OVR · {p.age} yrs
+                    </p>
+                  </div>
+                  <div className="text-right shrink-0">
+                    <p className="text-xs font-mono text-violet-300 font-bold">{p.contractYears}yr / ${p.salary.toLocaleString()}</p>
+                    <p className="text-[9px] text-slate-600 uppercase font-bold mt-0.5">
+                      Rookie Scale · Team Option Yr {p.teamOptionYear ?? p.contractYears}
+                    </p>
+                  </div>
+                  <button
+                    onClick={() => waiveRookie(p)}
+                    className="ml-2 px-4 py-2 text-[10px] font-black uppercase rounded-lg border border-rose-500/30 bg-rose-500/10 text-rose-400 hover:bg-rose-500/25 transition-all active:scale-95 shrink-0"
+                  >
+                    Waive Rookie
+                  </button>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
 
         {draftLog.length > 0 && (
           <div className="bg-slate-900 border border-slate-800 rounded-3xl p-6">
@@ -205,6 +488,156 @@ const Draft: React.FC<DraftProps> = ({ league, updateLeague, onScout, scoutingRe
         />
       )}
 
+      {showLiveTrade && liveTradeTarget && (
+        <LiveDraftTrade
+          league={league}
+          targetPick={liveTradeTarget}
+          updateLeague={updateLeague}
+          onClose={() => { setShowLiveTrade(false); setLiveTradeTarget(null); }}
+        />
+      )}
+
+      {/* AI-initiated trade offer banner */}
+      {aiDraftOffer && !showLiveTrade && (
+        <div className="fixed inset-0 z-[60] flex items-end sm:items-center justify-center bg-black/60 backdrop-blur-sm p-4">
+          <div className="bg-slate-900 border border-amber-500/40 rounded-3xl w-full max-w-lg p-6 shadow-2xl animate-in slide-in-from-bottom-4 sm:zoom-in-95 duration-300">
+            <div className="flex items-start gap-3 mb-4">
+              <div className="w-10 h-10 rounded-full bg-amber-500/20 border border-amber-500/40 flex items-center justify-center shrink-0">
+                <span className="text-lg">📞</span>
+              </div>
+              <div>
+                <p className="text-[9px] font-black uppercase tracking-widest text-amber-500 mb-0.5">Incoming Trade Offer</p>
+                <p className="text-white font-display font-bold text-base uppercase leading-tight">
+                  {aiDraftOffer.offeringTeam.name} wants to move up
+                </p>
+              </div>
+              <button
+                onClick={() => setAiDraftOffer(null)}
+                className="ml-auto w-7 h-7 rounded-full bg-slate-800 flex items-center justify-center text-slate-500 hover:text-white transition-colors text-xs shrink-0"
+              >
+                ✕
+              </button>
+            </div>
+
+            <div className="bg-slate-950/60 border border-slate-800 rounded-2xl p-4 mb-4">
+              <div className="flex items-center justify-between gap-4">
+                <div>
+                  <p className="text-[9px] text-slate-500 uppercase font-bold mb-1">They Offer</p>
+                  {aiDraftOffer.theirPicks.map(p => {
+                    const pos = p.round === 1 ? p.pick : p.pick - 30;
+                    return (
+                      <p key={`${p.round}-${p.pick}`} className="text-sm font-bold text-emerald-400">
+                        R{p.round} Pick #{pos}
+                      </p>
+                    );
+                  })}
+                </div>
+                <div className="text-2xl text-slate-600">⇄</div>
+                <div className="text-right">
+                  <p className="text-[9px] text-slate-500 uppercase font-bold mb-1">They Want</p>
+                  <p className="text-sm font-bold text-white">
+                    {aiDraftOffer.wantedPick.round === 1
+                      ? `R1 Pick #${aiDraftOffer.wantedPick.pick}`
+                      : `R2 Pick #${aiDraftOffer.wantedPick.pick - 30}`}
+                  </p>
+                  <p className="text-[9px] text-slate-600 uppercase mt-0.5">Your pick</p>
+                </div>
+              </div>
+            </div>
+
+            <div className="flex gap-3">
+              <button
+                onClick={() => {
+                  // Accept: swap picks in draftPicks
+                  const updatedPicks = (league.draftPicks ?? []).map(dp => {
+                    if (dp.pick === aiDraftOffer.wantedPick.pick && dp.round === aiDraftOffer.wantedPick.round)
+                      return { ...dp, currentTeamId: aiDraftOffer.offeringTeam.id };
+                    if (aiDraftOffer.theirPicks.some(tp => tp.pick === dp.pick && tp.round === dp.round))
+                      return { ...dp, currentTeamId: league.userTeamId };
+                    return dp;
+                  });
+                  const newsItem = {
+                    id: `ai-draft-offer-${Date.now()}`,
+                    category: 'transaction' as const,
+                    headline: '🔀 LIVE DRAFT TRADE',
+                    content: `${userTeam.name} trades R${aiDraftOffer.wantedPick.round} Pick #${aiDraftOffer.wantedPick.round === 1 ? aiDraftOffer.wantedPick.pick : aiDraftOffer.wantedPick.pick - 30} to ${aiDraftOffer.offeringTeam.name} for ${aiDraftOffer.theirPicks.map(p => `R${p.round} #${p.round === 1 ? p.pick : p.pick - 30}`).join(' + ')}.`,
+                    timestamp: league.currentDay,
+                    realTimestamp: Date.now(),
+                    isBreaking: true,
+                  };
+                  const wantedPickPos = aiDraftOffer.wantedPick.round === 1
+                    ? aiDraftOffer.wantedPick.pick
+                    : aiDraftOffer.wantedPick.pick - 30;
+                  setDraftLog(prev => [
+                    `TRADE: ${userTeam.name} sends R${aiDraftOffer.wantedPick.round} Pick #${wantedPickPos} to ${aiDraftOffer.offeringTeam.name} — receives ${aiDraftOffer.theirPicks.map(p => `R${p.round} #${p.round === 1 ? p.pick : p.pick - 30}`).join(' + ')}`,
+                    ...prev,
+                  ]);
+                  updateLeague({ draftPicks: updatedPicks, newsFeed: [newsItem, ...(league.newsFeed ?? [])] });
+                  setAiDraftOffer(null);
+                }}
+                className="flex-1 py-3 bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-display font-black uppercase text-sm rounded-xl transition-all active:scale-95"
+              >
+                Accept
+              </button>
+              <button
+                onClick={() => {
+                  // Counter: open LiveDraftTrade with their first pick as target
+                  setLiveTradeTarget(aiDraftOffer.theirPicks[0]);
+                  setShowLiveTrade(true);
+                  setAiDraftOffer(null);
+                }}
+                className="flex-1 py-3 bg-slate-800 hover:bg-amber-500 hover:text-slate-950 text-slate-300 font-display font-bold uppercase text-sm rounded-xl transition-all"
+              >
+                Counter
+              </button>
+              <button
+                onClick={() => setAiDraftOffer(null)}
+                className="px-5 py-3 bg-slate-800/50 hover:bg-slate-700 text-slate-500 font-bold uppercase text-sm rounded-xl transition-all"
+              >
+                Decline
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Sim to End confirmation modal */}
+      {showSimToEndConfirm && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm">
+          <div className="bg-slate-900 border border-slate-700 rounded-3xl p-8 max-w-sm w-full mx-4 shadow-2xl">
+            <div className="text-4xl mb-4 text-center">⚡</div>
+            <h3 className="text-xl font-display font-bold text-white uppercase tracking-tight text-center mb-2">
+              Sim Entire Draft?
+            </h3>
+            <p className="text-sm text-slate-400 text-center mb-6 leading-relaxed">
+              AI will make <span className="text-white font-bold">all remaining picks</span> — including yours. This cannot be undone.
+            </p>
+            <div className="flex gap-3">
+              <button
+                onClick={() => setShowSimToEndConfirm(false)}
+                className="flex-1 px-4 py-3 bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold uppercase text-sm rounded-xl transition-all active:scale-95"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={() => {
+                  setShowSimToEndConfirm(false);
+                  if (!isDrafting) {
+                    setIsDrafting(true);
+                    setDraftLog(['🏀 The NBA Draft is now underway!']);
+                  }
+                  setIsSimming(false);
+                  setIsSimToEnd(true);
+                }}
+                className="flex-1 px-4 py-3 bg-rose-600 hover:bg-rose-500 text-white font-display font-bold uppercase text-sm rounded-xl transition-all active:scale-95 shadow-lg shadow-rose-500/20"
+              >
+                Sim to End
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Header */}
       <header className="bg-slate-900 border border-slate-800 rounded-[2.5rem] p-8 shadow-2xl relative overflow-hidden">
         <div className="absolute top-0 right-0 w-80 h-80 bg-amber-500/5 blur-[100px] rounded-full -mr-40 -mt-40" />
@@ -232,37 +665,90 @@ const Draft: React.FC<DraftProps> = ({ league, updateLeague, onScout, scoutingRe
                 <p className="text-2xl font-display font-bold text-amber-500">{scoutPoints}</p>
               </div>
             )}
-            {!isDrafting && (
+            {!isDrafting && (() => {
+              const lotteryPending = league.draftPhase !== 'draft';
+              return (
+                <>
+                  {lotteryPending && (
+                    <span className="text-[10px] font-black uppercase tracking-widest text-slate-600 bg-slate-900 border border-slate-800 rounded-xl px-3 py-2 hidden sm:block">
+                      ⚠ Complete lottery first
+                    </span>
+                  )}
+                  <button
+                    onClick={lotteryPending ? undefined : startDraftSim}
+                    disabled={lotteryPending}
+                    title={lotteryPending ? 'Available after lottery' : undefined}
+                    className={`px-8 py-4 font-display font-bold uppercase rounded-xl transition-all text-base ${
+                      lotteryPending
+                        ? 'bg-slate-800 text-slate-600 cursor-not-allowed opacity-60'
+                        : 'bg-emerald-500 hover:bg-emerald-400 text-slate-950 shadow-xl shadow-emerald-500/20 active:scale-95'
+                    }`}
+                  >
+                    Start Live Draft
+                  </button>
+                  <button
+                    onClick={lotteryPending ? undefined : startSimToMyPick}
+                    disabled={lotteryPending}
+                    title={lotteryPending ? 'Available after lottery' : undefined}
+                    className={`px-6 py-4 font-display font-bold uppercase rounded-xl transition-all text-sm ${
+                      lotteryPending
+                        ? 'bg-slate-800 text-slate-600 cursor-not-allowed opacity-60'
+                        : 'bg-blue-600 hover:bg-blue-500 text-white shadow-xl shadow-blue-500/20 active:scale-95'
+                    }`}
+                  >
+                    ⚡ Sim to My Pick
+                  </button>
+                  <button
+                    onClick={lotteryPending ? undefined : () => setShowSimToEndConfirm(true)}
+                    disabled={lotteryPending}
+                    title={lotteryPending ? 'Available after lottery' : undefined}
+                    className={`px-6 py-4 font-display font-bold uppercase rounded-xl transition-all text-sm ${
+                      lotteryPending
+                        ? 'bg-slate-800 text-slate-600 cursor-not-allowed opacity-60'
+                        : 'bg-rose-700 hover:bg-rose-600 text-white shadow-xl shadow-rose-500/20 active:scale-95'
+                    }`}
+                  >
+                    ⚡⚡ Sim to End
+                  </button>
+                </>
+              );
+            })()}
+            {isDrafting && !isSimming && !isSimToEnd && !isUserTurn && (
               <>
                 <button
-                  onClick={startDraftSim}
-                  className="px-8 py-4 bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-display font-bold uppercase rounded-xl transition-all shadow-xl shadow-emerald-500/20 active:scale-95"
-                >
-                  Start Live Draft
-                </button>
-                <button
-                  onClick={startSimToMyPick}
-                  className="px-6 py-4 bg-blue-600 hover:bg-blue-500 text-white font-display font-bold uppercase rounded-xl transition-all shadow-xl shadow-blue-500/20 active:scale-95 text-sm"
+                  onClick={() => setIsSimming(true)}
+                  className="px-6 py-3 bg-blue-600 hover:bg-blue-500 text-white font-display font-bold uppercase rounded-xl transition-all text-sm active:scale-95"
                 >
                   ⚡ Sim to My Pick
                 </button>
+                <button
+                  onClick={() => setShowSimToEndConfirm(true)}
+                  className="px-5 py-3 bg-rose-700 hover:bg-rose-600 text-white font-display font-bold uppercase rounded-xl transition-all text-sm active:scale-95"
+                >
+                  ⚡⚡ Sim to End
+                </button>
               </>
             )}
-            {isDrafting && !isSimming && !isUserTurn && (
+            {isDrafting && isUserTurn && !isSimToEnd && (
               <button
-                onClick={() => setIsSimming(true)}
-                className="px-6 py-3 bg-blue-600 hover:bg-blue-500 text-white font-display font-bold uppercase rounded-xl transition-all text-sm active:scale-95"
+                onClick={() => setShowSimToEndConfirm(true)}
+                className="px-5 py-3 bg-rose-700/80 hover:bg-rose-600 text-white font-display font-bold uppercase rounded-xl transition-all text-sm active:scale-95"
               >
-                ⚡ Sim to My Pick
+                ⚡⚡ Sim to End
               </button>
             )}
-            {isSimming && (
+            {isSimming && !isSimToEnd && (
               <button
                 onClick={() => setIsSimming(false)}
                 className="px-6 py-3 bg-slate-700 hover:bg-slate-600 text-white font-bold uppercase rounded-xl transition-all text-sm active:scale-95"
               >
                 ⏸ Pause
               </button>
+            )}
+            {isSimToEnd && (
+              <div className="flex items-center gap-2 px-4 py-2 bg-rose-900/40 border border-rose-700/40 rounded-xl">
+                <span className="text-rose-400 animate-pulse text-sm font-black uppercase">⚡⚡ Simming to End…</span>
+              </div>
             )}
           </div>
         </div>
@@ -279,6 +765,131 @@ const Draft: React.FC<DraftProps> = ({ league, updateLeague, onScout, scoutingRe
           </div>
         )}
       </header>
+
+      {/* ── Draft Order Panel ──────────────────────────────────────────────── */}
+      {(league.draftPicks?.length ?? 0) > 0 && (() => {
+        const numRounds = league.settings.draftRounds ?? 2;
+        const allRounds = Array.from({ length: numRounds }, (_, i) => i + 1);
+        const teamsCount = league.teams.length;
+        const picksForRound = (league.draftPicks ?? []).filter(p => p.round === draftOrderRound);
+        const roundStartIdx = (league.draftPicks ?? []).findIndex(p => p.round === draftOrderRound);
+
+        return (
+          <div className="bg-slate-900 border border-slate-800 rounded-3xl overflow-hidden shadow-2xl">
+            {/* Header row */}
+            <button
+              onClick={() => setShowDraftOrder(v => !v)}
+              className="w-full flex items-center justify-between px-6 py-4 hover:bg-slate-800/20 transition-colors"
+            >
+              <div className="flex items-center gap-3 flex-wrap">
+                <span className="text-xs font-black uppercase tracking-[0.3em] text-slate-200">Draft Order</span>
+                <span className="text-[10px] font-bold text-slate-600 uppercase">{teamsCount} teams · {league.draftPicks!.length} total picks</span>
+                {isDrafting && currentPick && (
+                  <span className="px-2 py-0.5 bg-amber-500/20 border border-amber-500/40 rounded-full text-[9px] font-black text-amber-400 uppercase animate-pulse">
+                    Pick {currentPickIndex + 1} on clock
+                  </span>
+                )}
+              </div>
+              <div className="flex items-center gap-1.5 shrink-0 ml-3">
+                {allRounds.map(r => (
+                  <button
+                    key={r}
+                    onClick={e => { e.stopPropagation(); setDraftOrderRound(r); setShowDraftOrder(true); }}
+                    className={`px-2.5 py-1 text-[9px] font-black uppercase rounded-lg transition-all ${draftOrderRound === r ? 'bg-amber-500 text-slate-950' : 'bg-slate-800 text-slate-500 hover:text-slate-300'}`}
+                  >
+                    R{r}
+                  </button>
+                ))}
+                <span className="text-slate-600 ml-2 text-xs">{showDraftOrder ? '▲' : '▼'}</span>
+              </div>
+            </button>
+
+            {showDraftOrder && (
+              <div
+                ref={draftOrderContainerRef}
+                className="max-h-72 overflow-y-auto scrollbar-thin scrollbar-thumb-slate-700 border-t border-slate-800/60"
+              >
+                {picksForRound.map((pick, idx) => {
+                  const globalIdx = roundStartIdx + idx;
+                  const isCurrentPick = isDrafting && globalIdx === currentPickIndex;
+                  const isMade = globalIdx < currentPickIndex;
+                  const isUserPick = pick.currentTeamId === league.userTeamId;
+                  const wasTraded = !!(pick.originalTeamId && pick.originalTeamId !== pick.currentTeamId);
+                  const pickingTeam = league.teams.find(t => t.id === pick.currentTeamId);
+                  const originalTeam = wasTraded ? league.teams.find(t => t.id === pick.originalTeamId) : null;
+
+                  return (
+                    <div
+                      key={`${pick.round}-${pick.pick}`}
+                      ref={isCurrentPick ? currentPickRowRef : undefined}
+                      className={[
+                        'flex items-center gap-3 px-4 py-2.5 border-b border-slate-800/40 transition-colors',
+                        isCurrentPick ? 'bg-amber-500/[0.08] border-l-4 border-l-amber-500' : '',
+                        isUserPick && !isMade && !isCurrentPick ? 'bg-blue-500/[0.04] border-l-4 border-l-blue-600/60' : '',
+                        isMade ? 'opacity-30' : '',
+                      ].join(' ')}
+                    >
+                      {/* Status icon */}
+                      <div className="w-4 shrink-0 flex justify-center">
+                        {isCurrentPick
+                          ? <span className="text-amber-400 font-black text-xs">▶</span>
+                          : isMade
+                          ? <span className="text-slate-600 text-[10px]">✓</span>
+                          : <span className="text-slate-800 text-[10px]">·</span>}
+                      </div>
+
+                      {/* Pick number in round */}
+                      <div className="w-7 shrink-0 text-right">
+                        <span className={`text-xs font-black tabular-nums ${isCurrentPick ? 'text-amber-400' : isUserPick && !isMade ? 'text-blue-400' : 'text-slate-500'}`}>
+                          {idx + 1}
+                        </span>
+                      </div>
+
+                      {/* Team badge */}
+                      {pickingTeam
+                        ? <TeamBadge team={pickingTeam} size="xs" />
+                        : <div className="w-6 h-6 rounded bg-slate-800 shrink-0" />}
+
+                      {/* Team name + traded badge */}
+                      <div className="flex-1 min-w-0 flex items-center gap-2 flex-wrap">
+                        <span className={`text-xs font-bold truncate ${isCurrentPick ? 'text-white' : isUserPick && !isMade ? 'text-blue-300' : isMade ? 'text-slate-500' : 'text-slate-300'}`}>
+                          {pickingTeam ? `${pickingTeam.city} ${pickingTeam.name}` : '—'}
+                        </span>
+                        {wasTraded && (
+                          <span className="text-[9px] font-black text-amber-400/80 bg-amber-500/10 border border-amber-500/20 px-1.5 py-0.5 rounded uppercase whitespace-nowrap shrink-0">
+                            via {originalTeam?.abbreviation ?? originalTeam?.name ?? '?'}
+                          </span>
+                        )}
+                        {isUserPick && !isMade && (
+                          <span className="text-[9px] font-black text-blue-400/80 uppercase shrink-0">Your pick</span>
+                        )}
+                      </div>
+
+                      {/* Overall pick # */}
+                      <span className="text-[9px] text-slate-700 font-bold tabular-nums shrink-0">#{pick.pick}</span>
+
+                      {/* TRADE FOR button — AI-owned upcoming picks only */}
+                      {!isMade && !isUserPick && (
+                        <button
+                          onClick={e => {
+                            e.stopPropagation();
+                            setLiveTradeTarget(pick);
+                            setShowLiveTrade(true);
+                          }}
+                          className="shrink-0 px-2 py-1 text-[8px] font-black uppercase rounded-lg border transition-all bg-amber-500/10 border-amber-500/30 text-amber-400 hover:bg-amber-500 hover:text-slate-950 hover:border-amber-500 active:scale-95 whitespace-nowrap"
+                          title={`Propose a trade to acquire this pick from ${pickingTeam?.name}`}
+                        >
+                          Trade For
+                        </button>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        );
+      })()}
 
       {/* "On the Clock" banner */}
       {isUserTurn && (
@@ -298,13 +909,107 @@ const Draft: React.FC<DraftProps> = ({ league, updateLeague, onScout, scoutingRe
         </div>
       )}
 
+      {/* ── Team Needs Panel ──────────────────────────────────────── */}
+      {(() => {
+        const showingUser = !isDrafting || isUserTurn || !currentPick;
+        const displayNeeds = showingUser ? userTeamNeeds : draftingTeamNeeds;
+        const displayTeamName = showingUser
+          ? userTeam.name
+          : (league.teams.find(t => t.id === currentPick?.currentTeamId)?.name ?? userTeam.name);
+        const displayScheme = showingUser
+          ? userTeam.activeScheme
+          : (league.teams.find(t => t.id === currentPick?.currentTeamId)?.activeScheme ?? userTeam.activeScheme);
+        const bestFit = showingUser
+          ? availableProspects.find(p => prospectNeedFit(p, userTeamNeeds) === 'Strong Fit') ?? null
+          : null;
+        const bpa = availableProspects[0] ?? null;
+        return (
+          <div className="bg-slate-900 border border-slate-800 rounded-3xl p-6 shadow-xl">
+            <div className="flex flex-wrap items-start justify-between gap-4 mb-4">
+              <div>
+                <h3 className="text-xs font-black uppercase tracking-[0.3em] text-slate-200">
+                  {showingUser ? 'Your Team Needs' : `${displayTeamName} — Team Needs`}
+                </h3>
+                <p className="text-[10px] text-slate-600 font-bold uppercase mt-0.5">
+                  {displayTeamName} · {displayScheme} Scheme
+                </p>
+              </div>
+              {isUserTurn && (
+                <div className="flex flex-wrap items-center gap-2 text-[10px] font-black uppercase">
+                  {bpa && (
+                    <span className="flex items-center gap-1.5 px-3 py-1.5 bg-slate-800 border border-slate-700 rounded-xl text-slate-400">
+                      <span className="text-slate-600">BPA</span>
+                      {bpa.name}
+                      <span className="text-amber-500">{bpa.position}</span>
+                    </span>
+                  )}
+                  {bestFit && bestFit.id !== bpa?.id && (
+                    <span className="flex items-center gap-1.5 px-3 py-1.5 bg-emerald-500/15 border border-emerald-500/30 rounded-xl text-emerald-400">
+                      <span className="text-emerald-600">Best Fit</span>
+                      {bestFit.name}
+                      <span className="text-emerald-600">{bestFit.position}</span>
+                    </span>
+                  )}
+                </div>
+              )}
+            </div>
+            {displayNeeds.length === 0 ? (
+              <p className="text-xs text-slate-500 italic">Roster is well-balanced — draft best available player</p>
+            ) : (
+              <div className="flex flex-wrap gap-2">
+                {displayNeeds.map((need: TeamNeedItem, i: number) => (
+                  <span key={need.label} className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl border text-[10px] font-black uppercase ${
+                    need.urgency === 'Critical'
+                      ? 'bg-red-500/15 border-red-500/30 text-red-400'
+                      : need.urgency === 'High'
+                      ? 'bg-amber-500/15 border-amber-500/30 text-amber-400'
+                      : 'bg-slate-800 border-slate-700 text-slate-400'
+                  }`}>
+                    <span className="opacity-50 text-[9px]">#{i + 1}</span>
+                    {need.label}
+                    <span className={`ml-0.5 text-[8px] opacity-60 ${
+                      need.urgency === 'Critical' ? 'text-red-300' : need.urgency === 'High' ? 'text-amber-300' : 'text-slate-500'
+                    }`}>· {need.urgency}</span>
+                  </span>
+                ))}
+              </div>
+            )}
+          </div>
+        );
+      })()}
+
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
         {/* Left: Prospect Board */}
         <div className="lg:col-span-2 space-y-6">
           <div className="bg-slate-900 border border-slate-800 rounded-3xl overflow-hidden shadow-2xl">
-            <div className="p-6 border-b border-slate-800 flex justify-between items-center">
+            <div className="p-6 border-b border-slate-800 flex justify-between items-center flex-wrap gap-3">
               <h3 className="text-xl font-display font-bold uppercase tracking-widest text-white">Big Board</h3>
-              <span className="text-[10px] text-slate-500 font-bold uppercase">{availableProspects.length} available</span>
+              <div className="flex items-center gap-2 flex-wrap">
+                {/* Trade Up shortcut — opens pick selector */}
+                {isDrafting && (
+                  <button
+                    onClick={() => {
+                      const nextAIPick = (league.draftPicks ?? []).find(
+                        p => p.currentTeamId !== league.userTeamId && p.pick > currentPickIndex
+                      );
+                      if (nextAIPick) { setLiveTradeTarget(nextAIPick); setShowLiveTrade(true); }
+                    }}
+                    className="px-3 py-1.5 text-[9px] font-black uppercase rounded-xl border border-amber-500/40 bg-amber-500/10 text-amber-400 hover:bg-amber-500 hover:text-slate-950 hover:border-amber-500 transition-all active:scale-95 whitespace-nowrap"
+                  >
+                    ⬆ Trade Up
+                  </button>
+                )}
+                <span className={`text-[9px] font-black uppercase px-2.5 py-1 rounded-lg border ${
+                  draftClassTalent === 'Strong'
+                    ? 'text-emerald-400 bg-emerald-500/15 border-emerald-500/30'
+                    : draftClassTalent === 'Average'
+                    ? 'text-amber-400 bg-amber-500/15 border-amber-500/30'
+                    : 'text-red-400 bg-red-500/15 border-red-500/30'
+                }`}>
+                  {draftClassTalent} Class
+                </span>
+                <span className="text-[10px] text-slate-500 font-bold uppercase">{availableProspects.length} available</span>
+              </div>
             </div>
             <div className="overflow-x-auto">
               <table className="w-full text-left text-xs">
@@ -315,6 +1020,7 @@ const Draft: React.FC<DraftProps> = ({ league, updateLeague, onScout, scoutingRe
                     <th className="px-6 py-4">Pos</th>
                     <th className="px-6 py-4">School</th>
                     <th className="px-6 py-4 text-center">Grade</th>
+                    <th className="px-6 py-4 text-center hidden sm:table-cell">Fit</th>
                     <th className="px-6 py-4 text-right">Action</th>
                   </tr>
                 </thead>
@@ -328,8 +1034,11 @@ const Draft: React.FC<DraftProps> = ({ league, updateLeague, onScout, scoutingRe
                       <td className="px-6 py-5">
                         <span className="font-display font-bold text-slate-500 group-hover:text-amber-500">#{p.mockRank}</span>
                       </td>
-                      <td className="px-6 py-5">
-                        <p className="font-bold text-slate-200 uppercase tracking-tight group-hover:text-white">{p.name}</p>
+                      <td className="px-6 py-5" onClick={e => e.stopPropagation()}>
+                        <div className="flex items-center gap-2">
+                          <WatchToggle playerId={p.id} watchList={watchList} onToggle={toggleWatch} />
+                          <p className="font-bold text-slate-200 uppercase tracking-tight group-hover:text-white cursor-pointer" onClick={() => setSelectedProspect(p)}>{p.name}</p>
+                        </div>
                       </td>
                       <td className="px-6 py-5">
                         <span className="text-amber-500 font-black">{p.position}</span>
@@ -342,30 +1051,62 @@ const Draft: React.FC<DraftProps> = ({ league, updateLeague, onScout, scoutingRe
                           ))}
                         </div>
                       </td>
+                      <td className="px-6 py-5 text-center hidden sm:table-cell">
+                        {(() => {
+                          const fit = prospectNeedFit(p, userTeamNeeds);
+                          if (fit === 'Strong Fit') return (
+                            <span className="inline-flex items-center gap-1 px-2 py-0.5 bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 rounded text-[9px] font-black uppercase whitespace-nowrap">
+                              ✓ Strong Fit
+                            </span>
+                          );
+                          if (fit === 'Good Fit') return (
+                            <span className="inline-flex items-center gap-1 px-2 py-0.5 bg-blue-500/15 text-blue-400 border border-blue-500/25 rounded text-[9px] font-black uppercase whitespace-nowrap">
+                              Good Fit
+                            </span>
+                          );
+                          return (
+                            <span className="px-2 py-0.5 bg-slate-800/50 text-slate-600 border border-slate-700/50 rounded text-[9px] font-bold uppercase">
+                              Reach
+                            </span>
+                          );
+                        })()}
+                      </td>
                       <td className="px-6 py-5 text-right" onClick={e => e.stopPropagation()}>
-                        {isUserTurn ? (
-                          <div className="flex items-center justify-end gap-2">
-                            <button
-                              onClick={() => setSelectedProspect(p)}
-                              className="px-3 py-2 bg-slate-800 text-slate-400 text-[10px] font-black uppercase rounded-lg hover:bg-slate-700 transition-all"
-                            >
-                              Info
-                            </button>
-                            <button
-                              onClick={() => makePick(league.userTeamId, p)}
-                              className="px-4 py-2 bg-emerald-500 text-slate-950 text-[10px] font-black uppercase rounded-lg hover:scale-105 active:scale-95 transition-all shadow-lg shadow-emerald-500/20"
-                            >
-                              Draft
-                            </button>
-                          </div>
-                        ) : (
+                        <div className="flex items-center justify-end gap-2 flex-wrap">
                           <button
                             onClick={() => { onScout(p); setSelectedProspect(p); }}
-                            className="px-4 py-2 bg-slate-800 text-slate-400 text-[10px] font-black uppercase rounded-lg hover:bg-amber-500 hover:text-slate-950 transition-all"
+                            className="px-3 py-2 bg-slate-800 text-slate-400 text-[10px] font-black uppercase rounded-lg hover:bg-amber-500 hover:text-slate-950 transition-all"
                           >
                             Profile
                           </button>
-                        )}
+                          {/* TRADE FOR: show when draft is active and it's not yet the user's turn */}
+                          {isDrafting && !isUserTurn && (() => {
+                            const nextAIPick = (league.draftPicks ?? []).find(
+                              dp => dp.currentTeamId !== league.userTeamId && dp.pick > currentPickIndex
+                            );
+                            return nextAIPick ? (
+                              <button
+                                onClick={() => { setLiveTradeTarget(nextAIPick); setShowLiveTrade(true); }}
+                                className="px-3 py-2 text-[10px] font-black uppercase rounded-lg border border-amber-500/40 bg-amber-500/10 text-amber-400 hover:bg-amber-500 hover:text-slate-950 hover:border-amber-500 transition-all active:scale-95"
+                                title="Trade for a pick to draft this player"
+                              >
+                                Trade For
+                              </button>
+                            ) : null;
+                          })()}
+                          <button
+                            onClick={() => isUserTurn && makePick(league.userTeamId, p)}
+                            disabled={!isUserTurn}
+                            title={isUserTurn ? 'Draft this player' : 'Not your pick'}
+                            className={`px-4 py-2 text-[10px] font-black uppercase rounded-lg transition-all ${
+                              isUserTurn
+                                ? 'bg-emerald-500 text-slate-950 hover:scale-105 active:scale-95 shadow-lg shadow-emerald-500/20 cursor-pointer'
+                                : 'bg-slate-800/50 text-slate-600 border border-slate-700/50 cursor-not-allowed'
+                            }`}
+                          >
+                            Draft
+                          </button>
+                        </div>
                       </td>
                     </tr>
                   ))}

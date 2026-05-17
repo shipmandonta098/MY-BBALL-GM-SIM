@@ -61,6 +61,7 @@ const TeamManagement: React.FC<TeamManagementProps> = ({ league, updateLeague, i
   const [selectedTeamId, setSelectedTeamId] = useState(initialTeamId || league.userTeamId);
   const [editedTeam, setEditedTeam] = useState<Team | null>(null);
   const [logoPreviewError, setLogoPreviewError] = React.useState(false);
+  const [secondaryLogoPreviewError, setSecondaryLogoPreviewError] = React.useState(false);
   const [selectedRelocationCity, setSelectedRelocationCity] = useState('');
   const [showRelocationConfirm, setShowRelocationConfirm] = useState(false);
 
@@ -203,14 +204,46 @@ const TeamManagement: React.FC<TeamManagementProps> = ({ league, updateLeague, i
               </div>
 
               <div className="space-y-2">
-                <label className="text-[10px] font-black uppercase text-slate-500 tracking-widest">Logo URL</label>
-                <input 
-                  type="text" 
+                <label className="text-[10px] font-black uppercase text-slate-500 tracking-widest">Primary Logo URL</label>
+                <input
+                  type="text"
                   value={editedTeam.logo}
-                  onChange={(e) => setEditedTeam({...editedTeam, logo: e.target.value})}
+                  onChange={(e) => { setEditedTeam({...editedTeam, logo: e.target.value}); setLogoPreviewError(false); }}
                   disabled={!canEdit}
                   className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-3 text-white text-xs focus:outline-none focus:border-amber-500/50 disabled:opacity-50"
                 />
+              </div>
+
+              {/* Secondary logo */}
+              <div className="space-y-3 pt-2 border-t border-slate-800">
+                <div className="flex items-center gap-3">
+                  <div
+                    className="w-14 h-14 rounded-xl border border-slate-700 flex items-center justify-center overflow-hidden shrink-0"
+                    style={{ backgroundColor: editedTeam.primaryColor }}
+                  >
+                    {editedTeam.secondaryLogo && !secondaryLogoPreviewError
+                      ? <img
+                          src={editedTeam.secondaryLogo}
+                          alt="Secondary Logo"
+                          className="w-full h-full object-contain"
+                          referrerPolicy="no-referrer"
+                          onError={() => setSecondaryLogoPreviewError(true)}
+                        />
+                      : <span className="text-white font-black text-xs opacity-40">ALT</span>
+                    }
+                  </div>
+                  <div className="flex-1 space-y-1">
+                    <label className="text-[10px] font-black uppercase text-slate-500 tracking-widest">Secondary Logo URL</label>
+                    <input
+                      type="text"
+                      value={(editedTeam as any).secondaryLogo ?? ''}
+                      onChange={(e) => { setEditedTeam({...editedTeam, secondaryLogo: e.target.value} as any); setSecondaryLogoPreviewError(false); }}
+                      disabled={!canEdit}
+                      placeholder="Optional alternate / away logo"
+                      className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-white text-xs focus:outline-none focus:border-amber-500/50 disabled:opacity-50 placeholder:text-slate-600"
+                    />
+                  </div>
+                </div>
               </div>
 
               <div className="space-y-4 pt-4">

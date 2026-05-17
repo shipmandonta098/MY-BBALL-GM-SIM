@@ -2,13 +2,48 @@ import React, { useState, useMemo, useEffect } from 'react';
 import { LeagueState, Team, PowerRankingEntry, PowerRankingSnapshot } from '../types';
 import TeamBadge from './TeamBadge';
 import { generateTeamComparisonInsight } from '../services/geminiService';
+import { fmtSalary } from '../utils/formatters';
 import { PlayerLink } from '../context/NavigationContext';
+import { calcTeamEffectiveOVR, getEffectiveRating } from '../utils/injuryEffects';
 
 interface PowerRankingsProps {
   league: LeagueState;
   onViewRoster: (teamId: string) => void;
   onManageTeam: (teamId: string) => void;
 }
+
+interface TeamProfile { strengths: string[]; weaknesses: string[]; }
+
+// Each dimension: { label, attrs to average, strength threshold, weakness threshold }
+const PROFILE_DIMS: { label: string; keys: string[]; str: number; wk: number }[] = [
+  { label: 'Three-Point Shooting', keys: ['shooting3pt'],                      str: 73, wk: 65 },
+  { label: 'Post Scoring',         keys: ['postScoring'],                       str: 72, wk: 64 },
+  { label: 'Interior Defense',     keys: ['interiorDef', 'blocks'],             str: 72, wk: 64 },
+  { label: 'Playmaking',           keys: ['passing', 'ballHandling', 'offensiveIQ'], str: 73, wk: 65 },
+  { label: 'Athleticism',          keys: ['athleticism', 'speed'],              str: 74, wk: 66 },
+  { label: 'Rebounding',           keys: ['offReb', 'defReb'],                  str: 72, wk: 64 },
+  { label: 'Perimeter Defense',    keys: ['perimeterDef', 'steals'],            str: 72, wk: 64 },
+  { label: 'Passing',              keys: ['passing'],                           str: 73, wk: 65 },
+  { label: 'Ball Handling',        keys: ['ballHandling'],                      str: 73, wk: 65 },
+];
+
+const computeTeamProfile = (team: Team): TeamProfile => {
+  const active = team.roster.filter(p => p.status !== 'Injured');
+  const n = active.length || 1;
+  const avg = (key: string) =>
+    active.reduce((s, p) => s + ((p.attributes as Record<string, number>)[key] ?? 65), 0) / n;
+
+  const strengths: string[] = [];
+  const weaknesses: string[] = [];
+
+  for (const dim of PROFILE_DIMS) {
+    const val = dim.keys.reduce((s, k) => s + avg(k), 0) / dim.keys.length;
+    if (val >= dim.str)      strengths.push(dim.label);
+    else if (val <= dim.wk)  weaknesses.push(dim.label);
+  }
+
+  return { strengths, weaknesses };
+};
 
 const PowerRankings: React.FC<PowerRankingsProps> = ({ league, onViewRoster, onManageTeam }) => {
   const [activeTab, setActiveTab] = useState<'rankings' | 'comparison'>('rankings');
@@ -23,7 +58,7 @@ const PowerRankings: React.FC<PowerRankingsProps> = ({ league, onViewRoster, onM
   const teamData = useMemo(() => {
     return league.teams.map(team => {
       const winPct = team.wins / (team.wins + team.losses || 1);
-      const teamOvr = Math.round(team.roster.reduce((sum, p) => sum + p.rating, 0) / team.roster.length);
+      const teamOvr = calcTeamEffectiveOVR(team.roster);
       const teamGames = league.history.filter(g => g.homeTeamId === team.id || g.awayTeamId === team.id);
       let totalDiff = 0;
       teamGames.forEach(g => {
@@ -73,12 +108,15 @@ const PowerRankings: React.FC<PowerRankingsProps> = ({ league, onViewRoster, onM
   };
 
   const TeamComparisonCard = ({ team, side }: { team: Team, side: 'left' | 'right' }) => {
-    const ovr = Math.round(team.roster.reduce((a,b)=>a+b.rating,0)/team.roster.length);
-    const top5 = team.roster.sort((a,b)=>b.rating-a.rating).slice(0, 5);
+    const ovr = calcTeamEffectiveOVR(team.roster);
+    const top5 = [...team.roster].sort((a,b)=>getEffectiveRating(b)-getEffectiveRating(a)).slice(0, 5);
     const cap = team.budget - team.roster.reduce((s,p)=>s+p.salary,0);
+    const profile = computeTeamProfile(team);
+    const accentBorder = side === 'left' ? 'hover:border-amber-500/30' : 'hover:border-blue-500/30';
 
     return (
-      <div className={`bg-slate-900/50 border border-slate-800 rounded-[2rem] p-8 flex flex-col gap-8 transition-all ${side === 'left' ? 'hover:border-amber-500/30' : 'hover:border-blue-500/30'}`}>
+      <div className={`bg-slate-900/50 border border-slate-800 rounded-[2rem] p-8 flex flex-col gap-6 transition-all ${accentBorder}`}>
+        {/* Header */}
         <div className="flex items-center gap-6">
           <div className="w-20 h-20 bg-slate-800 rounded-2xl flex items-center justify-center border border-slate-700 shrink-0">
              <TeamBadge team={team} size="xl" />
@@ -89,6 +127,7 @@ const PowerRankings: React.FC<PowerRankingsProps> = ({ league, onViewRoster, onM
           </div>
         </div>
 
+        {/* Stats row */}
         <div className="grid grid-cols-2 gap-4">
            <div className="bg-slate-950 p-4 rounded-xl border border-slate-800">
               <p className="text-[10px] text-slate-500 font-black uppercase mb-1">OVR Rating</p>
@@ -96,11 +135,12 @@ const PowerRankings: React.FC<PowerRankingsProps> = ({ league, onViewRoster, onM
            </div>
            <div className="bg-slate-950 p-4 rounded-xl border border-slate-800">
               <p className="text-[10px] text-slate-500 font-black uppercase mb-1">Cap Space</p>
-              <p className={`text-xl font-mono font-bold ${cap > 0 ? 'text-emerald-400' : 'text-rose-500'}`}>${(cap/1000000).toFixed(1)}M</p>
+              <p className={`text-xl font-mono font-bold ${cap > 0 ? 'text-emerald-400' : 'text-rose-500'}`}>{fmtSalary(Math.abs(cap))}{cap < 0 ? ' over' : ''}</p>
            </div>
         </div>
 
-        <div className="space-y-4">
+        {/* Franchise core */}
+        <div className="space-y-3">
            <h4 className="text-[10px] font-black uppercase tracking-widest text-slate-600 border-b border-slate-800 pb-2">Franchise Core</h4>
            {top5.map(p => (
               <div key={p.id} className="flex justify-between items-center">
@@ -110,7 +150,38 @@ const PowerRankings: React.FC<PowerRankingsProps> = ({ league, onViewRoster, onM
            ))}
         </div>
 
-        <div className="mt-auto pt-6 border-t border-slate-800 flex justify-between items-center">
+        {/* Strengths */}
+        <div className="space-y-2">
+          <h4 className="text-[10px] font-black uppercase tracking-widest text-emerald-500 border-b border-slate-800 pb-2">Strengths</h4>
+          {profile.strengths.length === 0
+            ? <p className="text-xs text-slate-600 italic">No standout strengths.</p>
+            : <div className="flex flex-wrap gap-2">
+                {profile.strengths.map(label => (
+                  <span key={label} className="px-3 py-1 rounded-full text-[11px] font-black uppercase tracking-wide border bg-emerald-500/10 text-emerald-300 border-emerald-500/25">
+                    {label}
+                  </span>
+                ))}
+              </div>
+          }
+        </div>
+
+        {/* Weaknesses */}
+        <div className="space-y-2">
+          <h4 className="text-[10px] font-black uppercase tracking-widest text-rose-500 border-b border-slate-800 pb-2">Weaknesses</h4>
+          {profile.weaknesses.length === 0
+            ? <p className="text-xs text-slate-600 italic">No glaring weaknesses.</p>
+            : <div className="flex flex-wrap gap-2">
+                {profile.weaknesses.map(label => (
+                  <span key={label} className="px-3 py-1 rounded-full text-[11px] font-black uppercase tracking-wide border bg-rose-500/10 text-rose-300 border-rose-500/25">
+                    {label}
+                  </span>
+                ))}
+              </div>
+          }
+        </div>
+
+        {/* Footer */}
+        <div className="mt-auto pt-4 border-t border-slate-800 flex justify-between items-center">
            <div>
               <p className="text-[10px] text-slate-500 font-black uppercase">Coach Scheme</p>
               <p className="text-sm font-bold text-white uppercase">{team.activeScheme}</p>
